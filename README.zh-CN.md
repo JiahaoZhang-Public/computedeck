@@ -27,7 +27,7 @@ Kubernetes、PBS、LSF 和 Vast.ai 集成处于测试阶段。界面支持中文
 
 ## 从源码运行
 
-仓库目前保持私有，尚未发布 PyPI 包。以下步骤需要仓库访问权限。
+ComputeDeck 目前提供源码预览，尚未发布 PyPI 包。
 
 需要 macOS 或 Linux、Python 3.12 或 3.13、[uv](https://docs.astral.sh/uv/)、Node.js 22 和 OpenSSH。Node 用于构建网页。
 
