@@ -778,6 +778,7 @@ async def test_a_secret_lookup_that_hangs_is_bounded(
 
 def test_email_to_a_server_that_drips_is_cut_off() -> None:
     server = socket.create_server(("127.0.0.1", 0))
+    connected = threading.Event()
     closed = threading.Event()
 
     def serve() -> None:
@@ -785,6 +786,7 @@ def test_email_to_a_server_that_drips_is_cut_off() -> None:
         with conn:
             conn.settimeout(10)
             conn.sendall(b"2")  # a greeting that never ends
+            connected.set()
             with suppress(OSError):
                 while conn.recv(1024):
                     pass
@@ -800,10 +802,14 @@ def test_email_to_a_server_that_drips_is_cut_off() -> None:
     }
 
     async def send() -> list[threading.Thread]:
+        task = asyncio.create_task(channels.send_email(config, Message(subject="S", body="B")))
+        assert await asyncio.to_thread(connected.wait, 2)
+        # Observe the worker while blocked; cancellation may finish it immediately.
+        workers = [thread for thread in threading.enumerate() if thread.name == "computedeck-smtp"]
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.3):
-                await channels.send_email(config, Message(subject="S", body="B"))
-        return [thread for thread in threading.enumerate() if thread.name == "computedeck-smtp"]
+                await task
+        return workers
 
     started = time.monotonic()
     # asyncio.run also waits for the threads of the default executor, as the service's
