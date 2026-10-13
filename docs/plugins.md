@@ -18,6 +18,9 @@ only plugins you trust, and say plainly in your plugin what it does.
 
 ## Quick start
 
+While packages are unreleased, follow the [local plugin development guide](https://github.com/JiahaoZhang-Public/computedeck-plugins/blob/main/CONTRIBUTING.md#create-a-plugin)
+to use an adjacent core checkout. After release, the scaffold can resolve its core dependency from PyPI:
+
 ```bash
 computedeck plugin new lab-alerts --web     # add --driver for a data source
 cd computedeck-lab-alerts
