@@ -1,7 +1,10 @@
 """Strict, non-interactive OpenSSH execution using the user's existing configuration."""
 
 import asyncio
+import os
 import re
+import signal
+from contextlib import suppress
 
 # OpenSSH lines that say nothing to the user: banner rules around host-key warnings, and
 # the placeholder endpoint it prints when a ProxyCommand or ProxyJump connection fails.
@@ -13,6 +16,7 @@ _LOCKS: dict[str, asyncio.Lock] = {}
 # stopped instead of filling the service's memory.
 MAX_OUTPUT = 64 * 1024 * 1024
 MAX_ERROR = 256 * 1024
+REAP_SECONDS = 5
 
 
 class SSHBusyError(RuntimeError):
@@ -27,6 +31,12 @@ def _lock(destination: str) -> asyncio.Lock:
     return _LOCKS.setdefault(destination, asyncio.Lock())
 
 
+def _kill(process: asyncio.subprocess.Process) -> None:
+    # ProxyCommand/ProxyJump children can keep our pipes open after SSH exits.
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
 async def _read(
     stream: asyncio.StreamReader, limit: int, process: asyncio.subprocess.Process, over: list[int]
 ) -> bytes:
@@ -38,7 +48,7 @@ async def _read(
             continue
         if len(data) + len(chunk) > limit:
             over.append(limit)
-            process.kill()
+            _kill(process)
             continue
         data.extend(chunk)
     return bytes(data)
@@ -100,6 +110,7 @@ async def ssh_command(
             stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         over: list[int] = []
         try:
@@ -111,9 +122,9 @@ async def ssh_command(
             )
             await process.wait()
         except (TimeoutError, asyncio.CancelledError):
-            if process.returncode is None:
-                process.kill()
-            await process.communicate()
+            _kill(process)
+            with suppress(TimeoutError):
+                await asyncio.wait_for(process.communicate(), REAP_SECONDS)
             raise
     finally:
         lock.release()

@@ -1,4 +1,5 @@
 import { sourceAttentionTone } from './labels';
+import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -165,6 +166,8 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [detail, setDetail] = useState<Detail>(null);
+  const modalRef = useDialogFocus(undefined, !!modal);
+  const detailRef = useDialogFocus(undefined, !!detail);
   const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
@@ -766,6 +769,8 @@ export default function App() {
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <section
             className={`modal ${modal.kind === 'ssh' ? 'wide' : ''}`}
+            ref={modalRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -861,8 +866,10 @@ export default function App() {
         <div className="drawer-overlay" onMouseDown={() => setDetail(null)}>
           <aside
             className="drawer"
+            ref={detailRef}
+            tabIndex={-1}
             role="dialog"
-            aria-modal="true"
+            aria-modal={!modal}
             aria-labelledby="detail-title"
             onMouseDown={(event) => event.stopPropagation()}
           >

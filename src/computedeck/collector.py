@@ -120,6 +120,8 @@ class Collector:
             )
             if batch.qos is not None:
                 source["qos"] = batch.qos
+            if "qos_access" not in batch.capabilities:
+                source["qos"] = [{**entry, "access": "unknown"} for entry in source.get("qos", [])]
             if batch.account is not None:
                 source["account"] = {**batch.account, "observed_at": now()}
         except NodeChanged:

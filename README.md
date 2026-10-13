@@ -62,9 +62,11 @@ Use **Add source** on the first page or under **Sources**, or write a configurat
 | `scontrol -d show nodes -o` | visible nodes and their GPU allocation |
 | `scontrol show partition -o` | QoS names allowed by partitions |
 | `scontrol show assoc_mgr flags=qos` | QoS limits |
+| `scontrol show assoc_mgr users=<you> flags=assoc` | association evidence |
+| `sacctmgr --noheader --parsable2 show assoc where …` | effective QoS grants when the controller output omits them |
 | `sacct --user=<you> --state=FAILED,…` | failures in the last 24 hours |
 
-Only `squeue` is required. If a cluster does not allow the others, the source is marked as partial and the rest still works. After adding a source, the app runs a first collection and shows which of these worked. Add a second login on the same cluster by entering the same cluster name.
+Only `squeue` is required for job collection. Optional capabilities are marked missing without counting the source as a connection failure. After adding a source, the app runs a first collection and shows which of these worked. Add a second login on the same cluster by entering the same cluster name.
 
 **Other clusters.** Kubernetes (kubectl with your kubeconfig, locally or over SSH; the namespace is the login), PBS and LSF (over SSH like Slurm). See [docs/drivers](docs/drivers/). PBS, LSF, Kubernetes and Vast.ai are marked beta: they follow the documented formats but have not been run against every version.
 
@@ -75,6 +77,14 @@ Only `squeue` is required. If a cluster does not allow the others, the source is
 **Any other machine.** Add it under **Cloud instances → Add instance** with its host, port and user, or with an SSH alias you already have. ComputeDeck writes stable aliases to its own `computedeck.conf`; you can add one `Include` line to `~/.ssh/config` from the app, after a preview.
 
 Sources are collected every 10 minutes by default (5 to 1440 minutes per source).
+
+### Diagnose a source
+
+Run `computedeck doctor` for connection, command, permission and plugin checks, or use
+**Test connection** on the Sources page. Both show the same repair guidance. Use
+`computedeck doctor --source <source-id> --language zh-CN` for a Chinese report.
+See [diagnostics](docs/doctor.md), [Slurm permissions](docs/drivers/slurm.md), and
+[logging](docs/deployment.md#logs-and-startup-permissions).
 
 ## Run it on a server
 
@@ -120,9 +130,9 @@ The interface is in English by default. Switch to Chinese under **Settings → L
 
 ## What the numbers mean
 
-- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. When a source has not been collected recently, the number is a subtotal and is labeled as such.
+- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts GPUs with compute processes; unavailable process visibility remains unknown. When a source has not been collected recently, the number is a subtotal and is labeled as such.
 - **Unallocated** GPUs on a cluster are node capacity minus allocation. Maintenance, reservations or QoS limits can still prevent you from using them.
-- **QoS limits** are what the scheduler shows for your login. They are not proof that you may use that QoS, and limits of different QoS do not add up.
+- **QoS limits** are what the scheduler shows for your login. Limits alone do not prove access. The planner shows currently verified association grants by default and separates unverified or unassociated choices. Limits of different QoS do not add up.
 - **Utilization** of cloud instances is an instant reading of the whole host. Inside a container it can reflect the host machine.
 - **History** comes from successful collections only; periods without data stay empty.
 - **Prices** are estimates from known hourly prices, not bills. Currencies are never added together.
@@ -138,12 +148,4 @@ Layout: `src/computedeck` is the service (FastAPI, SQLite), `web` is the React a
 
 ## License
 
-Not chosen yet; it will be added before the first release.
-
-### Diagnose a source
-
-Run `computedeck doctor` for connection, command, permission and plugin checks, or use
-**Test connection** on the Sources page. Both show the same repair guidance. Use
-`computedeck doctor --source <source-id> --language zh-CN` for a Chinese report.
-See [diagnostics](docs/doctor.md), [Slurm permissions](docs/drivers/slurm.md), and
-[logging](docs/deployment.md#logs-and-startup-permissions).
+Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE), and the licenses of bundled browser dependencies in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

@@ -1419,6 +1419,8 @@ form > .form-error {
   background: rgb(10 12 16 / 38%);
 }
 .overlay {
+  /* Instance editing opens a modal above the existing details drawer. */
+  z-index: 61;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -2406,11 +2408,13 @@ td.wrap {
     display: inline-grid !important;
   }
   .sidebar {
+    visibility: hidden;
     transform: translateX(-100%);
     transition: transform 0.18s ease;
     box-shadow: var(--shadow-pop);
   }
   .sidebar.open {
+    visibility: visible;
     transform: none;
   }
   .scrim {

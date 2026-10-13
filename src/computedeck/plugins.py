@@ -104,6 +104,8 @@ class Plugin:
     # Filled in on discovery from the installed distribution.
     package: str | None = None
     version: str | None = None
+    # A failed import stays visible in diagnostics and the Toolbox.
+    load_error: str | None = None
 
 
 class Runtime:
@@ -283,11 +285,10 @@ class PluginContext:
     ) -> None:
         """Let sources reference secrets as ``scheme:name`` through this resolver."""
         from . import credentials
-        from .errors import SourceError
 
         def resolve(name: str) -> str | None:
             if not self.enabled:
-                raise SourceError("credential_scheme_off", scheme=scheme, plugin=self.id)
+                raise credentials.DisabledSchemeError(scheme, self.id)
             return resolver(name)
 
         if pattern is None:
@@ -415,11 +416,14 @@ def discover(data_dir: Path | None = None) -> list[Plugin]:
             continue
         try:
             plugin = entry.load()
-        except Exception:
-            logger.exception("Plugin %s could not be loaded", entry.name)
+        except Exception as error:
+            detail = type(error).__name__
+            logger.error("Plugin %s could not be loaded: %s", entry.name, detail)
+            plugins.append(replace(candidate, load_error=detail))
             continue
         if not isinstance(plugin, Plugin):
             logger.error("Entry point %s is not a computedeck Plugin", entry.name)
+            plugins.append(replace(candidate, load_error="Invalid plugin entry point"))
             continue
         dist = getattr(entry, "dist", None)
         if dist is not None:
@@ -446,6 +450,8 @@ def load(
         seen.add(plugin.id)
         context = PluginContext(plugin, runtime)
         context.rejected = message("plugin_blocked") if blocked(plugin) else compatibility(plugin)
+        if context.rejected is None and plugin.load_error is not None:
+            context.rejected = message("plugin_load_failed", detail=plugin.load_error)
         if context.rejected is not None:
             logger.error("Plugin %s is not loaded: %s", plugin.id, context.rejected)
         else:

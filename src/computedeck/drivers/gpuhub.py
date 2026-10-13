@@ -7,7 +7,6 @@ listed by it. api.gpuhub.com is not reachable from every network, while the same
 answers on www.gpuhub.com, so that host is tried next.
 """
 
-import re
 from typing import Any, ClassVar
 
 from .base import SourceError, integer, number
@@ -34,8 +33,8 @@ def envelope(body: Any) -> Any:
         return body.get("data")
     if body["code"] == "AuthorizeFailed":
         raise SourceError("credential_rejected")
-    text = re.sub(r"[\x00-\x1f]", " ", str(body.get("msg") or ""))[:160]
-    raise SourceError("provider_refused", text or None, reply=str(body["code"])[:40])
+    # Error envelopes may echo Authorization in either code or msg, even with HTTP 200.
+    raise SourceError("provider_refused")
 
 
 async def pages(api: Api, path: str, body: dict[str, Any]) -> list[dict[str, Any]]:

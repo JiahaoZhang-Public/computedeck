@@ -13,4 +13,8 @@ for archive in dist/computedeck-*.whl; do
     echo "$archive does not contain the web app" >&2
     exit 1
   fi
+  if ! unzip -Z1 "$archive" | grep -E '/licenses/THIRD_PARTY_NOTICES$' >/dev/null; then
+    echo "$archive does not contain the bundled dependencies' license notices" >&2
+    exit 1
+  fi
 done

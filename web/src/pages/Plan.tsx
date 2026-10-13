@@ -52,7 +52,12 @@ function explain(option: PlanOption, request: PlanRequest) {
   const key: Record<Verdict, MessageKey | null> = {
     // The numbers in the row already say why; repeating them only makes the row taller.
     likely: null,
-    possible: option.freeGpus != null ? 'plan.why.possibleLimit' : 'plan.why.possibleFree',
+    possible:
+      option.headroom == null
+        ? 'plan.why.possibleLimit'
+        : option.freeGpus == null
+          ? 'plan.why.possibleFree'
+          : null,
     busy: 'plan.why.busy',
     limit: 'plan.why.limit',
     wall: 'plan.why.wall',

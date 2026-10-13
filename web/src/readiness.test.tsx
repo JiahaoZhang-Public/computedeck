@@ -23,7 +23,7 @@ const source: Source = {
   last_attempt: null,
   error: null,
   interval_minutes: 10,
-  capabilities: ['jobs', 'nodes'],
+  capabilities: ['jobs', 'nodes', 'qos_access', 'qos_limits'],
   qos: [],
 };
 

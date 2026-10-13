@@ -156,7 +156,9 @@ def cluster_state(
     for node in nodes:
         state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", node["state"], flags=re.I)
         if re.search(
-            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon", state, re.I
+            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval",
+            state,
+            re.I,
         ):
             unavailable += 1
             known += 1

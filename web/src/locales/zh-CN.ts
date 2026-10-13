@@ -2,6 +2,7 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'msg.plugin_load_failed': '插件无法导入；请检查已安装的依赖',
   'plan.noVerified': '尚无已验证的 QoS 权限',
   'plan.noVerifiedHint': '展开下方权限未知的选项，并检查账户的关联权限。',
 

@@ -271,13 +271,14 @@ export function planOptions(
     const mine = jobs.filter((job) => job.source_id === source.id);
     const qosList: (QosLimit | null)[] = source.qos.length ? source.qos : [null];
     for (const qos of qosList) {
+      const currentQos = sourceHasData(source, 'qos_limits') ? qos : null;
       const inQos = mine.filter((job) => !qos || job.qos === qos.name);
       const running = inQos.filter(holdsAllocation);
       const pending = inQos.filter((job) => job.state.toUpperCase() === 'PENDING');
-      let limit = qos ? qosGpuLimit(qos, request.gpuType) : null;
+      let limit = currentQos ? qosGpuLimit(currentQos, request.gpuType) : null;
       // A scheduler that reports usage against the limit (Slurm's assoc_mgr, a Kubernetes
       // quota) is believed over a sum of jobs, whose QoS field may name something else.
-      const reported = qos ? qosGpuUsed(qos) : null;
+      const reported = currentQos ? qosGpuUsed(currentQos) : null;
       let used = !sourceHasData(source, 'jobs')
         ? null
         : (reported ??
@@ -285,11 +286,11 @@ export function planOptions(
             ? null
             : running.reduce((sum, job) => sum + (job.gpu_count ?? 0), 0)));
       let headroom = limit != null && used != null ? Math.max(0, limit - used) : null;
-      if (qos && request.gpuType && sourceHasData(source, 'jobs')) {
-        const constraints = gpuTres(qos.limits?.MaxTRESPU).filter(
+      if (currentQos && request.gpuType && sourceHasData(source, 'jobs')) {
+        const constraints = gpuTres(currentQos.limits?.MaxTRESPU).filter(
           (entry) => !entry.model || entry.model === request.gpuType.toLowerCase(),
         );
-        const reportedUsage = gpuTres(qosUsedTres(qos));
+        const reportedUsage = gpuTres(qosUsedTres(currentQos));
         const rooms = constraints.map((entry) => {
           const relevant = running.filter(
             (job) => !entry.model || !job.gpu_type || models(job.gpu_type).includes(entry.model),
@@ -322,13 +323,17 @@ export function planOptions(
       // Without a model choice, a finite typed cap may still reject the request.
       if (
         !request.gpuType &&
-        qos &&
-        gpuTres(qos.limits?.MaxTRESPU).some((entry) => entry.model && Number.isFinite(entry.value))
+        currentQos &&
+        gpuTres(currentQos.limits?.MaxTRESPU).some(
+          (entry) => entry.model && Number.isFinite(entry.value),
+        )
       )
         headroom = null;
       const option = {
         source,
-        access: sourceHasData(source, 'jobs') ? (qos?.access ?? 'unknown') : ('unknown' as const),
+        access: sourceHasData(source, 'qos_access')
+          ? (qos?.access ?? 'unknown')
+          : ('unknown' as const),
         qos: qos?.name ?? null,
         freeGpus: cluster.freeGpus,
         largestNodeFree: cluster.largestNodeFree,
@@ -338,16 +343,15 @@ export function planOptions(
         headroom,
         queued: pending.length,
         reasons: [...new Set(pending.map((job) => job.reason).filter((r): r is string => !!r))],
-        maxWallHours: qos ? wallHours(qos.limits?.MaxWallPJ) : null,
+        maxWallHours: currentQos ? wallHours(currentQos.limits?.MaxWallPJ) : null,
         nodesObservedAt: cluster.observedAt,
         noMatchingGpus: cluster.noMatchingGpus,
-        rules: qos
+        rules: currentQos
           ? qosRules(
-              qos,
+              currentQos,
               request,
               sourceHasData(source, 'jobs') ? { running, queued: pending } : null,
-              // Usage is only as current as the latest collection of the QoS limits.
-              sourceHasData(source, 'qos_limits') ? (qos.usage ?? {}) : {},
+              currentQos.usage ?? {},
             )
           : [],
       };

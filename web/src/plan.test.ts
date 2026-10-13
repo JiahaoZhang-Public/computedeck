@@ -17,7 +17,7 @@ const source = (extra: Partial<Source> = {}): Source => ({
   last_attempt: null,
   error: null,
   interval_minutes: 10,
-  capabilities: ['jobs', 'nodes', 'qos_limits'],
+  capabilities: ['jobs', 'nodes', 'qos_limits', 'qos_access'],
   qos: [
     {
       name: 'normal',
@@ -89,6 +89,37 @@ describe('where to run', () => {
     nodes: [node('g1'), node('g2', { gpu_allocated: 8 }), node('g3', { state: 'drain' })],
     jobs: [job('1'), job('2', { state: 'PENDING', reason: 'QOSMaxGRESPerUser' })],
   };
+
+  it('requires current permission evidence even when jobs and limits are fresh', () => {
+    const [option] = planOptions(
+      {
+        sources: [source({ capabilities: ['jobs', 'nodes', 'qos_limits'] })],
+        jobs: [],
+        nodes: [node('g1', { gpu_allocated: 0 })],
+      },
+      { gpus: 4, gpuType: '', hours: null },
+    );
+    expect(option).toMatchObject({ access: 'unknown', headroom: 8, verdict: 'possible' });
+  });
+
+  it('does not reuse old limits or usage when only permission verification succeeds', () => {
+    const [option] = planOptions(
+      {
+        sources: [source({ capabilities: ['jobs', 'nodes', 'qos_access'] })],
+        jobs: [],
+        nodes: [node('g1', { gpu_allocated: 0 })],
+      },
+      { gpus: 4, gpuType: '', hours: 48 },
+    );
+    expect(option).toMatchObject({
+      access: 'verified',
+      limit: null,
+      headroom: null,
+      maxWallHours: null,
+      rules: [],
+      verdict: 'possible',
+    });
+  });
 
   it('compares free GPUs, QoS headroom and queued jobs per QoS', () => {
     const [normal, long] = ['normal', 'long'].map((name) =>
@@ -447,7 +478,12 @@ describe('QoS rules besides the per-user GPU limit', () => {
     };
     expect(optionFor(qos, [])).toMatchObject({ used: 2, verdict: 'limit' });
     // Usage from a collection that is no longer current is not believed.
-    expect(optionFor(qos, [], ask(1), { capabilities: ['jobs', 'nodes'] }).verdict).toBe('likely');
+    expect(optionFor(qos, [], ask(1), { capabilities: ['jobs', 'nodes'] })).toMatchObject({
+      access: 'unknown',
+      limit: null,
+      headroom: null,
+      verdict: 'possible',
+    });
   });
 
   it('is over the limit when running and queued jobs reach MaxSubmitJobsPU', () => {

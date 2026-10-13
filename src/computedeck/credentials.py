@@ -67,6 +67,13 @@ _RESOLVERS: dict[str, tuple[Resolver, re.Pattern[str]]] = {
 _BUILT_IN = frozenset(_RESOLVERS)
 
 
+class DisabledSchemeError(SourceError):
+    """The plugin host, rather than a resolver, disabled this credential scheme."""
+
+    def __init__(self, scheme: str, plugin: str) -> None:
+        super().__init__("credential_scheme_off", scheme=scheme, plugin=plugin)
+
+
 def register(scheme: str, resolver: Resolver, pattern: str = r"[A-Za-z0-9_.@/-]{1,200}") -> None:
     if not re.fullmatch(r"[a-z][a-z0-9-]*", scheme) or scheme in _BUILT_IN:
         raise ValueError(f"Credential scheme cannot be registered: {scheme}")
@@ -88,4 +95,15 @@ def validate_reference(reference: str) -> str:
 def resolve(reference: str) -> str | None:
     validate_reference(reference)
     scheme, _, name = reference.partition(":")
-    return _RESOLVERS[scheme][0](name)
+    try:
+        return _RESOLVERS[scheme][0](name)
+    except DisabledSchemeError:
+        raise
+    except SourceError:
+        if scheme in _BUILT_IN:
+            raise
+    except Exception:
+        pass
+    # A resolver or keyring backend may quote a secret in its exception. Only the
+    # core's own actionable errors above may leave this boundary.
+    raise SourceError("credential_unavailable", reference=reference) from None

@@ -50,6 +50,7 @@ class FakeSubprocesses:
         self.started: list[tuple[str, FakeProcess]] = []
         self.calls: list[tuple[str, ...]] = []
         monkeypatch.setattr(asyncio, "create_subprocess_exec", self.create)
+        monkeypatch.setattr(ssh, "_kill", lambda process: process.kill())
 
     async def create(self, *args: str, **kwargs: Any) -> FakeProcess:
         process = FakeProcess()
@@ -89,6 +90,7 @@ async def test_ssh_is_argument_based_strict_and_killed_on_timeout(
 
 async def test_a_command_that_keeps_printing_is_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ssh, "MAX_OUTPUT", 1000)
+    monkeypatch.setattr(ssh, "_kill", lambda process: process.kill())
     process = FakeProcess(stdout=b"x" * 5000)
     process.release.set()
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))

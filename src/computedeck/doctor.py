@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import socket
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -45,12 +46,14 @@ async def ssh_config(alias: str, options: list[str]) -> dict[str, str]:
         alias,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
     try:
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10)
     except (TimeoutError, asyncio.CancelledError):
-        process.kill()
-        await process.communicate()
+        ssh._kill(process)
+        with suppress(TimeoutError):
+            await asyncio.wait_for(process.communicate(), ssh.REAP_SECONDS)
         raise
     if process.returncode:
         raise ValueError("Invalid SSH configuration")
@@ -186,6 +189,7 @@ async def source_checks(
         "lsf": ("bjobs", "bhosts", "bqueues", "lshosts"),
         "kubernetes": ("kubectl",),
         "ssh": ("python3",),
+        "aws-ec2": ("aws",),
     }.get(source["driver"], ())
     for command in commands:
         try:
@@ -222,6 +226,18 @@ async def source_checks(
                 "Check the configured reference and the service's credential access. "
                 "Values are never displayed.",
                 "检查凭据引用及服务进程的访问权限。不会显示凭据内容。",
+            )
+        )
+    if not rows:
+        rows.append(
+            check(
+                "connection",
+                False,
+                "Connection diagnostics",
+                "连接诊断",
+                "This driver has no connection checks. Refresh the source to verify collection.",
+                "此驱动没有连接检查。请刷新来源以验证采集。",
+                optional=True,
             )
         )
     return rows

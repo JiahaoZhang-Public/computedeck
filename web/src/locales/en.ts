@@ -1,5 +1,6 @@
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'msg.plugin_load_failed': 'The plugin could not be imported; check its installed dependencies',
   'plan.noVerified': 'No verified QoS access yet',
   'plan.noVerifiedHint': 'Expand the unverified options below and check association permissions.',
 
