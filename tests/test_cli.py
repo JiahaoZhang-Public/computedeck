@@ -146,7 +146,9 @@ def test_macos_login_service(
     assert plist["Label"] == "local.computedeck.service"
     assert plist["ProgramArguments"][-4:] == ["computedeck", "serve", "--port", "8710"]
     assert plist["EnvironmentVariables"]["COMPUTEDECK_DATA_DIR"] == str(data)
-    assert plist["StandardOutPath"] == str(data / "service.log")
+    assert plist["StandardOutPath"] == "/dev/null"
+    assert plist["StandardErrorPath"] == str(data / "startup.log")
+    assert (data / "startup.log").stat().st_mode & 0o777 == 0o600
     assert plist["ExitTimeOut"] == 30
     assert [command[:2] for command in commands] == [
         ["launchctl", "bootout"],

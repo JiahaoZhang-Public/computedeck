@@ -2,6 +2,26 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'plan.noVerified': '尚无已验证的 QoS 权限',
+  'plan.noVerifiedHint': '展开下方权限未知的选项，并检查账户的关联权限。',
+
+  'sources.testConnection': '测试连接',
+  'sources.checking': '正在检查连接…',
+
+  'status.unavailable': '不可用',
+  'status.degraded': '可用节点不足',
+  'attention.cluster': '{name}：集群可用性',
+  'clusters.unavailableNodes': '{count}/{total} 节点不可用',
+  'plan.verdict.unavailable': '集群不可用',
+  'plan.verdict.denied': '未关联权限',
+  'plan.why.unavailable': '所有可见节点均不可用。',
+  'plan.why.denied': '此账户没有授予该 QoS 的关联。',
+  'plan.why.accessUnknown': '无法验证 QoS 访问权限，请向调度器确认。',
+  'plan.why.degraded': '可见节点中可用的不足 20%。',
+  'plan.access.unknown': '权限未知（{count}）',
+  'plan.access.not_associated': '未关联权限（{count}）',
+  'market.official': '官方市场',
+
   'nav.overview': '总览',
   'nav.resources': '资源',
   'nav.jobs': '作业',

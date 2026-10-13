@@ -67,7 +67,7 @@ def test_plugin_routes_are_mounted_under_their_id(tmp_path: Path) -> None:
         assert client.get("/api/plugins/example/status").json() == {
             "id": "example",
             "sources": 0,
-            "data_dir": str(tmp_path),
+            "data_dir": str(tmp_path / "plugins/example"),
         }
         assert client.get("/status").status_code == 404
         assert client.get("/api/plugins/other/status").status_code == 404

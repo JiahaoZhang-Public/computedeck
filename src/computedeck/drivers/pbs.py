@@ -28,6 +28,7 @@ from .base import (
     DriverCheck,
     DriverInfo,
     SourceError,
+    cluster_state,
     integer,
     message,
     now,
@@ -625,4 +626,7 @@ class PbsDriver:
             batch.warnings.append(_unavailable("history_unavailable", error))
         if qos:
             batch.qos = list(qos.values())
+        batch.cluster_state = cluster_state(batch.nodes)
+        for entry in batch.qos or []:
+            entry["access"] = "unknown"
         return batch

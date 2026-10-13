@@ -139,3 +139,11 @@ Layout: `src/computedeck` is the service (FastAPI, SQLite), `web` is the React a
 ## License
 
 Not chosen yet; it will be added before the first release.
+
+### Diagnose a source
+
+Run `computedeck doctor` for connection, command, permission and plugin checks, or use
+**Test connection** on the Sources page. Both show the same repair guidance. Use
+`computedeck doctor --source <source-id> --language zh-CN` for a Chinese report.
+See [diagnostics](docs/doctor.md), [Slurm permissions](docs/drivers/slurm.md), and
+[logging](docs/deployment.md#logs-and-startup-permissions).

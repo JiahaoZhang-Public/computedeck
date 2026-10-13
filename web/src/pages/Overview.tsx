@@ -329,7 +329,14 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                 <td className="num">{allocatedCell(row.scoped)}</td>
                 <td>
                   {cluster ? (
-                    row.nodes.capacity != null ? (
+                    ['unavailable', 'degraded'].includes(row.state) ? (
+                      <span className={row.state === 'unavailable' ? 'red-text' : 'amber-text'}>
+                        {t('clusters.unavailableNodes', {
+                          count: row.nodes.abnormal,
+                          total: row.nodes.nodes,
+                        })}
+                      </span>
+                    ) : row.nodes.capacity != null ? (
                       <Meter
                         value={row.nodes.ratio}
                         text={t('overview.load.allocated', {

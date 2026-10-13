@@ -499,6 +499,7 @@ async def test_collect_reads_jobs_hosts_limits_and_failures(
         "name": "gpu",
         "limits": {"MaxWallPJ": "2880", "MaxJobsPU": "10", "MaxTRESPU": "gres/gpu=6"},
         "origin": "scheduler_queue",
+        "access": "unknown",
     }
     assert set(batch.snapshot()) == {"jobs", "nodes", "failures"}
 
@@ -603,7 +604,14 @@ async def test_partial_permissions_keep_supported_data(
     assert batch.nodes is None
     assert batch.failures is None
     assert set(batch.snapshot()) == {"jobs"}
-    assert batch.qos == [{"name": "gpu", "limits": {}, "origin": "observed_job_access_unverified"}]
+    assert batch.qos == [
+        {
+            "name": "gpu",
+            "limits": {},
+            "origin": "observed_job_access_unverified",
+            "access": "unknown",
+        }
+    ]
     detail = str(failure) or type(failure).__name__
     assert batch.warnings == [
         {"code": code, "detail": detail}

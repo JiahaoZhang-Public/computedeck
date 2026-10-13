@@ -101,6 +101,7 @@ def create_app(
     plugins: Iterable[plugin_host.Plugin] | None = None,
 ) -> FastAPI:
     data_dir = data_dir or paths.data_dir()
+    paths.secure_data_dir(data_dir)
     drivers._policy_dir = data_dir
     runtime = plugin_host.Runtime(data_dir)
     collector = Collector(runtime)
@@ -343,6 +344,16 @@ def create_app(
     @app.get("/api/drivers")
     async def driver_list() -> list[dict[str, Any]]:
         return [drivers.describe(name) for name in drivers.names()]
+
+    @app.post("/api/sources/{source_id}/check")
+    async def check_source_now(source_id: str) -> list[dict[str, Any]]:
+        from .doctor import source_checks
+
+        source = store().source(source_id)
+        if source is None:
+            raise HTTPException(404, message("source_not_found"))
+        async with runtime.semaphore:
+            return await source_checks(source, store().node(source.get("node", "")))
 
     @app.post("/api/sources", status_code=201)
     async def add_source(body: SourceInput) -> dict[str, Any]:
@@ -675,6 +686,9 @@ def serve(
 
     import uvicorn
 
+    from .logging_setup import configure
+
+    configure(paths.data_dir())
     app = create_app()
     server = uvicorn.Server(
         uvicorn.Config(
@@ -683,6 +697,7 @@ def serve(
             port=port or paths.port(),
             workers=1,
             access_log=False,
+            log_config=None,
             # A hanging request (a browse of an unreachable host) must not delay stopping.
             timeout_graceful_shutdown=SHUTDOWN_SECONDS,
             log_level=os.environ.get("COMPUTEDECK_LOG_LEVEL", "info"),

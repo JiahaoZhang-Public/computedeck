@@ -8,7 +8,11 @@ export function checkFinished(source: Source) {
     : false;
 }
 
-type CheckRow = { label: string; state: 'ok' | 'failed' | 'pending' | 'skipped'; detail?: string };
+type CheckRow = {
+  label: string;
+  state: 'ok' | 'failed' | 'pending' | 'skipped' | 'missing';
+  detail?: string;
+};
 
 export function checklist(source: Source | undefined, info: DriverInfo): CheckRow[] {
   const done = !!source && checkFinished(source);
@@ -33,7 +37,7 @@ export function checklist(source: Source | undefined, info: DriverInfo): CheckRo
             : 'pending'
           : source.capabilities.includes(check.capability)
             ? 'ok'
-            : 'failed',
+            : 'missing',
       detail: notice ? formatMessage(notice) : undefined,
     });
   }

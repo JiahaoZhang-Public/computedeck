@@ -368,6 +368,13 @@ def fake_cluster(
             return PARTITIONS
         if command == "scontrol show assoc_mgr flags=qos":
             return QOS
+        if command.startswith("scontrol show assoc_mgr users="):
+            return (
+                "Association Records\n"
+                "ClusterName=cluster-a Account=lab UserName=alice(1001) Partition= ID=1\n"
+            )
+        if command.startswith("sacctmgr"):
+            return "cluster-a|lab|alice||normal,debug,long\n"
         if command.startswith("sacct"):
             return sacct_line() + "\n"
         raise AssertionError(f"Unexpected command: {command}")
@@ -384,6 +391,9 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
         if command.startswith("squeue"):
             calls.append((destination, command, options))
             return job_line(UserName=user, QOS="long") + "\n"
+        if command.startswith("sacctmgr"):
+            calls.append((destination, command, options))
+            return f"cluster-a|lab|{user}||normal,debug,long\n"
         if command.startswith("sacct"):
             calls.append((destination, command, options))
             return sacct_line(User=user) + "\n"
@@ -391,7 +401,14 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(ssh, "run", run)
     batch = await slurm.SlurmDriver().collect(source)
-    assert batch.capabilities == ["jobs", "nodes", "partition_policy", "qos_limits", "history"]
+    assert batch.capabilities == [
+        "jobs",
+        "nodes",
+        "partition_policy",
+        "qos_limits",
+        "qos_access",
+        "history",
+    ]
     assert batch.warnings == []
     assert batch.jobs is not None and batch.jobs[0]["user"] == user
     assert batch.jobs[0]["id"] == "cluster-a:42"
@@ -411,14 +428,19 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     squeue = next(command for command in commands if command.startswith("squeue"))
     assert f"--user={user}" in squeue
     assert "--array" in squeue
-    sacct = next(command for command in commands if command.startswith("sacct"))
+    sacct = next(command for command in commands if command.startswith("sacct "))
     assert f"--user={user}" in sacct
     assert "--allocations" in sacct and "--parsable2" in sacct
     # sacct needs both time bounds when filtering by state.
     assert "--starttime=now-24hours" in sacct and "--endtime=now" in sacct
     assert "--state=" + ",".join(slurm.FAILURE_STATES) in sacct
     # Collection is read-only.
-    assert {command.split()[0] for command in commands} == {"squeue", "scontrol", "sacct"}
+    assert {command.split()[0] for command in commands} == {
+        "squeue",
+        "scontrol",
+        "sacct",
+        "sacctmgr",
+    }
     for command in commands:
         assert not {"update", "create", "delete", "sbatch", "scancel"} & set(command.split())
 
@@ -438,7 +460,12 @@ async def test_partial_permissions_keep_supported_data(
     assert batch.instances is None
     assert set(batch.snapshot()) == {"jobs"}
     assert batch.qos == [
-        {"name": "normal", "limits": {}, "origin": "observed_job_access_unverified"}
+        {
+            "name": "normal",
+            "limits": {},
+            "origin": "observed_job_access_unverified",
+            "access": "unknown",
+        }
     ]
     detail = str(failure) or type(failure).__name__
     assert batch.warnings == [
@@ -450,7 +477,7 @@ async def test_partial_permissions_keep_supported_data(
             "history_unavailable",
         )
     ]
-    assert len(calls) == 5
+    assert len(calls) == 6
     assert calls[0][2] == ["-l", "alice"]
 
 
@@ -590,3 +617,80 @@ def test_failed_job_without_gpu_tres_does_not_claim_zero() -> None:
     )
     assert job["gpu_count"] is None
     assert job["node"] is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Association Records\n"
+            "ClusterName=cluster-a Account=lab UserName=alice(1001) Partition= ID=1\n",
+            None,
+        ),
+        (
+            "ClusterName=cluster-a Account=lab UserName=alice(1001) QOS=normal,debug\n",
+            {"normal", "debug"},
+        ),
+        ("ClusterName=cluster-a UserName=bob(1002) QOS=admin\n", None),
+        ("ClusterName=cluster-a UserName=alice(1001) QOS=\n", set()),
+        ("ClusterName=cluster-a UserName=alice(1001) QOS=+normal\n", None),
+        ("No associations currently cached in Slurm.\n", set()),
+        ("ClusterName=cluster-a UserName=alice(1001) Comment=QOS=admin\n", None),
+        ("QOS=admin(1)\n", None),
+    ],
+)
+def test_association_access_requires_explicit_grants(text, expected):
+    # Current upstream text omits QOS. Explicit-field examples exercise the requested
+    # parser without misrepresenting that omission as an empty permission list.
+    assert slurm.association_qos(text, "alice") == expected
+
+
+async def test_association_access_does_not_follow_partition_or_qos_definitions(monkeypatch):
+    calls = []
+    healthy = fake_cluster(calls)
+
+    async def run(destination, command, options=None):
+        if command.startswith("scontrol show assoc_mgr users="):
+            return "ClusterName=cluster-a Account=lab UserName=alice(1001) QOS=normal\n"
+        return await healthy(destination, command, options)
+
+    monkeypatch.setattr(ssh, "run", run)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert {qos["name"]: qos["access"] for qos in batch.qos} == {
+        "normal": "verified",
+        "debug": "not_associated",
+        "long": "not_associated",
+    }
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            "cluster-a|lab|alice||normal,debug\ncluster-b|lab|alice||other\ncluster-a|lab|bob||admin\n",
+            {"normal", "debug"},
+        ),
+        ("cluster-a|lab|alice||\n", set()),
+        ("", set()),
+        ("bad output", None),
+        ("cluster-a|lab|alice||+normal\n", None),
+    ],
+)
+def test_database_grants_are_scoped_to_the_controller_and_login(output, expected):
+    assert slurm.database_qos(output, "alice", "cluster-a") == expected
+
+
+async def test_database_query_failure_keeps_permissions_unknown(monkeypatch):
+    healthy = fake_cluster([])
+
+    async def run(destination, command, options=None):
+        if command.startswith("sacctmgr"):
+            assert "user=alice" in command and "cluster=cluster-a" in command
+            raise ssh.SSHError("Accounting unavailable")
+        return await healthy(destination, command, options)
+
+    monkeypatch.setattr(ssh, "run", run)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.qos and all(item["access"] == "unknown" for item in batch.qos)
+    assert "qos_access" not in batch.capabilities
+    assert batch.jobs

@@ -278,3 +278,27 @@ def test_thinning_keeps_whole_points_and_gaps(store: Store) -> None:
     assert all(point["allocated_gpus"] is None for point in points)
     times = [point["at"] for point in points]
     assert times == sorted(times)
+
+
+def test_ssh_process_use_matches_dashboard_history(store: Store, add_source: AddSource) -> None:
+    source = add_source(driver="ssh", capabilities=["instances"])
+    for count in (1, 0, None):
+        store.save_snapshot(
+            source["id"],
+            {
+                "instances": [
+                    {
+                        "id": "gpu-box",
+                        "source_id": source["id"],
+                        "state": "running",
+                        "gpu_count": 8,
+                        "gpu_allocated": count,
+                        "metrics_scope": "host_visible",
+                    }
+                ]
+            },
+        )
+        point = latest_point(store)
+        assert point["allocated_gpus"] == count
+        assert point["known_allocated_gpus"] == (count or 0)
+        assert point["unknown_allocation_sources"] == int(count is None)

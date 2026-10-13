@@ -139,3 +139,10 @@ bash scripts/build.sh    # 打包 wheel 和 sdist，网页一并打入
 ## 许可证
 
 尚未确定，首次发布前补充。
+
+### 诊断来源
+
+运行 `computedeck doctor --language zh-CN`，检查连接、命令、权限和插件兼容性；也可以在
+“来源”页点击“测试连接”。两处使用相同的修复提示。使用 `--source <来源 ID>` 只检查一个
+来源。详见[诊断说明](docs/doctor.md)、[Slurm 权限](docs/drivers/slurm.md)与
+[日志轮转](docs/deployment.md#logs-and-startup-permissions)。

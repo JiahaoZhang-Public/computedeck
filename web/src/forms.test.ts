@@ -73,7 +73,7 @@ describe('first collection check', () => {
       }),
       SLURM,
     );
-    expect(rows.map((row) => row.state)).toEqual(['ok', 'ok', 'ok', 'failed', 'failed']);
+    expect(rows.map((row) => row.state)).toEqual(['ok', 'ok', 'ok', 'missing', 'missing']);
     expect(rows[4].detail).toBe('Failure history unavailable: sacct: disabled');
   });
   it('reports a failed connection and skips the remaining checks', () => {

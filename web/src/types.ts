@@ -2,6 +2,7 @@ import type { Message } from './i18n';
 
 export type Kind = 'cluster' | 'cloud';
 export interface QosLimit {
+  access?: 'verified' | 'not_associated' | 'unknown';
   name: string;
   /** Scheduler limits, e.g. `MaxTRESPU: "cpu=N,gres/gpu=8"`; "N" means no limit for that TRES. */
   limits: Record<string, string | null>;
@@ -33,6 +34,7 @@ export interface Source {
   qos: QosLimit[];
   warnings?: (Message | string)[];
   stale?: boolean;
+  cluster_state?: 'available' | 'degraded' | 'unavailable' | 'unknown';
   /** Driver-specific settings, such as a Kubernetes context or a cloud region. */
   options?: Record<string, string>;
   /** The collection machine that collects this source; empty for the service machine. */
@@ -120,6 +122,7 @@ export interface Instance {
   name: string;
   state: string;
   gpu_count: number | null;
+  gpu_allocated?: number | null;
   gpu_type: string | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;

@@ -467,3 +467,12 @@ def test_a_comma_in_a_gpu_name_keeps_the_gpu() -> None:
     instance, _ = parse(gpu=gpus)
     assert instance["gpu_count"] == 2
     assert instance["gpu_type"] and "NVIDIA A100, PCIe" in instance["gpu_type"]
+
+
+@pytest.mark.parametrize(("apps", "expected"), [(APPS, 1), ("", 0), (None, None)])
+def test_in_use_means_compute_processes_not_utilization(apps, expected):
+    instance, _ = parse(apps=apps)
+    assert instance["gpu_allocated"] == expected
+    assert instance["gpu_count"] == 2
+    # A high utilization sample without a listed process does not redefine this count.
+    assert instance["gpu_utilization"] == 50

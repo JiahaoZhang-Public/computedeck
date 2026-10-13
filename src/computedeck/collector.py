@@ -116,6 +116,7 @@ class Collector:
                 failures=0,
                 capabilities=batch.capabilities,
                 warnings=batch.warnings,
+                cluster_state=batch.cluster_state,
             )
             if batch.qos is not None:
                 source["qos"] = batch.qos

@@ -17,6 +17,8 @@ const TONES: Record<Verdict, string> = {
   wall: 'red',
   unknown: 'gray',
   none: 'red',
+  unavailable: 'red',
+  denied: 'gray',
 };
 
 /** Why a QoS rule decided the estimate. */
@@ -55,6 +57,8 @@ function explain(option: PlanOption, request: PlanRequest) {
     limit: 'plan.why.limit',
     wall: 'plan.why.wall',
     unknown: 'plan.why.unknown',
+    unavailable: 'plan.why.unavailable',
+    denied: 'plan.why.denied',
     none: request.gpuType ? 'plan.why.none' : 'plan.why.noGpus',
   };
   const { rule } = option;
@@ -80,11 +84,13 @@ function explain(option: PlanOption, request: PlanRequest) {
     option.largestNodeFree < request.gpus
   )
     parts.push(t('plan.why.multiNode', { count: request.gpus }));
+  if (option.access === 'unknown') parts.push(t('plan.why.accessUnknown'));
+  if (option.source.cluster_state === 'degraded') parts.push(t('plan.why.degraded'));
   return parts.join(' ');
 }
 
 export function PlanPage({ ctx }: { ctx: Ctx }) {
-  const { data, groups } = ctx;
+  const { data } = ctx;
   const [gpus, setGpus] = useState(1);
   const [gpuType, setGpuType] = useState('');
   const [hours, setHours] = useState('');
@@ -94,6 +100,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     hours: hours.trim() ? Number(hours) : null,
   };
   const options = planOptions(data, request);
+  const verified = options.filter((option) => option.access === 'verified');
   const models = gpuModels(data.nodes);
   const idle = idleInstances(data.instances);
   const hasClusters = data.sources.some((source) => source.kind === 'cluster');
@@ -137,79 +144,19 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           </label>
         </form>
       </Panel>
-      <Panel title={t('plan.options')} count={options.length}>
-        {options.length ? (
-          <div className="table-wrap">
-            <table className="table plan-table">
-              <thead>
-                <tr>
-                  <th>{t('plan.col.where')}</th>
-                  <th className="num">{t('plan.col.free')}</th>
-                  <th className="num">{t('plan.col.limit')}</th>
-                  <th className="num">{t('plan.col.queued')}</th>
-                  <th className="num">{t('plan.col.wall')}</th>
-                  <th>{t('plan.col.verdict')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {options.map((option) => {
-                  const why = explain(option, request);
-                  return (
-                    <tr key={option.key}>
-                      <td>
-                        <span className="with-mark">
-                          <GroupMark group={findGroup(groups, option.source.cluster_id)} />
-                          <span>
-                            <strong>
-                              {option.source.name}
-                              {option.qos && <span className="tag plan-qos">{option.qos}</span>}
-                            </strong>
-                            <span className="sub">
-                              {option.source.username}
-                              {option.nodesObservedAt &&
-                                ` · ${t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}`}
-                            </span>
-                          </span>
-                        </span>
-                      </td>
-                      <td className="num" data-label={t('plan.col.free')}>
-                        {option.freeGpus ?? '—'}
-                        {option.largestNodeFree != null && (
-                          <span className="sub">
-                            {t('plan.largestNode', { count: option.largestNodeFree })}
-                          </span>
-                        )}
-                      </td>
-                      <td className="num" data-label={t('plan.col.limit')}>
-                        {option.limit === Infinity ? t('plan.noLimit') : (option.limit ?? '—')}
-                        {option.used != null && option.limit != null && (
-                          <span className="sub">{t('plan.inUse', { count: option.used })}</span>
-                        )}
-                      </td>
-                      <td className="num" data-label={t('plan.col.queued')}>
-                        {option.queued}
-                        {option.reasons[0] && <span className="sub">{option.reasons[0]}</span>}
-                      </td>
-                      <td className="num" data-label={t('plan.col.wall')}>
-                        {option.maxWallHours == null ? '—' : duration(option.maxWallHours)}
-                      </td>
-                      <td className="plan-verdict">
-                        <span className={`status ${TONES[option.verdict]}`}>
-                          <i />
-                          {verdictLabel(option, request)}
-                        </span>
-                        {why && <span className="sub plan-why">{why}</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      <Panel title={t('plan.options')} count={verified.length}>
+        {verified.length ? (
+          <OptionsTable options={verified} request={request} ctx={ctx} />
         ) : (
           <Empty
-            title={t('plan.empty')}
-            text={hasClusters ? t('plan.emptyDisabled') : t('plan.emptyHint')}
+            title={t(options.length ? 'plan.noVerified' : 'plan.empty')}
+            text={
+              options.length
+                ? t('plan.noVerifiedHint')
+                : hasClusters
+                  ? t('plan.emptyDisabled')
+                  : t('plan.emptyHint')
+            }
             action={
               hasClusters || ctx.demo ? undefined : (
                 <button
@@ -224,6 +171,17 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         )}
         <p className="panel-note">{t('plan.note')}</p>
       </Panel>
+      {(['unknown', 'not_associated'] as const).map((access) => {
+        const rows = options.filter((option) => option.access === access);
+        return (
+          rows.length > 0 && (
+            <details className="panel" key={access}>
+              <summary>{t(`plan.access.${access}`, { count: rows.length })}</summary>
+              <OptionsTable options={rows} request={request} ctx={ctx} />
+            </details>
+          )
+        );
+      })}
       {idle.length > 0 && (
         <Panel title={t('plan.idle')} count={idle.length}>
           <ul className="rows">
@@ -249,5 +207,86 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         </Panel>
       )}
     </>
+  );
+}
+
+function OptionsTable({
+  options,
+  request,
+  ctx,
+}: {
+  options: PlanOption[];
+  request: PlanRequest;
+  ctx: Ctx;
+}) {
+  const { groups } = ctx;
+  return (
+    <div className="table-wrap">
+      <table className="table plan-table">
+        <thead>
+          <tr>
+            <th>{t('plan.col.where')}</th>
+            <th className="num">{t('plan.col.free')}</th>
+            <th className="num">{t('plan.col.limit')}</th>
+            <th className="num">{t('plan.col.queued')}</th>
+            <th className="num">{t('plan.col.wall')}</th>
+            <th>{t('plan.col.verdict')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {options.map((option) => {
+            const why = explain(option, request);
+            return (
+              <tr key={option.key}>
+                <td>
+                  <span className="with-mark">
+                    <GroupMark group={findGroup(groups, option.source.cluster_id)} />
+                    <span>
+                      <strong>
+                        {option.source.name}
+                        {option.qos && <span className="tag plan-qos">{option.qos}</span>}
+                      </strong>
+                      <span className="sub">
+                        {option.source.username}
+                        {option.nodesObservedAt &&
+                          ` · ${t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}`}
+                      </span>
+                    </span>
+                  </span>
+                </td>
+                <td className="num" data-label={t('plan.col.free')}>
+                  {option.freeGpus ?? '—'}
+                  {option.largestNodeFree != null && (
+                    <span className="sub">
+                      {t('plan.largestNode', { count: option.largestNodeFree })}
+                    </span>
+                  )}
+                </td>
+                <td className="num" data-label={t('plan.col.limit')}>
+                  {option.limit === Infinity ? t('plan.noLimit') : (option.limit ?? '—')}
+                  {option.used != null && option.limit != null && (
+                    <span className="sub">{t('plan.inUse', { count: option.used })}</span>
+                  )}
+                </td>
+                <td className="num" data-label={t('plan.col.queued')}>
+                  {option.queued}
+                  {option.reasons[0] && <span className="sub">{option.reasons[0]}</span>}
+                </td>
+                <td className="num" data-label={t('plan.col.wall')}>
+                  {option.maxWallHours == null ? '—' : duration(option.maxWallHours)}
+                </td>
+                <td className="plan-verdict">
+                  <span className={`status ${TONES[option.verdict]}`}>
+                    <i />
+                    {verdictLabel(option, request)}
+                  </span>
+                  {why && <span className="sub plan-why">{why}</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

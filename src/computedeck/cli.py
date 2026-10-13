@@ -101,6 +101,12 @@ def serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def doctor(args: argparse.Namespace) -> int:
+    from .doctor import run
+
+    return run(paths.data_dir(), args.port or paths.port(), args.source, args.json, args.language)
+
+
 def import_config(args: argparse.Namespace) -> int:
     _with_data_dir(args)
     from .config import ConfigError, apply
@@ -269,6 +275,15 @@ def parser() -> argparse.ArgumentParser:
 
     dump = commands.add_parser("export", help="print sources and settings as TOML")
     dump.set_defaults(handler=export_config)
+
+    diagnose = commands.add_parser(
+        "doctor", help="check connections, permissions and plugin compatibility"
+    )
+    diagnose.add_argument("--source", help="check one configured source id")
+    diagnose.add_argument("--port", type=_port)
+    diagnose.add_argument("--json", action="store_true")
+    diagnose.add_argument("--language", choices=["en", "zh-CN"], default="en")
+    diagnose.set_defaults(handler=doctor)
 
     login = commands.add_parser("service", help="run at login (launchd or systemd --user)")
     login.add_argument("action", choices=["install", "uninstall"])

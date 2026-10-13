@@ -30,7 +30,8 @@ export interface PlanRequest {
  * - unknown: no node data and no limit.
  * - none: the collected nodes have no GPUs of the requested model at all.
  */
-export type Verdict = 'likely' | 'possible' | 'busy' | 'limit' | 'wall' | 'unknown' | 'none';
+export type Verdict =
+  'likely' | 'possible' | 'busy' | 'limit' | 'wall' | 'unknown' | 'none' | 'unavailable' | 'denied';
 
 /**
  * A QoS rule other than the per-user GPU limit that decides an estimate.
@@ -50,6 +51,7 @@ export interface QosRule {
 }
 
 export interface PlanOption {
+  access: 'verified' | 'not_associated' | 'unknown';
   key: string;
   source: Source;
   qos: string | null;
@@ -74,7 +76,17 @@ export interface PlanOption {
   rule: QosRule | null;
 }
 
-const ORDER: Verdict[] = ['likely', 'possible', 'busy', 'limit', 'wall', 'unknown', 'none'];
+const ORDER: Verdict[] = [
+  'likely',
+  'possible',
+  'busy',
+  'limit',
+  'wall',
+  'unknown',
+  'none',
+  'unavailable',
+  'denied',
+];
 
 /** Slurm walltime: minutes ("2880"), or [D-]HH:MM:SS ("1-00:00:00"). */
 export function wallHours(value: string | null | undefined): number | null {
@@ -214,6 +226,9 @@ function verdict(
 ): { verdict: Verdict; rule: QosRule | null } {
   const rule = (effect: QosRule['effect']) =>
     option.rules.find((item) => item.effect === effect) ?? null;
+  if (option.access === 'not_associated') return { verdict: 'denied', rule: null };
+  if (sourceHasData(option.source, 'nodes') && option.source.cluster_state === 'unavailable')
+    return { verdict: 'unavailable', rule: null };
   if (option.noMatchingGpus) return { verdict: 'none', rule: null };
   if (request.hours != null && option.maxWallHours != null && request.hours > option.maxWallHours)
     return { verdict: 'wall', rule: null };
@@ -225,7 +240,9 @@ function verdict(
   if (rule('busy')) return { verdict: 'busy', rule: rule('busy') };
   // A rule that could not be checked keeps the estimate at "possible".
   if (option.freeGpus != null && option.headroom != null)
-    return rule('doubt')
+    return option.access !== 'verified' ||
+      option.source.cluster_state === 'degraded' ||
+      rule('doubt')
       ? { verdict: 'possible', rule: rule('doubt') }
       : { verdict: 'likely', rule: null };
   if (option.freeGpus != null || option.headroom != null)
@@ -311,6 +328,7 @@ export function planOptions(
         headroom = null;
       const option = {
         source,
+        access: sourceHasData(source, 'jobs') ? (qos?.access ?? 'unknown') : ('unknown' as const),
         qos: qos?.name ?? null,
         freeGpus: cluster.freeGpus,
         largestNodeFree: cluster.largestNodeFree,

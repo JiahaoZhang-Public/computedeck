@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { ConnectionChecks } from '../ConnectionChecks';
 import { ArrowRight, Plus, RefreshCw } from 'lucide-react';
 import type { DriverInfo, Source } from '../types';
 import type { Group } from '../groups';
@@ -33,6 +35,7 @@ function Capabilities({ source, info }: { source: Source; info: DriverInfo }) {
         return (
           <span key={check.capability} className={`capability ${state}`} title={title}>
             {check.command}
+            {state === 'missing' && ` · ${t('sources.capability.missing')}`}
           </span>
         );
       })}
@@ -121,6 +124,7 @@ function SourceRow({
   ctx: Ctx;
 }) {
   const columns = sshColumn ? 7 : 6;
+  const [checking, setChecking] = useState(false);
   const label = primary ? fieldValue(source, primary) : '';
   return (
     <>
@@ -171,6 +175,13 @@ function SourceRow({
               >
                 <RefreshCw size={13} className={source.status === 'syncing' ? 'spin' : ''} />
               </button>
+              <button
+                className="button small"
+                onClick={() => setChecking(!checking)}
+                aria-expanded={checking}
+              >
+                {t('sources.testConnection')}
+              </button>
               <button className="button small" onClick={() => ctx.configure(source)}>
                 {t('common.configure')}
               </button>
@@ -178,10 +189,17 @@ function SourceRow({
           )}
         </td>
       </tr>
+      {checking && (
+        <tr>
+          <td colSpan={columns}>
+            <ConnectionChecks sourceId={source.id} />
+          </td>
+        </tr>
+      )}
       {note && (
         <tr className="note-row">
           <td colSpan={columns}>
-            <span className={source.error ? 'red-text' : 'amber-text'}>{note}</span>
+            <span className={source.error ? 'red-text' : 'muted'}>{note}</span>
           </td>
         </tr>
       )}

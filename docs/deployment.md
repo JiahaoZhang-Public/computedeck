@@ -98,3 +98,19 @@ Off by default. The service binds to `127.0.0.1`, which keeps other machines out
 **Settings → Backup** writes a consistent copy to `<data dir>/backups` and keeps the newest 10 (`COMPUTEDECK_BACKUPS`); older copies it wrote are removed. To restore, stop the service, copy a backup to a new data directory as `computedeck.sqlite`, and start the service with `COMPUTEDECK_DATA_DIR` pointing there. Backups contain no secrets; credential references must still resolve on the machine.
 
 A database row that cannot be read (damaged, or written by a broken tool) is skipped rather than stopping the service: it is logged once, and `/api/health` counts such rows by table under `unreadable_rows`. A tool whose setup or startup fails is reported in the Toolbox; the rest of the service keeps running.
+
+## Logs and startup permissions
+
+The service writes application and uvicorn messages to `service.log` in its data directory.
+Logs rotate at 5 MiB, keeping the active file and four backups (`service.log.1` through `.4`).
+Existing oversized logs are retained when first rotated and expire as the backups turn over.
+Log files are mode 600, including newly opened files after rotation. Startup restricts an
+existing data directory to mode 700 and logs any permission correction.
+
+New `computedeck service install` templates discard stdout and send only startup stderr to
+`startup.log`; regular service logs go through the rotating handler. Reinstall the login
+service to update an older template. On Linux the file is managed by systemd's `append:`
+output mode; on macOS launchd uses `StandardErrorPath`.
+
+Run [doctor](doctor.md) before changing a connection. Missing optional capabilities such as
+accounting history do not count as failed sources; connection failures and stale data do.

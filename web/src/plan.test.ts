@@ -19,9 +19,19 @@ const source = (extra: Partial<Source> = {}): Source => ({
   interval_minutes: 10,
   capabilities: ['jobs', 'nodes', 'qos_limits'],
   qos: [
-    { name: 'normal', limits: { MaxTRESPU: 'gres/gpu=8', MaxWallPJ: '1440' }, origin: 'test' },
+    {
+      name: 'normal',
+      limits: { MaxTRESPU: 'gres/gpu=8', MaxWallPJ: '1440' },
+      access: 'verified' as const,
+      origin: 'test',
+    },
     // No MaxTRESPU at all: the GPU limit is unknown (gres/gpu=N would mean no limit).
-    { name: 'long', limits: { MaxWallPJ: '7-00:00:00' }, origin: 'test' },
+    {
+      name: 'long',
+      limits: { MaxWallPJ: '7-00:00:00' },
+      access: 'verified' as const,
+      origin: 'test',
+    },
   ],
   ...extra,
 });
@@ -109,8 +119,18 @@ describe('where to run', () => {
       sources: [
         source({
           qos: [
-            { name: 'small', limits: { MaxTRESPU: 'gres/gpu=2' }, origin: 'test' },
-            { name: 'large', limits: { MaxTRESPU: 'gres/gpu=16' }, origin: 'test' },
+            {
+              name: 'small',
+              limits: { MaxTRESPU: 'gres/gpu=2' },
+              access: 'verified' as const,
+              origin: 'test',
+            },
+            {
+              name: 'large',
+              limits: { MaxTRESPU: 'gres/gpu=16' },
+              access: 'verified' as const,
+              origin: 'test',
+            },
           ],
         }),
       ],
@@ -159,6 +179,7 @@ describe('where to run', () => {
             {
               name: 'gpu-quota',
               limits: { MaxTRESPU: 'gres/gpu=8', UsedTRESPU: 'gres/gpu=6' },
+              access: 'verified' as const,
               origin: 'test',
             },
           ],
@@ -174,7 +195,14 @@ describe('where to run', () => {
       ...data,
       sources: [
         source({
-          qos: [{ name: 'normal', limits: { MaxTRESPU: 'cpu=N,gres/gpu=N' }, origin: 'test' }],
+          qos: [
+            {
+              name: 'normal',
+              limits: { MaxTRESPU: 'cpu=N,gres/gpu=N' },
+              access: 'verified' as const,
+              origin: 'test',
+            },
+          ],
         }),
       ],
     };
@@ -250,7 +278,18 @@ describe('adversarial GPU planning', () => {
     (MaxTRESPU) => {
       const [option] = planOptions(
         {
-          sources: [source({ qos: [{ name: 'normal', limits: { MaxTRESPU }, origin: 'test' }] })],
+          sources: [
+            source({
+              qos: [
+                {
+                  name: 'normal',
+                  limits: { MaxTRESPU },
+                  access: 'verified' as const,
+                  origin: 'test',
+                },
+              ],
+            }),
+          ],
           jobs: [],
           nodes: [node('mi', { gpu_type: 'mi210', gpu_count: 64, gpu_allocated: 0 })],
         },
@@ -268,6 +307,7 @@ describe('adversarial GPU planning', () => {
               {
                 name: 'normal',
                 limits: { MaxTRESPU: 'gres/gpu=64,gres/gpu:mi210=8' },
+                access: 'verified' as const,
                 origin: 'test',
               },
             ],
@@ -292,6 +332,7 @@ describe('adversarial GPU planning', () => {
               {
                 name: 'normal',
                 limits: { MaxTRESPU: 'gres/gpu=64,gres/gpu:mi210=8' },
+                access: 'verified' as const,
                 origin: 'test',
               },
             ],
@@ -359,6 +400,7 @@ it('does not promise a typed QoS can accept an unspecified GPU model', () => {
             {
               name: 'normal',
               limits: { MaxTRESPU: 'gres/gpu=64,gres/gpu:a100=2' },
+              access: 'verified' as const,
               origin: 'test',
             },
           ],
@@ -383,6 +425,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
     const qos = {
       name: 'normal',
       limits: { MaxTRESPU: 'gres/gpu=8', MaxJobsPU: '2' },
+      access: 'verified' as const,
       origin: 't',
     };
     // Two running 1-GPU jobs use up the job limit while the GPU limit has room.
@@ -399,6 +442,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
       name: 'normal',
       limits: { MaxTRESPU: 'gres/gpu=8', MaxJobsPU: '4' },
       usage: { MaxJobsPU: '4', MaxTRESPU: 'cpu=16,gres/gpu=2' },
+      access: 'verified' as const,
       origin: 't',
     };
     expect(optionFor(qos, [])).toMatchObject({ used: 2, verdict: 'limit' });
@@ -410,6 +454,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
     const qos = {
       name: 'normal',
       limits: { MaxTRESPU: 'gres/gpu=8', MaxSubmitJobsPU: '2' },
+      access: 'verified' as const,
       origin: 't',
     };
     const option = optionFor(qos, [job('1', { gpu_count: 1 }), job('2', { state: 'PENDING' })]);
@@ -421,6 +466,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
     const qos = {
       name: 'normal',
       limits: { MaxTRESPU: 'gres/gpu=16', MaxTRESPJ: 'gres/gpu=4' },
+      access: 'verified' as const,
       origin: 't',
     };
     expect(optionFor(qos, [], ask(4)).verdict).toBe('likely');
@@ -444,6 +490,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
     const qos = {
       name: 'normal',
       limits: { MaxTRESPU: 'cpu=N,gres/gpu=8', GrpTRES: 'cpu=N,gres/gpu=16' },
+      access: 'verified' as const,
       origin: 't',
     };
     const option = optionFor(qos, [], ask(8));
@@ -457,6 +504,7 @@ describe('QoS rules besides the per-user GPU limit', () => {
       name: 'normal',
       limits: { MaxTRESPU: 'gres/gpu=8', GrpTRES: 'cpu=N,mem=N,gres/gpu=16' },
       usage: { GrpTRES: 'cpu=0,mem=0,gres/gpu=12' },
+      access: 'verified' as const,
       origin: 't',
     };
     expect(optionFor(qos, [], ask(4)).verdict).toBe('likely');
@@ -475,7 +523,12 @@ describe('QoS rules besides the per-user GPU limit', () => {
 });
 
 describe('clusters without the requested GPUs', () => {
-  const qos = { name: 'normal', limits: { MaxTRESPU: 'gres/gpu=8' }, origin: 't' };
+  const qos = {
+    name: 'normal',
+    limits: { MaxTRESPU: 'gres/gpu=8' },
+    access: 'verified' as const,
+    origin: 't',
+  };
   const b = source({ id: 'b-alice', cluster_id: 'b', name: 'B', qos: [qos] });
   const onB = (name: string, extra: Partial<ComputeNode> = {}) =>
     node(name, { id: `b:${name}`, source_id: 'b-alice', cluster_id: 'b', ...extra });
@@ -524,4 +577,58 @@ describe('clusters without the requested GPUs', () => {
     );
     expect(drained[0]).toMatchObject({ freeGpus: 0, noMatchingGpus: false, verdict: 'busy' });
   });
+});
+
+it('never upgrades unknown access to likely, and excludes missing grants from viable options', () => {
+  const data = {
+    sources: [
+      source({
+        qos: [
+          {
+            name: 'allowed',
+            access: 'verified' as const,
+            origin: 'test',
+            limits: { MaxTRESPU: 'gres/gpu=8' },
+          },
+          {
+            name: 'uncertain',
+            access: 'unknown',
+            origin: 'test',
+            limits: { MaxTRESPU: 'gres/gpu=8' },
+          },
+          {
+            name: 'other-account',
+            access: 'not_associated',
+            origin: 'test',
+            limits: { MaxTRESPU: 'gres/gpu=8' },
+          },
+        ],
+      }),
+    ],
+    nodes: [node('a', { gpu_allocated: 0 })],
+    jobs: [],
+  };
+  const options = planOptions(data, { gpus: 1, gpuType: '', hours: null });
+  expect(Object.fromEntries(options.map((option) => [option.qos, option.verdict]))).toEqual({
+    allowed: 'likely',
+    uncertain: 'possible',
+    'other-account': 'denied',
+  });
+});
+
+it('explains unavailable and degraded clusters even with apparently free GPUs', () => {
+  for (const [state, verdict] of [
+    ['unavailable', 'unavailable'],
+    ['degraded', 'possible'],
+  ] as const) {
+    const [option] = planOptions(
+      {
+        sources: [source({ cluster_state: state })],
+        nodes: [node('a', { gpu_allocated: 0 })],
+        jobs: [],
+      },
+      { gpus: 1, gpuType: '', hours: null },
+    );
+    expect(option.verdict).toBe(verdict);
+  }
 });

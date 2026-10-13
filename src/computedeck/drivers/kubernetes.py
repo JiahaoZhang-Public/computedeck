@@ -25,6 +25,7 @@ from .base import (
     DriverField,
     DriverInfo,
     SourceError,
+    cluster_state,
     message,
     now,
     options,
@@ -861,4 +862,7 @@ class KubernetesDriver:
             batch.warnings.append(_warning("qos_unavailable", error))
         batch.failures = parse_failures(pods, source, labels_by_node, at)
         batch.capabilities.append("history")
+        batch.cluster_state = cluster_state(batch.nodes)
+        for entry in batch.qos or []:
+            entry["access"] = "unknown"
         return batch

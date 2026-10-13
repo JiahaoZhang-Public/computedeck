@@ -160,7 +160,12 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
         <Empty
           title={t('market.none')}
           text={t('market.noneHint', { where: ctx.serverName })}
-          action={<Command text={add} ctx={ctx} />}
+          action={
+            <Command
+              text="computedeck plugin marketplace add JiahaoZhang-Public/computedeck-plugins"
+              ctx={ctx}
+            />
+          }
         />
       </Panel>
     );
@@ -189,6 +194,12 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
             </p>
           ),
       )}
+      <Panel title={t('market.official')}>
+        <Command
+          text="computedeck plugin marketplace add JiahaoZhang-Public/computedeck-plugins"
+          ctx={ctx}
+        />
+      </Panel>
       <div className="market-sources">
         {data.marketplaces.map((market) => (
           <span key={market.name} className="market-source" title={market.source}>

@@ -561,7 +561,12 @@ async def test_queued_jobs_without_matching_limits_still_appear_as_observed_queu
     batch = await pbs.PbsDriver().collect(SOURCE)
     assert batch.qos is not None
     qos = {item["name"]: item for item in batch.qos}
-    assert qos["long"] == {"name": "long", "limits": {}, "origin": "observed_job_access_unverified"}
+    assert qos["long"] == {
+        "name": "long",
+        "limits": {},
+        "origin": "observed_job_access_unverified",
+        "access": "unknown",
+    }
 
 
 async def test_unknown_gpu_counts_add_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -590,7 +595,14 @@ async def test_partial_permissions_keep_supported_data(
     assert batch.nodes is None
     assert batch.failures is None
     assert set(batch.snapshot()) == {"jobs"}
-    assert batch.qos == [{"name": "gpu", "limits": {}, "origin": "observed_job_access_unverified"}]
+    assert batch.qos == [
+        {
+            "name": "gpu",
+            "limits": {},
+            "origin": "observed_job_access_unverified",
+            "access": "unknown",
+        }
+    ]
     detail = str(failure) or type(failure).__name__
     assert batch.warnings == [
         {"code": code, "detail": detail}

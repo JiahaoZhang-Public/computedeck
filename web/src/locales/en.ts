@@ -1,5 +1,25 @@
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'plan.noVerified': 'No verified QoS access yet',
+  'plan.noVerifiedHint': 'Expand the unverified options below and check association permissions.',
+
+  'sources.testConnection': 'Test connection',
+  'sources.checking': 'Checking connection…',
+
+  'status.unavailable': 'Unavailable',
+  'status.degraded': 'Degraded',
+  'attention.cluster': '{name}: cluster availability',
+  'clusters.unavailableNodes': '{count}/{total} nodes unavailable',
+  'plan.verdict.unavailable': 'Cluster unavailable',
+  'plan.verdict.denied': 'Not associated',
+  'plan.why.unavailable': 'All visible nodes are unavailable.',
+  'plan.why.denied': 'This login has no association granting this QoS.',
+  'plan.why.accessUnknown': 'QoS access could not be verified; confirm it with the scheduler.',
+  'plan.why.degraded': 'Fewer than 20% of visible nodes are available.',
+  'plan.access.unknown': 'Unverified access ({count})',
+  'plan.access.not_associated': 'Not associated ({count})',
+  'market.official': 'Official marketplace',
+
   // Navigation and shell
   'nav.overview': 'Overview',
   'nav.resources': 'Resources',

@@ -1,5 +1,6 @@
 """Default locations. Every path can be overridden with an environment variable."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -8,6 +9,17 @@ from platformdirs import user_data_dir
 APP_NAME = "ComputeDeck"
 DEFAULT_PORT = 8710
 DEFAULT_BACKUPS = 10
+
+
+def secure_data_dir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if directory.stat().st_mode & 0o077:
+        directory.chmod(0o700)
+        logging.getLogger("computedeck").info("Restricted data directory permissions to 0700")
+    for path in [directory / "startup.log", *directory.glob("service.log*")]:
+        if path.is_file() and path.stat().st_mode & 0o077:
+            path.chmod(0o600)
+            logging.getLogger("computedeck").info("Restricted log file permissions to 0600")
 
 
 def data_dir() -> Path:
