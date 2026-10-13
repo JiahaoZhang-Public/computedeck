@@ -1,0 +1,357 @@
+# Plugins
+
+ComputeDeck can be extended without changing it. A plugin is an ordinary Python package
+that the service finds through entry points. It can add:
+
+- **tools**: API routes, background work, settings and reactions to events, listed in the
+  Toolbox where their owner switches them on or off;
+- **drivers**: new kinds of data source (schedulers, clouds, machines);
+- **notification channels** for the Notifications tool;
+- **web pages**: a prebuilt bundle the web app loads at run time.
+
+Plugins are shared through **marketplaces**: catalogs that list plugins with pinned
+sources. Everything below that a plugin imports comes from `computedeck.sdk`, the stable
+surface; other modules may change between releases.
+
+A plugin runs inside the service with the permissions of the user who runs it. Install
+only plugins you trust, and say plainly in your plugin what it does.
+
+## Quick start
+
+```bash
+computedeck plugin new lab-alerts --web     # add --driver for a data source
+cd computedeck-lab-alerts
+uv sync && uv run pytest
+npm --prefix web install && npm --prefix web run build   # only with --web
+uv run computedeck plugin validate .
+```
+
+Try it against your own ComputeDeck by installing it into the same environment
+(`uv pip install -e .`), restarting the service and switching it on in the Toolbox.
+
+## The plugin object
+
+```python
+from computedeck.sdk import Plugin, PluginContext, SettingField
+
+plugin = Plugin(
+    id="lab-alerts",  # lowercase, digits and dashes; also the route prefix
+    setup=setup,  # called once at startup, see below
+    name={"en": "Lab alerts", "zh-CN": "实验室提醒"},
+    description={"en": "One line on what it does."},
+    permissions=({"en": "posts failed jobs to the lab chat"},),
+    settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
+    default_enabled=False,  # start off until the owner turns it on
+    requires=">=0.3,<0.4",  # ComputeDeck versions it supports
+    api=1,  # the plugin API it was written for
+    page="lab-alerts",  # the page its web bundle adds, if any
+    web=Path(__file__).parent / "web",  # the built web bundle, if any
+    author="Example Lab",
+    homepage="https://example.com/lab-alerts",
+)
+```
+
+Register it in `pyproject.toml`:
+
+```toml
+[project.entry-points."computedeck.plugins"]
+lab-alerts = "computedeck_lab_alerts:plugin"
+```
+
+`name`, `description` and `permissions` are shown in the Toolbox before anyone switches the
+plugin on, in English and, when given, Chinese. Write permissions as what the plugin will
+do ("reads job logs over SSH", "posts to the webhook you set"); they inform people, they
+are not enforced.
+
+A plugin that needs a newer plugin API or another ComputeDeck version is listed in the
+Toolbox with the reason and not set up. The service's `policy.toml` can block plugins.
+
+The entry-point name must equal `Plugin.id`. Before importing code, policy checks the
+entry-point name, the distribution package name and, for a plugin installed from a
+marketplace, its catalog name and marketplace. Importing one entry point runs its
+package's code, so blocking any plugin or driver of a package blocks all of them (the
+tools shipped with ComputeDeck are blocked one by one). A different runtime `Plugin.id`
+can only be checked after import; installed plugins run trusted Python code, without a
+sandbox.
+
+## setup(ctx)
+
+`setup` runs at service start even while the plugin is off, so it should only register
+what follows. Nothing it registers runs or resolves until the plugin is switched on.
+
+| | |
+|---|---|
+| `ctx.router` | A FastAPI router served at `/api/plugins/<id>/…`. Requests need the access token like every API call, and the routes answer 404 while the plugin is off. |
+| `ctx.settings()` | The declared settings with saved values. Kinds: `text`, `textarea`, `number`, `boolean`, `select`, `credential` (a reference such as `env:NAME`, never a secret). |
+| `ctx.validate_settings(fn)` | Check settings beyond their kinds; raise `ValueError("message_code")`. |
+| `ctx.on_event(handler, types)` | Receive events while on (see below). |
+| `ctx.background(loop)` | A coroutine run while the plugin is on; restarted after a crash, stopped when switched off. |
+| `ctx.on_startup(fn)`, `ctx.on_shutdown(fn)` | Prepare and release resources, e.g. tables in `ctx.store.db`. Startup runs once, when the plugin is first on (at service start or when switched on); shutdown runs at service stop if startup ran. |
+| `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. |
+| `ctx.credential_scheme(name, resolver)` | Add a credential reference scheme, e.g. `vault:path`. While the plugin is off, its references fail with a message saying so. |
+| `ctx.runtime.cluster_lock(id)`, `ctx.runtime.semaphore` | Share the collector's connection budget when you reach clusters. |
+| `ctx.data_dir`, `ctx.store` | The service's data folder and database. Prefix your tables with your id. |
+
+### Events
+
+Events are recorded between collections, stored, and delivered in order to each plugin
+that is on, from where it left off; a short restart loses nothing. Switching a plugin on
+starts it with events from then on, and so does starting the service with a plugin its
+previous run did not load (newly installed, reinstalled, or no longer blocked): it never
+receives the backlog of an earlier installation.
+
+| Type | When | `data` |
+|---|---|---|
+| `job.started` | a pending job is running | `job` |
+| `job.ended` | a job left the queue | `job` (as last seen) |
+| `job.failed` | a job ended with a failure in the last day | `job` with `exit_code`, `end` |
+| `source.failed` | a source that worked could not be collected | `error` |
+| `source.recovered` | a failing source was collected again | |
+
+Every event has `id`, `type`, `at`, `source_id` and `data` with `source_name`,
+`cluster_id`, `username` and `driver`. The first collection of a new source records what
+already exists without delivering it.
+
+## Drivers
+
+A driver turns one configured source into one `Batch`. Built-in drivers are in
+`src/computedeck/drivers/` and are good examples: `slurm` and `pbs` (SSH), `kubernetes`
+(kubectl), `runpod` and `lambda` (HTTP APIs), `aws-ec2` (a CLI), `ssh` (one machine).
+
+```python
+from typing import Any, ClassVar, Literal
+
+from computedeck.sdk import (
+    Batch,
+    DriverCheck,
+    DriverInfo,
+    SourceError,
+    ssh_alias_field,
+    username_field,
+)
+
+
+class TorqueDriver:
+    name: ClassVar[str] = "torque"
+    kind: ClassVar[Literal["cluster", "cloud"]] = "cluster"
+    info: ClassVar[DriverInfo] = DriverInfo(
+        label={"en": "Torque cluster"},
+        description={"en": "Your jobs, read through SSH."},
+        details={"en": "Read-only queries through an SSH host alias on {where}."},
+        fields=[username_field(), ssh_alias_field()],
+        checks=[DriverCheck(capability="jobs", command="qstat", label={"en": "Your jobs"})],
+        beta=True,
+    )
+
+    def validate(self, source: dict[str, Any]) -> None:
+        if not source.get("ssh_alias") or not source.get("username"):
+            raise SourceError("cluster_connection_required")
+
+    async def collect(self, source: dict[str, Any]) -> Batch:
+        jobs = ...  # read-only queries
+        return Batch(jobs=jobs, capabilities=["jobs"])
+```
+
+```toml
+[project.entry-points."computedeck.drivers"]
+torque = "computedeck_torque:TorqueDriver"
+```
+
+`info` builds the add-source form: `username`, `ssh_alias` and `credential` are common
+fields; any other field key is stored in `source["options"]` (read it with
+`computedeck.sdk.options(source)`). `checks` become the first-collection checklist and
+the capability tags on the Sources page.
+
+Rules that keep the numbers honest:
+
+- `None` means not collected: `Batch(jobs=None)` is "not collected", `Batch(jobs=[])` is
+  "no jobs". Never report an unknown value as zero.
+- Raise `SourceError(code, detail)` on failure; the previous results are kept.
+- Ids are `<cluster_id>:<id>`, so two logins on one cluster count a job once.
+- Fields shown as text (`name`, `user`, `qos`, `node`, `elapsed`, ...) are strings or
+  `None`; numbers are stored as text, and a list or object rejects the whole batch.
+- Put optional parts that failed in `Batch.warnings` as `{"code": ..., "detail": ...}`.
+- Only read. Quote or strictly validate everything placed in a command, and never pass a
+  provider's error body on: it may echo secrets.
+
+### A new cloud provider
+
+Cloud GPU providers share most of their work, so a provider is a small subclass of
+`CloudDriver`: say where the API is and how the key is sent, then turn the provider's
+rows into `CloudInstance`. The base resolves the key reference, maps HTTP failures to
+messages without the provider's reply, validates SSH endpoints, tries fallback hosts,
+builds the add-source form and records the instances.
+
+```python
+from computedeck.sdk import CloudDriver, CloudInstance, ssh_command
+
+
+class ExampleCloud(CloudDriver):
+    name = "example-cloud"
+    label = {"en": "Example Cloud", "zh-CN": "示例云"}
+    base_url = "https://api.example-cloud.com"
+    key_env = "EXAMPLE_CLOUD_API_KEY"  # the form suggests env:EXAMPLE_CLOUD_API_KEY
+    auth_scheme = "Bearer"  # "" sends the key alone
+
+    async def instances(self, api, source):
+        rows = await api.get("/v1/instances")
+        return [
+            CloudInstance(
+                id=row["id"],
+                name=row["name"],
+                state="running" if row["status"] == "active" else "unknown",
+                gpu_count=row.get("gpus"),
+                gpu_type=row.get("gpu_model"),
+                hourly_cost=row.get("price_per_hour"),
+            )
+            for row in rows
+        ]
+```
+
+Override `account(api, source)` to return `Account(balance=...)` when the provider has a
+balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
+are complete examples.
+
+## Notification channels
+
+The Notifications tool sends to email and webhooks. A plugin can add a channel kind:
+
+```python
+from computedeck.sdk import ChannelKind, Message, SettingField, register_channel
+
+
+async def send(
+    config: dict, message: Message
+) -> None: ...  # raise SourceError("send_failed") on failure
+
+
+def setup(ctx):
+    register_channel(
+        ChannelKind(
+            kind="lab-pager",
+            label={"en": "Lab pager"},
+            fields=(SettingField(key="number", label={"en": "Pager number"}, required=True),),
+            send=send,
+        )
+    )
+```
+
+Each delivery, one rule's message to one channel, is stored before it is sent and is sent
+on its own: a slow or failing channel holds up no other channel, rule or event. One call
+to `send` gets 30 seconds in all, from connecting to the end of the answer; after that it
+is cancelled and counts as a failure. Do not retry or wait inside `send`. A failure is
+tried again after 20 and then 90 seconds, also after a restart, except a `SourceError`
+with the code `credential_unavailable`, `webhook_url_invalid` or `channel_kind_unknown`,
+or any other exception, which fail at once. Blocking work belongs in a thread that
+cancellation can stop, or the thread keeps running after the attempt is given up.
+
+## Web pages
+
+A plugin package can ship a prebuilt bundle: a folder with `index.js` (and optionally
+`index.css`), named by `Plugin.web`. While one of the package's plugins is on, the web app
+loads it from `/plugin-web/<package>/`. The bundle is a classic script that uses the page's
+React through `window.ComputeDeck` and registers itself:
+
+```jsx
+const { components, register } = window.ComputeDeck;
+
+register({
+  id: 'lab-alerts',
+  requires: 'lab-alerts',            // hidden while this server plugin is off
+  pages: [{ id: 'lab-alerts', label: { en: 'Lab alerts' }, icon: Icon, render: (props) => <Page {...props} /> }],
+  overview: OverviewCard,             // optional: beside the overview chart
+  settings: SettingsPanel,            // optional: on the Settings page
+  banner: Banner,                     // optional: above every page
+});
+```
+
+`window.ComputeDeck` offers `React`, `jsxRuntime`, `components` (`Panel`, `Empty`, `Status`,
+`Switch`, `Chips`, `Stat`, `Meter`, `BrandMark`), `request(path, body?, method?)` for the
+API, `format.relativeTime` and `format.dateTime`, `routeHash`, `locale()` and
+`localized(text)`. Page components receive `{ request, demo, remote, locale, page, health,
+navigate }`. `computedeck plugin new --web` sets up the build: Vite in library mode, IIFE
+output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
+`ComputeDeck.jsxRuntime`. Build the bundle before building the wheel, and include the
+folder with `artifacts` (hatch) or package data.
+
+## Marketplaces
+
+A marketplace is a `computedeck-marketplace.json` file at the root of a git repository, at
+an https address, or in a folder. The format follows Claude Code's `marketplace.json`:
+
+```json
+{
+  "name": "example-lab",
+  "owner": { "name": "Example Lab" },
+  "plugins": [
+    {
+      "name": "lab-alerts",
+      "display_name": { "en": "Lab alerts", "zh-CN": "实验室提醒" },
+      "description": { "en": "Posts failed jobs to the lab chat." },
+      "version": "1.0.0",
+      "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
+                  "sha256": ["<sha256 of the wheel>"] },
+      "permissions": [{ "en": "posts failed jobs to the lab chat" }],
+      "requires": ">=0.3,<0.4",
+      "license": "MIT",
+      "homepage": "https://example.com/lab-alerts"
+    }
+  ],
+  "renames": {}
+}
+```
+
+Sources must be pinned: `pypi` (package and exact version, sha256 recommended), `wheel`
+(https URL and sha256), `git` (URL and a 40-character commit `sha`, optional
+`subdirectory`; built from source) or `path` (inside the marketplace folder; for private
+and local catalogs).
+
+```bash
+computedeck plugin marketplace add example-lab/computedeck-plugins   # or a URL or folder
+computedeck plugin search alerts
+computedeck plugin info lab-alerts
+computedeck plugin install lab-alerts@example-lab
+computedeck plugin list
+computedeck plugin uninstall lab-alerts
+```
+
+Installing shows where the plugin comes from, how it will be installed and what it says it
+will do, and asks before going on. It installs into the environment ComputeDeck runs in
+(with uv when available, otherwise pip), takes wheels only from PyPI, and checks hashes.
+It never installs or uninstalls ComputeDeck, a package it depends on, or a package that
+was installed some other way. Restart ComputeDeck afterwards. The web app's Toolbox lists marketplaces and their plugins
+but does not install anything: anyone who can open the page could otherwise run code on
+the machine.
+
+Each added catalog is checked again when it is read. One that an earlier version of
+ComputeDeck accepted but this one does not is marked as unreadable, with the reason, in
+`plugin marketplace list`, `plugin search` and the web app; the other marketplaces work as
+usual. `computedeck plugin marketplace update NAME` reads it again.
+
+The tier shown next to a plugin comes from where its catalog was added, never from the
+catalog itself: **internal** (named in `policy.toml`), **community** (any other
+marketplace), **local** (a folder) and **official** (the ComputeDeck project's catalog).
+
+### policy.toml
+
+An owner or administrator can put `policy.toml` in the data directory:
+
+```toml
+allowed_marketplaces = ["https://github.com/example-lab/*"]   # only these may be added
+blocked_marketplaces = []
+internal_marketplaces = ["https://github.com/example-lab/*"]  # shown as Internal
+blocked_plugins = ["unwanted-tool", "risky@*", "*@untrusted"] # names, name@market or packages
+allow_local = true                                            # folder marketplaces and sources
+```
+
+Names compare as Python packages do (`Evil.Pkg`, `evil_pkg` and `evil-pkg` are the same).
+Blocked plugins are not loaded. A policy file that cannot be read blocks every plugin
+not shipped with ComputeDeck.
+
+## Before you publish
+
+- `computedeck plugin validate .` passes, with names, permissions and `requires` set.
+- Secrets are credential references; nothing secret is logged, stored or returned.
+- Collected data uses `None` for unknown, and failures raise `SourceError`.
+- The web bundle is built into the wheel and uses the page's React.
+- The marketplace entry pins the source and lists the same permissions.

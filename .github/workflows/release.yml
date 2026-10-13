@@ -1,0 +1,75 @@
+name: Release computedeck
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    # Enable only after the publication checklist and protected environments are ready.
+    if: github.repository == 'JiahaoZhang-Public/computedeck' && vars.PUBLISHING_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      stable: ${{ steps.release.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a commit on main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - run: gitleaks git --log-opts=--all --redact --no-banner
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate the tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/release_check.py . "$RELEASE_TAG" v >> "$GITHUB_OUTPUT"
+      - run: uv sync --frozen
+      - run: npm --prefix web ci
+      - run: bash scripts/check.sh
+      - run: bash scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
+  testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+  pypi:
+    needs: [build, testpypi]
+    if: needs.build.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

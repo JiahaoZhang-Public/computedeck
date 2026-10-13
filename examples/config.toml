@@ -1,0 +1,71 @@
+# Example ComputeDeck configuration. Import with: computedeck import examples/config.toml
+# Names, hosts and accounts below are fictional.
+
+language = "en"            # default UI language of this server: "en" or "zh-CN"
+server_name = "lab-server" # shown in remote mode instead of the host name
+
+# A Slurm cluster. Every identity is one login; jobs seen by two logins count once.
+[[cluster]]
+id = "cluster-a"           # stable identifier; defaults to a slug of the label
+label = "Cluster A"
+driver = "slurm"
+
+  [[cluster.identity]]
+  username = "alice"
+  ssh_alias = "cluster-a"  # a Host in ~/.ssh/config of the machine running the service
+  interval_minutes = 10
+
+  [[cluster.identity]]
+  username = "alice-project"
+  ssh_alias = "cluster-a-project"
+  enabled = false          # kept in the configuration but not collected
+
+[[cluster]]
+id = "cluster-b"
+label = "Cluster B"
+
+  [[cluster.identity]]
+  username = "alice"
+  ssh_alias = "cluster-b"
+
+# RunPod pods, listed through the API. The key itself is never stored.
+[[cloud]]
+id = "runpod"
+label = "RunPod"
+driver = "runpod"
+credential = "env:RUNPOD_API_KEY"   # or "keychain:computedeck/runpod"
+
+# Any other machine, reached over SSH.
+[[instance]]
+platform = "Lab workstation"
+id = "devbox"                       # stable part of the generated SSH alias
+name = "dev-box"
+host = "192.0.2.20"
+port = 22
+username = "alice"
+identity_file = "~/.ssh/id_ed25519"
+gpu_count = 1
+gpu_type = "RTX 4090"
+monitoring = true                   # read GPU/CPU/memory over SSH every 10 minutes
+
+# A machine already defined in ~/.ssh/config, e.g. behind a jump host.
+[[instance]]
+platform = "Lab workstation"
+id = "render01"
+name = "render-01"
+host = "render01"                   # the existing SSH alias
+existing_alias = true
+
+# A collection machine: another computer that collects the sources naming it, over SSH,
+# with its own SSH configuration, credentials and network (ComputeDeck installed there).
+# [[node]]
+# name = "Lab gateway"
+# ssh_alias = "lab-gateway"
+# command = "~/.local/bin/computedeck"
+#
+# [[cluster]]
+# label = "Cluster C"
+# driver = "kubernetes"
+# username = "ml-team"                 # the namespace
+# options = { context = "lab" }
+# node = "lab-gateway"
