@@ -26,7 +26,7 @@ jobs:
           go-version: stable
       - run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
       - run: gitleaks git --log-opts=--all --redact --no-banner
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
