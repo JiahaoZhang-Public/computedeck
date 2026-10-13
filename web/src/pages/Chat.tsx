@@ -55,52 +55,6 @@ function size(bytes: number) {
 /** Notes and small files for everyone who opens this ComputeDeck, by channel. */
 export function ChatPage({ ctx }: { ctx: Ctx }) {
   const tool = ctx.tools.find((item) => item.id === 'chat');
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [channel, setChannel] = useState('general');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [name, setName] = useState(savedName);
-  const [draft, setDraft] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [limit, setLimit] = useState(25);
-  const listRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const lastId = useRef(0);
-
-  useEffect(() => {
-    if (!tool?.enabled) return;
-    api<{ channels: Channel[]; max_file_mb: number }>(BASE)
-      .then((data) => {
-        setChannels(data.channels);
-        setLimit(data.max_file_mb);
-      })
-      .catch((reason) => setError(errorText(reason, 'error.service')));
-  }, [tool?.enabled]);
-
-  const poll = useCallback(async () => {
-    const rows = await api<ChatMessage[]>(
-      `${BASE}/messages?channel=${encodeURIComponent(channel)}&after=${lastId.current}`,
-    );
-    if (rows.length) {
-      lastId.current = rows[rows.length - 1].id;
-      setMessages((current) => [...current, ...rows]);
-    }
-  }, [channel]);
-
-  useEffect(() => {
-    if (!tool?.enabled) return;
-    lastId.current = 0;
-    setMessages([]);
-    void poll().catch((reason) => setError(errorText(reason, 'error.service')));
-    const timer = window.setInterval(() => void poll().catch(() => undefined), 4000);
-    return () => clearInterval(timer);
-  }, [poll, tool?.enabled]);
-
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages.length]);
-
   if (!tool?.enabled)
     return (
       <Panel>
@@ -115,6 +69,65 @@ export function ChatPage({ ctx }: { ctx: Ctx }) {
         />
       </Panel>
     );
+  return <ChatContent ctx={ctx} />;
+}
+
+function ChatContent({ ctx }: { ctx: Ctx }) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channel, setChannel] = useState('general');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [name, setName] = useState(savedName);
+  const [draft, setDraft] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [limit, setLimit] = useState(25);
+  const listRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const cursor = useRef({ channel: 'general', lastId: 0 });
+  const pollId = useRef(0);
+
+  useEffect(() => {
+    api<{ channels: Channel[]; max_file_mb: number }>(BASE)
+      .then((data) => {
+        setChannels(data.channels);
+        setLimit(data.max_file_mb);
+      })
+      .catch((reason) => setError(errorText(reason, 'error.service')));
+  }, []);
+
+  const poll = useCallback(async () => {
+    // A send started in another channel must not restart that channel's poll.
+    if (cursor.current.channel !== channel) return;
+    const requestId = pollId.current;
+    const rows = await api<ChatMessage[]>(
+      `${BASE}/messages?channel=${encodeURIComponent(channel)}&after=${cursor.current.lastId}`,
+    );
+    if (requestId !== pollId.current) return;
+    // Overlapping polls can contain the same messages; keep each one only once.
+    const unseen = rows.filter((row) => row.id > cursor.current.lastId);
+    if (unseen.length) {
+      cursor.current.lastId = unseen[unseen.length - 1].id;
+      setMessages((current) => [...current, ...unseen]);
+    }
+  }, [channel]);
+
+  useEffect(() => {
+    let active = true;
+    void poll().catch((reason) => {
+      if (active) setError(errorText(reason, 'error.service'));
+    });
+    const timer = window.setInterval(() => void poll().catch(() => undefined), 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      pollId.current += 1;
+    };
+  }, [poll]);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages.length]);
 
   async function send(event?: FormEvent) {
     event?.preventDefault();
@@ -185,7 +198,14 @@ export function ChatPage({ ctx }: { ctx: Ctx }) {
             key={item.id}
             className={item.id === channel ? 'active' : ''}
             aria-current={item.id === channel ? 'true' : undefined}
-            onClick={() => setChannel(item.id)}
+            onClick={() => {
+              if (item.id === channel) return;
+              pollId.current += 1;
+              cursor.current = { channel: item.id, lastId: 0 };
+              setChannel(item.id);
+              setMessages([]);
+              setError(null);
+            }}
           >
             {item.kind === 'general' ? t('chat.general') : item.label}
             {item.kind === 'node' && <small>{t('chat.machine')}</small>}

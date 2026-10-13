@@ -1,7 +1,7 @@
 import { useDialogFocus } from '../useDialogFocus';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowRight, ExternalLink, Search, X } from 'lucide-react';
+import { ArrowRight, ExternalLink, Puzzle, Search, X } from 'lucide-react';
 import type { Tool } from '../types';
 import { ApiError, errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -11,7 +11,7 @@ import { readSettings } from '../settingValues';
 import type { Values } from '../settingValues';
 import { SettingInput } from '../SettingInput';
 import { TIER_LABELS, TIER_TONES } from '../tiers';
-import { toolIcon } from '../toolIcons';
+import { toolIcons } from '../toolIcons';
 import { Chips, Empty, Panel, Switch } from '../ui';
 import { MarketplaceTab } from './Marketplace';
 import type { Ctx } from './shared';
@@ -67,7 +67,7 @@ function ToolTile({
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
-  const Icon = toolIcon(tool.icon);
+  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const status = tool.rejected
     ? formatMessage(tool.rejected)
     : tool.enabled
@@ -130,7 +130,7 @@ function ToolDrawer({
   const dialog = useDialogFocus(`tool-details-${tool.id}`);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const Icon = toolIcon(tool.icon);
+  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const failures = Object.values(tool.errors);
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -263,7 +263,7 @@ function ConfirmEnable({
 }) {
   const dialog = useDialogFocus(`tool-details-${tool.id}`);
   const needed = missing(tool);
-  const Icon = toolIcon(tool.icon);
+  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   return (
     <div className="overlay" onMouseDown={onCancel}>
       <section

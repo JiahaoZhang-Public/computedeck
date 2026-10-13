@@ -26,32 +26,34 @@ export function HistoryPanel({
   note?: ReactNode;
 }) {
   const [hours, setHours] = useState(24);
-  const [longer, setLonger] = useState<HistoryPoint[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState<{
+    hours: number;
+    demo: boolean;
+    points: HistoryPoint[];
+    failed: boolean;
+  } | null>(null);
+  const longer = result?.hours === hours && result.demo === demo ? result : null;
   useEffect(() => {
     if (hours === 24) return;
     let active = true;
-    setLonger(null);
-    setFailed(false);
     api<{ points: HistoryPoint[] }>(`/history?hours=${hours}&demo=${demo}`)
       .then((result) => {
-        if (active) setLonger(result.points);
+        if (active) setResult({ hours, demo, points: result.points, failed: false });
       })
       .catch(() => {
         if (active) {
-          setFailed(true);
-          setLonger([]);
+          setResult({ hours, demo, points: [], failed: true });
         }
       });
     return () => {
       active = false;
     };
   }, [hours, demo]);
-  const points = hours === 24 ? day : (longer ?? []);
+  const points = hours === 24 ? day : (longer?.points ?? []);
   const empty =
     hours === 24
       ? undefined
-      : failed
+      : longer?.failed
         ? t('chart.failed')
         : longer === null
           ? t('chart.loading')
@@ -64,7 +66,11 @@ export function HistoryPanel({
           <Chips
             label={t('chart.range')}
             value={String(hours)}
-            onChange={(value) => setHours(Number(value))}
+            onChange={(value) => {
+              if (Number(value) === hours) return;
+              setHours(Number(value));
+              setResult(null);
+            }}
             options={RANGES.map((range) => ({ value: String(range.hours), label: t(range.label) }))}
           />
           <ChartLegend partial={points.some(historyPartial)} />

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { MouseEvent } from 'react';
 import type { HistoryPoint } from './types';
 import { dateTime, historyAllocation, historyPartial } from './domain';
@@ -31,10 +31,14 @@ export default function TrendChart({
   empty?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [end, setEnd] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setEnd(Date.now()), 10000);
+    return () => window.clearInterval(timer);
+  }, []);
   // One hatch pattern per chart; an SVG id must not contain the colons React may put in ids.
   const hatch = `chart-hatch-${useId().replace(/[^\w-]/g, '')}`;
   const span = hours * HOUR;
-  const end = Date.now();
   const start = end - span;
   // A missing collection longer than this is drawn as a gap, never bridged.
   const maxGap = Math.max(30 * 60 * 1000, (2.5 * span) / 600);
