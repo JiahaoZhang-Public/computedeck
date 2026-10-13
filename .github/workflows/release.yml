@@ -41,7 +41,7 @@ jobs:
       - run: npm --prefix web ci
       - run: bash scripts/check.sh
       - run: bash scripts/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: distributions
           path: dist/*
