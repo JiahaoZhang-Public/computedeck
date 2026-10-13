@@ -27,7 +27,7 @@ Kubernetes, PBS, LSF and Vast.ai are beta integrations. The interface supports E
 
 ## Run from source
 
-The repositories are currently private and no PyPI package has been released. These steps require repository access.
+ComputeDeck is available as a source preview. No PyPI package has been released yet.
 
 You need macOS or Linux, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Node.js 22 and OpenSSH. Node is needed to build the web interface.
 
