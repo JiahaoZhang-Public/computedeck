@@ -101,6 +101,8 @@ bash scripts/build.sh    # local wheel and sdist, including the web interface
 
 The Python service is in `src/computedeck`, the React interface in `web`, and Python tests in `tests`.
 
+Web type checks use TypeScript 7. ESLint uses the official TypeScript 6 API package alongside it. Run `npm --prefix web run typecheck` to select the TypeScript 7 compiler explicitly.
+
 ## License
 
 [Apache-2.0](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for bundled dependencies.

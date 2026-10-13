@@ -17,8 +17,11 @@ export type Page = string;
 /** 'all' or a group key (cluster id or cloud platform key). */
 export type Filter = string;
 
-export function readRoute(knownPages: readonly string[]): { page: Page; group: Filter } {
-  const [path, search = ''] = window.location.hash.replace(/^#\/?/, '').split('?');
+export function readRoute(
+  knownPages: readonly string[],
+  hash = window.location.hash,
+): { page: Page; group: Filter } {
+  const [path, search = ''] = hash.replace(/^#\/?/, '').split('?');
   const page = knownPages.includes(path) ? path : 'overview';
   const params = new URLSearchParams(search);
   // `provider` is the parameter name used before groups were introduced.
