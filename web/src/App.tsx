@@ -1,3 +1,5 @@
+import { sourceAttentionTone } from './labels';
+import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -164,6 +166,8 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [detail, setDetail] = useState<Detail>(null);
+  const modalRef = useDialogFocus(undefined, !!modal);
+  const detailRef = useDialogFocus(undefined, !!detail);
   const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
@@ -403,21 +407,35 @@ export default function App() {
         ...data.sources
           // A disabled login is not collected, so its old error or age needs no attention.
           .filter(
-            (source) => source.enabled && (source.error || source.stale || source.warnings?.length),
+            (source) =>
+              source.enabled &&
+              (source.error ||
+                source.stale ||
+                source.warnings?.length ||
+                ['unavailable', 'degraded'].includes(source.cluster_state ?? '')),
           )
           .map((source) => ({
             id: `source:${source.id}`,
-            tone: source.error ? ('red' as const) : ('amber' as const),
+            tone: sourceAttentionTone(source),
             title: t(
               source.error
                 ? 'attention.failed'
                 : source.stale
                   ? 'attention.stale'
-                  : 'attention.partial',
+                  : ['unavailable', 'degraded'].includes(source.cluster_state ?? '')
+                    ? 'attention.cluster'
+                    : 'attention.partial',
               { name: sourceLabel(groups, source) },
             ),
             text:
               formatMessage(source.error) ||
+              (['unavailable', 'degraded'].includes(source.cluster_state ?? '')
+                ? t(
+                    source.cluster_state === 'unavailable'
+                      ? 'status.unavailable'
+                      : 'status.degraded',
+                  )
+                : '') ||
               formatMessage(source.warnings?.[0]) ||
               t('attention.lastSuccess', { time: relativeTime(source.last_success) }),
             action: () => configure(source),
@@ -751,6 +769,8 @@ export default function App() {
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <section
             className={`modal ${modal.kind === 'ssh' ? 'wide' : ''}`}
+            ref={modalRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -846,8 +866,10 @@ export default function App() {
         <div className="drawer-overlay" onMouseDown={() => setDetail(null)}>
           <aside
             className="drawer"
+            ref={detailRef}
+            tabIndex={-1}
             role="dialog"
-            aria-modal="true"
+            aria-modal={!modal}
             aria-labelledby="detail-title"
             onMouseDown={(event) => event.stopPropagation()}
           >

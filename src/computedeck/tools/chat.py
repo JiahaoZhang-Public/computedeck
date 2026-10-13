@@ -118,7 +118,8 @@ class Chat:
 
     @property
     def files(self) -> Path:
-        return self.ctx.data_dir / "chat-files"
+        # Built-in attachments retain their established location across upgrades.
+        return self.ctx.runtime.data_dir / "chat-files"
 
     def settings(self) -> dict[str, int]:
         return check_settings(self.ctx.settings())[0]

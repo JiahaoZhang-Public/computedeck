@@ -491,3 +491,29 @@ describe('running price', () => {
     expect(runningPrice(instance({ state: 'terminated', hourly_cost: 1 }))).toBeNull();
   });
 });
+
+describe('SSH process-based GPU use', () => {
+  it.each([0, 1, null])(
+    'reports %s occupied GPUs without replacing unknown with capacity',
+    (gpu_allocated) => {
+      const machine = instance({
+        state: 'running',
+        source_id: 'ssh-a',
+        gpu_count: 8,
+        gpu_allocated,
+        metrics_scope: 'host_visible',
+      });
+      const data = {
+        ...dashboard([]),
+        sources: [
+          source({ id: 'ssh-a', driver: 'ssh', kind: 'cloud', capabilities: ['instances'] }),
+        ],
+        instances: [machine],
+      };
+      const totals = summarize(data);
+      expect(totals.allocated).toBe(gpu_allocated);
+      expect(totals.unknownAllocationSources).toBe(gpu_allocated === null ? 1 : 0);
+      expect(totals.knownAllocated).toBe(gpu_allocated ?? 0);
+    },
+  );
+});

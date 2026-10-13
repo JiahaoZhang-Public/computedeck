@@ -10,10 +10,13 @@ a separately installed package starts on, since installing it is the owner's cho
 """
 
 import asyncio
+import json
 import logging
+import os
 import re
-from collections.abc import Callable, Coroutine, Iterable
-from contextlib import suppress
+import sqlite3
+from collections.abc import Callable, Coroutine, Iterable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -101,6 +104,8 @@ class Plugin:
     # Filled in on discovery from the installed distribution.
     package: str | None = None
     version: str | None = None
+    # A failed import stays visible in diagnostics and the Toolbox.
+    load_error: str | None = None
 
 
 class Runtime:
@@ -225,7 +230,51 @@ class PluginContext:
 
     @property
     def data_dir(self) -> Path:
-        return self.runtime.data_dir
+        """Private files for this plugin, separate from the service's configuration."""
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", self.id):
+            raise ValueError("Invalid plugin id")
+        directory = self.runtime.data_dir / "plugins" / self.id
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+        return directory
+
+    @contextmanager
+    def database(self) -> Iterator[sqlite3.Connection]:
+        """A transaction on this plugin's SQLite database; closes on exit.
+
+        Plugins may create their own tables here with the standard sqlite3 API.
+        """
+        path = self.data_dir / "storage.sqlite"
+        descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.fchmod(descriptor, 0o600)
+        os.close(descriptor)
+        db = sqlite3.connect(path)
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Read a JSON value from this plugin's key/value storage."""
+        with self.database() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS plugin_state (key TEXT PRIMARY KEY, value TEXT)")
+            row = db.execute("SELECT value FROM plugin_state WHERE key=?", (key,)).fetchone()
+            return json.loads(row[0]) if row else default
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Save a JSON value, committing it before this call returns."""
+        encoded = json.dumps(value, allow_nan=False)
+        with self.database() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS plugin_state (key TEXT PRIMARY KEY, value TEXT)")
+            db.execute("INSERT OR REPLACE INTO plugin_state VALUES (?, ?)", (key, encoded))
+
+    def sources(self) -> list[dict[str, Any]]:
+        """Read the configured sources without importing the core Store type."""
+        return self.store.sources()
+
+    def source(self, source_id: str) -> dict[str, Any] | None:
+        return self.store.source(source_id)
 
     def background(self, loop: Callable[[], Coroutine[Any, Any, None]]) -> None:
         """Run a long-lived coroutine from startup until the service stops."""
@@ -236,11 +285,10 @@ class PluginContext:
     ) -> None:
         """Let sources reference secrets as ``scheme:name`` through this resolver."""
         from . import credentials
-        from .errors import SourceError
 
         def resolve(name: str) -> str | None:
             if not self.enabled:
-                raise SourceError("credential_scheme_off", scheme=scheme, plugin=self.id)
+                raise credentials.DisabledSchemeError(scheme, self.id)
             return resolver(name)
 
         if pattern is None:
@@ -368,11 +416,14 @@ def discover(data_dir: Path | None = None) -> list[Plugin]:
             continue
         try:
             plugin = entry.load()
-        except Exception:
-            logger.exception("Plugin %s could not be loaded", entry.name)
+        except Exception as error:
+            detail = type(error).__name__
+            logger.error("Plugin %s could not be loaded: %s", entry.name, detail)
+            plugins.append(replace(candidate, load_error=detail))
             continue
         if not isinstance(plugin, Plugin):
             logger.error("Entry point %s is not a computedeck Plugin", entry.name)
+            plugins.append(replace(candidate, load_error="Invalid plugin entry point"))
             continue
         dist = getattr(entry, "dist", None)
         if dist is not None:
@@ -399,6 +450,8 @@ def load(
         seen.add(plugin.id)
         context = PluginContext(plugin, runtime)
         context.rejected = message("plugin_blocked") if blocked(plugin) else compatibility(plugin)
+        if context.rejected is None and plugin.load_error is not None:
+            context.rejected = message("plugin_load_failed", detail=plugin.load_error)
         if context.rejected is not None:
             logger.error("Plugin %s is not loaded: %s", plugin.id, context.rejected)
         else:

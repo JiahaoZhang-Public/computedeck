@@ -67,7 +67,7 @@ def test_plugin_routes_are_mounted_under_their_id(tmp_path: Path) -> None:
         assert client.get("/api/plugins/example/status").json() == {
             "id": "example",
             "sources": 0,
-            "data_dir": str(tmp_path),
+            "data_dir": str(tmp_path / "plugins/example"),
         }
         assert client.get("/status").status_code == 404
         assert client.get("/api/plugins/other/status").status_code == 404
@@ -214,7 +214,7 @@ class Entry:
         return self.value
 
 
-def test_discover_skips_broken_or_foreign_entry_points(
+def test_discover_retains_broken_or_foreign_entry_points(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     first, second = quiet_plugin("alpha"), quiet_plugin("beta")
@@ -231,7 +231,12 @@ def test_discover_skips_broken_or_foreign_entry_points(
 
     monkeypatch.setattr(plugin_host, "entry_points", entry_points)
     with caplog.at_level(logging.ERROR, logger="computedeck"):
-        assert plugin_host.discover() == [first, second]
+        found = plugin_host.discover()
+    assert found[:2] == [first, second]
+    assert [(plugin.id, plugin.load_error) for plugin in found[2:]] == [
+        ("broken", "ImportError"),
+        ("foreign", "Invalid plugin entry point"),
+    ]
     # Policy reads the names of both groups; only plugins are loaded.
     assert set(groups) == {"computedeck.plugins", "computedeck.drivers"}
     assert "broken" in caplog.text

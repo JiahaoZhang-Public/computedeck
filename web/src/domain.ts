@@ -140,6 +140,12 @@ export function historyPartial(point: HistoryPoint) {
     (point.allocated_gpus == null || (point.unknown_allocation_sources ?? 0) > 0)
   );
 }
+export function instanceAllocation(instance: Instance): number | null {
+  return instance.metrics_scope === 'host_visible'
+    ? (instance.gpu_allocated ?? null)
+    : instance.gpu_count;
+}
+
 export function summarize(data: Dashboard) {
   const enabled = (sourceId: string) =>
     !data.sources.some((source) => source.id === sourceId && !source.enabled);
@@ -173,7 +179,8 @@ export function summarize(data: Dashboard) {
   const unknownLifecycle = instances.some(
     (item) => !['running', 'stopped', 'terminated', 'deleted'].includes(item.state.toLowerCase()),
   );
-  const allocations = [...running, ...activeInstances];
+  const allocatedInstance = (item: Instance) => ({ ...item, gpu_count: instanceAllocation(item) });
+  const allocations = [...running, ...activeInstances.map(allocatedInstance)];
   const sourceFresh = (sourceId: string, capability: string) => {
     const source = data.sources.find((item) => item.id === sourceId);
     return !!source && sourceHasData(source, capability);
@@ -189,7 +196,7 @@ export function summarize(data: Dashboard) {
   for (const item of instances)
     if (!['running', 'stopped', 'terminated', 'deleted'].includes(item.state.toLowerCase()))
       unknownSources.add(item.source_id);
-  const knownAllocations = [...freshRunning, ...freshInstances].filter(
+  const knownAllocations = [...freshRunning, ...freshInstances.map(allocatedInstance)].filter(
     (item) => item.gpu_count != null,
   );
   const hasFreshSources = automaticSources.some((source) =>

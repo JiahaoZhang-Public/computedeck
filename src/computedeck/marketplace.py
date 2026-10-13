@@ -35,8 +35,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from .versions import core_version, numbers, satisfies, valid_range
 
 CATALOG = "computedeck-marketplace.json"
-# Catalogs published by the ComputeDeck project. Empty until the official catalog exists.
-OFFICIAL_SOURCES: tuple[str, ...] = ()
+# Exact catalog locations maintained by the ComputeDeck project.
+OFFICIAL_SOURCES: tuple[str, ...] = (
+    "https://github.com/JiahaoZhang-Public/computedeck-plugins.git",
+)
 NAME = r"^[a-z0-9][a-z0-9-]{0,63}$"
 Text = dict[str, str]
 

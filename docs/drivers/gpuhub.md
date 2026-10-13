@@ -24,8 +24,9 @@ list includes is never read or stored.
 ## Limits
 
 - The GPUhub API covers Elastic Deployment only. On-demand instances are not listed. An
-  account without Elastic Deployment access shows its balance, and the source is marked as
-  partial with the provider's reason.
+  account without Elastic Deployment access can still show its balance; the instance list is
+  marked unavailable. Refusals use a generic message because provider error text can echo
+  credentials.
 - `api.gpuhub.com` is not reachable from every network; the same API is then used through
   `www.gpuhub.com`.
 - Prices are the base price of each container (thousandths of a dollar in the API).

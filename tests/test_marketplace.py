@@ -486,3 +486,9 @@ def test_tools_are_listed_while_the_installed_list_cannot_be_read(
     # Logged in one line: the message says what is wrong, a traceback would bury it.
     assert "Plugin policy cannot be read" in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_official_catalog_address_has_an_exact_tier_match() -> None:
+    kind, url = marketplace.classify("JiahaoZhang-Public/computedeck-plugins")
+    assert marketplace.tier(marketplace.Policy(), kind, url) == "official"
+    assert marketplace.tier(marketplace.Policy(), "git", url + "-impostor") == "community"

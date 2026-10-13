@@ -15,7 +15,17 @@ export function groupSummary(data: Dashboard, group: Group) {
   const jobs = uniqueJobs(data.jobs.filter((job) => job.cluster_id === group.key));
   const scoped = summarize({ ...data, sources: group.sources, jobs, instances });
   const nodes = summarizeNodes(data.nodes.filter((node) => node.cluster_id === group.key));
-  const order = ['error', 'stale', 'partial', 'configured', 'syncing', 'ready', 'disabled'];
+  const order = [
+    'error',
+    'stale',
+    'unavailable',
+    'degraded',
+    'partial',
+    'configured',
+    'syncing',
+    'ready',
+    'disabled',
+  ];
   const enabledSources = group.sources.filter((source) => source.enabled);
   const states = (enabledSources.length ? enabledSources : group.sources).map(sourceState);
   let state = order.find((item) => states.includes(item)) ?? states[0];

@@ -166,3 +166,26 @@ describe('jobs of a cluster whose collection is not current', () => {
     expect(html).toContain('No current job list from A · alice');
   });
 });
+
+it('shows a fully unavailable cluster instead of an idle load bar', () => {
+  const data = dash({
+    sources: [source({ cluster_state: 'unavailable' })],
+    nodes: Array.from({ length: 70 }, (_, i) => ({
+      id: `a:${i}`,
+      source_id: 'a-alice',
+      cluster_id: 'a',
+      name: `node-${i}`,
+      state: 'down+not_responding',
+      gpu_count: 8,
+      gpu_allocated: 0,
+      gpu_type: 'example',
+      cpu_count: 32,
+      cpu_allocated: 0,
+      partitions: [],
+      observed_at: now,
+    })),
+  });
+  const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
+  expect(html).toContain('70/70 nodes unavailable');
+  expect(html).toContain('Unavailable');
+});

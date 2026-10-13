@@ -1,12 +1,16 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 /** Keep keyboard navigation inside an open drawer or confirmation, then return to its trigger. */
-export function useDialogFocus(returnFocusId?: string) {
+export function useDialogFocus(returnFocusId?: string, active = true) {
   const ref = useRef<HTMLElement>(null);
+  // Capture the opener before a child input's autoFocus runs during mounting.
+  const previous = useMemo(
+    () => (active && typeof document !== 'undefined' ? document.activeElement : null),
+    [active],
+  );
   useEffect(() => {
     const dialog = ref.current;
-    if (!dialog) return;
-    const previous = document.activeElement;
+    if (!active || !dialog) return;
     const controls = () =>
       [
         ...dialog.querySelectorAll<HTMLElement>(
@@ -16,10 +20,10 @@ export function useDialogFocus(returnFocusId?: string) {
         (element) =>
           element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length,
       );
-    (controls()[0] ?? dialog).focus();
+    if (!dialog.contains(document.activeElement)) (controls()[0] ?? dialog).focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;
-      const dialogs = document.querySelectorAll('[role="dialog"]');
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
       if (dialogs[dialogs.length - 1] !== dialog) return;
       const elements = controls();
       const first = elements[0] ?? dialog;
@@ -38,6 +42,6 @@ export function useDialogFocus(returnFocusId?: string) {
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
       else if (returnFocusId) document.getElementById(returnFocusId)?.focus();
     };
-  }, [returnFocusId]);
+  }, [returnFocusId, active, previous]);
   return ref;
 }

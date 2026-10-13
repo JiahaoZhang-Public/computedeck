@@ -276,6 +276,11 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         # The machine answered; there is no provider lifecycle behind it.
         "state": "running",
         "gpu_count": len(gpus) if gpus else None,
+        "gpu_allocated": (
+            sum(bool(row["processes"]) for row in gpus)
+            if gpus and all(row["processes"] is not None for row in gpus)
+            else None
+        ),
         "gpu_type": ", ".join(dict.fromkeys(row["name"] for row in gpus or [] if row["name"]))
         or None,
         "gpu_utilization": sum(observed) / len(observed) if observed else None,

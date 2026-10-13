@@ -45,13 +45,14 @@ def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any
         "error": None,
         "stale": False,
         "interval_minutes": 10,
-        "capabilities": ["jobs", "nodes", "qos_limits", "history"]
+        "capabilities": ["jobs", "nodes", "qos_limits", "qos_access", "history"]
         if cluster
         else ["instances", "ssh_discovery"],
         "warnings": [],
         "qos": [
             {
                 "name": name,
+                "access": "verified",
                 "limits": {"MaxTRESPU": f"gres/gpu={gpus}", "MaxWallPJ": wall},
                 "origin": "demo",
             }

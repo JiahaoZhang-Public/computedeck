@@ -1,3 +1,4 @@
+import { ConnectionChecks } from './ConnectionChecks';
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { CheckCircle2, Cloud, Loader2, MinusCircle, Server, Terminal, XCircle } from 'lucide-react';
@@ -463,6 +464,7 @@ export function SourceForm({
                 : t('source.check.done')}
           </p>
         </header>
+        {savedId && <ConnectionChecks key={savedId} sourceId={savedId} />}
         <ul className="checklist">
           {checklist(saved, info).map((row) => (
             <li key={row.label} className={row.state}>

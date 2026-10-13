@@ -62,9 +62,11 @@ uv run computedeck serve --open
 | `scontrol -d show nodes -o` | 可见节点及其 GPU 分配 |
 | `scontrol show partition -o` | 分区允许的 QoS 名称 |
 | `scontrol show assoc_mgr flags=qos` | QoS 上限 |
+| `scontrol show assoc_mgr users=<你> flags=assoc` | 账户关联信息 |
+| `sacctmgr --noheader --parsable2 show assoc where …` | 控制器输出缺少权限列表时读取有效 QoS 授权 |
 | `sacct --user=<你> --state=FAILED,…` | 最近 24 小时的失败 |
 
-只有 `squeue` 是必需的。集群不允许其他命令时，来源会标为“部分数据”，其余功能照常。添加来源后，应用会立即做一次采集并显示哪些项成功。同一集群的第二个登录身份，填写相同的集群名称即可。
+作业采集只要求 `squeue`。可选能力不可用时会标注“缺失”，不会将来源计为连接故障。添加来源后，应用会立即做一次采集并显示哪些项成功。同一集群的第二个登录身份，填写相同的集群名称即可。
 
 **其他集群**：Kubernetes（用你的 kubeconfig 执行 kubectl，可在本机或经 SSH；命名空间即登录身份）、PBS 和 LSF（与 Slurm 一样经 SSH）。见 [docs/drivers](docs/drivers/)。PBS、LSF、Kubernetes 和 Vast.ai 标为测试版：按官方文档的格式实现，但没有在所有版本上运行过。
 
@@ -75,6 +77,13 @@ uv run computedeck serve --open
 **其他机器**：在**云实例 → 添加实例**中填写主机、端口和用户名，或者填写你已有的 SSH 别名。ComputeDeck 把固定别名写在自己的 `computedeck.conf` 里；预览后可以在应用中把一行 `Include` 加到 `~/.ssh/config`。
 
 默认每 10 分钟采集一次，每个来源可设为 5 到 1440 分钟。
+
+### 诊断来源
+
+运行 `computedeck doctor --language zh-CN`，检查连接、命令、权限和插件兼容性；也可以在
+“来源”页点击“测试连接”。两处使用相同的修复提示。使用 `--source <来源 ID>` 只检查一个
+来源。详见[诊断说明](docs/doctor.md)、[Slurm 权限](docs/drivers/slurm.md)与
+[日志轮转](docs/deployment.md#logs-and-startup-permissions)。
 
 ## 在服务器上运行
 
@@ -120,9 +129,9 @@ computedeck plugin install lab-alerts@example-lab     # 然后重启，并在工
 
 ## 数字的含义
 
-- **在用 GPU** 是分配给你运行中作业和运行中云实例的 GPU。有来源最近没采集到时，这个数是小计，并会标出。
+- **在用 GPU** 是分配给你运行中作业和运行中云实例的 GPU。SSH GPU 机器按有计算进程的 GPU 数计数；无法读取进程时保持未知。有来源最近没采集到时，这个数是小计，并会标出。
 - 集群的**未分配** GPU 是节点容量减去分配量。维护、预留或 QoS 限制仍可能让你用不上。
-- **QoS 上限**是调度器对你的登录身份显示的值，不能证明你有权使用该 QoS，不同 QoS 的上限也不能相加。
+- **QoS 上限**是调度器对你的登录身份显示的值，仅有上限不能证明访问权限。“去哪跑”默认显示当前已验证的关联授权，权限未知或未关联的选项分别折叠。不同 QoS 的上限不能相加。
 - 云实例的**利用率**是整台主机的瞬时值，在容器中可能反映宿主机。
 - **历史**只来自成功的采集，没有数据的时段留空。
 - **单价**是按已知小时价格的估算，不是账单。不同币种不会相加。
@@ -138,4 +147,4 @@ bash scripts/build.sh    # 打包 wheel 和 sdist，网页一并打入
 
 ## 许可证
 
-尚未确定，首次发布前补充。
+采用 Apache-2.0，见 [LICENSE](LICENSE)、[NOTICE](NOTICE)，打包进网页的第三方许可见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。

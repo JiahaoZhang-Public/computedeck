@@ -42,6 +42,15 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def gpu_allocation(row: dict[str, Any]) -> int | None:
+    """SSH hosts count GPUs with compute processes; cloud instances count allocations."""
+    return (
+        row.get("gpu_allocated")
+        if row.get("metrics_scope") == "host_visible"
+        else row.get("gpu_count")
+    )
+
+
 def driver_kind(source: dict[str, Any]) -> str:
     try:
         return drivers.get(source.get("driver", "")).kind
@@ -105,7 +114,15 @@ def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
 
 
 class Store:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, readonly: bool = False) -> None:
+        self.unreadable: dict[str, set[str]] = {}
+        if readonly:
+            self.path = path
+            self.db = sqlite3.connect(
+                path.resolve().as_uri() + "?mode=ro", uri=True, check_same_thread=False
+            )
+            self._check_version()
+            return
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = path
         # SQLite derives WAL/SHM permissions from the database when opening WAL mode.
@@ -115,7 +132,6 @@ class Store:
         self.db = sqlite3.connect(path, check_same_thread=False)
         # Keys of stored rows that could not be read, by table: skipped, logged once and
         # counted in /api/health, so one bad row never stops the service or a page.
-        self.unreadable: dict[str, set[str]] = {}
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -636,7 +652,7 @@ class Store:
             if source["enabled"] and source["id"] not in fresh
         }
         unknown_sources.update(
-            row.get("source_id", "unknown") for row in running if row.get("gpu_count") is None
+            row.get("source_id", "unknown") for row in running if gpu_allocation(row) is None
         )
         unknown_sources.update(
             row.get("source_id", "unknown")
@@ -648,11 +664,7 @@ class Store:
                 and row.get("source_id") not in fresh
             )
         )
-        known_allocated = (
-            sum(row["gpu_count"] for row in running if row.get("gpu_count") is not None)
-            if fresh
-            else None
-        )
+        known_allocated = sum(gpu_allocation(row) or 0 for row in running) if fresh else None
         # Actual cloud observations remain useful even when the provider has not
         # confirmed lifecycle state. They never increase allocated GPU counts.
         sampled_cloud = [

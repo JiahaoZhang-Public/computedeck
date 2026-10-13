@@ -1,5 +1,6 @@
 """Read-only Slurm collection over SSH: own jobs, visible nodes, QoS limits, recent failures."""
 
+import asyncio
 import re
 import shlex
 from typing import Any, ClassVar, Literal
@@ -12,6 +13,7 @@ from .base import (
     DriverCheck,
     DriverInfo,
     SourceError,
+    cluster_state,
     integer,
     message,
     now,
@@ -276,6 +278,55 @@ def parse_qos(output: str, username: str = "") -> list[dict[str, Any]]:
     return result
 
 
+def association_qos(output: str, username: str) -> set[str] | None:
+    """Explicit association grants, or None when the controller does not print QOS.
+
+    Upstream Slurm's text formatter omits this field. Never infer permissions from
+    QoS definitions, partition policies, default QoS, or another user's records.
+    """
+    grants: set[str] = set()
+    found = False
+    for block in re.split(r"(?m)(?=^[ \t]*ClusterName=)", output):
+        fields = _key_values(re.split(r"\sComment=", block, maxsplit=1)[0])
+        if fields.get("UserName", "").split("(", 1)[0] != username:
+            continue
+        found = True
+        if "QOS" not in fields:
+            return None
+        for name in fields["QOS"].split(","):
+            if name in EMPTY:
+                continue
+            if name.startswith(("+", "-")):
+                return None  # An inheritance delta is not an effective permission list.
+            grants.add(name)
+    if found or "No associations currently cached" in output:
+        return grants
+    return None
+
+
+def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
+    """Effective grants from sacctmgr's documented parsable association columns."""
+    result: set[str] = set()
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        fields = line.rstrip("|").split("|")
+        # Keep an empty final QOS column: parsable2 has no extra trailing separator.
+        if len(fields) < 5:
+            fields = line.split("|")
+        if len(fields) != 5:
+            return None
+        name, _account, user, _partition, qos = (field.strip() for field in fields)
+        if user != username or name != cluster:
+            continue
+        for grant in qos.split(","):
+            if grant.startswith(("+", "-")):
+                return None
+            if grant not in EMPTY:
+                result.add(grant)
+    return result
+
+
 def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     """sacct allocations in a failure state. Only terminal accounting records count."""
     failures: dict[str, dict[str, Any]] = {}
@@ -366,6 +417,11 @@ class SlurmDriver:
                 warning="qos_unavailable",
             ),
             DriverCheck(
+                capability="qos_access",
+                command="association QOS",
+                label={"en": "QoS association permissions", "zh-CN": "QoS 关联权限"},
+            ),
+            DriverCheck(
                 capability="history",
                 command="sacct",
                 label={
@@ -454,6 +510,58 @@ class SlurmDriver:
                 batch.capabilities.append("qos_limits")
         except (RuntimeError, TimeoutError) as error:
             batch.warnings.append(_unavailable("qos_unavailable", error))
+        grants = None
+        associations = ""
+        try:
+            async with asyncio.timeout(10):
+                associations = await ssh.run(
+                    alias,
+                    shlex.join(
+                        ["scontrol", "show", "assoc_mgr", f"users={username}", "flags=assoc"]
+                    ),
+                    options,
+                )
+            grants = association_qos(associations, username)
+        except (RuntimeError, TimeoutError):
+            pass
+        if grants is None:
+            # A database can cover multiple clusters. The controller's cluster name,
+            # not the display name or SSH alias, scopes the optional database query.
+            clusters = set(re.findall(r"(?m)^[ \t]*ClusterName=([^\s]+)", associations))
+            if len(clusters) == 1:
+                cluster = clusters.pop()
+                command = shlex.join(
+                    [
+                        "sacctmgr",
+                        "--noheader",
+                        "--parsable2",
+                        "show",
+                        "assoc",
+                        "where",
+                        f"user={username}",
+                        f"cluster={cluster}",
+                        "format=Cluster,Account,User,Partition,QOS",
+                    ]
+                )
+                try:
+                    async with asyncio.timeout(10):
+                        grants = database_qos(
+                            await ssh.run(alias, command, options), username, cluster
+                        )
+                except (RuntimeError, TimeoutError):
+                    pass
+        for name in grants or []:
+            qos.setdefault(name, {"name": name, "limits": {}, "origin": "user_association"})
+        for entry in qos.values():
+            entry["access"] = (
+                "unknown"
+                if grants is None
+                else "verified"
+                if entry["name"] in grants
+                else "not_associated"
+            )
+        if grants is not None:
+            batch.capabilities.append("qos_access")
         try:
             # Both bounds are required when filtering by state.
             # https://slurm.schedmd.com/sacct.html
@@ -474,6 +582,6 @@ class SlurmDriver:
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))
-        if qos:
-            batch.qos = list(qos.values())
+        batch.qos = list(qos.values())
+        batch.cluster_state = cluster_state(batch.nodes)
         return batch

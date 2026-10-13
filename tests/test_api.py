@@ -155,6 +155,7 @@ def test_drivers_are_listed_with_their_kind(client: TestClient) -> None:
         "squeue",
         "scontrol",
         "assoc_mgr",
+        "association QOS",
         "sacct",
     ]
     assert listed["runpod"]["fields"][0]["default"] == "env:RUNPOD_API_KEY"

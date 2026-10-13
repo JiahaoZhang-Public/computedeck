@@ -90,7 +90,10 @@ what follows. Nothing it registers runs or resolves until the plugin is switched
 | `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. |
 | `ctx.credential_scheme(name, resolver)` | Add a credential reference scheme, e.g. `vault:path`. While the plugin is off, its references fail with a message saying so. |
 | `ctx.runtime.cluster_lock(id)`, `ctx.runtime.semaphore` | Share the collector's connection budget when you reach clusters. |
-| `ctx.data_dir`, `ctx.store` | The service's data folder and database. Prefix your tables with your id. |
+| `ctx.data_dir` | Private files in `plugins/<id>/` below the service data directory (mode 700). |
+| `ctx.get_state(key, default)`, `ctx.set_state(key, value)` | Persistent JSON values scoped to this plugin. |
+| `ctx.database()` | A context manager for a standard SQLite transaction in this plugin's database. |
+| `ctx.sources()`, `ctx.source(id)` | Read configured sources without importing core internals. |
 
 ### Events
 
@@ -183,7 +186,7 @@ messages without the provider's reply, validates SSH endpoints, tries fallback h
 builds the add-source form and records the instances.
 
 ```python
-from computedeck.sdk import CloudDriver, CloudInstance, ssh_command
+from computedeck.sdk import CloudDriver, CloudInstance, parse_ssh_command
 
 
 class ExampleCloud(CloudDriver):
@@ -355,3 +358,29 @@ not shipped with ComputeDeck.
 - Collected data uses `None` for unknown, and failures raise `SourceError`.
 - The web bundle is built into the wheel and uses the page's React.
 - The marketplace entry pins the source and lists the same permissions.
+
+## Persistent plugin data and SSH
+
+Import `Plugin`, `PluginContext`, `now`, `ssh_command`, and `SSHBusyError` from
+`computedeck.sdk`. `now()` returns an aware UTC ISO timestamp. `ssh_command` executes
+a strict, non-interactive SSH command; wrap it in `asyncio.timeout` to set your timeout.
+Use `wait=False` to raise `SSHBusyError` when another operation is using that destination.
+The separate `parse_ssh_command` parses a provider's connection string without executing it.
+
+```python
+ctx.set_state("last_refresh", {"at": now()})
+previous = ctx.get_state("last_refresh", {})
+with ctx.database() as db:
+    db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)")
+    db.execute("INSERT INTO notes(body) VALUES (?)", ("Example note",))
+```
+
+Each plugin owns its directory and SQLite database, created with modes 700 and 600.
+The database context commits on success, rolls back on exceptions, and closes the connection.
+Keep transactions short and do not hold one across an `await`. `plugin_state` is reserved
+for the key/value helpers; use your own names for other tables. Use `ctx.sources()` to
+read source settings, rather than importing `computedeck.store`. Installed plugins are
+trusted Python code: this storage separation is not an operating-system sandbox.
+
+Core database backups do not include the separate plugin directories. Include each plugin's
+files and SQLite database in your own backups while its database connections are closed.

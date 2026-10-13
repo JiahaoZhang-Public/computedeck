@@ -44,7 +44,9 @@ from .drivers.base import (
     ssh_alias_field,
     username_field,
 )
-from .drivers.cloud import Account, Api, CloudDriver, CloudInstance, ssh_command
+from .drivers.cloud import Account, Api, CloudDriver, CloudInstance
+from .drivers.cloud import ssh_command as parse_ssh_command
+from .drivers.ssh import SSHBusyError, ssh_command
 from .events import TYPES as EVENT_TYPES
 from .plugins import PLUGIN_API, Plugin, PluginContext, SettingField, Text
 from .tools.channels import ChannelKind, Message
@@ -68,6 +70,7 @@ __all__ = [
     "PluginContext",
     "SettingField",
     "SourceError",
+    "SSHBusyError",
     "Text",
     "credential_field",
     "integer",
@@ -75,6 +78,7 @@ __all__ = [
     "now",
     "number",
     "options",
+    "parse_ssh_command",
     "register_channel",
     "resolve_credential",
     "ssh",

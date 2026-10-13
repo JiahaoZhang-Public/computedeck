@@ -71,7 +71,16 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                     / {t('clusters.gpusAllocated', { count: row.nodes.capacity ?? '—' })}
                   </small>
                 </span>
-                <Meter value={row.nodes.ratio} text="" />
+                {['unavailable', 'degraded'].includes(row.state) ? (
+                  <p className="red-text">
+                    {t('clusters.unavailableNodes', {
+                      count: row.nodes.abnormal,
+                      total: row.nodes.nodes,
+                    })}
+                  </p>
+                ) : (
+                  <Meter value={row.nodes.ratio} text="" />
+                )}
               </div>
               <dl className="kv">
                 <div>

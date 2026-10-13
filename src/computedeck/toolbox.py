@@ -33,7 +33,7 @@ def origin(context: PluginContext) -> dict[str, Any]:
     if package in (None, "computedeck"):
         return {"kind": "builtin"}
     try:
-        records = marketplace.installed(context.data_dir)
+        records = marketplace.installed(context.runtime.data_dir)
     except marketplace.MarketplaceError as error:
         return {"kind": "unknown", "reason": str(error)}
     for name, record in records.items():

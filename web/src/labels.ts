@@ -17,13 +17,21 @@ export function statusTone(state: string): Tone {
       'COMPLETING',
       'stale',
       'partial',
+      'degraded',
     ].includes(state)
   )
     return 'amber';
   if (
-    ['error', 'FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL', 'BOOT_FAIL', 'PREEMPTED'].includes(
-      state,
-    )
+    [
+      'error',
+      'unavailable',
+      'FAILED',
+      'TIMEOUT',
+      'OUT_OF_MEMORY',
+      'NODE_FAIL',
+      'BOOT_FAIL',
+      'PREEMPTED',
+    ].includes(state)
   )
     return 'red';
   return 'gray';
@@ -51,7 +59,11 @@ export function sourceState(source: Source) {
     return source.status === 'unconfigured' && !source.last_success ? 'unconfigured' : 'disabled';
   if (source.stale) return 'stale';
   if (source.status === 'ready' && !source.last_success) return 'configured';
-  if (source.warnings?.length && ['ready', 'syncing'].includes(source.status)) return 'partial';
+  if (
+    ['ready', 'syncing'].includes(source.status) &&
+    ['unavailable', 'degraded'].includes(source.cluster_state ?? '')
+  )
+    return source.cluster_state!;
   return source.status;
 }
 export function connectedSource(source: Source) {
@@ -61,4 +73,11 @@ export function connectedSource(source: Source) {
     !!source.last_success &&
     !source.stale
   );
+}
+
+/** Missing optional capabilities are informational; failures and outages need attention. */
+export function sourceAttentionTone(source: Source): 'red' | 'amber' | 'gray' {
+  if (source.error || source.cluster_state === 'unavailable') return 'red';
+  if (source.stale || source.cluster_state === 'degraded') return 'amber';
+  return 'gray';
 }

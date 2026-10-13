@@ -106,7 +106,7 @@ async def test_an_account_without_deployment_access_is_partial(
     assert batch.instances is None
     [warning] = batch.warnings
     assert warning["code"] == "instances_unavailable" and warning["reason"] == "provider_refused"
-    assert "No access permission" in warning["detail"]
+    assert "detail" not in warning
 
 
 async def test_an_unreachable_api_host_falls_back_to_www(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal, Protocol
 
@@ -144,6 +145,32 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             raise ValueError("Collection timestamp needs a timezone")
 
 
+def cluster_state(
+    nodes: list[dict[str, Any]] | None,
+) -> Literal["available", "degraded", "unavailable", "unknown"]:
+    """Availability of the visible inventory; power-saving alone is not an outage."""
+    if not nodes:
+        return "unknown"
+    unavailable = 0
+    known = 0
+    for node in nodes:
+        state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", node["state"], flags=re.I)
+        if re.search(
+            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval",
+            state,
+            re.I,
+        ):
+            unavailable += 1
+            known += 1
+        elif re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
+            known += 1
+    if unavailable == len(nodes):
+        return "unavailable"
+    if known < len(nodes):
+        return "unknown"
+    return "degraded" if (len(nodes) - unavailable) / len(nodes) < 0.2 else "available"
+
+
 class Batch(BaseModel):
     """One collection result. ``None`` means "not collected", never "there are none"."""
 
@@ -152,6 +179,7 @@ class Batch(BaseModel):
     instances: list[dict[str, Any]] | None = None
     failures: list[dict[str, Any]] | None = None
     qos: list[dict[str, Any]] | None = None
+    cluster_state: Literal["available", "degraded", "unavailable", "unknown"] = "unknown"
     # What a cloud provider says about the account, e.g. {"balance": 12.5, "currency": "USD"}.
     account: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
@@ -168,6 +196,9 @@ class Batch(BaseModel):
             if not isinstance(entry.get("name"), str) or not entry["name"]:
                 raise ValueError("QoS entry needs a nonempty name")
             entry["origin"] = _text(entry.get("origin"), "origin")
+            entry.setdefault("access", "unknown")
+            if entry["access"] not in {"verified", "not_associated", "unknown"}:
+                raise ValueError("Invalid QoS access state")
             for key in ("limits", "usage"):
                 values = entry.get(key)
                 if values is None:

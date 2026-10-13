@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .paths import secure_data_dir
+
 LABEL = "local.computedeck.service"
 # Seconds the service manager waits after asking the service to stop: enough for the
 # service's own 10-second limit on requests in flight and background work.
@@ -37,7 +39,11 @@ def _run(args: list[str], check: bool = True) -> None:
 
 
 def install(port: int, data_dir: Path) -> str:
-    data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    secure_data_dir(data_dir)
+    startup_log = data_dir / "startup.log"
+    descriptor = os.open(startup_log, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+    os.fchmod(descriptor, 0o600)
+    os.close(descriptor)
     environment = {
         "COMPUTEDECK_DATA_DIR": str(data_dir),
         "COMPUTEDECK_PORT": str(port),
@@ -58,8 +64,8 @@ def install(port: int, data_dir: Path) -> str:
                     "KeepAlive": True,
                     "ThrottleInterval": 10,
                     "ExitTimeOut": STOP_SECONDS,
-                    "StandardOutPath": str(data_dir / "service.log"),
-                    "StandardErrorPath": str(data_dir / "service.log"),
+                    "StandardOutPath": "/dev/null",
+                    "StandardErrorPath": str(startup_log),
                 },
                 stream,
             )
@@ -79,6 +85,8 @@ def install(port: int, data_dir: Path) -> str:
             *(f'Environment="{key}={value}"' for key, value in environment.items()),
             "Restart=on-failure",
             "RestartSec=10",
+            "StandardOutput=null",
+            f"StandardError=append:{startup_log}",
             f"TimeoutStopSec={STOP_SECONDS}",
             "",
             "[Install]",
