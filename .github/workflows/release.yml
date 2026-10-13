@@ -16,7 +16,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       stable: ${{ steps.release.outputs.stable }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Require a commit on main
