@@ -372,14 +372,16 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
   >(null);
   const tool = ctx.tools.find((item) => item.id === 'notify');
 
-  const load = useCallback(async () => {
-    try {
-      setState(await api<NotifyState>(BASE));
-      setError(null);
-    } catch (reason) {
-      setError(errorText(reason, 'error.service'));
-    }
-  }, []);
+  const load = useCallback(
+    () =>
+      api<NotifyState>(BASE)
+        .then((next) => {
+          setState(next);
+          setError(null);
+        })
+        .catch((reason) => setError(errorText(reason, 'error.service'))),
+    [],
+  );
   useEffect(() => {
     if (tool?.enabled) void load();
   }, [tool?.enabled, load]);

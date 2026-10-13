@@ -76,22 +76,19 @@ export type Ctx = {
 };
 
 export function SearchBox({ ctx, placeholder }: { ctx: Ctx; placeholder: string }) {
+  const { searchRef, query, setQuery } = ctx;
   return (
     <label className="search">
       <Search size={14} />
       <input
-        ref={ctx.searchRef}
-        value={ctx.query}
-        onChange={(event) => ctx.setQuery(event.target.value)}
+        ref={searchRef}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
       />
-      {ctx.query ? (
-        <button
-          className="icon-button"
-          aria-label={t('search.clear')}
-          onClick={() => ctx.setQuery('')}
-        >
+      {query ? (
+        <button className="icon-button" aria-label={t('search.clear')} onClick={() => setQuery('')}>
           <X size={12} />
         </button>
       ) : (

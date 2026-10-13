@@ -152,9 +152,8 @@ function initialLocale(): Locale {
 export default function App() {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
-  const [route, setRoute] = useState(() => readRoute(startPages));
-  const page = route.page;
-  const [group, setGroupState] = useState<Filter>(route.group);
+  const [hash, setHash] = useState(() => window.location.hash);
+  const [group, setGroupState] = useState<Filter>(() => readRoute(startPages).group);
   const [query, setQuery] = useState('');
   const [demo, setDemo] = useState(
     () => new URLSearchParams(window.location.search).get('demo') === 'true',
@@ -181,13 +180,8 @@ export default function App() {
     () => [...corePages, ...pagesOf(plugins).map((item) => item.id)],
     [plugins],
   );
-  const knownRef = useRef(knownPages);
-  useEffect(() => {
-    // A plugin page becomes reachable once its bundle registers and its tool is on.
-    knownRef.current = knownPages;
-    const next = readRoute(knownPages);
-    setRoute((current) => (current.page === next.page ? current : next));
-  }, [knownPages]);
+  // Re-evaluate the requested route as plugin pages become available or disappear.
+  const page = readRoute(knownPages, hash).page;
   useEffect(() => {
     loadBundles(tools.filter((tool) => tool.enabled && tool.web).map((tool) => tool.web as string));
   }, [tools]);
@@ -221,8 +215,8 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => {
-      const next = readRoute(knownRef.current);
-      setRoute(next);
+      const next = readRoute(corePages);
+      setHash(window.location.hash);
       setGroupState(next.group);
       setQuery('');
       setSidebarOpen(false);
@@ -243,46 +237,50 @@ export default function App() {
     window.history.replaceState(null, '', routeHash(page, filter));
   };
 
-  const load = useCallback(async () => {
-    const requestId = ++loadId.current;
-    try {
-      const [next, status, toolbox, machines] = await Promise.all([
-        api<Dashboard>(`/dashboard?demo=${demo}`),
-        // Health also carries plugin state; a failure here must not hide the dashboard.
-        api<Health>('/health').catch(() => null),
-        api<Tool[]>('/toolbox').catch(() => null),
-        api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
-      ]);
-      if (requestId !== loadId.current) return;
-      setData(next);
-      setHealth(status);
-      if (toolbox) setTools(toolbox);
-      if (machines) setNodes(machines);
-      // Driver descriptions do not change while the service runs; fetch them once.
-      if (!driversLoaded.current) {
-        driversLoaded.current = true;
-        api<DriverInfo[]>('/drivers')
-          .then(setDrivers)
-          .catch(() => {
-            driversLoaded.current = false;
-          });
-      }
-      setError(null);
-      setNeedsToken(false);
-    } catch (reason) {
-      if (requestId !== loadId.current) return;
-      setNeedsToken(reason instanceof ApiError && reason.status === 401);
-      setError(errorText(reason, 'error.service'));
-    } finally {
-      if (requestId === loadId.current) setLoading(false);
-    }
+  const load = useCallback(() => {
+    loadId.current += 1;
+    const requestId = loadId.current;
+    return Promise.all([
+      api<Dashboard>(`/dashboard?demo=${demo}`),
+      // Health also carries plugin state; a failure here must not hide the dashboard.
+      api<Health>('/health').catch(() => null),
+      api<Tool[]>('/toolbox').catch(() => null),
+      api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
+    ])
+      .then(([next, status, toolbox, machines]) => {
+        if (requestId !== loadId.current) return;
+        setData(next);
+        setHealth(status);
+        if (toolbox) setTools(toolbox);
+        if (machines) setNodes(machines);
+        // Driver descriptions do not change while the service runs; fetch them once.
+        if (!driversLoaded.current) {
+          driversLoaded.current = true;
+          api<DriverInfo[]>('/drivers')
+            .then(setDrivers)
+            .catch(() => {
+              driversLoaded.current = false;
+            });
+        }
+        setError(null);
+        setNeedsToken(false);
+      })
+      .catch((reason) => {
+        if (requestId !== loadId.current) return;
+        setNeedsToken(reason instanceof ApiError && reason.status === 401);
+        setError(errorText(reason, 'error.service'));
+      })
+      .finally(() => {
+        if (requestId === loadId.current) setLoading(false);
+      });
   }, [demo]);
   useEffect(() => {
-    setData(null);
-    setLoading(true);
     void load();
     const interval = window.setInterval(() => void load(), 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      loadId.current += 1;
+    };
   }, [load]);
   useEffect(() => {
     if (!toast) return;
@@ -392,6 +390,9 @@ export default function App() {
     }
   }
   const toggleDemo = () => {
+    loadId.current += 1;
+    setData(null);
+    setLoading(true);
     setDemo((value) => !value);
     setGroupState('all');
     setQuery('');

@@ -17,7 +17,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 /** Icons a plugin may name in its manifest (`icon`); anything else is a puzzle piece. */
-const ICONS: Record<string, LucideIcon> = {
+export const toolIcons: Record<string, LucideIcon> = {
   bell: BellRing,
   chat: MessagesSquare,
   transfer: ArrowLeftRight,
@@ -33,7 +33,3 @@ const ICONS: Record<string, LucideIcon> = {
   wrench: Wrench,
   puzzle: Puzzle,
 };
-
-export function toolIcon(name: string | null | undefined): LucideIcon {
-  return (name && ICONS[name]) || Puzzle;
-}

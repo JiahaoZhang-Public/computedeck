@@ -247,13 +247,8 @@ type Step = 'type' | 'details' | 'check';
 /** What an "add source" button already knows: a driver, a cluster to join, or a kind. */
 export type SourcePreset = { driver?: string; clusterName?: string; kind?: Kind };
 
-function driverIcon(info: DriverInfo) {
-  if (info.name === 'ssh') return Terminal;
-  return info.kind === 'cluster' ? Server : Cloud;
-}
-
 function TypeCard({ info, onChoose }: { info: DriverInfo; onChoose: () => void }) {
-  const Icon = driverIcon(info);
+  const Icon = info.name === 'ssh' ? Terminal : info.kind === 'cluster' ? Server : Cloud;
   return (
     <button className="type-card" onClick={onChoose}>
       <Icon size={18} />
