@@ -6,7 +6,11 @@
 
 ComputeDeck 沿用已有的 SSH 别名和云平台 API，在你自己的机器上运行，无需集群管理员权限。
 
-[English](README.md) · [配置说明](docs/configuration.md) · [插件开发](docs/plugins.md)
+[English](README.md) · [演示](https://jiahaozhang-public.github.io/computedeck/#demo) · [配置说明](docs/configuration.md) · [插件开发](docs/plugins.md)
+
+[![示例总览：两个集群、云实例、GPU 占用和历史曲线](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
+
+*以下截图均为应用内的示例数据。点击总览可观看 20 秒演示。*
 
 ## 功能
 
@@ -16,6 +20,26 @@ ComputeDeck 沿用已有的 SSH 别名和云平台 API，在你自己的机器�
 - 保留采集历史，检查连接问题并给出修复建议。
 
 核心只读取资源，不提交作业或停止实例。缺失数据会标为未知，规划结果是估计，不能保证调度成功。详见[数字的计算方式](docs/metrics.md)。
+
+## 使用案例
+
+<details>
+<summary><strong>查看作业为什么排队</strong></summary>
+
+这个作业申请了 4 张 A100。详情同时显示账户、QoS 和 Slurm 返回的 `QOSMaxGRESPerUser` 排队原因，便于定位是哪项限制在影响作业。
+
+[![示例作业详情：4 张 A100 的申请与 QoS 排队原因](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)
+
+</details>
+
+<details>
+<summary><strong>为 4 张 H100、24 小时的任务选择资源</strong></summary>
+
+输入型号、数量和时长后，规划器会标出不匹配的选项：debug QoS 最多运行 2 小时，Cluster A 没有 H100。可行选项仍是基于最近采集的估计。
+
+[![示例资源比较：4 张 H100、24 小时，显示时长限制与型号不匹配](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)
+
+</details>
 
 ## 支持的来源
 

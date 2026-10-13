@@ -6,7 +6,11 @@ A dashboard for Slurm jobs, cloud GPUs and SSH machines. See what is running, wh
 
 ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your own machine and does not require cluster administrator access.
 
-[中文](README.zh-CN.md) · [Configuration](docs/configuration.md) · [Plugins](docs/plugins.md)
+[中文](README.zh-CN.md) · [Demo](https://jiahaozhang-public.github.io/computedeck/#demo) · [Configuration](docs/configuration.md) · [Plugins](docs/plugins.md)
+
+[![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
+
+*All screenshots use the built-in example data. Click the overview for the 20-second demo.*
 
 ## Features
 
@@ -16,6 +20,26 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 - Collection history and connection diagnostics with repair suggestions.
 
 The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
+
+## Examples
+
+<details>
+<summary><strong>Read why a job is queued</strong></summary>
+
+This job requests four A100 GPUs. Its details show the account, QoS and Slurm's `QOSMaxGRESPerUser` pending reason, so you can see which limit the scheduler is reporting.
+
+[![Example queued job requesting four A100 GPUs, with its account, QoS and pending reason](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)
+
+</details>
+
+<details>
+<summary><strong>Find resources for a 4 × H100, 24-hour run</strong></summary>
+
+Enter the model, count and run time. The planner flags the two-hour debug QoS and Cluster A's lack of H100 GPUs. The remaining options are still estimates from the latest collection.
+
+[![Example comparison for four H100 GPUs over 24 hours, showing time limits and GPU model mismatches](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)
+
+</details>
 
 ## Supported sources
 
