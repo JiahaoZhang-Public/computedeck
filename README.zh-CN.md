@@ -101,6 +101,8 @@ bash scripts/build.sh    # 本地构建 wheel 和 sdist，包含网页
 
 Python 服务位于 `src/computedeck`，React 界面位于 `web`，Python 测试位于 `tests`。
 
+网页类型检查使用 TypeScript 7，ESLint 同时使用官方 TypeScript 6 API 包。运行 `npm --prefix web run typecheck` 会明确调用 TypeScript 7 编译器。
+
 ## 许可证
 
 采用 [Apache-2.0](LICENSE)。第三方依赖声明见 [NOTICE](NOTICE) 和 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。
