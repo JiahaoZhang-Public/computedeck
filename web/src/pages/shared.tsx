@@ -173,7 +173,7 @@ export function JobsTable({
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
-            <th>{t('jobs.col.clusterQos')}</th>
+            <th title={t('jobs.col.clusterQosHint')}>{t('jobs.col.clusterQos')}</th>
             <th className="num">GPU</th>
             <th className="num">CPU</th>
             <th>{t('jobs.col.state')}</th>
@@ -256,7 +256,7 @@ export function FailuresTable({ jobs, groups }: { jobs: FailedJob[]; groups: Gro
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
-            <th>{t('jobs.col.clusterQos')}</th>
+            <th title={t('jobs.col.clusterQosHint')}>{t('jobs.col.clusterQos')}</th>
             <th>{t('jobs.col.result')}</th>
             <th>{t('jobs.col.exitCode')}</th>
             <th>{t('jobs.col.ended')}</th>

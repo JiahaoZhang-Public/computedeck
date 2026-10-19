@@ -11,6 +11,7 @@ import { InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
+import { FailuresTable, JobsTable } from './pages/shared';
 import type { Dashboard, Instance, Job, Source } from './types';
 
 const now = new Date().toISOString();
@@ -423,6 +424,9 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
       ['命名空间', '节点池', '优先级类'],
     ],
     ['plugin-scheduler', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['constructor', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['toString', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['__proto__', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
     ['', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
   ])(
     'uses the job source driver %s, with neutral labels for plugins and missing sources',
@@ -463,7 +467,7 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
       expect(html).toContain(`<dt>${t(key)}</dt><dd>—</dd>`);
   });
 
-  it('names groups and mixed scheduler node pools without calling them sources', () => {
+  it('names groups and the generic partition column without calling them sources', () => {
     setLocale(locale);
     const data = serverDemo();
     const context = ctx(data);
@@ -472,7 +476,29 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
     expect(overview).toContain(t('overview.col.source'));
     const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
     expect(clusters).toContain(`<th>${t('clusters.col.partition')}</th>`);
+    expect(clusters).toContain(
+      `<th>${locale === 'en' ? 'QoS / queue / quota' : 'QoS / 队列 / 配额'}</th>`,
+    );
+    const headers = [...clusters.matchAll(/<th\b[^>]*>([^<]*)<\/th>/g)].map((match) => match[1]);
+    expect(headers.join(' ')).not.toMatch(/priority class|优先级类/i);
     expect(clusters).toContain(t('filter.byGroup'));
     expect(t('nav.cloud')).toBe(t('source.type.machines'));
+  });
+
+  it('explains scheduler-specific job fields in both table header tooltips', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const groups = groupsOf(data);
+    const label = locale === 'en' ? 'Cluster / queue or QoS' : '集群 / 队列或 QoS';
+    const hint =
+      locale === 'en'
+        ? 'Slurm QoS, PBS or LSF queue, Kubernetes priority class'
+        : 'Slurm 的 QoS、PBS 或 LSF 的队列、Kubernetes 的优先级类';
+    for (const table of [
+      <JobsTable jobs={[job('terms')]} groups={groups} onOpen={() => {}} empty={null} />,
+      <FailuresTable jobs={data.recent_failures ?? []} groups={groups} />,
+    ]) {
+      expect(renderToStaticMarkup(table)).toContain(`<th title="${hint}">${label}</th>`);
+    }
   });
 });

@@ -16,8 +16,8 @@ The interface uses the [English glossary](../README.md#terms-in-the-interface) a
 
 | UI term / 界面术语 | Configuration meaning / 配置含义 |
 |---|---|
-| Source / 来源 | One `[[cluster.identity]]` login or `[[cloud]]` API account or SSH host / 一个集群登录身份、云 API 账号或 SSH 主机。 |
-| Cluster or platform / 集群或平台 | A resource group / 资源分组，由 `[[cluster]]` 或云平台名称表示。 |
+| Source / 来源 | One login (`[[cluster.identity]]` or `[[cluster]]` with inline `username` / `ssh_alias`), or one `[[cloud]]` API account or SSH host / 一个登录身份（`[[cluster.identity]]` 或直接填写 `username` / `ssh_alias` 的 `[[cluster]]`），或一个 `[[cloud]]` 云 API 账号或 SSH 主机。 |
+| Cluster or platform / 集群或平台 | A resource group: a `[[cluster]]` or a cloud platform name / 资源分组，由 `[[cluster]]` 或云平台名称表示。 |
 | Instance / machine / 实例 / 机器 | A collected machine or hand-added `[[instance]]` / 采集到的机器或手动添加的机器。 |
 | Collection machine / 采集机器 | `[[node]]`, selected by a source's `node` field / 通过来源的 `node` 字段选择的采集电脑。 |
 | Node / 节点 | A scheduler's compute node, not `[[node]]` / 调度器的计算节点，不是配置中的采集机器。 |

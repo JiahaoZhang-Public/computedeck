@@ -228,9 +228,10 @@ const zhCN: Record<keyof typeof en, string> = {
   'jobs.failed24h': '24 小时内失败',
   'jobs.byCluster': '按集群筛选',
   'jobs.allClusters': '全部集群',
-  'jobs.search': '作业名、ID、用户、QoS、节点',
+  'jobs.search': '作业名、ID、用户、队列或 QoS、节点',
   'jobs.col.job': '作业',
-  'jobs.col.clusterQos': '集群 / QoS',
+  'jobs.col.clusterQos': '集群 / 队列或 QoS',
+  'jobs.col.clusterQosHint': 'Slurm 的 QoS、PBS 或 LSF 的队列、Kubernetes 的优先级类',
   'jobs.col.state': '状态',
   'jobs.col.nodeReason': '节点 / 排队原因',
   'jobs.col.elapsed': '已运行',
@@ -283,12 +284,12 @@ const zhCN: Record<keyof typeof en, string> = {
   'clusters.nodeData': '节点数据',
   'clusters.note': '集群分配包含其他账户。QoS 限制和你的访问权限仍会限制可运行的位置。',
   'clusters.qosNote':
-    'QoS 上限是调度器对这个登录身份显示的值，是各 QoS 的上限，不是空闲容量，也未验证是否有权使用。',
+    '限制（QoS、队列或资源配额）是调度器对这个登录身份显示的上限，不是空闲容量，也未验证是否有权使用。',
   'clusters.qosLimit': '≤ {count} GPU',
   'clusters.col.account': '账户',
   'clusters.col.sshHost': 'SSH Host',
   'clusters.col.gpus': '在用 / 排队 GPU',
-  'clusters.col.qos': 'QoS',
+  'clusters.col.qos': 'QoS / 队列 / 配额',
   'clusters.col.interval': '周期',
   'clusters.col.lastSuccess': '上次成功',
   'clusters.col.state': '状态',
@@ -397,7 +398,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'usage.hostHint': '实例主机的瞬时值',
   'usage.demo': '示例数据。',
   'usage.historyNote': '来自{where}保存的采样；没有采到的时段留空，不按 0 计。',
-  'usage.prices': '云实例单价',
+  'usage.prices': '实例单价',
   'usage.col.platform': '平台',
   'usage.pricesNote': '按已知单价估算，不是账单，不含存储等费用。不同币种分开显示。',
 
@@ -409,9 +410,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'settings.languageHint': '保存在这台设备上。',
   'settings.ssh': 'SSH 配置',
   'settings.ssh.local':
-    '云实例的 SSH 别名保存在单独的 computedeck.conf。预览后可以确认把 Include 加到 ~/.ssh/config。',
-  'settings.ssh.remote':
-    '下载云实例端点配置到当前电脑。远程模式不会修改 {server} 的 ~/.ssh/config。',
+    '实例的 SSH 别名保存在单独的 computedeck.conf。预览后可以确认把 Include 加到 ~/.ssh/config。',
+  'settings.ssh.remote': '下载实例端点配置到当前电脑。远程模式不会修改 {server} 的 ~/.ssh/config。',
   'settings.ssh.preview': '预览',
   'settings.ssh.previewDownload': '预览并下载',
   'settings.backup': '备份',
@@ -437,7 +437,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'ssh.intro': '只管理下面这些 Host。安装会先备份 ~/.ssh/config，再加入一行 Include。',
   'ssh.intro.remote':
     '只包含端点，不含 {server} 的密钥路径和 Include。连接时使用当前电脑的默认密钥。',
-  'ssh.empty': '# 还没有可用的云实例端点',
+  'ssh.empty': '# 还没有可用的实例端点',
   'ssh.install': '安装到 ~/.ssh/config',
   'ssh.downloadPath': '下载到当前电脑：computedeck.conf',
 

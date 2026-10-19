@@ -2,11 +2,17 @@ import { hasKey, t } from './i18n';
 import type { MessageKey } from './i18n';
 import type { ComputeNode, Source } from './types';
 
+const NEUTRAL = {
+  account: 'job.account',
+  partition: 'job.partition',
+  qos: 'job.qos',
+} as const;
+
 const JOB_TERMS: Record<
   string,
   { account: MessageKey; partition: MessageKey; qos: MessageKey | null }
 > = {
-  slurm: { account: 'job.account', partition: 'job.partition', qos: 'job.qos' },
+  slurm: NEUTRAL,
   pbs: { account: 'job.account', partition: 'job.queue', qos: null },
   lsf: { account: 'job.project', partition: 'job.queue', qos: null },
   kubernetes: {
@@ -17,7 +23,7 @@ const JOB_TERMS: Record<
 };
 
 export function jobTerms(driver: string) {
-  return JOB_TERMS[driver] ?? JOB_TERMS.slurm;
+  return Object.hasOwn(JOB_TERMS, driver) ? JOB_TERMS[driver] : NEUTRAL;
 }
 
 export function statusLabel(state: string) {
