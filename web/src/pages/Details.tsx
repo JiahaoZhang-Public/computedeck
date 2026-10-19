@@ -4,6 +4,7 @@ import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import { instanceAllocation, jobGpuResources, money, relativeTime, runningPrice } from '../domain';
 import { directSSHCommand } from '../connections';
+import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
@@ -82,6 +83,9 @@ function Metrics({ values }: { values: { label: string; value: number | null | u
 
 export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
   const gpu = jobGpuResources(job);
+  const terms = jobTerms(
+    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ?? '',
+  );
   const pending = job.state.toUpperCase() === 'PENDING';
   return (
     <div className="drawer-body">
@@ -105,15 +109,19 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
           <dd>{job.user}</dd>
         </div>
         <div>
-          <dt>Slurm Account</dt>
+          <dt>{t(terms.account)}</dt>
           <dd>{job.account || '—'}</dd>
         </div>
         <div>
-          <dt>Partition / QoS</dt>
-          <dd>
-            {job.partition || '—'} / {job.qos || '—'}
-          </dd>
+          <dt>{t(terms.partition)}</dt>
+          <dd>{job.partition || '—'}</dd>
         </div>
+        {terms.qos && (
+          <div>
+            <dt>{t(terms.qos)}</dt>
+            <dd>{job.qos || '—'}</dd>
+          </div>
+        )}
         <div>
           <dt>{pending ? t('job.requestedGpus') : t('job.allocatedGpus')}</dt>
           <dd>

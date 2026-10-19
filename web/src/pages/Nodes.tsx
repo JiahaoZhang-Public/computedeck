@@ -43,7 +43,7 @@ function NodeEditor({ node, onDone }: { node?: CollectionNode; onDone: (saved: b
           <input
             name="name"
             defaultValue={node?.name ?? ''}
-            placeholder="Lab gateway"
+            placeholder={t('nodes.namePlaceholder')}
             required
             maxLength={80}
             autoFocus

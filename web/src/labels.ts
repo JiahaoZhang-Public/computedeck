@@ -1,5 +1,24 @@
 import { hasKey, t } from './i18n';
+import type { MessageKey } from './i18n';
 import type { ComputeNode, Source } from './types';
+
+const JOB_TERMS: Record<
+  string,
+  { account: MessageKey; partition: MessageKey; qos: MessageKey | null }
+> = {
+  slurm: { account: 'job.account', partition: 'job.partition', qos: 'job.qos' },
+  pbs: { account: 'job.account', partition: 'job.queue', qos: null },
+  lsf: { account: 'job.project', partition: 'job.queue', qos: null },
+  kubernetes: {
+    account: 'job.namespace',
+    partition: 'job.nodePool',
+    qos: 'job.priorityClass',
+  },
+};
+
+export function jobTerms(driver: string) {
+  return JOB_TERMS[driver] ?? JOB_TERMS.slurm;
+}
 
 export function statusLabel(state: string) {
   const key = `status.${state}`;

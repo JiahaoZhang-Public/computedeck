@@ -169,7 +169,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                   <th>{t('clusters.col.cluster')}</th>
                   <th>{t('clusters.col.gpuAllocated')}</th>
                   <th className="num">{t('clusters.col.cpuAllocated')}</th>
-                  <th>Partition</th>
+                  <th>{t('clusters.col.partition')}</th>
                   <th>{t('clusters.col.state')}</th>
                   <th className="num">{t('clusters.col.sampled')}</th>
                 </tr>

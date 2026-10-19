@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
-import { InstanceDetail } from './pages/Details';
+import { InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
@@ -409,5 +409,70 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     const usage = renderToStaticMarkup(<UsagePage ctx={context} />);
     expect(usage).toContain('>87<');
     expect(usage).toContain(t('usage.gpuHint', { count: 42 }));
+  });
+});
+
+describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) => {
+  it.each([
+    ['slurm', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['pbs', ['Account', 'Queue'], ['账户', '队列']],
+    ['lsf', ['Project', 'Queue'], ['项目', '队列']],
+    [
+      'kubernetes',
+      ['Namespace', 'Node pool', 'Priority class'],
+      ['命名空间', '节点池', '优先级类'],
+    ],
+    ['plugin-scheduler', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+  ])(
+    'uses the job source driver %s, with neutral labels for plugins and missing sources',
+    (driver, en, zh) => {
+      setLocale(locale);
+      const queued = driver === 'pbs' || driver === 'lsf';
+      const item = job('terms', {
+        account: 'research',
+        partition: 'gpu',
+        qos: queued ? 'gpu' : 'normal',
+      });
+      // A different login comes first: lookup must use source_id, not the first cluster login.
+      const data = dash({
+        sources: [source({ id: 'other-login' }), ...(driver ? [source({ driver })] : [])],
+      });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={ctx(data)} />);
+      const fields = [...html.matchAll(/<dt>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map((match) => [
+        match[1],
+        match[2],
+      ]);
+      const names = locale === 'en' ? en : zh;
+      expect(fields).toContainEqual([names[0], 'research']);
+      expect(fields).toContainEqual([names[1], 'gpu']);
+      if (queued) {
+        expect(fields.filter(([, value]) => value === 'gpu')).toHaveLength(1);
+        expect(html).not.toContain('<dt>QoS</dt>');
+      } else expect(fields).toContainEqual([names[2], 'normal']);
+      expect(html).not.toContain('Slurm Account');
+    },
+  );
+
+  it('keeps missing scheduler field values unknown', () => {
+    setLocale(locale);
+    const html = renderToStaticMarkup(
+      <JobDetail job={job('empty', { account: '', partition: '', qos: '' })} ctx={ctx(dash({}))} />,
+    );
+    for (const key of ['job.account', 'job.partition', 'job.qos'] as const)
+      expect(html).toContain(`<dt>${t(key)}</dt><dd>—</dd>`);
+  });
+
+  it('names groups and mixed scheduler node pools without calling them sources', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const context = ctx(data);
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    expect(overview).toContain(locale === 'en' ? 'Clusters &amp; clouds' : '集群与云平台');
+    expect(overview).toContain(t('overview.col.source'));
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(clusters).toContain(`<th>${t('clusters.col.partition')}</th>`);
+    expect(clusters).toContain(t('filter.byGroup'));
+    expect(t('nav.cloud')).toBe(t('source.type.machines'));
   });
 });

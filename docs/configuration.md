@@ -9,6 +9,20 @@ computedeck export > config.toml   # current sources, instances and settings
 
 Import keeps the collected data and state of sources that already exist. Run it while the service is stopped, or refresh in the app afterwards. A complete example is in [examples/config.toml](../examples/config.toml).
 
+## Terms / 术语
+
+The interface uses the [English glossary](../README.md#terms-in-the-interface) and
+[中文术语表](../README.zh-CN.md#界面术语). Configuration keys keep their existing names:
+
+| UI term / 界面术语 | Configuration meaning / 配置含义 |
+|---|---|
+| Source / 来源 | One `[[cluster.identity]]` login or `[[cloud]]` API account or SSH host / 一个集群登录身份、云 API 账号或 SSH 主机。 |
+| Cluster or platform / 集群或平台 | A resource group / 资源分组，由 `[[cluster]]` 或云平台名称表示。 |
+| Instance / machine / 实例 / 机器 | A collected machine or hand-added `[[instance]]` / 采集到的机器或手动添加的机器。 |
+| Collection machine / 采集机器 | `[[node]]`, selected by a source's `node` field / 通过来源的 `node` 字段选择的采集电脑。 |
+| Node / 节点 | A scheduler's compute node, not `[[node]]` / 调度器的计算节点，不是配置中的采集机器。 |
+| Needs attention / 待处理 | Derived faults and warnings, not a configuration table / 根据当前状态生成的故障和警告列表，不是配置表。 |
+
 ## Top level
 
 | Key | Meaning |

@@ -274,7 +274,7 @@ function RuleEditor({
           <input
             name="subject"
             defaultValue={start.subject}
-            placeholder="{job} failed on {cluster}"
+            placeholder={t('notify.rule.templatePlaceholder')}
           />
         </label>
         <label className="span-two">

@@ -21,6 +21,21 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
 
+## Terms in the interface
+
+| Term | Meaning |
+|---|---|
+| Source | One connection used to collect data: a cluster login, cloud API account or SSH host. Several sources can describe the same cluster or platform. |
+| Cluster or platform | A group of resources shown under **Clusters & clouds** and in the group filter. |
+| Instance / machine | One rented or owned machine. **Cloud and machines** includes cloud instances, SSH sources and hand-added machines. |
+| Collection machine | Another computer that collects sources for this service, shown as **via {name}**. It is not a compute node. |
+| Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
+| Needs attention | The single list of current faults and warnings; its badge, tile and panel use the same count. |
+
+Job details use the scheduler's terms: Account / Partition / QoS for Slurm,
+Account / Queue for PBS, Project / Queue for LSF, and Namespace / Node pool /
+Priority class for Kubernetes. Other drivers use neutral Account / Partition / QoS labels.
+
 ## Examples
 
 <details>
