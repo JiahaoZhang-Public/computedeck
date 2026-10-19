@@ -385,6 +385,52 @@ describe('tool lifecycle', () => {
     expect(container.textContent).toContain('Second reply');
   });
 
+  it('reports a failing first Chat load after mount or channel change', async () => {
+    request.mockImplementation(async (path) => {
+      if (path === '/plugins/chat')
+        return {
+          channels: [
+            { id: 'general', label: 'General', kind: 'general' },
+            { id: 'research', label: 'Research', kind: 'group' },
+          ],
+          max_file_mb: 25,
+        };
+      throw new Error(
+        path.includes('channel=research') ? 'Research unavailable' : 'General unavailable',
+      );
+    });
+    await render(<ChatPage ctx={context('chat')} />);
+    expect(container.querySelector('.red-text')?.textContent).toContain('General unavailable');
+    await click('.chat-channels button:nth-child(2)');
+    expect(container.querySelector('.red-text')?.textContent).toContain('Research unavailable');
+    expect(container.textContent).not.toContain('General unavailable');
+  });
+
+  it('keeps timed, visibility and focus Chat failures silent after the first load', async () => {
+    let failing = false;
+    request.mockImplementation(async (path) => {
+      if (path === '/plugins/chat') return { channels: [], max_file_mb: 25 };
+      if (failing) throw new Error('Temporary tunnel failure');
+      return [];
+    });
+    await render(<ChatPage ctx={context('chat')} />);
+    failing = true;
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(4000));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.red-text')).toBeNull();
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.red-text')).toBeNull();
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('.red-text')).toBeNull();
+    failing = false;
+    await act(async () => vi.advanceTimersByTimeAsync(4000));
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(container.querySelector('.red-text')).toBeNull();
+  });
+
   it('ignores old chat replies after changing channels and resets the cursor on re-enable', async () => {
     const general = deferred<unknown[]>();
     request.mockImplementation(async (path) => {
@@ -891,4 +937,204 @@ it('opens diagnosis from an unmeasured login in the GPUs-in-use hint', async () 
   );
   expect(dialog.querySelector('form')).toBeNull();
   expect(request.mock.calls.some(([path]) => path.endsWith('/check'))).toBe(false);
+});
+
+describe('visible dashboard polling', () => {
+  function mockDashboard(data: Dashboard) {
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard'))
+        return path.includes(`since=${data.token}`) ? { unchanged: true, token: data.token } : data;
+      if (path === '/settings') return { language: 'en' };
+      if (path === '/health') return null;
+      if (path === '/refresh') return { status: 'started' };
+      return [];
+    });
+  }
+
+  it('retains an unchanged dashboard and polls auxiliary state, but sends nothing while hidden', async () => {
+    const data = { ...dashboard('Cluster A'), token: 'live-token' };
+    mockDashboard(data);
+    window.history.replaceState(null, '', '/#/jobs');
+    await render(<App />);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(10000));
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+    for (const path of ['/health', '/toolbox', '/nodes?demo=false'])
+      expect(request).toHaveBeenCalledWith(path);
+    expect(container.textContent).toContain('Cluster A');
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    request.mockClear();
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      await vi.advanceTimersByTimeAsync(60000);
+    });
+    expect(request).not.toHaveBeenCalled();
+    hidden.mockReturnValue(false);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false');
+    request.mockClear();
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+    await render(null);
+    request.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await vi.advanceTimersByTimeAsync(60000);
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(['refresh', 'probe', 'add'] as const)(
+    'follows the user %s every second for sixty seconds, with auxiliaries only every ten',
+    async (action) => {
+      const data = { ...serverDemo(), mode: 'live' as const, token: 'live-token' };
+      mockDashboard(data);
+      if (action !== 'refresh') window.history.replaceState(null, '', '/#/cloud');
+      await render(<App />);
+      if (action === 'refresh') await click(`button[aria-label="${t('topbar.refresh')}"]`);
+      if (action === 'probe') {
+        await click('tr.clickable');
+        await click('.drawer .button.primary');
+        expect(request.mock.calls.some(([path]) => path.endsWith('/probe'))).toBe(true);
+      }
+      if (action === 'add') {
+        await click(`button[aria-label="${t('cloud.add')}"]`);
+        await act(async () => {
+          container
+            .querySelector('form')!
+            .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+        expect(request.mock.calls.some(([path]) => path === '/instances')).toBe(true);
+      }
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(999));
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(request.mock.calls.map(([path]) => path)).toEqual([
+        '/dashboard?demo=false&since=live-token',
+      ]);
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(9000));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(9);
+      for (const path of ['/health', '/toolbox', '/nodes?demo=false'])
+        expect(request.mock.calls.filter(([each]) => each === path)).toHaveLength(1);
+      await act(async () => vi.advanceTimersByTimeAsync(50000));
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(9999));
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+    },
+  );
+
+  it('lets a slow follow-up finish without piling up requests or discarding its data', async () => {
+    const data = { ...dashboard('Cluster A'), token: 'live-token' };
+    const slow = deferred<Dashboard>();
+    let pending = false;
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return pending ? slow.promise : data;
+      if (path === '/settings') return { language: 'en' };
+      if (path === '/health') return null;
+      if (path === '/refresh') return { status: 'started' };
+      return [];
+    });
+    await render(<App />);
+    await click(`button[aria-label="${t('topbar.refresh')}"]`);
+    pending = true;
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+    await act(async () => slow.resolve({ ...dashboard('Updated cluster'), token: 'next-token' }));
+    expect(container.textContent).toContain('Updated cluster');
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=next-token');
+  });
+
+  it.each([1000, 10000])(
+    'supersedes a hung poll after ten seconds at the %i ms cadence and ignores its late reply',
+    async (cadence) => {
+      const original = { ...dashboard('Cluster A'), token: 'live-token' };
+      const newer = { ...dashboard('Updated cluster'), token: 'next-token' };
+      const hung = deferred<Dashboard>();
+      let reply: Dashboard | Promise<Dashboard> = original;
+      request.mockImplementation(async (path) => {
+        if (path.startsWith('/dashboard')) return reply;
+        if (path === '/settings') return { language: 'en' };
+        if (path === '/health') return null;
+        if (path === '/refresh') return { status: 'started' };
+        return [];
+      });
+      await render(<App />);
+      if (cadence === 1000) await click(`button[aria-label="${t('topbar.refresh')}"]`);
+      reply = hung.promise;
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(cadence));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+      await act(async () => vi.advanceTimersByTimeAsync(9999));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+      reply = newer;
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(2);
+      expect(container.textContent).toContain('Updated cluster');
+      await act(async () => hung.resolve(original));
+      expect(container.textContent).toContain('Updated cluster');
+      expect(container.textContent).not.toContain('Cluster A');
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(cadence));
+      expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=next-token');
+    },
+  );
+
+  it('drops the previous mode token and refreshes Activity when the token changes', async () => {
+    let data = { ...dashboard('Cluster A'), token: 'live-token' };
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard'))
+        return path.includes(`since=${data.token}`) ? { unchanged: true, token: data.token } : data;
+      if (path === '/settings') return { language: 'en' };
+      if (path === '/health') return null;
+      return [];
+    });
+    window.history.replaceState(null, '', '/#/jobs');
+    await render(<App />);
+    request.mockClear();
+    data = { ...data, token: 'next-token' };
+    await act(async () => vi.advanceTimersByTimeAsync(10000));
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false');
+    request.mockClear();
+    await click('[role="switch"]');
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=true');
+    expect(request.mock.calls.some(([path]) => path.includes('demo=true&since='))).toBe(false);
+  });
+
+  it('keeps relative ages moving when the dashboard and auxiliary state do not change', async () => {
+    const data = { ...dashboard('Cluster A'), token: 'live-token', as_of: now.toISOString() };
+    mockDashboard(data);
+    await render(<App />);
+    const before = container.querySelector('.health-pill')!.textContent;
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(container.querySelector('.health-pill')!.textContent).not.toBe(before);
+    expect(container.querySelector('.health-pill')!.textContent).toContain(
+      t('time.minutesAgo', { count: 1 }),
+    );
+  });
+
+  it('pauses Chat polling and resumes immediately on visibility and focus', async () => {
+    request.mockImplementation(async (path) =>
+      path === '/plugins/chat' ? { channels: [], max_file_mb: 25 } : [],
+    );
+    await render(<ChatPage ctx={context('chat')} />);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(20000));
+    expect(request).not.toHaveBeenCalled();
+    hidden.mockReturnValue(false);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(request).toHaveBeenCalledWith('/plugins/chat/messages?channel=general&after=0');
+    request.mockClear();
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).toHaveBeenCalledWith('/plugins/chat/messages?channel=general&after=0');
+  });
 });

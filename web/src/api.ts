@@ -32,11 +32,31 @@ function checkExampleMode(path: string, method: string) {
     throw new Error(t('toast.demoReadOnly'));
 }
 
+async function waitUntilVisible(): Promise<void> {
+  if (!document.hidden) return;
+  await new Promise<void>((resolve) => {
+    const visible = () => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', visible);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', visible);
+  });
+}
+
 /** All host API traffic, including plugin requests and file uploads, goes through here. */
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   checkExampleMode(path, method);
-  const auth = await authHeaders();
+  let auth: Record<string, string>;
+  do {
+    if (document.hidden) {
+      await waitUntilVisible();
+      checkExampleMode(path, method);
+    }
+    auth = await authHeaders();
+    // If the tab hid during authentication, verify again when it returns.
+  } while (document.hidden);
   // The user may have switched modes while the session was being verified.
   checkExampleMode(path, method);
   const response = await fetch(`/api${path}`, {

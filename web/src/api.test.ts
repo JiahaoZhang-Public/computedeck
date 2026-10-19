@@ -101,3 +101,21 @@ describe.each(['en', 'zh-CN'] as const)('example request isolation in %s', (loca
     expect(calls).toEqual([]);
   });
 });
+
+it('defers initial and plugin requests while hidden, then rechecks example mode', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const calls = stubFetch(new Response('{}'));
+  const read = api('/dashboard');
+  const write = api('/plugins/example/action', {});
+  const blocked = expect(write).rejects.toThrow(t('toast.demoReadOnly'));
+  await Promise.resolve();
+  expect(calls).toEqual([]);
+  window.history.replaceState(null, '', '/?demo=true');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await read;
+  await blocked;
+  expect(calls).toHaveLength(1);
+  expect(calls[0].method).toBe('GET');
+  hidden.mockRestore();
+});

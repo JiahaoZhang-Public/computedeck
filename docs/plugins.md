@@ -494,3 +494,27 @@ trusted Python code: this storage separation is not an operating-system sandbox.
 
 Core database backups do not include the separate plugin directories. Include each plugin's
 files and SQLite database in your own backups while its database connections are closed.
+
+## Dashboard polling
+
+`GET /api/dashboard` adds an optional `token`, a short SHA-256 of the serialized
+response before the token is added. Send it back as `?since=<token>` (alongside
+`demo=true` for example data). When the content matches, the service returns HTTP
+200 with `{"unchanged": true, "token": "..."}`; otherwise it returns the complete
+dashboard and its new token. Callers without `since` always receive the complete
+response, including `history`. Responses still use `Cache-Control: no-store`;
+there are no ETags or 304 responses. The token covers time-derived freshness,
+summaries, attention, the sliding history window and pending collections, so it
+can change without a database write. Live and example data have separate tokens;
+example timestamps advance once per minute.
+
+The web pauses polling while hidden and reloads on visibility or focus. Requests
+made through its request function while the page is hidden wait until it is
+visible again; this includes plugin requests and writes. Visible requests do
+not wait for visibility.
+Visible dashboard polls run every ten seconds, or every second for up to sixty
+seconds after the viewer's Refresh, Probe or add action. Health, toolbox and
+collection-machine status keep their ten-second cadence; `/api/health` checks
+only the managed SSH include prefix, without building a dashboard. Activity
+polls every fifteen seconds and when the dashboard token changes. Relative ages
+continue to advance even when the dashboard is unchanged.

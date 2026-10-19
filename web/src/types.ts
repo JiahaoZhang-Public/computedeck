@@ -239,6 +239,7 @@ export interface Attention {
   action: 'diagnose' | 'instance' | 'health' | 'toolbox';
 }
 export interface Dashboard {
+  token?: string;
   attention?: Attention[];
   summary: FleetSummary;
   mode: string;

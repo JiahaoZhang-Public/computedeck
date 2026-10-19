@@ -1,6 +1,7 @@
 import { computeHealth } from './health';
 import { HealthPanel } from './HealthPanel';
 import { SourceDiagnosis } from './SourceDiagnosis';
+import { useVisibleInterval } from './useVisibleInterval';
 import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -175,6 +176,10 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const loadId = useRef(0);
   const driversLoaded = useRef(false);
+  const dashboardToken = useRef<string | undefined>(undefined);
+  const lastAuxLoad = useRef(-Infinity);
+  const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
+  const [followUntil, setFollowUntil] = useState(0);
   const notify = useCallback(
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
     [],
@@ -223,51 +228,82 @@ export default function App() {
     window.history.replaceState(null, '', routeHash(page, filter));
   };
 
-  const load = useCallback(() => {
-    loadId.current += 1;
-    const requestId = loadId.current;
-    return Promise.all([
-      api<Dashboard>(`/dashboard?demo=${demo}`),
-      // Health also carries plugin state; a failure here must not hide the dashboard.
-      api<Health>('/health').catch(() => null),
-      api<Tool[]>('/toolbox').catch(() => null),
-      api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
-    ])
-      .then(([next, status, toolbox, machines]) => {
-        if (requestId !== loadId.current) return;
-        setData(next);
-        setHealth(status);
-        if (toolbox) setTools(toolbox);
-        if (machines) setNodes(machines);
-        // Driver descriptions do not change while the service runs; fetch them once.
-        if (!driversLoaded.current) {
-          driversLoaded.current = true;
-          api<DriverInfo[]>('/drivers')
-            .then(setDrivers)
-            .catch(() => {
-              driversLoaded.current = false;
-            });
-        }
-        setError(null);
-        setNeedsToken(false);
-      })
-      .catch((reason) => {
-        if (requestId !== loadId.current) return;
-        setNeedsToken(reason instanceof ApiError && reason.status === 401);
-        setError(errorText(reason, 'error.service'));
-      })
-      .finally(() => {
-        if (requestId === loadId.current) setLoading(false);
-      });
-  }, [demo]);
-  useEffect(() => {
-    void load();
-    const interval = window.setInterval(() => void load(), 10000);
-    return () => {
-      clearInterval(interval);
+  const load = useCallback(
+    (dashboardOnly = false) => {
+      if (document.hidden) return Promise.resolve();
       loadId.current += 1;
-    };
-  }, [load]);
+      const requestId = loadId.current;
+      const requestedAt = Date.now();
+      return Promise.all([
+        api<Dashboard | { unchanged: true; token: string }>(
+          `/dashboard?demo=${demo}${dashboardToken.current ? `&since=${dashboardToken.current}` : ''}`,
+        ),
+        // Health also carries plugin state; a failure here must not hide the dashboard.
+        dashboardOnly ? null : api<Health>('/health').catch(() => null),
+        dashboardOnly ? null : api<Tool[]>('/toolbox').catch(() => null),
+        dashboardOnly ? null : api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
+      ])
+        .then(([next, status, toolbox, machines]) => {
+          if (requestId !== loadId.current) return;
+          if (!('unchanged' in next)) {
+            dashboardToken.current = next.token;
+            setData(next);
+          }
+          if (!dashboardOnly) {
+            lastAuxLoad.current = requestedAt;
+            setHealth(status);
+          }
+          if (toolbox) setTools(toolbox);
+          if (machines) setNodes(machines);
+          // Driver descriptions do not change while the service runs; fetch them once.
+          if (!document.hidden && !driversLoaded.current) {
+            driversLoaded.current = true;
+            api<DriverInfo[]>('/drivers')
+              .then(setDrivers)
+              .catch(() => {
+                driversLoaded.current = false;
+              });
+          }
+          setError(null);
+          setNeedsToken(false);
+        })
+        .catch((reason) => {
+          if (requestId !== loadId.current) return;
+          setNeedsToken(reason instanceof ApiError && reason.status === 401);
+          setError(errorText(reason, 'error.service'));
+        })
+        .finally(() => {
+          if (requestId === loadId.current) setLoading(false);
+        });
+    },
+    [demo],
+  );
+  useEffect(
+    () => () => {
+      loadId.current += 1;
+      activePoll.current = null;
+    },
+    [load],
+  );
+  const poll = useCallback(() => {
+    if (followUntil && Date.now() >= followUntil) {
+      setFollowUntil(0);
+      return;
+    }
+    // Give slow replies time to finish, but let polling recover from a stalled tunnel.
+    const startedAt = Date.now();
+    if (activePoll.current && startedAt - activePoll.current.startedAt < 10000) return;
+    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < 10000);
+    activePoll.current = { startedAt, promise: pending };
+    return pending.finally(() => {
+      if (activePoll.current?.promise === pending) activePoll.current = null;
+    });
+  }, [load, followUntil]);
+  useVisibleInterval(poll, followUntil ? 1000 : 10000);
+  const followCollection = useCallback(() => setFollowUntil(Date.now() + 60000), []);
+  const [, setClock] = useState(Date.now);
+  const tickClock = useCallback(() => setClock(Date.now()), []);
+  useVisibleInterval(tickClock, 30000);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), toast.tone === 'error' ? 12000 : 4500);
@@ -299,6 +335,7 @@ export default function App() {
           '/refresh',
           sourceId ? { source_id: sourceId } : {},
         );
+        followCollection();
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
       await load();
@@ -311,6 +348,10 @@ export default function App() {
   async function mutate<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
     setBusy(true);
     try {
+      const followsCollection =
+        path.endsWith('/probe') ||
+        (method === 'POST' && (path === '/sources' || path === '/instances'));
+      if (followsCollection) followCollection();
       const result = await api<T>(path, body, method);
       await load();
       return result;
@@ -350,6 +391,7 @@ export default function App() {
   async function collect(source: Source) {
     try {
       await api('/refresh', { source_id: source.id });
+      followCollection();
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
       );
@@ -379,6 +421,9 @@ export default function App() {
   }
   const toggleDemo = () => {
     loadId.current += 1;
+    dashboardToken.current = undefined;
+    lastAuxLoad.current = -Infinity;
+    setFollowUntil(0);
     setData(null);
     setLoading(true);
     const next = !demo;
@@ -837,7 +882,6 @@ export default function App() {
                 busy={busy}
                 onCancel={() => setModal(null)}
                 onManual={() => setModal({ kind: 'instance' })}
-                onPoll={load}
                 onDelete={async (source) => {
                   await mutate(`/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE');
                   setModal(null);
@@ -849,7 +893,10 @@ export default function App() {
                     body,
                     id ? 'PUT' : 'POST',
                   );
-                  if (saved.enabled) await api('/refresh', { source_id: saved.id });
+                  if (saved.enabled) {
+                    await api('/refresh', { source_id: saved.id });
+                    followCollection();
+                  }
                   await load();
                   if (modal.source) notify(t('toast.sourceSaved'));
                   return saved;

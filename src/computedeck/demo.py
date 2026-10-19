@@ -104,7 +104,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
 
 def demo_history(hours: int) -> list[dict[str, Any]]:
     """A smooth fictional trace, one point per 30 minutes, up to 7 days."""
-    current = datetime.now(UTC)
+    current = datetime.now(UTC).replace(second=0, microsecond=0)
     steps = min(hours, 168) * 2
     points = []
     for i in range(steps + 1):
@@ -124,7 +124,8 @@ def demo_history(hours: int) -> list[dict[str, Any]]:
 
 
 def dashboard() -> dict[str, Any]:
-    current = datetime.now(UTC)
+    # Keep example polls stable within a minute, as if these were collected samples.
+    current = datetime.now(UTC).replace(second=0, microsecond=0)
     observed = (current - timedelta(minutes=3)).isoformat()
     probed = (current - timedelta(minutes=2)).isoformat()
     sources = [_source(row, observed) for row in _SOURCES]
@@ -364,7 +365,7 @@ def events() -> list[dict[str, Any]]:
     sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
     timeout, oom = data["recent_failures"]
-    at = datetime.now(UTC)
+    at = datetime.now(UTC).replace(second=0, microsecond=0)
 
     def context(source_id: str) -> dict[str, Any]:
         source = sources[source_id]
@@ -417,7 +418,9 @@ def events() -> list[dict[str, Any]]:
 
 def nodes() -> list[dict[str, Any]]:
     """An example collection machine."""
-    observed = (datetime.now(UTC) - timedelta(minutes=3)).isoformat()
+    observed = (
+        datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=3)
+    ).isoformat()
     return [
         {
             "id": "example:lab-gateway",

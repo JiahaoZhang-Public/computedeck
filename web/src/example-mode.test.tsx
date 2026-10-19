@@ -288,13 +288,17 @@ it.each(['en', 'zh-CN'] as const)(
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await click(button(t('token.save')));
-    expect(unlocked).toBe(true);
-    expect(container.querySelector('.token-gate')).toBeNull();
-    expect(container.querySelector('.demo-banner')).not.toBeNull();
-    expect(window.location.search).toContain('demo=true');
-    expect(container.querySelector('.health-age')?.textContent).toBe(
-      t('time.hoursAgo', { count: 2 }),
-    );
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(unlocked).toBe(true);
+        expect(container.querySelector('.token-gate')).toBeNull();
+        expect(container.querySelector('.demo-banner')).not.toBeNull();
+        expect(window.location.search).toContain('demo=true');
+        expect(container.querySelector('.health-age')?.textContent).toBe(
+          t('time.hoursAgo', { count: 2 }),
+        );
+      });
+    });
     await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET');
     expect(writes).toHaveLength(1);

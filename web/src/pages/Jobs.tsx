@@ -171,7 +171,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
           </>
         )}
       </Panel>
-      <ActivityPanel demo={ctx.demo} />
+      <ActivityPanel demo={ctx.demo} token={data.token} />
     </>
   );
 }

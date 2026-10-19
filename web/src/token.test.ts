@@ -35,6 +35,7 @@ beforeEach(() => {
   vi.resetModules();
   stored = storage({ 'computedeck.session': 'session-token' });
   vi.stubGlobal('window', { localStorage: stored });
+  vi.stubGlobal('document', { hidden: false });
 });
 afterEach(() => vi.unstubAllGlobals());
 
