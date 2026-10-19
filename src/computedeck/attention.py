@@ -3,8 +3,6 @@
 from datetime import datetime
 from typing import Any
 
-from .summary import fresh
-
 
 def _source_name(source: dict[str, Any]) -> str:
     name = source["name"]
@@ -71,16 +69,23 @@ def derive(
                 observed_at=source.get("last_attempt"),
                 next_attempt=next_attempt,
             )
+            continue
         elif source.get("stale"):
             age = (now - datetime.fromisoformat(source["last_success"])).total_seconds()
             severity = "error" if age > 3 * source["interval_minutes"] * 60 else "warn"
             add("source_stale", subject, severity, since=since, **timing)
+            continue
 
-        # Retained nodes do not describe current cluster availability. A shared cluster
-        # needs only one item, even when several logins report its nodes.
+        # Keep known faults through the first failed attempt while observations are
+        # still recent. Failed/stale source items above replace retained conditions.
+        # A shared cluster needs only one item across its logins.
         cluster = source.get("cluster_id") or source["id"]
         state = source.get("cluster_state")
-        if fresh(source, "nodes") and state in {"unavailable", "degraded"}:
+        if (
+            source.get("last_success")
+            and "nodes" in source.get("capabilities", [])
+            and state in {"unavailable", "degraded"}
+        ):
             if cluster not in clusters or state == "unavailable":
                 clusters[cluster] = source
 

@@ -411,13 +411,45 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
     config.apply(store, CONFIG)
     source = store.source("cluster-a-alice")
     assert source is not None
-    source.update(capabilities=["jobs"], capabilities_seen=["jobs", "history"])
+    source.update(
+        last_success=now(),
+        capabilities=["jobs"],
+        capabilities_seen=["jobs", "history"],
+        warnings=[{"code": "partitions_unavailable"}],
+        cluster_state="degraded",
+    )
     store.save_source(source)
     disabled = CONFIG.replace('ssh_alias = "cluster-a"', 'ssh_alias = "cluster-a"\nenabled = false')
     for content, enabled in [(disabled, False), (CONFIG, True)]:
+        current = store.source(source["id"])
+        assert current is not None
+        store.save_source(
+            {**current, "status": "error", "error": {"code": "ssh_timeout"}, "failures": 5}
+        )
         config.apply(store, content)
         saved = store.source(source["id"])
         assert saved is not None
         assert saved["enabled"] is enabled
         assert saved["capabilities"] == ["jobs"]
         assert saved["capabilities_seen"] == ["jobs", "history"]
+        assert saved["last_success"] == source["last_success"]
+        assert saved["warnings"] == source["warnings"]
+        assert saved["cluster_state"] == "degraded"
+        assert saved["status"] == ("ready" if enabled else "unconfigured")
+        assert saved["error"] is None
+        assert saved["failures"] == 0
+
+
+def test_import_enables_configured_source_before_first_collection(store: Store) -> None:
+    disabled = CONFIG.replace('ssh_alias = "cluster-a"', 'ssh_alias = "cluster-a"\nenabled = false')
+    config.apply(store, disabled)
+    source = store.source("cluster-a-alice")
+    assert source is not None
+    assert source["status"] == "unconfigured"
+    config.apply(store, CONFIG)
+    saved = store.source(source["id"])
+    assert saved is not None
+    assert saved["enabled"] is True
+    assert saved["status"] == "ready"
+    assert saved["error"] is None
+    assert saved["failures"] == 0

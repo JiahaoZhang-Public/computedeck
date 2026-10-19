@@ -401,20 +401,22 @@ def create_app(
             key in changes and changes[key] != source.get(key)
             for key in ("ssh_alias", "credential", "username", "options", "node")
         )
+        enabled_changed = "enabled" in changes and changes["enabled"] != source["enabled"]
         source.update(changes)
         check_node(source)
         validate_source(source)
         source["next_due_at"] = now()
+        if connection_changed or enabled_changed:
+            source.update(
+                status="ready" if source["enabled"] else "unconfigured", error=None, failures=0
+            )
         if connection_changed:
             source.update(
-                status="ready" if source["enabled"] else "unconfigured",
                 last_success=None,
                 capabilities=[],
                 capabilities_seen=[],
                 warnings=[],
                 cluster_state="unknown",
-                error=None,
-                failures=0,
             )
         store().save_source(source)
         collector.clear_inactive_commit_errors()

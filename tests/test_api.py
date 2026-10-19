@@ -895,6 +895,68 @@ def test_pending_collections_are_exposed_and_refresh_can_queue_other_sources(
     assert wait_until_idle(client)["collecting"] == []
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_disabling_source_during_collection_resets_run_state(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    started = Event()
+    release = Event()
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        started.set()
+        await asyncio.to_thread(release.wait, 5)
+        if fails:
+            raise SourceError("ssh_timeout")
+        return Batch(jobs=[], capabilities=["jobs"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    source = post(client, "/api/sources", CLUSTER).json()
+    try:
+        post(client, "/api/refresh", {"source_id": source["id"]})
+        assert started.wait(2)
+        assert client.get("/api/dashboard").json()["sources"][0]["status"] == "syncing"
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": False}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "unconfigured"
+    finally:
+        release.set()
+    data = wait_until_idle(client)
+    [saved] = data["sources"]
+    assert saved["enabled"] is False
+    assert saved["status"] == "unconfigured"
+    assert saved["error"] is None
+    assert saved["failures"] == 0
+    assert saved["last_success"] is None
+    assert data["attention"] == []
+    assert data["collecting"] == []
+
+
+@pytest.mark.parametrize("previous_failure", [False, True])
+def test_enabling_configured_source_starts_ready_without_old_failures(
+    client: TestClient, data_dir: Path, previous_failure: bool
+) -> None:
+    source = post(client, "/api/sources", {**CLUSTER, "enabled": False}).json()
+    assert source["status"] == "unconfigured"
+    if previous_failure:
+        store = Store(data_dir / "computedeck.sqlite")
+        try:
+            store.save_source(
+                {**source, "status": "error", "error": {"code": "ssh_timeout"}, "failures": 5}
+            )
+        finally:
+            store.db.close()
+    response = client.put(f"/api/sources/{source['id']}", json={"enabled": True}, headers=HEADERS)
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["status"] == "ready"
+    assert saved["error"] is None
+    assert saved["failures"] == 0
+    assert saved["next_due_at"] is not None
+    assert client.get("/api/dashboard").json()["attention"] == []
+
+
 def test_collector_commit_fault_reaches_health_and_recovers(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -18,11 +18,16 @@ list. A collection failure appears after two consecutive failures, or immediatel
 if its data is stale. Stale data becomes an error after three collection intervals.
 Cluster availability uses the existing node-health rule and current node data,
 with one item per cluster, using the worst state reported by its current logins.
+Known cluster faults and collection warnings stay visible through the first failed
+attempt while the last successful collection is still within the freshness window.
+Once a source-failure or stale-data item appears, it replaces those retained conditions.
 A capability warning counts only when the source has
 delivered that capability before; permanent gaps stay on Sources. Other warnings
 are all included. Unchecked connections and machines with monitoring off do not
 produce attention items; failed SSH checks on monitored machines and provider
 instances do. Disabled sources and plugins do not produce items.
+Disabling or re-enabling a source clears its collection error and retry count while
+preserving the last successful observations and capability history.
 
 Rows link to diagnosis (the last error and an explicit Test connection button),
 the instance, service health or Toolbox. Their times use existing observations:

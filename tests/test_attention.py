@@ -104,6 +104,56 @@ def test_cluster_faults_are_current_and_shared_across_logins(state: str, severit
     assert items[0]["observed_at"] == row["last_success"]
 
 
+@pytest.mark.parametrize("state", ["unavailable", "degraded"])
+@pytest.mark.parametrize(
+    ("failures", "stale", "expected"),
+    [(1, False, "cluster"), (2, False, "source_failed"), (1, True, "source_failed")],
+)
+def test_cluster_fault_survives_failure_debounce(
+    state: str, failures: int, stale: bool, expected: str
+) -> None:
+    row = source(
+        cluster_state=state,
+        status="error",
+        error={"code": "ssh_timeout"},
+        failures=failures,
+        stale=stale,
+    )
+    [item] = derive([row])
+    assert item["kind"] == (f"cluster_{state}" if expected == "cluster" else expected)
+    assert item["severity"] == (
+        "warn" if expected == "cluster" and state == "degraded" else "error"
+    )
+    assert derive([{**row, "enabled": False}]) == []
+    if expected == "cluster":
+        assert item["observed_at"] == row["last_success"]
+        assert derive([{**row, "capabilities": ["jobs"]}]) == []
+        assert derive([{**row, "last_success": None}]) == []
+
+
+@pytest.mark.parametrize(
+    ("error", "failures", "stale", "expected"),
+    [
+        (None, 0, False, ["capability_regressed", "partial_data"]),
+        ({"code": "ssh_timeout"}, 1, False, ["capability_regressed", "partial_data"]),
+        ({"code": "ssh_timeout"}, 2, False, ["source_failed"]),
+        ({"code": "ssh_timeout"}, 1, True, ["source_failed"]),
+        (None, 0, True, ["source_stale"]),
+    ],
+)
+def test_source_faults_replace_retained_collection_warnings(
+    error: dict[str, str] | None, failures: int, stale: bool, expected: list[str]
+) -> None:
+    row = source(
+        capabilities_seen=["history"],
+        warnings=[{"code": "history_unavailable"}, {"code": "partitions_unavailable"}],
+        error=error,
+        failures=failures,
+        stale=stale,
+    )
+    assert [item["kind"] for item in derive([row])] == expected
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_shared_cluster_uses_worst_fresh_login_state(reverse: bool) -> None:
     rows = [

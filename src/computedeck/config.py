@@ -228,6 +228,10 @@ def apply(store: Store, text: str) -> dict[str, int]:
                     warnings=[],
                     cluster_state="unknown",
                 )
+            if existing["enabled"] != record["enabled"]:
+                existing.update(
+                    status="ready" if record["enabled"] else "unconfigured", error=None, failures=0
+                )
             existing.update({key: record[key] for key in ("name", *_SOURCE_KEYS)})
             record = existing
         record["next_due_at"] = now()
