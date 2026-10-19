@@ -13,6 +13,7 @@ import { registerWebPlugin } from './plugins';
 import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
+import { dateTime } from './domain';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
@@ -442,3 +443,116 @@ describe('tool lifecycle', () => {
     expect(container.textContent).toContain('Add channel');
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps age and Refresh during collection, and opens the health panel in %s',
+  async (locale) => {
+    setLocale(locale);
+    const data = serverDemo();
+    data.as_of = new Date(now.getTime() - 8 * 60000).toISOString();
+    data.sources[0].failures = 2;
+    data.sources[0].next_due_at = now.toISOString();
+    const pending = deferred<{ status: string }>();
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language: locale };
+      if (path === '/health')
+        return {
+          polling: true,
+          background_errors: {
+            'collector:schedule': { at: now.toISOString(), error: 'schedule failed' },
+          },
+          unreadable_rows: { snapshots: 2 },
+        };
+      if (path === '/refresh') return pending.promise;
+      return [];
+    });
+    await render(<App />);
+    const pill = container.querySelector<HTMLButtonElement>('.health-pill')!;
+    expect(pill.textContent).toContain(t('time.minutesAgo', { count: 8 }));
+    expect(pill.title).toContain(dateTime(data.as_of));
+    expect(pill.title).not.toContain(data.as_of);
+    expect(pill.getAttribute('aria-label')).toBe(
+      t('health.accessible', {
+        title: t('health.title'),
+        status: t('health.withAge', {
+          label: t('health.collectorFault'),
+          age: t('time.minutesAgo', { count: 8 }),
+        }),
+      }),
+    );
+    expect(container.querySelector('.collecting-count')?.textContent).toBe(
+      t('health.collecting', { count: 1 }),
+    );
+    const refresh = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${t('topbar.refresh')}"]`,
+    )!;
+    expect(refresh.disabled).toBe(false);
+    await click(`button[aria-label="${t('topbar.refresh')}"]`);
+    expect(refresh.disabled).toBe(true);
+    await act(async () => pending.resolve({ status: 'running' }));
+    expect(refresh.disabled).toBe(false);
+    pill.focus();
+    await click('.health-pill');
+    const panel = container.querySelector('[role="dialog"]')!;
+    expect(panel.textContent).toContain(t('health.unreadable', { count: 2 }));
+    expect(panel.textContent).toContain('schedule failed');
+    expect(panel.textContent).toContain(t('health.backoff', { count: 2 }));
+    const retry = [...panel.querySelectorAll('button')].find(
+      (button) => button.textContent === t('common.retry'),
+    )!;
+    await act(async () => retry.click());
+    expect(request).toHaveBeenCalledWith('/refresh', { source_id: data.sources[0].id });
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(pill);
+    for (const page of ['settings', 'toolbox', 'notify', 'chat']) {
+      await act(async () => {
+        window.location.hash = `#/${page}`;
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(container.querySelector('.health-pill')).not.toBeNull();
+      expect(container.querySelector(`button[aria-label="${t('topbar.refresh')}"]`)).toBeNull();
+    }
+  },
+);
+
+it('panel collection actions only reload example data', async () => {
+  window.history.replaceState(null, '', '/?demo=true');
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return serverDemo();
+    if (path === '/settings') return { language: 'en' };
+    return [];
+  });
+  await render(<App />);
+  await click('.health-pill');
+  for (const button of container.querySelectorAll<HTMLButtonElement>(
+    '.health-panel .link, .health-panel > .button',
+  )) {
+    await act(async () => button.click());
+  }
+  expect(request.mock.calls.some(([, body]) => body !== undefined)).toBe(false);
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'does not repeat Unknown in the pill accessible name in %s',
+  async (locale) => {
+    setLocale(locale);
+    const pending = deferred<Dashboard>();
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return pending.promise;
+      if (path === '/settings') return { language: locale };
+      return [];
+    });
+    await render(<App />);
+    const pill = container.querySelector<HTMLButtonElement>('.health-pill')!;
+    expect(pill.getAttribute('aria-label')).toBe(
+      t('health.accessible', {
+        title: t('health.title'),
+        status: t('health.unknown'),
+      }),
+    );
+    expect(pill.title).toBe(t('health.unknown'));
+    await act(async () => pending.resolve(serverDemo()));
+  },
+);

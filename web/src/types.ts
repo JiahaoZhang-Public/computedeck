@@ -28,6 +28,8 @@ export interface Source {
   status: string;
   last_success: string | null;
   last_attempt: string | null;
+  next_due_at?: string | null;
+  failures?: number;
   error: Message | string | null;
   interval_minutes: number;
   capabilities: string[];
@@ -232,6 +234,9 @@ export interface Dashboard {
   nodes: ComputeNode[];
   history: HistoryPoint[];
   updated_at: string | null;
+  as_of?: string | null;
+  behind?: string[];
+  collecting?: string[];
   refreshing: boolean;
   recent_failures?: FailedJob[];
   failure_history_sources?: string[];
@@ -243,6 +248,8 @@ export interface SSHConfig {
   installed: boolean;
 }
 export interface Health {
+  background_errors?: Record<string, { at: string; error: string }>;
+  unreadable_rows?: Record<string, number>;
   server_host?: string;
   server_name?: string | null;
   status: string;

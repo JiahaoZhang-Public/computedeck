@@ -1,3 +1,5 @@
+import { computeHealth } from './health';
+import { HealthPanel } from './HealthPanel';
 import { sourceAttentionTone } from './labels';
 import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -33,7 +35,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { partialCount, relativeTime } from './domain';
+import { dateTime, partialCount, relativeTime } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf, sourceLabel } from './groups';
@@ -117,17 +119,7 @@ const navGroups: {
     ],
   },
 ];
-const dataPages: Page[] = [
-  'overview',
-  'plan',
-  'jobs',
-  'resources',
-  'cloud',
-  'usage',
-  'sources',
-  'toolbox',
-  'settings',
-];
+const dataPages: Page[] = ['overview', 'plan', 'jobs', 'resources', 'cloud', 'usage', 'sources'];
 const pageTitles: Record<CorePage, MessageKey> = {
   overview: 'nav.overview',
   plan: 'nav.plan',
@@ -163,6 +155,7 @@ export default function App() {
   const [needsToken, setNeedsToken] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [detail, setDetail] = useState<Detail>(null);
   const modalRef = useDialogFocus(undefined, !!modal);
@@ -304,12 +297,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', keydown);
   }, [modal, detail]);
 
-  async function refresh() {
+  async function refresh(sourceId?: string) {
     setRefreshing(true);
     try {
       if (demo) notify(t('toast.demoReloaded'));
       else {
-        const result = await api<{ status: string }>('/refresh', {});
+        const result = await api<{ status: string }>(
+          '/refresh',
+          sourceId ? { source_id: sourceId } : {},
+        );
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
       await load();
@@ -464,6 +460,11 @@ export default function App() {
   const problems = attention.filter((item) => item.tone !== 'gray').length;
   const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
+  const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
+  const healthDescription =
+    healthState.label === healthState.age
+      ? healthState.label
+      : t('health.withAge', { label: healthState.label, age: healthState.age });
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
   const toolNav = enabledToolPages(tools);
@@ -653,20 +654,43 @@ export default function App() {
           </button>
           <h1>{title}</h1>
           <div className="topbar-actions">
+            <div className="health-status" role="status">
+              <button
+                className={`health-pill health-${healthState.level}`}
+                onClick={() => setHealthOpen(true)}
+                aria-label={t('health.accessible', {
+                  title: t('health.title'),
+                  status: healthDescription,
+                })}
+                aria-haspopup="dialog"
+                aria-expanded={healthOpen}
+                title={
+                  !needsToken && data?.as_of
+                    ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
+                    : healthDescription
+                }
+              >
+                <span aria-hidden="true">
+                  {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
+                </span>
+                {healthState.label !== healthState.age && (
+                  <span className="health-label">{healthState.label} · </span>
+                )}
+                <span className="health-age">{healthState.age}</span>
+              </button>
+            </div>
+            {!!data?.collecting?.length && !needsToken && (
+              <span className="collecting-count">
+                {t('health.collecting', { count: data.collecting.length })}
+              </span>
+            )}
             {!demo && pageActions[page]}
             {isDataPage && (
               <>
-                <span className="sync-time" title={data?.updated_at ?? ''}>
-                  {data?.refreshing
-                    ? t('topbar.collecting')
-                    : data?.updated_at
-                      ? t('common.updated', { time: relativeTime(data.updated_at) })
-                      : t('time.never')}
-                </span>
                 <button
                   className="button"
                   onClick={() => void refresh()}
-                  disabled={refreshing || !!data?.refreshing}
+                  disabled={refreshing || needsToken}
                   title={t('topbar.refreshHint')}
                   aria-label={t('topbar.refresh')}
                 >
@@ -677,6 +701,15 @@ export default function App() {
             )}
           </div>
         </header>
+        {healthState.collectorFault && isDataPage && (
+          <div className="banner red" role="alert">
+            <TriangleAlert size={15} />
+            <span>{t('health.collectorFault')}</span>
+            <button className="link" onClick={() => setHealthOpen(true)}>
+              {t('health.details')}
+            </button>
+          </div>
+        )}
         {demo && isDataPage && (
           <div className="banner amber">
             <span>{t('banner.demo')}</span>
@@ -765,6 +798,15 @@ export default function App() {
             <X size={14} />
           </button>
         </div>
+      )}
+      {healthOpen && (
+        <HealthPanel
+          state={healthState}
+          data={data}
+          busy={refreshing || needsToken}
+          refresh={refresh}
+          close={() => setHealthOpen(false)}
+        />
       )}
       {modal && (
         <div className="overlay" onMouseDown={() => setModal(null)}>

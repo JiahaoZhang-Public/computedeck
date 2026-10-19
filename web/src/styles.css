@@ -373,11 +373,129 @@ kbd,
   align-items: center;
   gap: 8px;
 }
-.sync-time {
-  color: var(--text-3);
+.health-status {
+  min-width: 0;
+}
+.health-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  max-width: 360px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-2);
   font-size: 12px;
-  margin: 0 2px 0 6px;
+}
+.health-label,
+.health-age {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.health-label {
+  flex-shrink: 1;
+}
+.health-age {
+  flex-shrink: 0;
+}
+.health-bad {
+  color: var(--red);
+}
+.health-warn {
+  color: var(--amber);
+}
+.health-unknown {
+  color: var(--text-3);
+}
+.collecting-count {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.overlay.health-overlay {
+  place-items: start end;
+  padding-top: 60px;
+}
+.modal.health-panel {
+  padding: 20px;
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 84px);
+  overflow-wrap: anywhere;
+}
+.health-panel h2 {
+  padding-right: 28px;
+  font-size: 16px;
+}
+.health-panel p {
+  color: var(--text-2);
+  font-size: 12px;
+  margin: 6px 0;
+}
+.health-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.health-row-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.health-row details {
+  font-size: 12px;
+  margin: 6px 0;
+}
+.health-row summary {
+  cursor: pointer;
+}
+.health-row a {
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  .health-label {
+    display: none;
+  }
+  .health-pill {
+    max-width: 150px;
+  }
+  .health-age {
+    flex-shrink: 1;
+  }
+}
+@media (max-width: 560px) {
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding-block: 4px;
+  }
+  .topbar h1 {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .topbar-actions {
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .health-pill {
+    max-width: 120px;
+  }
+  .overlay.health-overlay {
+    padding: 0;
+    place-items: end stretch;
+  }
+  .modal.health-panel {
+    width: 100%;
+    max-height: 80dvh;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
 }
 .banner {
   display: flex;
@@ -2438,9 +2556,6 @@ td.wrap {
   }
   .banner {
     padding: 8px 16px;
-  }
-  .sync-time {
-    display: none;
   }
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));

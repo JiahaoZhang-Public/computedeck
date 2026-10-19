@@ -34,13 +34,13 @@ export function groupSummary(data: Dashboard, group: Group) {
         ? 'reachable'
         : 'unverified'
       : 'unconfigured';
-  const updated = [
-    ...group.sources.map((source) => source.last_success),
-    ...instances.map((item) => item.observed_at),
-  ]
-    .filter((at): at is string => !!at)
-    .sort()
-    .pop();
+  const times = enabledSources.length
+    ? enabledSources.map((source) => source.last_success)
+    : instances.map((item) => item.observed_at).filter(Boolean);
+  const updated =
+    times.length && times.every(Boolean)
+      ? (times as string[]).sort((a, b) => Date.parse(a) - Date.parse(b))[0]
+      : undefined;
   return { ids, instances, scoped, nodes, state, updated };
 }
 
