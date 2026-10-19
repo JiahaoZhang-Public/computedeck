@@ -37,9 +37,16 @@ def derive(sources: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]
 
 @pytest.mark.parametrize(
     ("failures", "stale", "expected"),
-    [(0, False, []), (1, False, []), (2, False, ["source_failed"]), (1, True, ["source_failed"])],
+    [
+        (0, False, ["source_failed"]),
+        (1, False, ["source_failed"]),
+        (2, False, ["source_failed"]),
+        (1, True, ["source_failed"]),
+    ],
 )
-def test_failure_debounce(failures: int, stale: bool, expected: list[str]) -> None:
+def test_failure_is_visible_from_first_attempt(
+    failures: int, stale: bool, expected: list[str]
+) -> None:
     row = source(error={"code": "ssh_timeout"}, failures=failures, stale=stale)
     items = derive([row])
     assert [item["kind"] for item in items] == expected
@@ -107,9 +114,9 @@ def test_cluster_faults_are_current_and_shared_across_logins(state: str, severit
 @pytest.mark.parametrize("state", ["unavailable", "degraded"])
 @pytest.mark.parametrize(
     ("failures", "stale", "expected"),
-    [(1, False, "cluster"), (2, False, "source_failed"), (1, True, "source_failed")],
+    [(1, False, "source_failed"), (2, False, "source_failed"), (1, True, "source_failed")],
 )
-def test_cluster_fault_survives_failure_debounce(
+def test_source_failure_replaces_retained_cluster_fault(
     state: str, failures: int, stale: bool, expected: str
 ) -> None:
     row = source(
@@ -121,21 +128,15 @@ def test_cluster_fault_survives_failure_debounce(
     )
     [item] = derive([row])
     assert item["kind"] == (f"cluster_{state}" if expected == "cluster" else expected)
-    assert item["severity"] == (
-        "warn" if expected == "cluster" and state == "degraded" else "error"
-    )
+    assert item["severity"] == ("warn" if failures == 1 and not stale else "error")
     assert derive([{**row, "enabled": False}]) == []
-    if expected == "cluster":
-        assert item["observed_at"] == row["last_success"]
-        assert derive([{**row, "capabilities": ["jobs"]}]) == []
-        assert derive([{**row, "last_success": None}]) == []
 
 
 @pytest.mark.parametrize(
     ("error", "failures", "stale", "expected"),
     [
         (None, 0, False, ["capability_regressed", "partial_data"]),
-        ({"code": "ssh_timeout"}, 1, False, ["capability_regressed", "partial_data"]),
+        ({"code": "ssh_timeout"}, 1, False, ["source_failed"]),
         ({"code": "ssh_timeout"}, 2, False, ["source_failed"]),
         ({"code": "ssh_timeout"}, 1, True, ["source_failed"]),
         (None, 0, True, ["source_stale"]),
@@ -229,6 +230,7 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
         "source_stale",
         "source_failed",
         "source_failed",
+        "cluster_unavailable",
         "instance_ssh_failed",
     ]
     assert data["attention"][-1]["subject"]["id"] == "example:runpod:demo-pod"

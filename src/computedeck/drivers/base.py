@@ -164,6 +164,7 @@ def cluster_state(
     nodes: list[dict[str, Any]] | None,
 ) -> Literal["available", "degraded", "unavailable", "unknown"]:
     """Availability of the visible inventory, using the same rule as usable capacity."""
+    nodes = [n for n in (nodes or []) if n.get("gpu_count") is None or n["gpu_count"] > 0]
     if not nodes:
         return "unknown"
     health = [node_health(node.get("state", "")) for node in nodes]

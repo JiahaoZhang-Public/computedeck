@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from computedeck.demo import dashboard, events, nodes
+from computedeck.demo import dashboard, demo_history, events, nodes
 from computedeck.drivers.cloud import instance_lifecycle
 from computedeck.store import gpu_allocation, manual_state
 from computedeck.summary import RUNNING, fresh
@@ -54,7 +54,9 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     assert data["summary"]["groups"]["example:cluster-b"]["nodes"]["known_usable"] == 48
     for source in data["sources"]:
         if source["driver"] == "slurm":
-            assert source["cluster_state"] == "available"
+            assert source["cluster_state"] == (
+                "unavailable" if source["cluster_id"] == "example:cluster-d" else "available"
+            )
     nodes = {(node["cluster_id"], node["name"]): node for node in data["nodes"]}
     running_gpus: Counter[tuple[str, str]] = Counter()
     for job in data["jobs"]:
@@ -260,7 +262,11 @@ def test_demo_failure_coverage_uses_only_fresh_history_sources() -> None:
     data = dashboard()
     covered = [source for source in data["sources"] if fresh(source, "history")]
     assert data["failure_history_sources"] == [source["id"] for source in covered]
-    assert data["failure_history_sources"] == ["example:cluster-a-alice", "example:cluster-b-alice"]
+    assert data["failure_history_sources"] == [
+        "example:cluster-a-alice",
+        "example:cluster-b-alice",
+        "example:cluster-d-alice",
+    ]
     assert not {
         "example:cluster-c-alice",
         "example:cluster-a-carol",
@@ -289,3 +295,42 @@ def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
         assert job["gpu_count"] > max(0, limit - used)
     # A separate queue still demonstrates demand that can start before a new request.
     assert any(job["reason"] == "Priority" and job["gpu_count"] == 4 for job in queued)
+
+
+def test_example_all_down_cluster_has_consistent_state_and_capacity() -> None:
+    data = dashboard()
+    source = next(s for s in data["sources"] if s["cluster_id"] == "example:cluster-d")
+    assert fresh(source, "nodes")
+    assert source["cluster_state"] == "unavailable"
+    summary = data["summary"]["groups"][source["cluster_id"]]["nodes"]
+    assert summary["nodes"] == summary["abnormal"] == summary["unavailable"] == 2
+    assert summary["usable"] == 0
+    assert any(
+        item["kind"] == "cluster_unavailable" and item["subject"]["id"] == source["id"]
+        for item in data["attention"]
+    )
+
+
+@pytest.mark.parametrize("hours", [24, 168])
+def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) -> None:
+    data = dashboard()
+    summary = data["summary"]
+    history = demo_history(hours, data)
+    latest = history[-1]
+    assert latest["allocated_gpus"] == summary["allocated"]
+    assert latest["known_allocated_gpus"] == summary["known_allocated"]
+    assert latest["unknown_allocation_sources"] == len(summary["unmeasured"])
+    assert history[0]["unknown_allocation_sources"] == 0
+    assert history[0]["allocated_gpus"] == history[0]["known_allocated_gpus"]
+    unprobed = [
+        i
+        for i in data["instances"]
+        if i.get("manual") and i.get("monitoring") and not i.get("observed_at")
+    ]
+    for point in history:
+        gaps = sum(
+            point["at"] >= s["last_success"] for s in data["sources"] if s["stale"] or s["error"]
+        )
+        gaps += sum(point["at"] >= i["added_at"] for i in unprobed)
+        assert point["unknown_allocation_sources"] == gaps
+        assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])

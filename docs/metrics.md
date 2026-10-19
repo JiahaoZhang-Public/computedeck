@@ -29,7 +29,8 @@ A source is current when enabled, successfully collected, in a ready or collecti
 state, without an error or stale flag, and with the capability needed by the figure.
 Data becomes stale after the collection interval plus 10% and two minutes of grace.
 The topbar age still uses the oldest success even when a source is failing. With no
-enabled sources it reads “No sources connected”; example data has a neutral label.
+enabled sources it reads “No sources connected”. Example mode uses the same
+health severity rules for its fictional sources; the example banner identifies the mode.
 An SSH check has its own timestamp and does not refresh the provider's listing.
 
 Browser polling is separate from collection: hidden tabs pause requests, unchanged
@@ -48,20 +49,22 @@ because it now follows the oldest enabled source instead of the newest one.
 ## Needs attention
 
 The Overview tile, navigation badge and attention panel count the same server
-list. A collection failure appears after two consecutive failures, or immediately
-if its data is stale. Stale data becomes an error after three collection intervals.
-Cluster availability uses the existing node-health rule and current node data,
-with one item per cluster, using the worst state reported by its current logins.
-Known cluster faults and collection warnings stay visible through the first failed
-attempt while the last successful collection is still within the freshness window.
-Once a source-failure or stale-data item appears, it replaces those retained conditions.
+list. The first collection failure appears as a warning; two consecutive failures
+or stale data make it an error. Stale data becomes an error after three collection
+intervals. Built-in drivers classify cluster availability using the node-health
+rule over GPU-capable nodes (positive or unknown GPU counts), so healthy CPU-only
+nodes cannot hide a GPU outage. One item per cluster uses the worst state reported
+by its current logins. Source-failure and stale-data items replace retained cluster
+faults and collection warnings.
 A capability warning counts only when the source has
 delivered that capability before; permanent gaps stay on Sources. Other warnings
 are all included. Unchecked connections and machines with monitoring off do not
 produce attention items; failed SSH checks on monitored machines and provider
 instances do. Disabled sources and plugins do not produce items.
 Disabling or re-enabling a source clears its collection error and retry count while
-preserving the last successful observations and capability history.
+preserving retained observations and capability history. It clears `last_success`
+so the next collection establishes a silent event baseline. Retained inventories
+do not override the cluster state reported by the latest collection.
 
 Rows link to diagnosis (the last error and an explicit Test connection button),
 the instance, service health or Toolbox. Their times use existing observations:

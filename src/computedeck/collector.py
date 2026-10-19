@@ -216,14 +216,24 @@ class Collector:
         }
 
         def persist(updates: dict[str, Any]) -> dict[str, Any]:
-            current = self._instance(instance_id)
+            current = (
+                next(
+                    (row for row in self.store.manual_instances() if row["id"] == instance_id), None
+                )
+                if instance.get("manual")
+                else self._instance(instance_id)
+            )
             if not current or any(current.get(key) != value for key, value in endpoint.items()):
                 raise ProbeConflict("endpoint_changed")
             if instance.get("manual"):
                 current.update(updates, last_probe_attempt=attempt)
-                # Its state follows from this check, as the dashboard derives it.
-                current["state"] = manual_state(current)
                 self.store.save_instance(current)
+                return {
+                    **current,
+                    "source_id": "manual",
+                    "manual": True,
+                    "state": manual_state(current),
+                }
             else:
                 listed = {key: updates[key] for key in LISTED_PROBE_FIELDS if key in updates}
                 current.update(listed, last_probe_attempt=attempt)

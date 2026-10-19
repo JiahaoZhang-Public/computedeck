@@ -17,6 +17,7 @@ _SOURCES = [
     ("example:cluster-a-carol", "Cluster A", "slurm", "example:cluster-a", "carol"),
     ("example:cluster-c-alice", "Cluster C", "pbs", "example:cluster-c", "alice"),
     ("example:runpod-secondary", "RunPod secondary", "runpod", "example:runpod", ""),
+    ("example:cluster-d-alice", "Cluster D", "slurm", "example:cluster-d", "alice"),
 ]
 _GPU = {"example:cluster-a": "A100 80GB", "example:cluster-b": "H100"}
 _JOBS = [
@@ -41,7 +42,13 @@ def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any
         "cluster_id": cluster_id,
         "username": username,
         "ssh_alias": cluster_id.removeprefix("example:") if cluster else "",
-        "credential": "" if cluster else "env:RUNPOD_API_KEY",
+        "credential": ""
+        if cluster
+        else (
+            "env:RUNPOD_SECONDARY_API_KEY"
+            if source_id == "example:runpod-secondary"
+            else "env:RUNPOD_API_KEY"
+        ),
         "options": {},
         # Cluster B is reachable only from the lab gateway, which collects it.
         "node": "example:lab-gateway" if cluster_id == "example:cluster-b" else "",
@@ -102,24 +109,42 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
     }
 
 
-def demo_history(hours: int) -> list[dict[str, Any]]:
+def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """A smooth fictional trace, one point per 30 minutes, up to 7 days."""
     current = datetime.now(UTC).replace(second=0, microsecond=0)
+    data = dashboard() if data is None else data
+    summary = data["summary"]
+    gaps = [s for s in data["sources"] if s.get("stale") or s.get("error")]
+    unprobed = [
+        i
+        for i in data["instances"]
+        if i.get("manual") and i.get("monitoring") and not i.get("observed_at")
+    ]
     steps = min(hours, 168) * 2
     points = []
     for i in range(steps + 1):
         age = steps - i
         allocated = 14 + (4 if age % 48 < 32 else 0) + (4 if i % 96 > 60 else 0)
+        at = current - timedelta(minutes=30 * age)
+        # Unprobed machines create a gap only after being added. Source gaps start
+        # at their last successful collection; the latest point uses the live summary.
+        unknown = sum(at >= datetime.fromisoformat(i["added_at"]) for i in unprobed)
+        unknown += sum(at >= datetime.fromisoformat(s["last_success"]) for s in gaps)
         points.append(
             {
-                "at": (current - timedelta(minutes=30 * age)).isoformat(),
-                "allocated_gpus": allocated,
+                "at": at.isoformat(),
+                "allocated_gpus": None if unknown else allocated,
                 "known_allocated_gpus": allocated,
-                "unknown_allocation_sources": 0,
+                "unknown_allocation_sources": unknown,
                 "gpu_utilization": round(64 + 12 * math.sin(i / 6) + 5 * math.cos(i / 2), 1),
                 "coverage_count": 12 if age % 48 > 16 else 18,
             }
         )
+    points[-1].update(
+        allocated_gpus=summary["allocated"],
+        known_allocated_gpus=summary["known_allocated"],
+        unknown_allocation_sources=len(summary["unmeasured"]),
+    )
     return points
 
 
@@ -275,6 +300,7 @@ def dashboard() -> dict[str, Any]:
             "id": "example:manual:lab-workstation-buildbox",
             "external_id": "buildbox",
             "name": "build-box",
+            "added_at": (current - timedelta(minutes=45)).isoformat(),
             "state": "unknown",
             "gpu_allocated": None,
             "observed_at": None,
@@ -319,6 +345,20 @@ def dashboard() -> dict[str, Any]:
         ]
         for i in range(1, 9)
     ]
+    nodes.extend(
+        {
+            **nodes[0],
+            "id": f"example:cluster-d:d-gpu-{i:02}",
+            "name": f"d-gpu-{i:02}",
+            "cluster_id": "example:cluster-d",
+            "source_id": "example:cluster-d-alice",
+            "state": state,
+            "gpu_count": 1,
+            "gpu_allocated": 0,
+            "cpu_allocated": 0,
+        }
+        for i, state in enumerate(("down*", "drained"), 1)
+    )
     for node in nodes:
         if node["cluster_id"] == "example:cluster-b":
             if node["name"] in {"b-gpu-07", "b-gpu-08"}:
@@ -335,14 +375,13 @@ def dashboard() -> dict[str, Any]:
             source["cluster_state"] = cluster_state(
                 [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
             )
-    history = demo_history(24)
     data = {
         "mode": "demo",
         "sources": sources,
         "jobs": jobs,
         "instances": instances,
         "nodes": nodes,
-        "history": history,
+        "history": [],
         "updated_at": observed,
         "refreshing": True,
         "collecting": [sources[1]["id"]],
@@ -355,6 +394,7 @@ def dashboard() -> dict[str, Any]:
     }
 
     data["summary"] = summarize(data)
+    data["history"] = demo_history(24, data)
     data["attention"] = attention.derive(
         data, [drivers.describe(name) for name in drivers.names()], now=current
     )

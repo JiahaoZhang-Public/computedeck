@@ -230,7 +230,10 @@ def apply(store: Store, text: str) -> dict[str, int]:
                 )
             if existing["enabled"] != record["enabled"]:
                 existing.update(
-                    status="ready" if record["enabled"] else "unconfigured", error=None, failures=0
+                    status="ready" if record["enabled"] else "unconfigured",
+                    error=None,
+                    failures=0,
+                    last_success=None,
                 )
             existing.update({key: record[key] for key in ("name", *_SOURCE_KEYS)})
             record = existing

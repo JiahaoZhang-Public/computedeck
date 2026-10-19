@@ -623,3 +623,38 @@ def test_fleet_freshness_failure_and_recovery(store: Store, add_source: AddSourc
     store.save_source({**source, "enabled": False})
     data = store.dashboard()
     assert data["as_of"] is None and data["behind"] == []
+
+
+def test_retained_nodes_do_not_override_collection_state(
+    store: Store, add_source: AddSource
+) -> None:
+    from computedeck.drivers.base import Batch
+
+    source = add_source(capabilities=["jobs", "nodes"], cluster_state="unavailable")
+    node = {
+        "id": "cluster-a:g1",
+        "source_id": source["id"],
+        "cluster_id": "cluster-a",
+        "name": "g1",
+        "state": "down",
+        "gpu_count": 8,
+    }
+    store.save_snapshot(source["id"], {"nodes": [node], "jobs": []})
+    assert store.dashboard()["sources"][0]["cluster_state"] == "unavailable"
+    batch = Batch(jobs=[], capabilities=["jobs"])
+    store.save_snapshot(source["id"], batch.snapshot())
+    store.save_source(
+        {**source, "capabilities": batch.capabilities, "cluster_state": batch.cluster_state}
+    )
+    data = store.dashboard()
+    assert data["nodes"]
+    assert data["sources"][0]["cluster_state"] == "unknown"
+    assert data["summary"]["groups"]["cluster-a"]["nodes"]["nodes"] == 0
+    # A driver-defined state is authoritative, even with unfamiliar node states.
+    store.save_source({**source, "cluster_state": "available"})
+    assert store.dashboard()["sources"][0]["cluster_state"] == "available"
+    # Connection edits reset state despite retained inventory.
+    store.save_source(
+        {**source, "last_success": None, "capabilities": [], "cluster_state": "unknown"}
+    )
+    assert store.dashboard()["sources"][0]["cluster_state"] == "unknown"

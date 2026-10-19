@@ -784,7 +784,27 @@ def test_history_endpoint_bounds_and_demo(client: TestClient) -> None:
     week = client.get("/api/history?hours=168&demo=true").json()
     assert week["hours"] == 168
     assert len(week["points"]) == 337
-    assert all(point["known_allocated_gpus"] == point["allocated_gpus"] for point in week["points"])
+    data = client.get("/api/dashboard?demo=true").json()
+    summary = data["summary"]
+    early = week["points"][0]
+    assert early["unknown_allocation_sources"] == 0
+    assert early["allocated_gpus"] == early["known_allocated_gpus"]
+    for source in data["sources"]:
+        if source["stale"] or source["error"]:
+            assert all(
+                point["unknown_allocation_sources"] > 0 and point["allocated_gpus"] is None
+                for point in week["points"]
+                if point["at"] >= source["last_success"]
+            )
+    latest = week["points"][-1]
+    assert latest["allocated_gpus"] == summary["allocated"]
+    assert latest["known_allocated_gpus"] == summary["known_allocated"]
+    assert latest["unknown_allocation_sources"] == len(summary["unmeasured"])
+    assert all(
+        point["allocated_gpus"] is None
+        for point in week["points"]
+        if point["unknown_allocation_sources"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1069,6 +1089,7 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
         "source_stale",
         "source_failed",
         "source_failed",
+        "cluster_unavailable",
         "instance_ssh_failed",
     ]
     assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
@@ -1134,3 +1155,58 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
     assert [item["kind"] for item in data["attention"]] == (
         [] if changed_connection else ["capability_regressed"]
     )
+
+
+@pytest.mark.parametrize("outcome", ["jobs_ended", "ongoing_failure"])
+def test_reenable_starts_a_silent_event_baseline(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    stage = "initial"
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        if stage == "failure":
+            raise SourceError("ssh_timeout")
+        job = {
+            "id": "cluster-a:1",
+            "source_id": source["id"],
+            "cluster_id": "cluster-a",
+            "state": "RUNNING",
+            "gpu_count": 1,
+        }
+        if stage == "ended":
+            return Batch(
+                jobs=[],
+                failures=[{**job, "state": "FAILED", "end": "2026-01-01T12:00:00"}],
+                capabilities=["jobs", "history"],
+            )
+        return Batch(jobs=[job], capabilities=["jobs", "history"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    source = post(client, "/api/sources", CLUSTER).json()
+
+    def refresh() -> None:
+        post(client, "/api/refresh", {"source_id": source["id"]})
+        wait_until_idle(client)
+
+    refresh()
+    if outcome == "ongoing_failure":
+        stage = "failure"
+        refresh()
+    for enabled in (False, True):
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": enabled}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["last_success"] is None
+        assert response.json()["capabilities_seen"] == ["history", "jobs"]
+    stage = "ended" if outcome == "jobs_ended" else "failure"
+    refresh()
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        rows = store.events()
+    finally:
+        store.db.close()
+    if outcome == "jobs_ended":
+        assert [(row["type"], row["silent"]) for row in rows] == [("job.failed", True)]
+    else:
+        assert [row["type"] for row in rows] == ["source.failed"]

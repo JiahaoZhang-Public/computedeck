@@ -227,6 +227,9 @@ Override `account(api, source)` to return `Account(balance=...)` when the provid
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
 
+Drivers emitting `reported_running` or other 0.4-only SDK values must declare
+`requires=">=0.4,<0.5"`, or use `desired_running` on 0.3.
+
 `CloudInstance.state` also accepts `reported_running`: the provider's normal running
 report without an observation of readiness, as with RunPod REST. It can still be starting
 its image; it is not proof that SSH or the workload is ready. `desired_running` retains
@@ -411,14 +414,19 @@ Kinds are `source_failed`, `source_stale`, `cluster_unavailable`,
 `cluster_degraded`, `capability_regressed`, `partial_data`, `instance_ssh_failed`,
 `service_loop_failed`, `unreadable_rows` and `plugin_error`. Plugin errors use the
 existing health report's `error` key; plugins do not raise attention items.
+A first collection failure produces a warning item; repeated failures or stale
+data escalate it to an error.
 Source rows gain `capabilities_seen`, the union of capabilities delivered by
 successful collections. Older rows need no migration: their current capabilities
 seed the union on the next successful collection. Connection changes through
 source edits or configuration import clear both current and seen capabilities;
 name, interval and enabled edits preserve them. Connection changes also clear
-warnings and cluster state from the old connection.
+warnings and cluster state from the old connection. `Batch.cluster_state` is honored
+as reported by the driver; retained node inventories do not override it. Built-in
+drivers classify availability over GPU-capable nodes (unknown or positive GPU counts).
 Enabled toggles clear the collection error and retry count, resetting status to
-`ready` or `unconfigured`, without clearing last success or capability history.
+`ready` or `unconfigured`, clearing last success to establish a silent event baseline
+on the next collection. Current and seen capabilities are preserved.
 
 ## Marketplaces
 

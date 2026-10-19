@@ -420,7 +420,10 @@ def create_app(
         source["next_due_at"] = now()
         if connection_changed or enabled_changed:
             source.update(
-                status="ready" if source["enabled"] else "unconfigured", error=None, failures=0
+                status="ready" if source["enabled"] else "unconfigured",
+                error=None,
+                failures=0,
+                last_success=None,
             )
         if connection_changed:
             source.update(

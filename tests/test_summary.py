@@ -202,7 +202,7 @@ def test_one_node_health_rule(state, health):
 
 
 def test_outage_has_no_usable_capacity_and_disabled_nodes_are_excluded(store, add_source):
-    active = add_source(capabilities=["nodes", "jobs"])
+    active = add_source(capabilities=["nodes", "jobs"], cluster_state="unavailable")
     off = add_source(username="bob", enabled=False, capabilities=["nodes", "jobs"])
     for source, state in ((active, "RESERVED"), (off, "idle")):
         store.save_snapshot(
@@ -379,3 +379,44 @@ def test_job_tab_ids_use_the_same_states_as_counts(store, add_source):
     assert set(summary["jobs"]["pending_ids"]) == {f"cluster-a:{state}" for state in PENDING}
     assert len(summary["jobs"]["running_ids"]) == summary["known_running"]
     assert len(summary["jobs"]["pending_ids"]) == summary["known_pending"]
+
+
+def test_gpu_outage_is_not_hidden_by_cpu_nodes_or_unknown_gpu_counts() -> None:
+    from computedeck.drivers.base import cluster_state
+    from computedeck.summary import summarize_nodes
+
+    nodes = [
+        {
+            "id": "gpu1",
+            "name": "gpu1",
+            "cluster_id": "a",
+            "state": "down",
+            "gpu_count": 8,
+            "gpu_allocated": 0,
+        },
+        {
+            "id": "gpu2",
+            "name": "gpu2",
+            "cluster_id": "a",
+            "state": "drained",
+            "gpu_count": None,
+            "gpu_allocated": 0,
+        },
+    ]
+    assert cluster_state(nodes) == "unavailable"
+    summary = summarize_nodes(nodes)
+    assert summary["nodes"] == summary["abnormal"] == 2
+    assert summary["usable"] == 0
+    assert summary["unavailable"] is None
+    nodes.append(
+        {
+            "id": "cpu",
+            "name": "cpu",
+            "cluster_id": "a",
+            "state": "idle",
+            "gpu_count": 0,
+            "gpu_allocated": 0,
+        }
+    )
+    assert cluster_state(nodes) == "unavailable"
+    assert summarize_nodes(nodes)["usable"] == 0

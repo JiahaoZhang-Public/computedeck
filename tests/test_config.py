@@ -432,7 +432,7 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
         assert saved["enabled"] is enabled
         assert saved["capabilities"] == ["jobs"]
         assert saved["capabilities_seen"] == ["jobs", "history"]
-        assert saved["last_success"] == source["last_success"]
+        assert saved["last_success"] is None
         assert saved["warnings"] == source["warnings"]
         assert saved["cluster_state"] == "degraded"
         assert saved["status"] == ("ready" if enabled else "unconfigured")

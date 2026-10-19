@@ -404,8 +404,12 @@ async def test_probe_merges_measurements_into_manual_instance(
     assert saved["gpu_utilization"] == 50
     assert saved["gpu_count"] == 2
     # It answered just now: running, as the dashboard derives it from this check.
-    assert saved["state"] == result["state"] == "running"
+    assert saved["state"] == instance["state"] == "unknown"
+    assert result["state"] == store.dashboard()["instances"][0]["state"] == "running"
     assert store.dashboard()["history"][-1]["gpu_utilization"] == 50
+    # A later probe must also read the stored row, not persist the dashboard's derived state.
+    await collector.probe(instance["id"])
+    assert store.manual_instances()[0]["state"] == "unknown"
     assert not collector.probes
 
 

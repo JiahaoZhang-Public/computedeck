@@ -59,12 +59,12 @@ def derive(
         since = source.get("last_success")
         next_attempt = source.get("next_due_at")
         timing = {"observed_at": since, "next_attempt": next_attempt}
-        if source.get("error") and (source.get("failures", 0) >= 2 or source.get("stale")):
+        if source.get("error") or source.get("status") == "error":
             add(
                 "source_failed",
                 subject,
-                "error",
-                details=[source["error"]],
+                "error" if source.get("failures", 0) >= 2 or source.get("stale") else "warn",
+                details=[source["error"]] if source.get("error") else [],
                 since=since,
                 observed_at=source.get("last_attempt"),
                 next_attempt=next_attempt,
@@ -76,8 +76,7 @@ def derive(
             add("source_stale", subject, severity, since=since, **timing)
             continue
 
-        # Keep known faults through the first failed attempt while observations are
-        # still recent. Failed/stale source items above replace retained conditions.
+        # Failed/stale source items above replace retained conditions.
         # A shared cluster needs only one item across its logins.
         cluster = source.get("cluster_id") or source["id"]
         state = source.get("cluster_state")

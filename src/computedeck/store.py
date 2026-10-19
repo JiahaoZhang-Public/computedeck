@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import cluster_state, node_health, validate_row
+from .drivers.base import node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
@@ -598,10 +598,6 @@ class Store:
         history = self.history(24)
         for node in nodes.values():
             node["health"] = node_health(node.get("state", ""))
-        for source in sources:
-            source_nodes = [n for n in observations["nodes"] if n.get("source_id") == source["id"]]
-            if source_nodes:
-                source["cluster_state"] = cluster_state(source_nodes)
         data = {
             "mode": "live",
             **freshness(sources),
