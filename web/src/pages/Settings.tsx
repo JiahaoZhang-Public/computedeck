@@ -14,7 +14,11 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
       <div className="stack">
         <Panel title={t('settings.sources')}>
           <div className="setting-row">
-            <p>{t('settings.sourcesMoved', { count: data.sources.length })}</p>
+            <p>
+              {demo
+                ? t('settings.sourcesMovedExample')
+                : t('settings.sourcesMoved', { count: data.sources.length })}
+            </p>
             <a className="button" href={routeHash('sources')}>
               {t('sources.open')} <ArrowRight size={13} />
             </a>

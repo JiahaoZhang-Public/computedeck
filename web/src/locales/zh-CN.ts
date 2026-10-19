@@ -514,6 +514,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'setup.machine': 'SSH 机器',
   'setup.machineHint': '通过 SSH 访问的 GPU 工作站或服务器。',
   'settings.sourcesMoved': '来源在单独的页面管理（已配置 {count} 个）。',
+  'settings.sourcesMovedExample': '来源在单独的页面管理。',
   'sources.open': '打开来源',
   'sources.intro':
     '每个登录身份按各自的周期采集。命令标签显示上次采集能读取哪些信息，缺少的是可选项。',
@@ -624,7 +625,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'msg.setting_required': '请填写{setting}',
   'nav.toolbox': '工具箱',
   'toolbox.intro': 'ComputeDeck 自带的工具默认关闭；开启前会先告诉你它会做什么。',
-  'toolbox.demo': '正在显示示例数据，不能修改工具。',
   'toolbox.empty': '没有安装工具',
   'toolbox.emptyHint': '以 Python 包安装的插件会出现在这里。',
   'toolbox.on': '已开启',

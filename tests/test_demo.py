@@ -1,8 +1,12 @@
 """The built-in example should demonstrate usable planner choices."""
 
 import re
-from datetime import UTC, datetime
+import time
+from collections import Counter
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import pytest
 
 from computedeck.demo import dashboard, events, nodes
 from computedeck.drivers.cloud import instance_lifecycle
@@ -52,9 +56,13 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
         if source["driver"] == "slurm":
             assert source["cluster_state"] == "available"
     nodes = {(node["cluster_id"], node["name"]): node for node in data["nodes"]}
+    running_gpus: Counter[tuple[str, str]] = Counter()
     for job in data["jobs"]:
         if job["state"] == "RUNNING":
             assert nodes[job["cluster_id"], job["node"]]["health"] == "usable"
+            running_gpus[job["cluster_id"], job["node"]] += job["gpu_count"]
+    for key, gpus in running_gpus.items():
+        assert gpus <= nodes[key]["gpu_count"]
     unavailable = [node for node in data["nodes"] if node["health"] == "unavailable"]
     assert {node["state"] for node in unavailable} == {"down*", "drained"}
     assert all(node["gpu_allocated"] == 0 for node in unavailable)
@@ -87,7 +95,7 @@ def test_demo_scenario_has_failures_staleness_and_a_capability_gap() -> None:
     failing = sources["example:cluster-c-alice"]
     assert failing["driver"] == "pbs"
     assert failing["status"] == "error"
-    assert failing["failures"] >= 2
+    assert failing["failures"] == 8
     age = (datetime.now(UTC) - datetime.fromisoformat(failing["last_success"])).total_seconds()
     assert 160 * 60 <= age < 161 * 60
     assert failing["stale"] is True
@@ -172,12 +180,61 @@ def test_every_example_message_code_is_translated() -> None:
         assert messages <= keys, (locale, messages - keys)
 
 
-def test_demo_next_attempts_are_upcoming_unless_already_collecting() -> None:
+def test_demo_next_attempts_follow_collection_intervals_and_backoff() -> None:
     data = dashboard()
     current = datetime.now(UTC)
     for source in data["sources"]:
         if source["status"] != "syncing":
-            assert datetime.fromisoformat(source["next_due_at"]) > current
+            attempt = datetime.fromisoformat(source["last_attempt"])
+            due = datetime.fromisoformat(source["next_due_at"])
+            delay = 30 if source["driver"] == "pbs" else source["interval_minutes"]
+            assert due == attempt + timedelta(minutes=delay)
+            if source["stale"] and not source["error"]:
+                assert due < current
+            else:
+                assert due > current
+
+
+def test_demo_source_failure_events_match_current_outages_or_recoveries() -> None:
+    sources = {source["id"]: source for source in dashboard()["sources"]}
+    rows = events()
+    for event in rows:
+        if event["type"] != "source.failed":
+            continue
+        source = sources[event["source_id"]]
+        at = datetime.fromisoformat(event["at"])
+        success = datetime.fromisoformat(source["last_success"])
+        attempt = datetime.fromisoformat(source["last_attempt"])
+        if source["error"]:
+            assert success < at <= attempt
+            assert abs((at - success).total_seconds() - source["interval_minutes"] * 60) < 1
+            # Seven retries after the initial failure: 10, 10, 10, 16, 30, 30, 30 min.
+            assert abs((attempt - at).total_seconds() - 136 * 60) < 1
+        else:
+            # A historical failure precedes a recovery, then subsequent successes.
+            assert any(
+                row["type"] == "source.recovered"
+                and row["source_id"] == source["id"]
+                and at < datetime.fromisoformat(row["at"]) <= success
+                for row in rows
+            )
+
+
+@pytest.mark.parametrize("timezone", ["UTC0", "UTC-4", "UTC+7"])
+def test_demo_failed_job_local_end_times_match_events(timezone: str) -> None:
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setenv("TZ", timezone)
+            time.tzset()
+            for event in events():
+                if event["type"] == "job.failed":
+                    end = datetime.fromisoformat(event["data"]["job"]["end"])
+                    assert end.tzinfo is None
+                    assert (
+                        abs(end.timestamp() - datetime.fromisoformat(event["at"]).timestamp()) < 1
+                    )
+    finally:
+        time.tzset()
 
 
 def test_demo_failure_coverage_uses_only_fresh_history_sources() -> None:

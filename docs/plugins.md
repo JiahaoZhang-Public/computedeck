@@ -302,9 +302,9 @@ While example data is on, the host's `request` rejects every non-GET request bef
 fetching, except the access-token check (`POST /session`). This includes requests
 from Notify, Chat and plugins. File uploads use the same guard. Reads still return
 each tool's own settings and data; the banner says so. Plugins must use the supplied
-`request` for API calls. This browser safeguard
-does not sandbox plugin code or pause the service's background collectors.
-Example resource IDs use the `example:` namespace; example data is never stored.
+`request` for API calls. This browser safeguard does not sandbox plugin code or
+pause the service's background collectors. Example resource IDs use the `example:`
+namespace; example data is never stored.
 
 ## Dashboard summaries
 

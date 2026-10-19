@@ -221,6 +221,35 @@ it('preserves other query parameters and the route when toggling and reloading',
 });
 
 it.each(['en', 'zh-CN'] as const)(
+  'omits the example source count from Settings in %s',
+  async (locale) => {
+    await open('settings', locale);
+    expect(container.textContent).toContain(t('settings.sourcesMovedExample'));
+    expect(container.textContent).not.toContain(
+      t('settings.sourcesMoved', { count: data.sources.length }),
+    );
+    await click(button(t('banner.demoOff')));
+    expect(container.textContent).toContain(
+      t('settings.sourcesMoved', { count: data.sources.length }),
+    );
+  },
+);
+
+it.each([
+  ['diagnosis', '#attention button'],
+  ['drawer', '.jobs-table tbody tr'],
+  ['health panel', '.health-pill'],
+])('closes the %s when leaving example mode', async (kind, selector) => {
+  await open(kind === 'drawer' ? 'jobs' : 'overview');
+  await click(container.querySelector(selector));
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  await click(button(t('banner.demoOff')));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.querySelector('.demo-banner')).toBeNull();
+  expectOnlyReads();
+});
+
+it.each(['en', 'zh-CN'] as const)(
   'unlocks the token gate without leaving example mode in %s',
   async (locale) => {
     vi.stubGlobal('crypto', webcrypto);

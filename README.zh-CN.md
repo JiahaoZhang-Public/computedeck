@@ -79,7 +79,7 @@ npm --prefix web run build
 uv run computedeck serve --open
 ```
 
-在左下角打开**示例数据**，无需接入资源即可浏览界面。服务监听 `http://127.0.0.1:8710`。
+开启**示例数据**，无需接入资源即可浏览界面。服务监听 `http://127.0.0.1:8710`。
 
 接入集群时，在**来源 → 添加来源**中填写已有的 SSH 别名和用户名。SSH 必须能够无需交互地登录。云平台凭据填写 `env:RUNPOD_API_KEY` 这样的引用，而不是密钥本身。详见[配置说明](docs/configuration.md)和 [Slurm 接入指南](docs/drivers/slurm.md)。
 

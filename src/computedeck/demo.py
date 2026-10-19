@@ -142,15 +142,16 @@ def dashboard() -> dict[str, Any]:
         stale=True,
         last_success=(current - timedelta(minutes=47)).isoformat(),
         last_attempt=(current - timedelta(minutes=47)).isoformat(),
-        next_due_at=(current + timedelta(minutes=3)).isoformat(),
+        next_due_at=(current - timedelta(minutes=37)).isoformat(),
     )
     sources[5].update(
         status="error",
         stale=True,
         last_success=(current - timedelta(hours=2, minutes=40)).isoformat(),
-        last_attempt=(current - timedelta(minutes=2)).isoformat(),
-        next_due_at=(current + timedelta(minutes=8)).isoformat(),
-        failures=3,
+        # Attempts at 150, 140, 130, 120, 104, 74, 44 and 14 minutes ago.
+        last_attempt=(current - timedelta(minutes=14)).isoformat(),
+        next_due_at=(current + timedelta(minutes=16)).isoformat(),
+        failures=8,
         error={"code": "ssh_failed", "detail": "Permission denied (publickey)."},
         capabilities=["jobs", "nodes", "qos_limits", "history"],
         capabilities_seen=["history", "jobs", "nodes", "qos_limits"],
@@ -179,7 +180,8 @@ def dashboard() -> dict[str, Any]:
             sources[4]["last_success"],
         )
     )
-    jobs[-1]["node"] = "a-gpu-01"
+    jobs[-1]["node"] = "a-gpu-02"
+    local_current = current.astimezone().replace(tzinfo=None)
     failure = {
         **_job(
             len(_JOBS),
@@ -195,7 +197,7 @@ def dashboard() -> dict[str, Any]:
             observed,
         ),
         "state": "OUT_OF_MEMORY",
-        "end": (current - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "end": (local_current - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:125",
     }
     timeout = {
@@ -204,7 +206,7 @@ def dashboard() -> dict[str, Any]:
             ("example:cluster-a-alice", "vision / baseline", "TIMEOUT", 2, None, None, "02:00:00"),
             observed,
         ),
-        "end": (current - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "end": (local_current - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:0",
     }
     instances = [
@@ -360,7 +362,7 @@ def events() -> list[dict[str, Any]]:
     """Recent example events, newest first."""
     data = dashboard()
     jobs = {job["id"]: job for job in data["jobs"]}
-    failure = data["recent_failures"][0]
+    timeout, oom = data["recent_failures"]
     at = datetime.now(UTC)
 
     def context(source_id: str) -> dict[str, Any]:
@@ -377,16 +379,11 @@ def events() -> list[dict[str, Any]]:
         (
             "source.failed",
             "example:cluster-c-alice",
-            2,
+            150,
             {"error": next(s["error"] for s in data["sources"] if s["driver"] == "pbs")},
         ),
-        ("job.failed", failure["source_id"], 120, {"job": failure}),
-        (
-            "job.failed",
-            data["recent_failures"][1]["source_id"],
-            300,
-            {"job": data["recent_failures"][1]},
-        ),
+        ("job.failed", timeout["source_id"], 120, {"job": timeout}),
+        ("job.failed", oom["source_id"], 300, {"job": oom}),
         (
             "job.ended",
             "example:cluster-a-bob",

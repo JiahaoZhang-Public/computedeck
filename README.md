@@ -79,7 +79,7 @@ npm --prefix web run build
 uv run computedeck serve --open
 ```
 
-Open **Example data** at the bottom left to try the interface without connecting a resource. The service listens on `http://127.0.0.1:8710`.
+Turn on **Example data** to try the interface without connecting a resource. The service listens on `http://127.0.0.1:8710`.
 
 To connect a cluster, choose **Sources → Add source** and enter the SSH alias and username you already use. SSH must work without prompts. For cloud providers, enter a credential reference such as `env:RUNPOD_API_KEY`, not the key itself. See [configuration](docs/configuration.md) and the [Slurm setup guide](docs/drivers/slurm.md).
 

@@ -554,6 +554,7 @@ const en = {
   'setup.machine': 'SSH machine',
   'setup.machineHint': 'A GPU workstation or server you reach over SSH.',
   'settings.sourcesMoved': 'Sources are managed on their own page ({count} configured).',
+  'settings.sourcesMovedExample': 'Sources are managed on their own page.',
   'sources.open': 'Open Sources',
   'sources.intro':
     'Each login is collected on its own schedule. The command tags show what the last collection could read; missing ones are optional.',
@@ -673,7 +674,6 @@ const en = {
   'nav.toolbox': 'Toolbox',
   'toolbox.intro':
     'Tools that come with ComputeDeck start switched off. Before one is switched on you see what it will do.',
-  'toolbox.demo': 'Example data is on; tools cannot be changed.',
   'toolbox.empty': 'No tools installed',
   'toolbox.emptyHint': 'Plugins installed as Python packages appear here.',
   'toolbox.on': 'On',
