@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from computedeck import app as api
 from computedeck import collector as collector_module
-from computedeck.drivers import ssh
+from computedeck.drivers import ssh, ssh_host
 from computedeck.drivers.base import Batch, SourceError
 from computedeck.drivers.slurm import SlurmDriver
 from computedeck.store import DatabaseVersionError, Store
@@ -511,8 +511,14 @@ def test_existing_alias_instance_probes_alias_without_cluster_source(
 
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, options))
-        output = {"cpu_utilization": 10, "gpu_csv": "NVIDIA L4, 24, 0, 1\n" * 8}
-        return json.dumps(output)
+        gpus = "".join(f"{index}, GPU-{index}, NVIDIA L4, 24, 0, 1\n" for index in range(8))
+        output = {
+            "cpu_utilization": 10,
+            "gpu_tool": "nvidia-smi",
+            "gpu": gpus,
+            "apps": "GPU-3, 4242, 90\n",
+        }
+        return ssh_host.MARKER + json.dumps(output)
 
     monkeypatch.setattr(ssh, "run", run)
     body = {
@@ -531,9 +537,13 @@ def test_existing_alias_instance_probes_alias_without_cluster_source(
     assert result.status_code == 200, result.text
     assert calls == [("gpu-box", [])]
     assert result.json()["gpu_count"] == 8
+    assert result.json()["gpu_allocated"] == 1
     assert result.json()["gpu_utilization"] == 24
-    assert result.json()["state"] == "unknown"
-    assert client.get("/api/dashboard").json()["sources"] == []
+    # It answered just now; there is no provider lifecycle behind a machine added by hand.
+    assert result.json()["state"] == "running"
+    dashboard = client.get("/api/dashboard").json()
+    assert dashboard["sources"] == []
+    assert dashboard["instances"][0]["state"] == "running"
     config = client.get("/api/ssh/config").json()["config"]
     assert "Host gpu-box" not in config
     assert "HostName gpu-box" not in config

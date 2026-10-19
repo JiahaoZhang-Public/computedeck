@@ -76,7 +76,7 @@ A machine you reach over SSH and add by hand.
 | `existing_alias` | `true` when `host` is an alias already in your SSH configuration; no Host block is generated. |
 | `gpu_count`, `gpu_type` | Shown until a hardware snapshot reports the real values. |
 | `hourly_cost`, `currency` | For cost estimates; `currency` is an ISO code such as `USD`. |
-| `monitoring` | Read GPU, CPU and memory over SSH every 10 minutes. |
+| `monitoring` | Read GPUs, their processes, CPU and memory over SSH every 10 minutes. The machine counts in GPUs in use while its last check is under 20 minutes old. |
 
 ## Credentials
 

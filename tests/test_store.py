@@ -193,6 +193,83 @@ def test_cloud_metrics_update_only_the_probed_endpoint(store: Store) -> None:
     assert "gpu_utilization" not in rows["runpod:b"]
 
 
+def test_a_listing_keeps_the_last_check_of_an_unchanged_endpoint(store: Store) -> None:
+    pod = {
+        "id": "runpod:a",
+        "source_id": "runpod-runpod",
+        "state": "desired_running",
+        "host": "192.0.2.1",
+        "port": 22001,
+        "username": "root",
+        "cpu_utilization": None,
+        "ssh_status": "unverified",
+    }
+    other = {**pod, "id": "runpod:b"}
+    store.save_snapshot("runpod-runpod", {"instances": [pod, other]})
+    endpoint = {"host": "192.0.2.1", "port": 22001, "username": "root"}
+    failed = {
+        "ssh_status": "error",
+        "ssh_error": {"code": "ssh_failed", "detail": "Connection refused"},
+        "last_probe_attempt": now(),
+    }
+    store.update_cloud_metrics("runpod:a", endpoint, failed)
+    reached = {"ssh_status": "reachable", "ssh_error": None, "last_probe_attempt": now()}
+    store.update_cloud_metrics("runpod:b", endpoint, {**reached, "cpu_utilization": 20.0})
+    # A listing cannot check SSH: a failed connection stays failed until checked again.
+    store.save_snapshot("runpod-runpod", {"instances": [pod, other]})
+    rows = {row["id"]: row for row in store.dashboard()["instances"]}
+    assert {key: rows["runpod:a"][key] for key in failed} == failed
+    assert {key: rows["runpod:b"][key] for key in reached} == reached
+    # What the check measured belongs to that moment, not to this listing.
+    assert rows["runpod:b"]["cpu_utilization"] is None
+    # A pod that comes back on another port has not been checked there.
+    store.save_snapshot("runpod-runpod", {"instances": [{**pod, "port": 22002}, other]})
+    rows = {row["id"]: row for row in store.dashboard()["instances"]}
+    assert rows["runpod:a"]["ssh_status"] == "unverified"
+    assert "ssh_error" not in rows["runpod:a"]
+    assert "last_probe_attempt" not in rows["runpod:a"]
+    assert rows["runpod:b"]["ssh_status"] == "reachable"
+
+
+def test_a_source_that_reaches_the_machine_itself_is_not_overruled(store: Store) -> None:
+    machine = {"id": "gpu-box:gpu-box", "host": "gpu-box", "port": None, "username": "alice"}
+    failed = {"ssh_status": "error", "ssh_error": "timeout", "last_probe_attempt": now()}
+    store.save_snapshot("gpu-box-ssh", {"instances": [{**machine, **failed}]})
+    store.save_snapshot("gpu-box-ssh", {"instances": [{**machine, "ssh_status": "reachable"}]})
+    [row] = store.dashboard()["instances"]
+    assert row["ssh_status"] == "reachable"
+    assert "ssh_error" not in row
+
+
+@pytest.mark.parametrize(
+    ("ssh_status", "minutes", "state"),
+    [
+        ("reachable", 1, "running"),
+        ("reachable", 19, "running"),
+        ("reachable", 21, "unknown"),
+        ("error", 1, "unknown"),
+        ("unverified", None, "unknown"),
+    ],
+)
+def test_a_machine_added_by_hand_runs_only_while_a_recent_check_reached_it(
+    store: Store, ssh_status: str, minutes: int | None, state: str
+) -> None:
+    observed = None if minutes is None else datetime.now(UTC) - timedelta(minutes=minutes)
+    store.save_instance(
+        {
+            "id": "manual:lab-box1",
+            "source_id": "manual",
+            "manual": True,
+            # Stored by an earlier check; what counts is when that check was.
+            "state": "running",
+            "ssh_status": ssh_status,
+            "observed_at": observed and observed.isoformat(),
+        }
+    )
+    [row] = store.dashboard()["instances"]
+    assert row["state"] == state
+
+
 def test_stale_sources_are_flagged(store: Store, add_source: AddSource) -> None:
     hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     add_source(last_success=hour_ago)

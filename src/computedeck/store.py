@@ -16,6 +16,10 @@ from .errors import SourceError, checked
 
 SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
+# Monitored machines added by hand are checked over SSH this often.
+PROBE_INTERVAL = timedelta(minutes=10)
+# What an SSH check of a provider-listed instance leaves for the next listing to keep.
+PROBE_RESULT = ("ssh_status", "ssh_error", "last_probe_attempt")
 logger = logging.getLogger("computedeck")
 # Fields every reader of a stored record relies on; a record without them is skipped.
 _SOURCE_FIELDS: dict[str, type] = {
@@ -43,10 +47,13 @@ def now() -> str:
 
 
 def gpu_allocation(row: dict[str, Any]) -> int | None:
-    """SSH hosts count GPUs with compute processes; cloud instances count allocations."""
+    """SSH hosts count GPUs with compute processes; cloud instances count allocations.
+
+    A machine added by hand counts only what an SSH check measured, never the GPUs typed in.
+    """
     return (
         row.get("gpu_allocated")
-        if row.get("metrics_scope") == "host_visible"
+        if row.get("manual") or row.get("metrics_scope") == "host_visible"
         else row.get("gpu_count")
     )
 
@@ -80,6 +87,38 @@ def _timestamp(value: Any) -> str | None:
     except ValueError:
         pass
     return None
+
+
+def manual_state(row: dict[str, Any]) -> str:
+    """A machine added by hand has no provider lifecycle. It is running while its last SSH
+    check reached it within two check intervals, and unknown otherwise, never stopped."""
+    observed = _timestamp(row.get("observed_at"))
+    if row.get("ssh_status") != "reachable" or observed is None:
+        return "unknown"
+    age = datetime.now(UTC) - datetime.fromisoformat(observed)
+    return "running" if age < 2 * PROBE_INTERVAL else "unknown"
+
+
+def ssh_sampled_at(row: dict[str, Any]) -> str | None:
+    """When SSH last measured this machine: the reading of a machine read over SSH, or the
+    last check of an instance a provider lists, whose listing time measures nothing on it."""
+    if row.get("manual") or row.get("metrics_scope") == "host_visible":
+        return _timestamp(row.get("observed_at"))
+    return _timestamp(row.get("last_probe_attempt"))
+
+
+def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
+    """A listed instance with the last SSH check of its unchanged endpoint. A listing cannot
+    check SSH, so a failed connection stays failed until it is checked again."""
+    if (
+        old is None
+        or not old.get("last_probe_attempt")
+        or row.get("ssh_status", "unverified") != "unverified"
+        or not row.get("host")
+        or any(row.get(key) != old.get(key) for key in ("host", "port", "username"))
+    ):
+        return row
+    return {**row, **{key: old[key] for key in PROBE_RESULT if key in old}}
 
 
 def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
@@ -447,16 +486,18 @@ class Store:
         ).fetchone()
         merged = _read_snapshot(old[0])[0] if old else {}
         if "instances" in snapshot and merged.get("instances"):
+            previous = {row["id"]: row for row in merged["instances"]}
+            listed = [_keep_probe(row, previous.get(row["id"])) for row in snapshot["instances"]]
             # Keep an unexplained disappearance for one successful listing. A second
             # complete listing confirms absence; partial failures never reach here.
-            seen = {row["id"] for row in snapshot["instances"]}
+            seen = {row["id"] for row in listed}
             missing = [
                 {**row, "state": "missing"}
                 for row in merged["instances"]
                 if row["id"] not in seen
                 and row.get("state") not in {"missing", "terminated", "deleted"}
             ]
-            snapshot = {**snapshot, "instances": [*snapshot["instances"], *missing]}
+            snapshot = {**snapshot, "instances": [*listed, *missing]}
         merged.update(snapshot)
         with self.db:
             self.db.execute(
@@ -575,7 +616,9 @@ class Store:
                 for item in snapshot.get("failures", []):
                     failures.setdefault(item["id"], item)
         history_sources = [source for source in history_sources if source["id"] in history_ids]
-        instances.update({item["id"]: item for item in self.manual_instances()})
+        instances.update(
+            {item["id"]: {**item, "state": manual_state(item)} for item in self.manual_instances()}
+        )
         history = self.history(24)
         return {
             "mode": "live",
@@ -639,10 +682,11 @@ class Store:
             for row in dashboard["instances"]
             if row.get("manual") or row.get("source_id") not in disabled
         ]
+        # A machine added by hand is running only while a recent check reached it.
         running = [
             row
             for row in dashboard["jobs"] + instances
-            if row.get("source_id") in fresh
+            if (row.get("manual") or row.get("source_id") in fresh)
             and str(row.get("state", "unknown")).lower()
             in ("running", "r", "completing", "cg", "configuring", "cf")
         ]
@@ -661,19 +705,20 @@ class Store:
             not in ("running", "stopped", "terminated", "deleted")
             or (
                 str(row.get("state", "unknown")).lower() == "running"
+                and not row.get("manual")
                 and row.get("source_id") not in fresh
             )
         )
-        known_allocated = sum(gpu_allocation(row) or 0 for row in running) if fresh else None
-        # Actual cloud observations remain useful even when the provider has not
+        counted = [value for value in map(gpu_allocation, running) if value is not None]
+        known_allocated = sum(counted) if fresh or counted else None
+        # Actual SSH observations remain useful even when the provider has not
         # confirmed lifecycle state. They never increase allocated GPU counts.
         sampled_cloud = [
             row
             for row in instances
             if row.get("ssh_status") == "reachable"
-            and row.get("observed_at")
-            and (datetime.now(UTC) - datetime.fromisoformat(row["observed_at"])).total_seconds()
-            < 720
+            and (sampled := ssh_sampled_at(row))
+            and (datetime.now(UTC) - datetime.fromisoformat(sampled)).total_seconds() < 720
         ]
         measured_by_id = {
             row["id"]: row

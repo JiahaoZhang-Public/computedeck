@@ -1,4 +1,8 @@
-"""SSH hardware probe: NVIDIA and AMD parsing, unknown is not zero, strict endpoints."""
+"""SSH hardware probe: the SSH machine driver's probe, unknown is not zero, strict endpoints.
+
+Parsing of nvidia-smi, rocm-smi and ps output is covered in test_ssh_host.py; these tests
+cover what a check of one machine stores.
+"""
 
 import json
 import shlex
@@ -10,35 +14,42 @@ from typing import Any
 import pytest
 
 from computedeck import hardware
-from computedeck.drivers import ssh
+from computedeck.drivers import ssh, ssh_host
+from computedeck.drivers.base import SourceError
 
+GPUS = (
+    "0, GPU-0000aaaa, NVIDIA A100 80GB, 80, 40000, 81920\n"
+    "1, GPU-1111bbbb, NVIDIA A100 80GB, [N/A], 1000, 81920\n"
+)
 AMD = {
-    "card0": {
-        "GPU use (%)": "35",
-        "Card Series": "AMD Instinct MI250X",
-        "Card Model": "0x7408",
-        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
-        "Card SKU": "D00000",
-    },
+    "card0": {"GPU use (%)": "35", "Card Series": "AMD Instinct MI250X"},
     "card1": {"GPU use (%)": "N/A", "Card Series": "AMD Instinct MI250X"},
-    "system": {"Driver version": "1.0.0"},
 }
 
 
 def probe_output(**changes: Any) -> str:
-    result = {"cpu_utilization": 25.0, "memory_utilization": 40.0, "gpu_csv": "", "amd_json": ""}
+    result: dict[str, Any] = {
+        "cpu_utilization": 25.0,
+        "memory_utilization": 40.0,
+        "user": "alice",
+        "gpu_tool": "nvidia-smi",
+        "gpu": GPUS,
+        "gpu_error": None,
+        "amd_memory": None,
+        "apps": "GPU-0000aaaa, 4242, 39000\n",
+        "apps_error": None,
+        "owners": " 4242 alice\n",
+    }
     result.update(changes)
-    return json.dumps(result)
+    return ssh_host.MARKER + json.dumps(result)
 
 
-def test_nvidia_missing_utilization_is_unknown_and_host_scope_explicit() -> None:
-    result = hardware.parse_probe(
-        probe_output(
-            gpu_csv="NVIDIA A100 80GB, 80, 1000, 81920\nNVIDIA A100 80GB, [N/A], 500, 81920\n"
-        )
-    )
+def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> None:
+    result = hardware.parse_probe(probe_output())
     assert result["gpu_count"] == 2
     assert result["gpu_type"] == "NVIDIA A100 80GB"
+    # The same convention as an SSH machine source: GPUs with compute processes.
+    assert result["gpu_allocated"] == 1
     assert result["gpu_utilization"] == 80
     assert result["gpu_observed_count"] == 1
     assert result["cpu_utilization"] == 25
@@ -46,72 +57,59 @@ def test_nvidia_missing_utilization_is_unknown_and_host_scope_explicit() -> None
     assert result["metrics_scope"] == "host_visible"
     assert result["ssh_status"] == "reachable"
     assert result["observed_at"]
+    assert result["probe_warnings"] == []
     # A probe measures a host; it never claims a provider lifecycle state.
     assert "state" not in result
+    # Process ids and their users are not kept.
+    assert "gpus" not in result
+
+
+def test_idle_gpus_are_zero_in_use_but_unreadable_processes_stay_unknown() -> None:
+    assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 0
+    result = hardware.parse_probe(probe_output(apps=None, apps_error="Insufficient Permissions"))
+    assert result["gpu_allocated"] is None
+    assert result["gpu_count"] == 2
+    assert result["probe_warnings"] == [
+        {"code": "gpu_processes_unavailable", "detail": "Insufficient Permissions"}
+    ]
+
+
+def test_amd_gpus_in_use_are_unknown_with_a_reason() -> None:
+    result = hardware.parse_probe(
+        probe_output(gpu_tool="rocm-smi", gpu=json.dumps(AMD), apps=None, owners=None)
+    )
+    assert result["gpu_count"] == 2
+    assert result["gpu_type"] == "AMD Instinct MI250X"
+    assert result["gpu_utilization"] == 35
+    assert result["gpu_allocated"] is None
+    assert result["probe_warnings"] == [{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}]
 
 
 def test_no_gpu_tool_leaves_everything_unknown() -> None:
-    missing = hardware.parse_probe(probe_output(cpu_utilization=None, memory_utilization=None))
+    missing = hardware.parse_probe(
+        probe_output(
+            gpu_tool=None, gpu=None, apps=None, cpu_utilization=None, memory_utilization=None
+        )
+    )
     assert missing["gpu_count"] is None
+    assert missing["gpu_allocated"] is None
     assert missing["gpu_type"] is None
     assert missing["gpu_utilization"] is None
     assert missing["gpu_observed_count"] == 0
     assert missing["cpu_utilization"] is None
     assert missing["memory_utilization"] is None
+    assert [warning["code"] for warning in missing["probe_warnings"]] == ["gpus_unavailable"]
 
 
-def test_out_of_range_utilization_is_ignored() -> None:
-    result = hardware.parse_probe(probe_output(gpu_csv="GPU, 150, 0, 1\nGPU, 50, 0, 1\n"))
-    assert result["gpu_count"] == 2
-    assert result["gpu_utilization"] == 50
-    assert result["gpu_observed_count"] == 1
-
-
-def test_unexpected_nvidia_output_is_rejected() -> None:
-    with pytest.raises(ValueError):
-        hardware.parse_probe(probe_output(gpu_csv="NVIDIA A100, 80\n"))
-
-
-def test_amd_rocm_smi_json() -> None:
-    result = hardware.parse_probe(probe_output(amd_json=json.dumps(AMD)))
-    assert result["gpu_count"] == 2
-    assert result["gpu_type"] == "AMD Instinct MI250X"
-    assert result["gpu_utilization"] == 35
-    assert result["gpu_observed_count"] == 1
-    assert result["metrics_scope"] == "host_visible"
-
-
-def test_amd_key_spelling_varies_between_releases() -> None:
-    data = {
-        "card0": {"GPU use (%)": 10, "Card series": "Radeon Example"},
-        "card1": {"gpu use (%)": "30", "Card model": "Radeon Example Pro"},
-        "card2": {"GPU use (%)": "20"},
-        "card3": "not a card",
-    }
-    result = hardware.parse_probe(probe_output(amd_json=json.dumps(data)))
-    assert result["gpu_count"] == 3
-    assert result["gpu_type"] == "Radeon Example, Radeon Example Pro, AMD GPU"
-    assert result["gpu_utilization"] == 20
-    assert result["gpu_observed_count"] == 3
-
-
-@pytest.mark.parametrize("text", ["[]", '"card0"', "not json"])
-def test_unexpected_amd_output_is_rejected(text: str) -> None:
-    with pytest.raises(ValueError):
-        hardware.parse_probe(probe_output(amd_json=text))
-
-
-def test_nvidia_output_takes_precedence_over_amd() -> None:
-    result = hardware.parse_probe(
-        probe_output(gpu_csv="NVIDIA L4, 5, 0, 1\n", amd_json=json.dumps(AMD))
-    )
-    assert result["gpu_type"] == "NVIDIA L4"
-    assert result["gpu_count"] == 1
+@pytest.mark.parametrize("output", ["not json", "[]", probe_output(gpu="NVIDIA A100, 80\n")])
+def test_unexpected_output_is_rejected(output: str) -> None:
+    with pytest.raises(SourceError):
+        hardware.parse_probe(output)
 
 
 def test_embedded_probe_script_runs_and_parses() -> None:
     done = subprocess.run(
-        [sys.executable, "-I", "-c", hardware._PROBE],
+        [sys.executable, "-I", "-c", ssh_host._PROBE],
         capture_output=True,
         text=True,
         timeout=30,
@@ -138,7 +136,7 @@ async def test_endpoint_probe_passes_port_user_and_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    recorder = RecordingSSH(probe_output(gpu_csv="NVIDIA L4, 5, 0, 1\n"))
+    recorder = RecordingSSH(probe_output())
     monkeypatch.setattr(ssh, "run", recorder)
     result = await hardware.probe_instance(
         {
@@ -148,11 +146,12 @@ async def test_endpoint_probe_passes_port_user_and_identity(
             "identity_file": "~/.ssh/id_ed25519",
         }
     )
-    assert result["gpu_count"] == 1
+    assert result["gpu_count"] == 2
     [(destination, command, options)] = recorder.calls
     assert destination == "192.0.2.10"
     assert options == ["-p", "2222", "-l", "alice", "-i", f"{tmp_path}/.ssh/id_ed25519"]
-    assert shlex.split(command) == ["python3", "-c", hardware._PROBE]
+    # The SSH machine driver's read-only probe, run the same way.
+    assert shlex.split(command) == ["python3", "-I", "-c", ssh_host._PROBE]
 
 
 async def test_existing_alias_probe_uses_alias_without_port_or_user(
@@ -177,12 +176,13 @@ async def test_existing_alias_probe_uses_alias_without_port_or_user(
 async def test_probe_without_gpu_tool_keeps_provider_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(ssh, "run", RecordingSSH(probe_output()))
+    monkeypatch.setattr(ssh, "run", RecordingSSH(probe_output(gpu_tool=None, gpu=None)))
     result = await hardware.probe_instance({"host": "192.0.2.10", "port": 22, "username": "root"})
     # Absent keys leave the provider-reported GPU count and type untouched on merge.
     assert "gpu_count" not in result
     assert "gpu_type" not in result
     assert result["gpu_utilization"] is None
+    assert result["gpu_allocated"] is None
 
 
 @pytest.mark.parametrize(

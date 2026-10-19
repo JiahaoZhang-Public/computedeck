@@ -117,6 +117,7 @@ def demo_history(hours: int) -> list[dict[str, Any]]:
 def dashboard() -> dict[str, Any]:
     current = datetime.now(UTC)
     observed = (current - timedelta(minutes=3)).isoformat()
+    probed = (current - timedelta(minutes=2)).isoformat()
     sources = [_source(row, observed) for row in _SOURCES]
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
     failure = {
@@ -149,7 +150,9 @@ def dashboard() -> dict[str, Any]:
             "hourly_cost": 0.69,
             "currency": "USD",
             "observed_at": observed,
+            # Checked after this listing; the next listing keeps the result of the check.
             "ssh_status": "reachable",
+            "last_probe_attempt": probed,
         },
         {
             "id": "manual:lab-workstation-devbox",
@@ -157,12 +160,16 @@ def dashboard() -> dict[str, Any]:
             "platform": "Lab workstation",
             "external_id": "devbox",
             "name": "dev-box",
-            "state": "unknown",
+            # Running while a recent SSH check reached it; GPUs in use have processes.
+            "state": "running",
             "gpu_count": 1,
+            "gpu_allocated": 1,
             "gpu_type": "RTX 4090",
             "gpu_utilization": 4,
+            "gpu_observed_count": 1,
             "cpu_utilization": 12,
             "memory_utilization": 31,
+            "metrics_scope": "host_visible",
             "host": "192.0.2.20",
             "port": 22,
             "username": "alice",
@@ -172,7 +179,10 @@ def dashboard() -> dict[str, Any]:
             "hourly_cost": None,
             "currency": "USD",
             "observed_at": observed,
-            "ssh_status": "unverified",
+            "ssh_status": "reachable",
+            "last_probe_attempt": observed,
+            "probe_warnings": [],
+            "monitoring": True,
             "manual": True,
         },
     ]

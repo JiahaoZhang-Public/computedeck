@@ -17,7 +17,7 @@ from computedeck.drivers.base import Batch, SourceError, message
 from computedeck.drivers.slurm import SlurmDriver
 from computedeck.plugins import Runtime
 from computedeck.records import InstanceInput, instance_record
-from computedeck.store import Store, now
+from computedeck.store import Store, gpu_allocation, now
 
 AddSource = Callable[..., dict[str, Any]]
 Collect = Callable[[dict[str, Any]], Any]
@@ -403,7 +403,8 @@ async def test_probe_merges_measurements_into_manual_instance(
     [saved] = store.manual_instances()
     assert saved["gpu_utilization"] == 50
     assert saved["gpu_count"] == 2
-    assert saved["state"] == "unknown"
+    # It answered just now: running, as the dashboard derives it from this check.
+    assert saved["state"] == result["state"] == "running"
     assert store.dashboard()["history"][-1]["gpu_utilization"] == 50
     assert not collector.probes
 
@@ -475,6 +476,8 @@ async def test_probe_failure_is_recorded_and_raised(
     [saved] = store.manual_instances()
     assert saved["ssh_status"] == "error"
     assert saved["ssh_error"] == {"code": "ssh_failed", "detail": "Connection refused"}
+    # A failed check says nothing about whether the machine runs: unknown, never stopped.
+    assert saved["state"] == "unknown"
     assert not collector.probes
 
 
@@ -526,6 +529,65 @@ async def test_cloud_probe_updates_snapshot_without_changing_inventory(
     assert saved["gpu_type"] == "A100"
     assert saved["state"] == "desired_running"
     assert store.manual_instances() == []
+
+
+async def test_a_check_never_changes_what_a_provider_listed(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+) -> None:
+    source = add_source("RunPod", driver="runpod")
+    listed_at = now()
+    pod = {
+        "id": "runpod:pod1",
+        "source_id": source["id"],
+        "state": "running",
+        "host": "192.0.2.5",
+        "port": 22005,
+        "username": "root",
+        "identity_file": None,
+        "gpu_count": 2,
+        "gpu_type": "A100",
+        "gpu_utilization": None,
+        "cpu_utilization": None,
+        "observed_at": listed_at,
+        "ssh_status": "unverified",
+    }
+    store.save_snapshot(source["id"], {"instances": [pod]})
+
+    async def probe(row: dict[str, Any]) -> dict[str, Any]:
+        # An idle rented pod: no compute processes, and a container that sees one GPU.
+        return {
+            "ssh_status": "reachable",
+            "gpu_count": 1,
+            "gpu_type": "NVIDIA L4",
+            "gpu_allocated": 0,
+            "gpu_utilization": 0.0,
+            "gpu_observed_count": 1,
+            "cpu_utilization": 12.0,
+            "metrics_scope": "host_visible",
+            "observed_at": now(),
+            "probe_warnings": [],
+        }
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    result = await collector.probe("runpod:pod1")
+    [saved] = store.dashboard()["instances"]
+    assert saved == result
+    assert saved["ssh_status"] == "reachable"
+    assert saved["last_probe_attempt"]
+    assert (saved["gpu_utilization"], saved["cpu_utilization"]) == (0.0, 12.0)
+    # The provider stays the authority for its inventory, the GPUs held and its listing time.
+    assert (saved["gpu_count"], saved["gpu_type"]) == (2, "A100")
+    assert saved["observed_at"] == listed_at
+    for key in ("gpu_allocated", "metrics_scope", "probe_warnings"):
+        assert key not in saved
+    assert gpu_allocation(saved) == 2
+    assert store.dashboard()["history"][-1]["allocated_gpus"] == 2
+    # The next listing keeps the check, not its readings.
+    store.save_snapshot(source["id"], {"instances": [pod]})
+    [listed] = store.dashboard()["instances"]
+    assert listed["ssh_status"] == "reachable"
+    assert listed["last_probe_attempt"] == saved["last_probe_attempt"]
+    assert listed["cpu_utilization"] is None
 
 
 @pytest.mark.parametrize(

@@ -13,12 +13,15 @@ from .errors import SourceError, message
 from .hardware import probe_instance
 from .plugins import Runtime
 from .ssh_config import write_config
-from .store import Store, now
+from .store import PROBE_INTERVAL, Store, manual_state, now
 
 logger = logging.getLogger("computedeck")
 # Settings whose change means an in-flight result belongs to an old connection.
 CONNECTION_KEYS = ("ssh_alias", "enabled", "credential", "username", "options", "node")
 PERCENTAGES = ("gpu_utilization", "cpu_utilization", "memory_utilization")
+# What a check may change on an instance a source lists. The source stays the authority for
+# its inventory, its GPUs in use and when it was listed.
+LISTED_PROBE_FIELDS = ("ssh_status", "ssh_error", "gpu_observed_count", *PERCENTAGES)
 
 
 def measured(instance_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -200,12 +203,16 @@ class Collector:
             current = self._instance(instance_id)
             if not current or any(current.get(key) != value for key, value in endpoint.items()):
                 raise ProbeConflict("endpoint_changed")
-            current.update(updates, last_probe_attempt=attempt)
             if instance.get("manual"):
+                current.update(updates, last_probe_attempt=attempt)
+                # Its state follows from this check, as the dashboard derives it.
+                current["state"] = manual_state(current)
                 self.store.save_instance(current)
             else:
+                listed = {key: updates[key] for key in LISTED_PROBE_FIELDS if key in updates}
+                current.update(listed, last_probe_attempt=attempt)
                 self.store.update_cloud_metrics(
-                    instance_id, endpoint, {**updates, "last_probe_attempt": attempt}
+                    instance_id, endpoint, {**listed, "last_probe_attempt": attempt}
                 )
             return current
 
@@ -259,8 +266,7 @@ class Collector:
                 attempted = instance.get("last_probe_attempt")
                 if (
                     not attempted
-                    or (datetime.now(UTC) - datetime.fromisoformat(attempted)).total_seconds()
-                    >= 600
+                    or datetime.now(UTC) - datetime.fromisoformat(attempted) >= PROBE_INTERVAL
                 ):
                     self.spawn(self._auto_probe(instance["id"]))
 

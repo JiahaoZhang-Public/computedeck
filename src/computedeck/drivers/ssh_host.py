@@ -220,8 +220,14 @@ def _amd(text: str, memory_text: str | None) -> list[dict[str, Any]]:
     return gpus
 
 
-def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
-    """The probe's JSON as one running instance, with warnings for what was not read."""
+def probe_command() -> str:
+    """The read-only probe as one remote command."""
+    # -I: ignore PYTHON* variables, user site-packages and modules in the remote cwd.
+    return shlex.join(["python3", "-I", "-c", _PROBE])
+
+
+def read_output(output: str) -> dict[str, Any]:
+    """The probe's JSON object, after any banner a shell start-up file printed."""
     marked = [line for line in output.splitlines() if line.startswith(MARKER)]
     try:
         snapshot = json.loads(marked[-1][len(MARKER) :] if marked else output)
@@ -229,6 +235,16 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         raise SourceError("unexpected_output", command="python3") from None
     if not isinstance(snapshot, dict):
         raise SourceError("unexpected_output", command="python3")
+    return snapshot
+
+
+def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]]:
+    """GPU, CPU and memory readings of one machine, the capabilities they cover and warnings
+    for what was not read.
+
+    ``gpu_allocated`` counts the GPUs with compute processes; it stays None, never 0, when
+    the processes could not be read (``gpu_processes_unavailable``), as on AMD GPUs.
+    """
     warnings: list[dict[str, Any]] = []
     capabilities = ["instances"]
     tool = snapshot.get("gpu_tool")
@@ -264,17 +280,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         )
         warnings.append(message("gpus_unavailable", detail=str(detail)[:180]))
     observed = [row["utilization"] for row in gpus or [] if row["utilization"] is not None]
-    try:
-        username = validate_username(str(snapshot.get("user") or ""))
-    except ValueError:
-        username = ""
-    instance = {
-        "id": f"{source['cluster_id']}:{alias}",
-        "source_id": source["id"],
-        "platform": source["name"],
-        "name": alias,
-        # The machine answered; there is no provider lifecycle behind it.
-        "state": "running",
+    readings = {
         "gpu_count": len(gpus) if gpus else None,
         "gpu_allocated": (
             sum(bool(row["processes"]) for row in gpus)
@@ -287,6 +293,27 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "gpu_observed_count": len(observed),
         "cpu_utilization": _percent(snapshot.get("cpu_utilization")),
         "memory_utilization": _percent(snapshot.get("memory_utilization")),
+        "gpus": gpus,
+    }
+    return readings, capabilities, warnings
+
+
+def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
+    """The probe's JSON as one running instance, with warnings for what was not read."""
+    snapshot = read_output(output)
+    readings, capabilities, warnings = measure(snapshot)
+    try:
+        username = validate_username(str(snapshot.get("user") or ""))
+    except ValueError:
+        username = ""
+    instance = {
+        "id": f"{source['cluster_id']}:{alias}",
+        "source_id": source["id"],
+        "platform": source["name"],
+        "name": alias,
+        # The machine answered; there is no provider lifecycle behind it.
+        "state": "running",
+        **readings,
         "metrics_scope": "host_visible",
         # The user's own Host block is authoritative; no managed Host block is generated.
         "host": alias,
@@ -299,7 +326,6 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "currency": "USD",
         "observed_at": now(),
         "ssh_status": "reachable",
-        "gpus": gpus,
     }
     return Batch(instances=[instance], capabilities=capabilities, warnings=warnings)
 
@@ -372,10 +398,8 @@ class SSHHostDriver:
 
     async def collect(self, source: dict[str, Any]) -> Batch:
         alias = _alias(source)
-        # -I: ignore PYTHON* variables, user site-packages and modules in the remote cwd.
-        command = shlex.join(["python3", "-I", "-c", _PROBE])
         try:
-            output = await ssh.run(alias, command)
+            output = await ssh.run(alias, probe_command())
         except ssh.SSHError as error:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
