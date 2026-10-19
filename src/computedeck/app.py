@@ -10,6 +10,7 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -24,7 +25,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import attention, auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .errors import SourceError, message
@@ -320,6 +321,16 @@ def create_app(
         result = store().dashboard()
         result["refreshing"] = bool(collector.pending)
         result["collecting"] = sorted(collector.pending)
+        result["attention"] = attention.derive(
+            result,
+            [drivers.describe(name) for name in drivers.names()],
+            now=datetime.now(UTC),
+            loop_errors=runtime.loop_errors,
+            unreadable_rows=store().unreadable_rows(),
+            plugin_status={
+                context.id: {**context.status(), "enabled": context.enabled} for context in contexts
+            },
+        )
         return result
 
     @app.get("/api/history")
@@ -398,6 +409,8 @@ def create_app(
             source.update(
                 status="ready" if source["enabled"] else "unconfigured",
                 last_success=None,
+                capabilities=[],
+                capabilities_seen=[],
                 error=None,
                 failures=0,
             )

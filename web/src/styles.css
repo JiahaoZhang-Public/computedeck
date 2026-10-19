@@ -1184,6 +1184,10 @@ form > .form-error {
 
 /* ---------- Overview ---------- */
 
+.source-diagnosis {
+  overflow-wrap: anywhere;
+}
+
 .attention li + li {
   border-top: 1px solid var(--border);
 }

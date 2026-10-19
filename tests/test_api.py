@@ -911,6 +911,15 @@ def test_collector_commit_fault_reaches_health_and_recovers(
         "OSError: database write failed"
     )
 
+    items = client.get("/api/dashboard").json()["attention"]
+    assert any(
+        item["kind"] == "service_loop_failed" and item["subject"]["id"] == key for item in items
+    )
+    assert not any(
+        item["kind"] == "service_loop_failed"
+        for item in client.get("/api/dashboard?demo=true").json()["attention"]
+    )
+
     async def succeed(self: collector_module.Collector, source_id: str) -> None:
         pass
 
@@ -918,6 +927,7 @@ def test_collector_commit_fault_reaches_health_and_recovers(
     post(client, "/api/refresh")
     wait_until_idle(client)
     assert key not in client.get("/api/health").json()["background_errors"]
+    assert client.get("/api/dashboard").json()["attention"] == []
 
 
 @pytest.mark.parametrize("action", ["delete", "disable"])
@@ -974,3 +984,66 @@ def test_health_filters_inactive_commit_faults_without_mutating_runtime(
     assert f"collector:commit:{source['id']}" not in errors
     assert f"collector:commit:{other['id']}" in errors
     assert runtime.loop_errors == recorded
+
+
+def test_attention_reads_live_staleness_and_keeps_demo_isolated(
+    client: TestClient, data_dir: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    source = post(client, "/api/sources", CLUSTER).json()
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        source.update(last_success=(datetime.now(UTC) - timedelta(minutes=31)).isoformat())
+        store.save_source(source)
+    finally:
+        store.db.close()
+    data = client.get("/api/dashboard").json()
+    assert [(item["kind"], item["severity"]) for item in data["attention"]] == [
+        ("source_stale", "error")
+    ]
+    assert [
+        item["kind"] for item in client.get("/api/dashboard?demo=true").json()["attention"]
+    ] == ["instance_ssh_failed"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"ssh_alias": "cluster-b"},
+        {"interval_minutes": 20},
+        {"name": "Renamed cluster"},
+    ],
+)
+def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, Any]
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    capabilities = ["jobs", "nodes", "history"]
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        store.save_source(
+            {**source, "capabilities": capabilities, "capabilities_seen": capabilities}
+        )
+    finally:
+        store.db.close()
+
+    response = client.put(f"/api/sources/{source['id']}", json=changes, headers=HEADERS)
+    assert response.status_code == 200
+    changed_connection = "ssh_alias" in changes
+    expected = [] if changed_connection else capabilities
+    assert response.json()["capabilities"] == expected
+    assert response.json()["capabilities_seen"] == expected
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        return Batch(jobs=[], capabilities=["jobs"], warnings=[{"code": "history_unavailable"}])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    post(client, "/api/refresh", {"source_id": source["id"]})
+    data = wait_until_idle(client)
+    assert data["sources"][0]["capabilities_seen"] == (
+        ["jobs"] if changed_connection else sorted(capabilities)
+    )
+    assert [item["kind"] for item in data["attention"]] == (
+        [] if changed_connection else ["capability_regressed"]
+    )

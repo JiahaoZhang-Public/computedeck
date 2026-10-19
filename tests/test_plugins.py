@@ -164,6 +164,11 @@ def test_one_plugin_failing_does_not_stop_the_service(tmp_path: Path) -> None:
         health = client.get("/api/health").json()
         assert health["plugins"]["failing"] == {"error": "ValueError: bad row", "enabled": True}
         assert health["plugins"]["example"] == {"ok": True, "enabled": True}
+        items = client.get("/api/dashboard").json()["attention"]
+        assert {item["kind"] for item in items} == {"service_loop_failed", "plugin_error"}
+        assert next(item for item in items if item["kind"] == "plugin_error")["details"] == [
+            "ValueError: bad row"
+        ]
         tools = {tool["id"]: tool for tool in client.get("/api/toolbox").json()}
         assert tools["broken"]["rejected"] == {
             "code": "plugin_setup_failed",

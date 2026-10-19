@@ -218,7 +218,14 @@ def apply(store: Store, text: str) -> dict[str, int]:
                 for key in ("ssh_alias", "credential", "username", "options", "node", "enabled")
             ):
                 # Same as an edit in the app: earlier results belong to the old connection.
-                existing.update(last_success=None, error=None, status=record["status"], failures=0)
+                existing.update(
+                    last_success=None,
+                    error=None,
+                    status=record["status"],
+                    failures=0,
+                    capabilities=[],
+                    capabilities_seen=[],
+                )
             existing.update({key: record[key] for key in ("name", *_SOURCE_KEYS)})
             record = existing
         record["next_due_at"] = now()

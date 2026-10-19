@@ -33,6 +33,7 @@ export interface Source {
   error: Message | string | null;
   interval_minutes: number;
   capabilities: string[];
+  capabilities_seen?: string[];
   qos: QosLimit[];
   warnings?: (Message | string)[];
   stale?: boolean;
@@ -225,7 +226,20 @@ export interface FleetSummary extends Summary {
     pending_ids: string[];
   };
 }
+export interface Attention {
+  key: string;
+  kind: string;
+  subject: { kind: 'source' | 'instance' | 'service' | 'plugin'; id: string; name: string };
+  severity: 'error' | 'warn';
+  message: Message;
+  details: (Message | string)[];
+  since: string | null;
+  observed_at: string | null;
+  next_attempt: string | null;
+  action: 'diagnose' | 'instance' | 'health' | 'toolbox';
+}
 export interface Dashboard {
+  attention?: Attention[];
   summary: FleetSummary;
   mode: string;
   sources: Source[];

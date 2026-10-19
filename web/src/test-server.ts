@@ -13,6 +13,8 @@ function server(input: unknown) {
         `
 import json, sys
 from computedeck.summary import summarize, summarize_nodes
+from computedeck import attention, drivers
+from datetime import datetime, UTC
 from computedeck.drivers.base import node_health
 request = json.load(sys.stdin)
 if 'demo' in request:
@@ -27,6 +29,7 @@ else:
     for node in data['nodes']:
         node['health'] = node_health(node['state'])
     data['summary'] = summarize(data)
+    data.setdefault('attention', attention.derive(data, [drivers.describe(name) for name in drivers.names()], now=datetime.now(UTC)))
     result = data
 json.dump(result, sys.stdout)
 `,

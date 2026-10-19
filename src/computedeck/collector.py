@@ -129,6 +129,11 @@ class Collector:
                 error=None,
                 failures=0,
                 capabilities=batch.capabilities,
+                capabilities_seen=sorted(
+                    set(source.get("capabilities_seen", []))
+                    | set(source.get("capabilities", []))
+                    | set(batch.capabilities)
+                ),
                 warnings=batch.warnings,
                 cluster_state=batch.cluster_state,
             )

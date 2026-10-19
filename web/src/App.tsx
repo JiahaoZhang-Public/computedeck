@@ -1,6 +1,6 @@
 import { computeHealth } from './health';
 import { HealthPanel } from './HealthPanel';
-import { sourceAttentionTone } from './labels';
+import { SourceDiagnosis } from './SourceDiagnosis';
 import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  Attention,
   CollectionNode,
   Dashboard,
   DriverInfo,
@@ -35,20 +36,11 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, partialCount, relativeTime } from './domain';
+import { dateTime, partialCount } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
-import { groupsOf, sourceLabel } from './groups';
-import {
-  ApiError,
-  errorText,
-  formatMessage,
-  isLocale,
-  setLocale,
-  storeLocale,
-  storedLocale,
-  t,
-} from './i18n';
+import { groupsOf } from './groups';
+import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
 import type { Locale, MessageKey } from './i18n';
 import { corePages, readRoute, routeHash } from './routes';
 import type { CorePage, Filter, Page } from './routes';
@@ -66,7 +58,7 @@ import type { SourcePreset } from './forms';
 import { TokenGate } from './TokenGate';
 import { sessionRejected, setToken } from './token';
 import { BrandMark, Status } from './ui';
-import type { Attention, Ctx } from './pages/shared';
+import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
 import { OverviewPage } from './pages/Overview';
 import { JobsPage } from './pages/Jobs';
@@ -86,6 +78,7 @@ import { InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
 type Modal =
   | { kind: 'instance'; item?: Instance }
   | { kind: 'source'; source?: Source; preset?: SourcePreset }
+  | { kind: 'diagnosis'; sourceId: string }
   | { kind: 'ssh'; data: SSHConfig }
   | null;
 type Detail = { kind: 'job'; item: Job } | { kind: 'instance'; item: Instance } | null;
@@ -399,65 +392,23 @@ export default function App() {
     // Labels are recomputed with the data; the locale does not affect them.
     [data],
   );
-  const attention: Attention[] = data
-    ? [
-        ...data.sources
-          // A disabled login is not collected, so its old error or age needs no attention.
-          .filter(
-            (source) =>
-              source.enabled &&
-              (source.error ||
-                source.stale ||
-                source.warnings?.length ||
-                ['unavailable', 'degraded'].includes(source.cluster_state ?? '')),
-          )
-          .map((source) => ({
-            id: `source:${source.id}`,
-            tone: sourceAttentionTone(source),
-            title: t(
-              source.error
-                ? 'attention.failed'
-                : source.stale
-                  ? 'attention.stale'
-                  : ['unavailable', 'degraded'].includes(source.cluster_state ?? '')
-                    ? 'attention.cluster'
-                    : 'attention.partial',
-              { name: sourceLabel(groups, source) },
-            ),
-            text:
-              formatMessage(source.error) ||
-              (['unavailable', 'degraded'].includes(source.cluster_state ?? '')
-                ? t(
-                    source.cluster_state === 'unavailable'
-                      ? 'status.unavailable'
-                      : 'status.degraded',
-                  )
-                : '') ||
-              formatMessage(source.warnings?.[0]) ||
-              t('attention.lastSuccess', { time: relativeTime(source.last_success) }),
-            action: () => configure(source),
-          })),
-        ...data.instances
-          .filter((item) => item.ssh_status === 'error')
-          .map((item) => ({
-            id: `instance:${item.id}`,
-            tone: 'red' as const,
-            title: t('attention.sshFailed', { name: item.name }),
-            text: formatMessage(item.ssh_error) || t('attention.sshFailedHint'),
-            action: () => setDetail({ kind: 'instance', item }),
-          })),
-        ...data.instances
-          .filter((item) => item.ssh_status === 'unverified' && item.host && item.port)
-          .map((item) => ({
-            id: `instance:${item.id}`,
-            tone: 'gray' as const,
-            title: t('attention.unverified', { name: item.name }),
-            text: t('attention.unverifiedHint'),
-            action: () => setDetail({ kind: 'instance', item }),
-          })),
-      ]
-    : [];
-  const problems = attention.filter((item) => item.tone !== 'gray').length;
+  const attention = data?.attention ?? [];
+  const problems = attention.length;
+  const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
+  const diagnosisSource =
+    modal?.kind === 'diagnosis'
+      ? data?.sources.find((source) => source.id === modal.sourceId)
+      : undefined;
+  const openAttention = (item: Attention) => {
+    if (item.action === 'diagnose') {
+      const source = data?.sources.find((source) => source.id === item.subject.id);
+      if (source) diagnose(source);
+    } else if (item.action === 'instance') {
+      const instance = data?.instances.find((instance) => instance.id === item.subject.id);
+      if (instance) setDetail({ kind: 'instance', item: instance });
+    } else if (item.action === 'toolbox') navigate('toolbox');
+    else setHealthOpen(true);
+  };
   const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
   const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
@@ -483,6 +434,8 @@ export default function App() {
         setQuery,
         searchRef,
         attention,
+        openAttention,
+        diagnose,
         health,
         locale,
         changeLocale,
@@ -826,6 +779,12 @@ export default function App() {
             >
               <X size={16} />
             </button>
+            {modal.kind === 'diagnosis' &&
+              (diagnosisSource ? (
+                <SourceDiagnosis key={diagnosisSource.id} source={diagnosisSource} demo={demo} />
+              ) : (
+                <h2 id="modal-title">{t('msg.source_not_found')}</h2>
+              ))}
             {modal.kind === 'instance' && (
               <InstanceForm
                 item={modal.item}

@@ -3,7 +3,15 @@ import type { Summary, Unmeasured } from '../types';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
 import { formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
-import { jobCount, jobsMissing, listedJobs, money, partialCount, relativeTime } from '../domain';
+import {
+  jobCount,
+  jobsMissing,
+  listedJobs,
+  money,
+  partialCount,
+  relativeTime,
+  dateTime,
+} from '../domain';
 import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
 import { Empty, GroupMark, Meter, Panel, Stat, Status } from '../ui';
@@ -20,8 +28,9 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const { jobs: allJobs, stale } = listedJobs(data);
   const missingJobs = jobsMissing(data);
   const failures = data.recent_failures ?? [];
-  const setupNeeded = !demo && !data.sources.length && !data.instances.length;
-  const issues = ctx.attention.filter((item) => item.tone !== 'gray').length;
+  const setupNeeded =
+    !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
+  const issues = ctx.attention.length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
   const jobsKnown = summary.known_requested != null || summary.known_running > 0;
   const clusterLogins = data.sources.filter(
@@ -122,12 +131,29 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           {ctx.attention.length ? (
             <ul className="attention">
               {ctx.attention.map((item) => (
-                <li key={item.id}>
-                  <button onClick={item.action}>
-                    <span className={`dot ${item.tone}`} />
+                <li key={item.key}>
+                  <button onClick={() => ctx.openAttention(item)}>
+                    <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
                     <span>
-                      <strong>{item.title}</strong>
-                      <small>{item.text}</small>
+                      <strong>{formatMessage(item.message)}</strong>
+                      {item.details.map((detail, index) => (
+                        <small key={index}>{formatMessage(detail)}</small>
+                      ))}
+                      <small>
+                        {item.since
+                          ? t('attention.since', {
+                              time: dateTime(item.since),
+                              age: relativeTime(item.since),
+                            })
+                          : item.observed_at
+                            ? t('attention.lastSeen', {
+                                time: dateTime(item.observed_at),
+                                age: relativeTime(item.observed_at),
+                              })
+                            : t('attention.sinceUnknown')}
+                        {item.next_attempt &&
+                          ` · ${t('health.nextAttempt', { time: dateTime(item.next_attempt) })}`}
+                      </small>
                     </span>
                     <ChevronRight size={14} />
                   </button>
@@ -390,7 +416,7 @@ function UnmeasuredLinks({ items, ctx }: { items: Unmeasured[]; ctx: Ctx }) {
                 if (instance) ctx.openInstance(instance);
               } else {
                 const source = ctx.data.sources.find((item) => item.id === subject.id);
-                if (source) ctx.configure(source);
+                if (source) ctx.diagnose(source);
               }
             }}
           >

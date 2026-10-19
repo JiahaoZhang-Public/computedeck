@@ -2,7 +2,7 @@ import { serverDashboard } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DiagnosticRows } from './ConnectionChecks';
-import { sourceAttentionTone, sourceState } from './labels';
+import { sourceState } from './labels';
 import { PlanPage } from './pages/Plan';
 import { setLocale } from './i18n';
 import { groupsOf } from './groups';
@@ -32,12 +32,44 @@ describe('optional capabilities', () => {
   it('keeps missing history and inventory out of the anomaly count', () => {
     const partial = {
       ...source,
-      warnings: [{ code: 'history_unavailable' }, { code: 'instances_unavailable' }],
+      capabilities: ['jobs'],
+      warnings: [{ code: 'history_unavailable' }, { code: 'nodes_unavailable' }],
     };
-    expect(sourceAttentionTone(partial)).toBe('gray');
+    expect(
+      serverDashboard({
+        sources: [partial],
+        jobs: [],
+        instances: [],
+        nodes: [],
+        history: [],
+        mode: 'live',
+        updated_at: null,
+        refreshing: false,
+      }).attention,
+    ).toEqual([]);
     expect(sourceState(partial)).toBe('ready');
-    expect(sourceAttentionTone({ ...partial, stale: true })).toBe('amber');
-    expect(sourceAttentionTone({ ...partial, error: { code: 'ssh_failed' } })).toBe('red');
+    const stale = serverDashboard({
+      sources: [{ ...partial, stale: true }],
+      jobs: [],
+      instances: [],
+      nodes: [],
+      history: [],
+      mode: 'live',
+      updated_at: null,
+      refreshing: false,
+    }).attention!;
+    expect(stale.map((item) => [item.kind, item.severity])).toEqual([['source_stale', 'warn']]);
+    const failed = serverDashboard({
+      sources: [{ ...partial, failures: 2, error: { code: 'ssh_failed' } }],
+      jobs: [],
+      instances: [],
+      nodes: [],
+      history: [],
+      mode: 'live',
+      updated_at: null,
+      refreshing: false,
+    }).attention!;
+    expect(failed.map((item) => [item.kind, item.severity])).toEqual([['source_failed', 'error']]);
   });
   it('renders the same failure and repair messages returned by doctor', () => {
     setLocale('en');

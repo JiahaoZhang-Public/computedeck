@@ -351,6 +351,33 @@ commit for that same source clears its error. Commit errors are also cleared whe
 the source is deleted or disabled. Unreadable rows are reported by table; consult
 the service log for details.
 
+## Dashboard attention
+
+`GET /api/dashboard` adds an `attention` list, also present in example data. It is
+computed on read, without stored inbox state or new events. Each item has `key`,
+`kind`, `subject: {kind, id, name}`, `severity` (`error` or `warn`), a translatable
+`message`, all relevant `details`, nullable `since`, `observed_at` and `next_attempt` times, and an
+`action` (`diagnose`, `instance`, `health` or `toolbox`). All attention counts use
+this list's length.
+
+`since` is the last success for `source_failed` and `source_stale` (no good data
+since that collection), otherwise null. `observed_at` is the latest observation,
+not the incident onset: the latest attempt for collection failures, the last
+success for stale data and source conditions, the SSH check time, or the recorded
+loop error time. Both fields are null for unreadable rows and plugin health errors.
+Capability regressions include the machine-readable `capability` and the driver's
+check `command` in the message; the UI displays the command.
+
+Kinds are `source_failed`, `source_stale`, `cluster_unavailable`,
+`cluster_degraded`, `capability_regressed`, `partial_data`, `instance_ssh_failed`,
+`service_loop_failed`, `unreadable_rows` and `plugin_error`. Plugin errors use the
+existing health report's `error` key; plugins do not raise attention items.
+Source rows gain `capabilities_seen`, the union of capabilities delivered by
+successful collections. Older rows need no migration: their current capabilities
+seed the union on the next successful collection. Connection changes through
+source edits or configuration import clear both current and seen capabilities;
+name and interval edits preserve them.
+
 ## Marketplaces
 
 A marketplace is a `computedeck-marketplace.json` file at the root of a git repository, at

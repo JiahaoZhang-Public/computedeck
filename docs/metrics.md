@@ -10,3 +10,26 @@
 - **History** uses the same server allocation and utilization figures as Overview and Usage. Periods without data stay empty. Older points stay unchanged; excluding unmonitored machines can create a step at upgrade.
 - **Jobs counts** include only current jobs from enabled logins. If an enabled login lacks a current list, the count is partial. Last-known jobs remain visible as stale rows but do not increase the current count. The navigation badge and unfiltered Jobs count use the same server selection.
 - **Prices** are estimates from known hourly prices, not bills. Held instances show their hourly price; not-held instances do not. Unknown and transitional states retain the existing price display until fuller cost accounting is added; a price alone does not establish allocation. Currencies are never added together.
+
+## Needs attention
+
+The Overview tile, navigation badge and attention panel count the same server
+list. A collection failure appears after two consecutive failures, or immediately
+if its data is stale. Stale data becomes an error after three collection intervals.
+Cluster availability uses the existing node-health rule and current node data,
+with one item per cluster. A capability warning counts only when the source has
+delivered that capability before; permanent gaps stay on Sources. Other warnings
+are all included. Unchecked connections and machines with monitoring off do not
+produce attention items; failed SSH checks on monitored machines and provider
+instances do. Disabled sources and plugins do not produce items.
+
+Rows link to diagnosis (the last error and an explicit Test connection button),
+the instance, service health or Toolbox. Their times use existing observations:
+`since` is the last successful collection for a failing or stale source: no good
+data has arrived since then. It is null for all other cases. `observed_at` records
+the latest observation, shown as "Last seen": the collection that observed a
+source condition, the latest failed attempt for a source that never succeeded,
+an SSH check, or a background error report. Repeated observations do not imply a
+new incident onset. Unreadable rows and plugin health errors have neither time.
+Attention is derived on every dashboard read; there is no acknowledge, snooze or
+additional collection request.

@@ -4,6 +4,7 @@ import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import attention, drivers
 from .drivers.base import cluster_state, node_health
 from .summary import freshness, summarize
 
@@ -165,8 +166,9 @@ def dashboard() -> dict[str, Any]:
             "hourly_cost": 0.69,
             "currency": "USD",
             "observed_at": observed,
-            # Checked after this listing; the next listing keeps the result of the check.
-            "ssh_status": "reachable",
+            # A failed check survives provider listings without changing held GPUs.
+            "ssh_status": "error",
+            "ssh_error": {"code": "ssh_timeout"},
             "last_probe_attempt": probed,
         },
         {
@@ -289,6 +291,9 @@ def dashboard() -> dict[str, Any]:
     }
 
     data["summary"] = summarize(data)
+    data["attention"] = attention.derive(
+        data, [drivers.describe(name) for name in drivers.names()], now=current
+    )
     return data
 
 

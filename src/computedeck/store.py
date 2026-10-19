@@ -398,8 +398,12 @@ class Store:
                     source[key] = timestamp(source[key])
             if not isinstance(source.get("options", {}), dict):
                 source["options"] = {}
-            for key in ("account", "qos", "warnings", "capabilities", "error"):
-                kind = list if key in ("qos", "warnings", "capabilities") else dict
+            for key in ("account", "qos", "warnings", "capabilities", "capabilities_seen", "error"):
+                kind = (
+                    list
+                    if key in ("qos", "warnings", "capabilities", "capabilities_seen")
+                    else dict
+                )
                 try:
                     if not isinstance(source.get(key), kind | None):
                         raise ValueError(f"Stored {key} is not a {kind.__name__}")

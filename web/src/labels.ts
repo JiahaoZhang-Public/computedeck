@@ -68,10 +68,3 @@ export function connectedSource(source: Source) {
     !source.stale
   );
 }
-
-/** Missing optional capabilities are informational; failures and outages need attention. */
-export function sourceAttentionTone(source: Source): 'red' | 'amber' | 'gray' {
-  if (source.error || source.cluster_state === 'unavailable') return 'red';
-  if (source.stale || source.cluster_state === 'degraded') return 'amber';
-  return 'gray';
-}

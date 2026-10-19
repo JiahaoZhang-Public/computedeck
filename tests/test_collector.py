@@ -787,3 +787,29 @@ async def test_collect_clears_a_commit_fault_for_an_inactive_source(
     await collector.collect(source["id"])
     assert key not in collector.runtime.loop_errors
     assert "collector:schedule" in collector.runtime.loop_errors
+
+
+async def test_capabilities_seen_survive_regression_failure_and_recovery(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+) -> None:
+    # Upgrade from an existing source row, without capabilities_seen or a migration.
+    source = add_source(capabilities=["jobs", "nodes"])
+    batch = Batch(capabilities=["jobs"], warnings=[message("nodes_unavailable")])
+    failure = False
+
+    def collect(source: dict[str, Any]) -> Batch:
+        if failure:
+            raise SourceError("ssh_failed")
+        return batch
+
+    use_driver(monkeypatch, collect)
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["jobs", "nodes"]
+    failure = True
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["jobs", "nodes"]
+    failure = False
+    batch = Batch(capabilities=["jobs", "nodes", "history"])
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["history", "jobs", "nodes"]
+    assert store.source(source["id"])["warnings"] == []

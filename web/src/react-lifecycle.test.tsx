@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Puzzle } from 'lucide-react';
 import App from './App';
 import { HealthPanel } from './HealthPanel';
+import { SourceDiagnosis } from './SourceDiagnosis';
 import { computeHealth } from './health';
 import { api } from './api';
 import { setLocale, t } from './i18n';
@@ -674,3 +675,123 @@ describe.each(['en', 'zh-CN'] as const)('health panel details in %s', (locale) =
     expect(container.querySelector('a[href="#/toolbox"]')?.textContent).toBe(t('nav.toolbox'));
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'renders one server attention count and opens diagnosis without testing in %s',
+  async (locale) => {
+    const data = serverDemo();
+    const source = data.sources[0];
+    source.error = { code: 'ssh_timeout' };
+    data.attention = [
+      {
+        key: `source_failed:${source.id}`,
+        kind: 'source_failed',
+        subject: { kind: 'source', id: source.id, name: source.name },
+        severity: 'error',
+        message: { code: 'attention_source_failed', name: source.name },
+        details: [{ code: 'ssh_timeout' }, 'second detail'],
+        since: source.last_success,
+        observed_at: source.last_attempt,
+        next_attempt: source.next_due_at!,
+        action: 'diagnose',
+      },
+    ];
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language: locale };
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    expect(container.querySelector('a[href="#/overview"] .badge')?.textContent).toBe('1');
+    expect(container.querySelector('#attention .count')?.textContent).toBe('1');
+    const tile = [...container.querySelectorAll('.stat')].find(
+      (element) => element.querySelector('.stat-label')?.textContent === t('overview.attention'),
+    );
+    expect(tile?.querySelector('.stat-value')?.textContent).toBe('1');
+    expect(container.querySelectorAll('#attention li')).toHaveLength(1);
+    expect(container.querySelector('#attention')?.textContent).toContain('second detail');
+    expect(container.querySelector('#attention')?.textContent).toContain(
+      dateTime(source.next_due_at),
+    );
+    await click('#attention button');
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('h2')?.textContent).toBe(
+      t('attention.diagnosis', { name: source.name }),
+    );
+    expect(dialog.querySelector('form')).toBeNull();
+    expect(request.mock.calls.filter(([path]) => path.endsWith('/check'))).toHaveLength(0);
+    const test = [...dialog.querySelectorAll('button')].find(
+      (button) => button.textContent === t('sources.testConnection'),
+    )!;
+    await act(async () => test.click());
+    expect(
+      request.mock.calls.some(
+        ([path, body]) => path === `/sources/${source.id}/check` && body != null,
+      ),
+    ).toBe(true);
+  },
+);
+
+it('keeps service attention visible before any sources are connected', async () => {
+  const data = dashboard('Cluster A');
+  data.sources = [];
+  data.attention = [
+    {
+      key: 'service_loop_failed:collector:schedule',
+      kind: 'service_loop_failed',
+      subject: { kind: 'service', id: 'collector:schedule', name: 'collector:schedule' },
+      severity: 'error',
+      message: { code: 'attention_service_loop_failed', name: 'collector:schedule' },
+      details: ['Scheduler stopped'],
+      since: null,
+      observed_at: null,
+      next_attempt: null,
+      action: 'health',
+    },
+  ];
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path === '/settings') return { language: 'en' };
+    if (path === '/health') return null;
+    return [];
+  });
+  await render(<App />);
+  expect(container.querySelector('#attention')?.textContent).toContain('Scheduler stopped');
+  await click('#attention button');
+  expect(container.querySelector('.health-panel')).not.toBeNull();
+});
+
+it.each(['en', 'zh-CN'] as const)('keeps example diagnosis read-only in %s', async (locale) => {
+  setLocale(locale);
+  const source = serverDemo().sources[0];
+  source.error = { code: 'ssh_timeout' };
+  await render(<SourceDiagnosis source={source} demo />);
+  const button = container.querySelector('button')!;
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toBe(t('sources.testConnection'));
+  expect(container.textContent).toContain(t('attention.exampleCheck'));
+  await act(async () => button.click());
+  expect(request).not.toHaveBeenCalled();
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'labels repeated observations as Last seen in %s',
+  async (locale) => {
+    const data = serverDemo();
+    const item = data.attention![0];
+    expect(item.since).toBeNull();
+    expect(item.observed_at).not.toBeNull();
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language: locale };
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    const params = { time: dateTime(item.observed_at), age: relativeTime(item.observed_at) };
+    const text = container.querySelector('#attention')?.textContent;
+    expect(text).toContain(t('attention.lastSeen', params));
+    expect(text).not.toContain(t('attention.since', params));
+  },
+);

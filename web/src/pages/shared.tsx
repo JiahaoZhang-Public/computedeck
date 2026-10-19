@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react';
 import { ArrowRight, Search, X } from 'lucide-react';
 import type {
+  Attention,
   CollectionNode,
   Dashboard,
   DriverInfo,
@@ -22,14 +23,6 @@ import type { PluginProps, WebPlugin } from '../plugins';
 import { dateTime, jobGpuResources, relativeTime } from '../domain';
 import { Chips, Empty, Status } from '../ui';
 
-export type Attention = {
-  id: string;
-  tone: 'red' | 'amber' | 'gray';
-  title: string;
-  text: string;
-  action: () => void;
-};
-
 export type Ctx = {
   data: Dashboard;
   groups: Group[];
@@ -44,6 +37,8 @@ export type Ctx = {
   setQuery: (query: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   attention: Attention[];
+  openAttention: (item: Attention) => void;
+  diagnose: (source: Source) => void;
   health: Health | null;
   locale: Locale;
   changeLocale: (locale: Locale) => void;
