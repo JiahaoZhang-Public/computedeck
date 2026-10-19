@@ -11,14 +11,17 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import validate_row
+from .drivers.base import cluster_state, node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
+from .summary import PROBE_INTERVAL as PROBE_INTERVAL
+from .summary import _timestamp, fresh, summarize
+from .summary import gpu_allocation as gpu_allocation
+from .summary import manual_state as manual_state
+from .summary import ssh_sampled_at as ssh_sampled_at
 
 SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
-# Monitored machines added by hand are checked over SSH this often.
-PROBE_INTERVAL = timedelta(minutes=10)
 # What an SSH check of a provider-listed instance leaves for the next listing to keep.
 PROBE_RESULT = ("ssh_status", "ssh_error", "last_probe_attempt")
 logger = logging.getLogger("computedeck")
@@ -47,18 +50,6 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def gpu_allocation(row: dict[str, Any]) -> int | None:
-    """SSH hosts count GPUs with compute processes; cloud instances count allocations.
-
-    A machine added by hand counts only what an SSH check measured, never the GPUs typed in.
-    """
-    return (
-        row.get("gpu_allocated")
-        if row.get("manual") or row.get("metrics_scope") == "host_visible"
-        else row.get("gpu_count")
-    )
-
-
 def driver_kind(source: dict[str, Any]) -> str:
     try:
         return drivers.get(source.get("driver", "")).kind
@@ -78,34 +69,6 @@ def _decode(data: Any, fields: dict[str, type] | None = None) -> Any:
             if not isinstance(value.get(key), kind):
                 raise Unreadable(f"no valid {key}")
     return value
-
-
-def _timestamp(value: Any) -> str | None:
-    """A stored time the readers can compare, or None."""
-    try:
-        if isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None:
-            return value
-    except ValueError:
-        pass
-    return None
-
-
-def manual_state(row: dict[str, Any]) -> str:
-    """A machine added by hand has no provider lifecycle. It is running while its last SSH
-    check reached it within two check intervals, and unknown otherwise, never stopped."""
-    observed = _timestamp(row.get("observed_at"))
-    if row.get("ssh_status") != "reachable" or observed is None:
-        return "unknown"
-    age = datetime.now(UTC) - datetime.fromisoformat(observed)
-    return "running" if age < 2 * PROBE_INTERVAL else "unknown"
-
-
-def ssh_sampled_at(row: dict[str, Any]) -> str | None:
-    """When SSH last measured this machine: the reading of a machine read over SSH, or the
-    last check of an instance a provider lists, whose listing time measures nothing on it."""
-    if row.get("manual") or row.get("metrics_scope") == "host_visible":
-        return _timestamp(row.get("observed_at"))
-    return _timestamp(row.get("last_probe_attempt"))
 
 
 def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
@@ -561,16 +524,7 @@ class Store:
         self._repaired("instances", instance_id)
         return deleted == 1
 
-    @staticmethod
-    def fresh(source: dict[str, Any], capability: str) -> bool:
-        return bool(
-            source["enabled"]
-            and source.get("last_success")
-            and not source.get("stale")
-            and not source.get("error")
-            and source.get("status") in ("ready", "syncing")
-            and capability in source.get("capabilities", [])
-        )
+    fresh = staticmethod(fresh)
 
     def dashboard(self) -> dict[str, Any]:
         sources = self.sources()
@@ -593,6 +547,17 @@ class Store:
         nodes: dict[str, Any] = {}
         instances: dict[str, Any] = {}
         failures: dict[str, Any] = {}
+        observations: dict[str, list[dict[str, Any]]] = {"jobs": [], "nodes": [], "instances": []}
+        source_by_id = {s["id"]: s for s in sources}
+
+        def observation_rank(item: dict[str, Any], capability: str) -> tuple[bool, bool, str]:
+            source = source_by_id.get(item.get("source_id", ""), {})
+            return (
+                bool(source and fresh(source, capability)),
+                bool(source.get("enabled")),
+                item.get("observed_at") or "",
+            )
+
         for source_id, encoded in self.db.execute("SELECT source_id, data FROM snapshots"):
             snapshot, invalid = self._snapshot(source_id, encoded)
             if invalid:
@@ -607,10 +572,12 @@ class Store:
                         )
                 history_ids.discard(source_id)
             for key, target in (("jobs", jobs), ("nodes", nodes), ("instances", instances)):
-                for item in snapshot.get(key, []):
+                rows = [{"source_id": source_id, **item} for item in snapshot.get(key, [])]
+                observations[key].extend(rows)
+                for item in rows:
                     previous = target.get(item["id"])
-                    if not previous or (item.get("observed_at") or "") >= (
-                        previous.get("observed_at") or ""
+                    if not previous or observation_rank(item, key) >= observation_rank(
+                        previous, key
                     ):
                         target[item["id"]] = item
             # Failures are a 24-hour window as of the last collection; only a fresh
@@ -619,11 +586,20 @@ class Store:
                 for item in snapshot.get("failures", []):
                     failures.setdefault(item["id"], item)
         history_sources = [source for source in history_sources if source["id"] in history_ids]
-        instances.update(
-            {item["id"]: {**item, "state": manual_state(item)} for item in self.manual_instances()}
-        )
+        manual = [
+            {"source_id": "manual", "manual": True, **item, "state": manual_state(item)}
+            for item in self.manual_instances()
+        ]
+        instances.update({item["id"]: item for item in manual})
+        observations["instances"].extend(manual)
         history = self.history(24)
-        return {
+        for node in nodes.values():
+            node["health"] = node_health(node.get("state", ""))
+        for source in sources:
+            source_nodes = [n for n in observations["nodes"] if n.get("source_id") == source["id"]]
+            if source_nodes:
+                source["cluster_state"] = cluster_state(source_nodes)
+        data = {
             "mode": "live",
             "sources": sources,
             "jobs": list(jobs.values()),
@@ -644,6 +620,9 @@ class Store:
                 (source["last_success"] for source in history_sources), default=None
             ),
         }
+
+        data["summary"] = summarize({**data, **observations})
+        return data
 
     def history(self, hours: int, max_points: int = 600) -> list[dict[str, Any]]:
         """Points of the last ``hours``, thinned to at most ``max_points``.
@@ -673,85 +652,14 @@ class Store:
 
     def record_history(self) -> None:
         dashboard = self.dashboard()
-        # History includes only fresh source observations. Unknown intervals remain gaps.
-        fresh = {
-            s["id"]
-            for s in dashboard["sources"]
-            if self.fresh(s, "jobs" if s["kind"] == "cluster" else "instances")
-        }
-        disabled = {source["id"] for source in dashboard["sources"] if not source["enabled"]}
-        instances = [
-            row
-            for row in dashboard["instances"]
-            if row.get("manual") or row.get("source_id") not in disabled
-        ]
-        running_jobs = [
-            row
-            for row in dashboard["jobs"]
-            if row.get("source_id") in fresh
-            and str(row.get("state", "unknown")).lower()
-            in ("running", "r", "completing", "cg", "configuring", "cf")
-        ]
-        # A machine added by hand is running only while a recent check reached it.
-        held_instances = [
-            row
-            for row in instances
-            if (row.get("manual") or row.get("source_id") in fresh)
-            and instance_lifecycle(row.get("state")) == "held"
-        ]
-        allocated = [*running_jobs, *held_instances]
-        unknown_sources = {
-            source["id"]
-            for source in dashboard["sources"]
-            if source["enabled"] and source["id"] not in fresh
-        }
-        unknown_sources.update(
-            row.get("source_id", "unknown") for row in allocated if gpu_allocation(row) is None
-        )
-        unknown_sources.update(
-            row.get("source_id", "unknown")
-            for row in instances
-            if instance_lifecycle(row.get("state")) == "unknown"
-            or (
-                instance_lifecycle(row.get("state")) == "held"
-                and not row.get("manual")
-                and row.get("source_id") not in fresh
-            )
-        )
-        counted = [value for value in map(gpu_allocation, allocated) if value is not None]
-        known_allocated = sum(counted) if fresh or counted else None
-        # Actual SSH observations remain useful even when the provider has not
-        # confirmed lifecycle state. They never increase allocated GPU counts.
-        sampled_cloud = [
-            row
-            for row in instances
-            if row.get("ssh_status") == "reachable"
-            and (sampled := ssh_sampled_at(row))
-            and (datetime.now(UTC) - datetime.fromisoformat(sampled)).total_seconds() < 720
-        ]
-        measured_by_id = {
-            row["id"]: row
-            for row in [*running_jobs, *sampled_cloud]
-            if row.get("gpu_utilization") is not None
-        }
-        measured = list(measured_by_id.values())
-        covered = sum(row.get("gpu_observed_count", row.get("gpu_count")) or 0 for row in measured)
+        summary = dashboard["summary"]
         point = {
             "at": now(),
-            "allocated_gpus": None if unknown_sources else known_allocated,
-            "known_allocated_gpus": known_allocated,
-            "unknown_allocation_sources": len(unknown_sources),
-            "gpu_utilization": (
-                sum(
-                    row["gpu_utilization"]
-                    * (row.get("gpu_observed_count", row.get("gpu_count")) or 0)
-                    for row in measured
-                )
-                / covered
-                if covered
-                else None
-            ),
-            "coverage_count": covered,
+            "allocated_gpus": summary["allocated"],
+            "known_allocated_gpus": summary["known_allocated"],
+            "unknown_allocation_sources": summary["unknown_allocation_sources"],
+            "gpu_utilization": summary["utilization"],
+            "coverage_count": summary["covered"],
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))

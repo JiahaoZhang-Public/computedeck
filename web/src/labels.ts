@@ -1,5 +1,5 @@
 import { hasKey, t } from './i18n';
-import type { Source } from './types';
+import type { ComputeNode, Source } from './types';
 
 export function statusLabel(state: string) {
   const key = `status.${state}`;
@@ -37,20 +37,13 @@ export function statusTone(state: string): Tone {
     return 'red';
   return 'gray';
 }
-/**
- * Slurm power saving (POWER_DOWN, POWERING_DOWN, POWERED_DOWN, POWER_UP, POWERING_UP) is a
- * normal state of an idle node, not an outage; a node that is also down says so separately.
- */
-const POWER_SAVING = /power(?:ed|ing)?_(?:down|up)/gi;
-const ABNORMAL =
-  /down|drain|fail|maint|not_resp|not_ready|cordon|offline|unavail|unreach|unknown|inval|reserved|\*/i;
-/** A node that cannot take work now: down, draining, failing, INVAL (bad configuration), … */
-export function nodeAbnormal(state: string) {
-  return ABNORMAL.test(state.replace(POWER_SAVING, ''));
+/** Availability is classified on the server, including reservations and power saving. */
+export function nodeAbnormal(node: Pick<ComputeNode, 'health'>) {
+  return node.health === 'unavailable';
 }
-export function nodeTone(state: string): Tone {
-  if (nodeAbnormal(state)) return 'red';
-  if (/idle/i.test(state)) return 'green';
+export function nodeTone(node: Pick<ComputeNode, 'health' | 'state'>): Tone {
+  if (nodeAbnormal(node)) return 'red';
+  if (node.health === 'usable' && /idle/i.test(node.state)) return 'green';
   return 'gray';
 }
 

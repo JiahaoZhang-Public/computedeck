@@ -28,7 +28,8 @@ from computedeck.store import Store
         (["idle"] + ["down"] * 9, "degraded"),
         (["idle"] + ["down"] * 4, "available"),
         (["idle+cloud+powered_down"], "available"),
-        (["unknown"], "unknown"),
+        (["unknown"], "unavailable"),
+        (["new_scheduler_state"], "unknown"),
     ],
 )
 def test_cluster_availability(states, expected):

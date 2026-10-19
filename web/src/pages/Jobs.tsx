@@ -16,7 +16,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
   const clusters = groups.filter((item) => item.kind === 'cluster');
   const inView = (clusterId: string) => group === 'all' || clusterId === group;
   // Logins without a current job list: their jobs are unknown, so counts are lower bounds.
-  const missing = jobsMissing(data.sources).filter((source) => inView(source.cluster_id));
+  const missing = jobsMissing(data).filter((source) => inView(source.cluster_id));
   const collected = data.sources.some(
     (source) =>
       source.enabled &&
@@ -48,8 +48,19 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
       matches(query, job.name, job.id, job.user, job.qos),
   );
   const shown = tab === 'running' ? running : tab === 'pending' ? pending : scoped;
-  const count = (jobs: typeof scoped) =>
-    jobCount(jobs.filter((job) => !stale.has(job.source_id)).length, missing.length);
+  const summary = group === 'all' ? data.summary : data.summary.groups[group];
+  const count = (jobs: typeof scoped, state: 'all' | 'running' | 'pending') => {
+    if (!query && summary) {
+      const known =
+        state === 'all'
+          ? summary.jobs.known
+          : state === 'running'
+            ? summary.known_running
+            : summary.known_pending;
+      return jobCount(known, summary.jobs.missing_source_ids.length);
+    }
+    return jobCount(jobs.filter((job) => !stale.has(job.source_id)).length, missing.length);
+  };
   const hasClusters = data.sources.some((source) => source.kind === 'cluster' && source.enabled);
   const coverage = covered
     .map((id) => {
@@ -66,9 +77,9 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
             value={tab}
             onChange={setTab}
             options={[
-              { value: 'all', label: t('filter.all'), count: count(scoped) },
-              { value: 'running', label: t('status.RUNNING'), count: count(running) },
-              { value: 'pending', label: t('status.PENDING'), count: count(pending) },
+              { value: 'all', label: t('filter.all'), count: count(scoped, 'all') },
+              { value: 'running', label: t('status.RUNNING'), count: count(running, 'running') },
+              { value: 'pending', label: t('status.PENDING'), count: count(pending, 'pending') },
               {
                 value: 'failed',
                 label: t('jobs.failed24h'),

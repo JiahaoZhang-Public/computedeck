@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { setLocale, t } from './i18n';
+import { ClustersPage } from './pages/Clusters';
+import { PlanPage } from './pages/Plan';
+import { UsagePage } from './pages/Usage';
+import { serverDashboard, serverDemo } from './test-server';
+import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
@@ -51,21 +56,22 @@ const job = (id: string, extra: Partial<Job> = {}): Job => ({
   observed_at: hourAgo,
   ...extra,
 });
-const dash = (extra: Partial<Dashboard>): Dashboard => ({
-  mode: 'live',
-  sources: [source()],
-  jobs: [],
-  instances: [],
-  nodes: [],
-  history: [],
-  updated_at: now,
-  refreshing: false,
-  ...extra,
-});
-const ctx = (data: Dashboard) =>
+const dash = (extra: Partial<Dashboard>): Dashboard =>
+  serverDashboard({
+    mode: 'live',
+    sources: [source()],
+    jobs: [],
+    instances: [],
+    nodes: [],
+    history: [],
+    updated_at: now,
+    refreshing: false,
+    ...extra,
+  });
+const ctx = (input: Dashboard) =>
   ({
-    data,
-    groups: groupsOf(data),
+    data: serverDashboard(input),
+    groups: groupsOf(input),
     demo: false,
     group: 'all',
     query: '',
@@ -169,17 +175,30 @@ describe('jobs of a cluster whose collection is not current', () => {
   });
 });
 
-it('shows a fully unavailable cluster instead of an idle load bar', () => {
-  const data = dash({
-    sources: [source({ cluster_state: 'unavailable' })],
-    nodes: Array.from({ length: 70 }, (_, i) => ({
+function clusterData(states: string[], state: Source['cluster_state'] = 'available') {
+  return dash({
+    sources: [
+      source({
+        cluster_state: state,
+        capabilities: ['jobs', 'nodes', 'qos_limits', 'qos_access'],
+        qos: [
+          {
+            name: 'normal',
+            access: 'verified',
+            limits: { MaxTRESPU: 'gres/gpu=8' },
+            origin: 'test',
+          },
+        ],
+      }),
+    ],
+    nodes: states.map((state, i) => ({
       id: `a:${i}`,
       source_id: 'a-alice',
       cluster_id: 'a',
       name: `node-${i}`,
-      state: 'down+not_responding',
+      state,
       gpu_count: 8,
-      gpu_allocated: 0,
+      gpu_allocated: state === 'mixed' ? 2 : 0,
       gpu_type: 'example',
       cpu_count: 32,
       cpu_allocated: 0,
@@ -187,10 +206,7 @@ it('shows a fully unavailable cluster instead of an idle load bar', () => {
       observed_at: now,
     })),
   });
-  const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
-  expect(html).toContain('70/70 nodes unavailable');
-  expect(html).toContain('Unavailable');
-});
+}
 
 describe('the last SSH check of a machine', () => {
   const twoMinutesAgo = new Date(Date.now() - 2 * 60_000).toISOString();
@@ -254,5 +270,98 @@ describe('the last SSH check of a machine', () => {
   it('leaves the busy count out for a provider instance, which holds what it rents', () => {
     const html = drawer({ ...machine, manual: false, metrics_scope: undefined });
     expect(html).not.toContain('GPUs with processes');
+  });
+});
+
+afterEach(() => setLocale('en'));
+describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (locale) => {
+  it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const context = ctx(data);
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    expect(overview).toContain('≥ 21');
+    expect(overview).toContain('build-box');
+    expect(overview).toContain(t('msg.summary_not_probed_yet'));
+    expect(overview).toContain(t('summary.unmonitored.one'));
+    expect(t('summary.unmonitored', { count: 1 })).toBe(t('summary.unmonitored.one'));
+    expect(t('summary.unmonitored', { count: 2 })).not.toBe(t('summary.unmonitored.one'));
+    if (locale === 'en') expect(overview).not.toContain('1 machines');
+  });
+  it('shows the same all-down capacity on Overview, Clusters and Where to run', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(Array(70).fill('down+not_responding'), 'unavailable'));
+    const text = t('summary.capacity', { usable: 0, unavailable: 560 });
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
+    for (const html of [overview, clusters, plan]) {
+      expect(html).toContain(text);
+      expect(html).not.toContain('0 / 560');
+    }
+    expect(overview).toContain(`<span class="red-text">${text}</span>`);
+    expect(clusters).toContain(`<strong class="red-text">${text}</strong>`);
+    expect(overview.split('</table>')[0]).not.toContain('meter-track');
+    expect(clusters.split('</section>')[0]).not.toContain('meter-track');
+    expect(plan).toContain(t('plan.verdict.unavailable'));
+  });
+
+  it.each(['FUTURE', 'ERROR'])('keeps the usable subtotal when a node is %s', (state) => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', state], 'unknown'));
+    const text = t('summary.allocation', { allocated: '—', usable: '≥ 8' });
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+    ]) {
+      expect(html).toContain(text);
+      expect(html).toContain('≥ 8');
+    }
+  });
+
+  it.each([
+    ['available', ['mixed', 'mixed', 'mixed', 'drained'], '', 24, 6],
+    ['degraded', ['mixed', ...Array(9).fill('drained')], 'amber-text', 8, 2],
+  ] as const)(
+    'shows allocation and the %s tone without escalating individual drained nodes',
+    (state, states, tone, usable, allocated) => {
+      setLocale(locale);
+      const context = ctx(clusterData([...states], state));
+      const text = t('summary.allocation', { allocated, usable });
+      const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+      const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+      expect(overview).toContain(`<span class="${tone}">${text}</span>`);
+      expect(clusters).toContain(`<strong class="${tone}">${text}</strong>`);
+      const detail = t('summary.capacityDetail', {
+        unavailable: states.length * 8 - usable,
+        total: states.length * 8,
+      });
+      expect(overview).toContain(detail);
+      expect(clusters).toContain(detail);
+    },
+  );
+
+  it('shows allocation over usable GPUs without a zero-unavailable line for a healthy cluster', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', 'mixed']));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.allocation', { allocated: 4, usable: 16 }));
+      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 0, total: 16 }));
+    }
+  });
+
+  it('renders server figures without deriving them again from rows', () => {
+    setLocale(locale);
+    const context = ctx(serverDemo());
+    context.data.summary.allocated = 123;
+    context.data.summary.utilization = 87;
+    context.data.summary.covered = 42;
+    expect(renderToStaticMarkup(<OverviewPage ctx={context} />)).toContain('>123<');
+    const usage = renderToStaticMarkup(<UsagePage ctx={context} />);
+    expect(usage).toContain('>87<');
+    expect(usage).toContain(t('usage.gpuHint', { count: 42 }));
   });
 });

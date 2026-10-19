@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { serverDashboard, serverDemo } from './test-server';
 import { act, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -52,7 +53,7 @@ function sample(hoursAgo: number): HistoryPoint {
 }
 
 function dashboard(name: string): Dashboard {
-  return {
+  return serverDashboard({
     mode: 'live',
     sources: [
       {
@@ -80,7 +81,7 @@ function dashboard(name: string): Dashboard {
     history: [],
     updated_at: null,
     refreshing: false,
-  };
+  });
 }
 
 function context(id: string, enabled = true): Ctx {
@@ -116,6 +117,65 @@ afterEach(async () => {
 });
 
 describe('dashboard lifecycle', () => {
+  it('uses the server Jobs count and opens a named unmeasured machine', async () => {
+    const data = serverDemo();
+    data.summary.jobs.total = null;
+    data.summary.jobs.known = 2;
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language: 'en' };
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    expect(container.querySelector('a[href="#/jobs"] .badge')?.textContent).toBe('≥ 2');
+    const missing = [...container.querySelectorAll<HTMLButtonElement>('.stat-hint button')].find(
+      (button) => button.textContent?.includes('build-box'),
+    );
+    expect(missing).toBeDefined();
+    await act(async () => missing!.click());
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('build-box');
+  });
+
+  it.each(['en', 'zh-CN'] as const)(
+    'limits each unmeasured hint to two links until expanded in %s',
+    async (locale) => {
+      const data = serverDemo();
+      const missing = ['first-login', 'second-login', 'third-login', 'fourth-login'].map(
+        (name) => ({
+          subject: { kind: 'source' as const, id: name, name },
+          reason: { code: 'summary_source_stale' },
+        }),
+      );
+      data.summary.unmeasured = missing;
+      data.summary.queued_unmeasured = missing;
+      data.summary.jobs.missing_source_ids = missing.map((item) => item.subject.id);
+      data.summary.requested = null;
+      data.summary.running = null;
+      setLocale(locale);
+      request.mockImplementation(async (path) => {
+        if (path.startsWith('/dashboard')) return data;
+        if (path === '/settings') return { language: locale };
+        if (path === '/health') return null;
+        return [];
+      });
+      await render(<App />);
+      const hints = [...container.querySelectorAll<HTMLElement>('.stat-hint')].slice(0, 3);
+      for (const hint of hints) {
+        expect(hint.textContent).toContain('first-login');
+        expect(hint.textContent).toContain('second-login');
+        expect(hint.textContent).not.toContain('third-login');
+        expect(hint.textContent).not.toContain('fourth-login');
+        const more = hint.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+        expect(more?.textContent).toBe(t('summary.more', { count: 2 }));
+        await act(async () => more!.click());
+        expect(hint.textContent).toContain('third-login');
+        expect(hint.textContent).toContain('fourth-login');
+        expect(hint.querySelector('button[aria-expanded="false"]')).toBeNull();
+      }
+    },
+  );
+
   it('ignores a live response that finishes after switching to example data', async () => {
     const live = deferred<Dashboard>();
     const demo = deferred<Dashboard>();

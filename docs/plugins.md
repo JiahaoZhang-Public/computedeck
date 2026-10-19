@@ -298,6 +298,39 @@ output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
 `ComputeDeck.jsxRuntime`. Build the bundle before building the wheel, and include the
 folder with `artifacts` (hatch) or package data.
 
+## Dashboard summaries
+
+`GET /api/dashboard` (including example data) adds `summary`. Existing dashboard
+keys and `WEB_API = 1` remain unchanged. The summary contains fleet figures and the
+same figures under `groups[cluster_id]` (or `platform:<lowercase platform>` for
+hand-added machines) and `sources[source_id]`:
+
+- `allocated`, `requested`, `running`, `pending` are complete totals or `null`.
+  `known_allocated`, `known_requested`, `known_running`, `known_pending` are their
+  observed subtotals. A null total must never be displayed as zero.
+- `unmeasured` and `queued_unmeasured` name missing allocation and queue evidence as
+  `{subject: {kind: "source" | "instance", id, name}, reason: {code}}`. Reason codes
+  have English and Chinese translations. `unmonitored` counts excluded hand-added
+  machines with monitoring off.
+- `utilization` is GPU-weighted, with `covered` measured GPUs. `cpu_utilization` and
+  `memory_utilization` are means of available samples. Provider allocation and SSH
+  sample freshness are independent.
+- `nodes` gives `capacity`, `usable`, `known_usable`, `unavailable` GPU counts,
+  allocation and unallocated GPUs **on usable nodes**, node counts, and the oldest
+  observation. `usable` is null when node health is partly unknown; `known_usable`
+  preserves the subtotal on known usable nodes, displayed as a lower bound.
+  `observed_at` is the oldest contributing observation.
+  Only enabled, current inventories contribute.
+  Each dashboard node also gains `health: "usable" | "unavailable" | "unknown"`.
+- `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the
+  fleet-level `summary.jobs` includes `current_ids` and `listed_ids`; these lists are
+  not repeated under groups or sources. Listed IDs include retained stale jobs; the
+  count excludes those rows.
+
+`unknown_allocation_sources` retains the history coverage count: provider instances
+share their login's missing count; unmeasured hand-added machines count individually.
+The summary does not add cost accounting or failure-history coverage.
+
 ## Marketplaces
 
 A marketplace is a `computedeck-marketplace.json` file at the root of a git repository, at

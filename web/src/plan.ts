@@ -10,7 +10,6 @@ import {
   uniqueJobs,
   uniqueNodes,
 } from './domain';
-import { nodeTone } from './labels';
 
 /** What the user wants to run. */
 export interface PlanRequest {
@@ -117,7 +116,7 @@ function capacity(nodes: ComputeNode[], gpuType: string) {
   const gpuNodes = nodes.filter((node) => node.gpu_count == null || node.gpu_count > 0);
   const matching = gpuNodes.filter((node) => matchesModel(node, gpuType));
   const usable = matching.filter(
-    (node) => nodeTone(node.state) !== 'red' && node.gpu_count != null && node.gpu_count > 0,
+    (node) => node.health === 'usable' && node.gpu_count != null && node.gpu_count > 0,
   );
   const free = usable.map((node) =>
     node.gpu_allocated == null || (gpuType && models(node.gpu_type).length > 1)
@@ -129,7 +128,13 @@ function capacity(nodes: ComputeNode[], gpuType: string) {
   // then a cluster without usable matching nodes has none free, rather than unknown.
   const complete =
     nodes.length > 0 &&
-    gpuNodes.every((node) => node.gpu_count != null && (!gpuType || !!node.gpu_type));
+    gpuNodes.every(
+      (node) =>
+        node.health !== 'unknown' &&
+        node.health != null &&
+        node.gpu_count != null &&
+        (!gpuType || !!node.gpu_type),
+    );
   return {
     matchingNodes: usable.length,
     freeGpus: usable.length

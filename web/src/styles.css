@@ -785,6 +785,12 @@ form > .form-error {
   font-size: 12px;
 }
 
+.stat-hint .link {
+  display: inline;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Tables ---------- */
 
 .table-wrap {

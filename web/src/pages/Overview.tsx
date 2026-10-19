@@ -1,15 +1,9 @@
+import { useState } from 'react';
+import type { Summary, Unmeasured } from '../types';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
-import { localized, t } from '../i18n';
+import { formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
-import {
-  jobCount,
-  jobsMissing,
-  listedJobs,
-  money,
-  partialCount,
-  relativeTime,
-  summarize,
-} from '../domain';
+import { jobCount, jobsMissing, listedJobs, money, partialCount, relativeTime } from '../domain';
 import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
 import { Empty, GroupMark, Meter, Panel, Stat, Status } from '../ui';
@@ -17,19 +11,19 @@ import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
 import { FailuresTable, JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
 import { recentlyReachable } from './util';
-import { groupSummary, instanceCount } from './summary';
+import { capacityText, groupSummary, instanceCount } from './summary';
 
 export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const { data, demo } = ctx;
-  const summary = summarize(data);
+  const summary = data.summary;
   // Current jobs first, then the last-known jobs of logins whose job list is not current.
   const { jobs: allJobs, stale } = listedJobs(data);
-  const missingJobs = jobsMissing(data.sources);
+  const missingJobs = jobsMissing(data);
   const failures = data.recent_failures ?? [];
   const setupNeeded = !demo && !data.sources.length && !data.instances.length;
   const issues = ctx.attention.filter((item) => item.tone !== 'gray').length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
-  const jobsKnown = summary.knownRequested != null || summary.knownRunning > 0;
+  const jobsKnown = summary.known_requested != null || summary.known_running > 0;
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
   ).length;
@@ -52,35 +46,53 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       <div className="stats">
         <Stat
           label={t('overview.allocated')}
-          value={partialCount(summary.allocated, summary.knownAllocated)}
+          value={partialCount(summary.allocated, summary.known_allocated)}
           hint={
-            summary.knownAllocated == null
-              ? t('overview.allocated.none')
-              : summary.allocated == null
-                ? t('overview.allocated.partial', { count: summary.unknownAllocationSources })
-                : t('overview.allocated.complete')
+            <>
+              {summary.unmeasured.length ? (
+                <UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />
+              ) : summary.known_allocated == null ? (
+                t('overview.allocated.none')
+              ) : (
+                t('overview.allocated.complete')
+              )}
+              {summary.unmonitored > 0 && (
+                <span className="sub">
+                  {t('summary.unmonitored', { count: summary.unmonitored })}
+                </span>
+              )}
+            </>
           }
         />
         <Stat
           label={t('overview.queued')}
-          value={partialCount(summary.requested, summary.knownRequested)}
+          value={partialCount(summary.requested, summary.known_requested)}
           hint={
-            !hasClusters
-              ? t('overview.running.none')
-              : summary.requested == null
-                ? t('overview.queued.partial')
-                : t('overview.queued.jobs', { count: summary.pending })
+            !hasClusters ? (
+              t('overview.running.none')
+            ) : summary.requested == null ? (
+              <UnmeasuredLinks items={summary.queued_unmeasured} ctx={ctx} />
+            ) : (
+              t('overview.queued.jobs', { count: summary.pending })
+            )
           }
         />
         <Stat
           label={t('overview.running')}
-          value={summary.running ?? (jobsKnown ? summary.knownRunning : '—')}
+          value={partialCount(summary.running, jobsKnown ? summary.known_running : null)}
           hint={
-            summary.running != null
-              ? t('overview.running.complete')
-              : jobsKnown
-                ? t('overview.running.partial')
-                : t('overview.running.none')
+            summary.running != null ? (
+              t('overview.running.complete')
+            ) : jobsKnown ? (
+              <UnmeasuredLinks
+                items={summary.queued_unmeasured.filter((item) =>
+                  summary.jobs.missing_source_ids.includes(item.subject.id),
+                )}
+                ctx={ctx}
+              />
+            ) : (
+              t('overview.running.none')
+            )
           }
         />
         <Stat
@@ -140,10 +152,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       </div>
       <Panel
         title={t('overview.jobs')}
-        count={jobCount(
-          allJobs.filter((job) => !stale.has(job.source_id)).length,
-          missingJobs.length,
-        )}
+        count={jobCount(summary.jobs.known, summary.jobs.missing_source_ids.length)}
         actions={
           <a className="link" href={routeHash('jobs')}>
             {t('overview.allJobs')} <ArrowRight size={13} />
@@ -248,14 +257,14 @@ function SetupGuide({ ctx }: { ctx: Ctx }) {
 }
 
 /** GPUs in use for one row: "≥ n" when part of the use is unknown, never a false 0. */
-function allocatedCell(summary: ReturnType<typeof summarize>) {
+function allocatedCell(summary: Summary) {
   if (summary.allocated != null) return summary.allocated;
   return (
     <span
-      className={summary.knownAllocated ? '' : 'muted'}
+      className={summary.known_allocated ? '' : 'muted'}
       title={t('overview.allocated.unknownCell')}
     >
-      {summary.knownAllocated ? `≥ ${summary.knownAllocated}` : '—'}
+      {summary.known_allocated ? `≥ ${summary.known_allocated}` : '—'}
     </span>
   );
 }
@@ -291,6 +300,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
         <tbody>
           {groups.map((group) => {
             const row = groupSummary(data, group);
+            const capacity = capacityText(row.nodes, row.state);
             const cluster = group.kind === 'cluster';
             const open = () => ctx.navigate(cluster ? 'resources' : 'cloud', group.key);
             return (
@@ -329,23 +339,16 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                 <td className="num">{allocatedCell(row.scoped)}</td>
                 <td>
                   {cluster ? (
-                    ['unavailable', 'degraded'].includes(row.state) ? (
-                      <span className={row.state === 'unavailable' ? 'red-text' : 'amber-text'}>
-                        {t('clusters.unavailableNodes', {
-                          count: row.nodes.abnormal,
-                          total: row.nodes.nodes,
-                        })}
-                      </span>
-                    ) : row.nodes.capacity != null ? (
-                      <Meter
-                        value={row.nodes.ratio}
-                        text={t('overview.load.allocated', {
-                          allocated: row.nodes.allocated ?? '?',
-                          capacity: row.nodes.capacity,
-                        })}
-                      />
+                    capacity.outage ? (
+                      <span className={capacity.tone}>{capacity.text}</span>
                     ) : (
-                      <span className="muted">—</span>
+                      <span>
+                        <Meter
+                          value={row.nodes.ratio}
+                          text={<span className={capacity.tone}>{capacity.text}</span>}
+                        />
+                        <span className="sub muted">{capacity.detail}</span>
+                      </span>
                     )
                   ) : row.scoped.utilization != null ? (
                     <Meter
@@ -368,5 +371,37 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function UnmeasuredLinks({ items, ctx }: { items: Unmeasured[]; ctx: Ctx }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      {(expanded ? items : items.slice(0, 2)).map(({ subject, reason }, index) => (
+        <span className="sub" key={`${subject.kind}:${subject.id}`}>
+          {index > 0 && ' · '}
+          <button
+            className="link"
+            onClick={() => {
+              if (subject.kind === 'instance') {
+                const instance = ctx.data.instances.find((item) => item.id === subject.id);
+                if (instance) ctx.openInstance(instance);
+              } else {
+                const source = ctx.data.sources.find((item) => item.id === subject.id);
+                if (source) ctx.configure(source);
+              }
+            }}
+          >
+            {subject.name} — {formatMessage(reason)} ▸
+          </button>
+        </span>
+      ))}
+      {!expanded && items.length > 2 && (
+        <button className="link" aria-expanded={false} onClick={() => setExpanded(true)}>
+          {t('summary.more', { count: items.length - 2 })}
+        </button>
+      )}
+    </>
   );
 }

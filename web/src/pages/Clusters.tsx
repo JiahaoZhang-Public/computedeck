@@ -3,14 +3,14 @@ import { Plus } from 'lucide-react';
 import type { Source } from '../types';
 import { findGroup } from '../groups';
 import { formatMessage, t } from '../i18n';
-import { qosGpuLimit, relativeTime, summarize, uniqueNodes } from '../domain';
+import { qosGpuLimit, relativeTime, uniqueNodes } from '../domain';
 import { partialCount } from '../domain';
 import { nodeTone, sourceState } from '../labels';
 import { Chips, Empty, GroupMark, Meter, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
 import { GroupFilter, SearchBox } from './shared';
 import { matches } from './util';
-import { groupSummary } from './summary';
+import { capacityText, groupSummary } from './summary';
 
 export function ClustersPage({ ctx }: { ctx: Ctx }) {
   const { data, group, query, groups } = ctx;
@@ -24,8 +24,8 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
   const nodes = uniqueNodes(data.nodes.filter((node) => keys.has(node.cluster_id))).filter((node) =>
     matches(query, node.name, node.partitions.join(' '), node.state),
   );
-  const idle = nodes.filter((node) => nodeTone(node.state) === 'green');
-  const abnormal = nodes.filter((node) => nodeTone(node.state) === 'red');
+  const idle = nodes.filter((node) => nodeTone(node) === 'green');
+  const abnormal = nodes.filter((node) => nodeTone(node) === 'red');
   const shownNodes = nodeFilter === 'idle' ? idle : nodeFilter === 'abnormal' ? abnormal : nodes;
   if (!clusters.length)
     return (
@@ -54,6 +54,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
       <div className="cluster-cards">
         {visible.map((item) => {
           const row = groupSummary(data, item);
+          const capacity = capacityText(row.nodes, row.state);
           return (
             <section className="panel cluster-card" key={item.key}>
               <header>
@@ -64,22 +65,12 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 <Status state={row.state} />
               </header>
               <div className="cluster-capacity">
-                <span className="big">
-                  {row.nodes.allocated ?? '—'}
-                  <small>
-                    {' '}
-                    / {t('clusters.gpusAllocated', { count: row.nodes.capacity ?? '—' })}
-                  </small>
-                </span>
-                {['unavailable', 'degraded'].includes(row.state) ? (
-                  <p className="red-text">
-                    {t('clusters.unavailableNodes', {
-                      count: row.nodes.abnormal,
-                      total: row.nodes.nodes,
-                    })}
-                  </p>
-                ) : (
-                  <Meter value={row.nodes.ratio} text="" />
+                <strong className={capacity.tone}>{capacity.text}</strong>
+                {!capacity.outage && (
+                  <>
+                    <p className="muted">{capacity.detail}</p>
+                    <Meter value={row.nodes.ratio} text="" />
+                  </>
                 )}
               </div>
               <dl className="kv">
@@ -88,7 +79,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                   <dd>
                     {row.nodes.nodes || '—'}
                     {row.nodes.abnormal > 0 && (
-                      <span className="red-text">
+                      <span className={capacity.tone}>
                         {' · '}
                         {t('clusters.abnormal', { count: row.nodes.abnormal })}
                       </span>
@@ -98,13 +89,13 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 <div>
                   <dt>{t('clusters.mine')}</dt>
                   <dd>
-                    {partialCount(row.scoped.allocated, row.scoped.knownAllocated)} /{' '}
-                    {partialCount(row.scoped.requested, row.scoped.knownRequested)}
+                    {partialCount(row.scoped.allocated, row.scoped.known_allocated)} /{' '}
+                    {partialCount(row.scoped.requested, row.scoped.known_requested)}
                   </dd>
                 </div>
                 <div>
                   <dt>{t('clusters.nodeData')}</dt>
-                  <dd>{row.nodes.observedAt ? relativeTime(row.nodes.observedAt) : '—'}</dd>
+                  <dd>{row.nodes.observed_at ? relativeTime(row.nodes.observed_at) : '—'}</dd>
                 </div>
               </dl>
             </section>
@@ -199,7 +190,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                     </td>
                     <td className="muted">{node.partitions.join(', ') || '—'}</td>
                     <td>
-                      <span className={`tag ${nodeTone(node.state)}`}>{node.state}</span>
+                      <span className={`tag ${nodeTone(node)}`}>{node.state}</span>
                     </td>
                     <td className="num muted">{relativeTime(node.observed_at)}</td>
                   </tr>
@@ -219,12 +210,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
 }
 
 function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
-  const summary = summarize({
-    ...ctx.data,
-    sources: [source],
-    jobs: ctx.data.jobs.filter((job) => job.source_id === source.id),
-    instances: ctx.data.instances.filter((item) => item.source_id === source.id),
-  });
+  const summary = ctx.data.summary.sources[source.id];
   const message = source.error
     ? formatMessage(source.error)
     : source.warnings?.map(formatMessage).join('; ');
@@ -244,8 +230,8 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
           {source.ssh_alias || <span className="muted">{t('common.notSet')}</span>}
         </td>
         <td className="num">
-          {partialCount(summary.allocated, summary.knownAllocated)} /{' '}
-          {partialCount(summary.requested, summary.knownRequested)}
+          {partialCount(summary.allocated, summary.known_allocated)} /{' '}
+          {partialCount(summary.requested, summary.known_requested)}
         </td>
         <td>
           {source.qos.length ? (

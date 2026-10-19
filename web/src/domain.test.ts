@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   runningPrice,
   instanceLifecycle,
-  currentJobs,
+  currentJobs as readCurrentJobs,
   partialCount,
   elapsedSeconds,
   sortJobs,
@@ -10,16 +10,29 @@ import {
   historyPartial,
   jobCount,
   jobGpuResources,
-  jobsMissing,
-  listedJobs,
+  jobsMissing as readJobsMissing,
+  listedJobs as readListedJobs,
   knownSum,
   percentage,
-  summarize,
-  summarizeNodes,
   uniqueJobs,
   uniqueNodes,
 } from './domain';
-import type { ComputeNode, Dashboard, HistoryPoint, Instance, Job, Source } from './types';
+import type {
+  ComputeNode,
+  Dashboard as ServerDashboard,
+  HistoryPoint,
+  Instance,
+  Job,
+  Source,
+} from './types';
+
+import { serverDashboard, serverNodes as summarizeNodes } from './test-server';
+type Dashboard = Omit<ServerDashboard, 'summary'>;
+const summarize = (data: Dashboard) => serverDashboard(data).summary;
+const currentJobs = (data: Dashboard) => readCurrentJobs(serverDashboard(data));
+const listedJobs = (data: Dashboard) => readListedJobs(serverDashboard(data));
+const jobsMissing = (sources: Source[]) =>
+  readJobsMissing(serverDashboard({ ...dashboard([]), sources }));
 
 const job = (extra: Partial<Job>): Job => ({
   id: 'cluster-a:42',
@@ -93,6 +106,7 @@ const instance = (extra: Partial<Instance>): Instance => ({
   currency: 'USD',
   observed_at: new Date().toISOString(),
   ssh_status: 'reachable',
+  monitoring: true,
   last_probe_attempt: new Date().toISOString(),
   ...extra,
 });
@@ -119,8 +133,8 @@ describe('allocation accounting', () => {
     data.instances = [instance({ state, gpu_count, gpu_allocated: null })];
     expect(summarize(data)).toMatchObject({
       allocated,
-      knownAllocated: allocated ?? 0,
-      unknownAllocationSources: allocated === null ? 1 : 0,
+      known_allocated: allocated ?? 0,
+      unknown_allocation_sources: allocated === null ? 1 : 0,
     });
   });
   it('leaves absent and unrecognized lifecycle states unknown', () => {
@@ -144,8 +158,8 @@ describe('allocation accounting', () => {
     data.instances = [instance({ state: 'reported_running' })];
     expect(summarize(data)).toMatchObject({
       allocated: null,
-      knownAllocated: null,
-      unknownAllocationSources: 1,
+      known_allocated: null,
+      unknown_allocation_sources: 1,
     });
   });
   it('deduplicates observations across accounts and preserves cross-cluster IDs', () => {
@@ -177,7 +191,7 @@ describe('allocation accounting', () => {
       dashboard([job({}), job({ id: '43', state: 'CONFIGURING', gpu_count: 8 })]),
     );
     expect(result.allocated).toBe(12);
-    expect(result.knownAllocated).toBe(12);
+    expect(result.known_allocated).toBe(12);
     expect(result.running).toBe(2);
     expect(result.pending).toBe(0);
     expect(jobGpuResources(job({ state: 'CONFIGURING', gpu_count: 8 }))).toEqual({
@@ -285,8 +299,8 @@ describe('allocation accounting', () => {
     const data = dashboard([job({}), job({ id: '43', source_id: 'stale', gpu_count: 8 })]);
     data.sources = [source({}), source({ id: 'stale', stale: true })];
     const result = summarize(data);
-    expect(result.knownAllocated).toBe(4);
-    expect(result.unknownAllocationSources).toBe(1);
+    expect(result.known_allocated).toBe(4);
+    expect(result.unknown_allocation_sources).toBe(1);
     expect(result.allocated).toBeNull();
     expect(data.jobs).toHaveLength(2);
   });
@@ -297,17 +311,17 @@ describe('allocation accounting', () => {
       job({ id: '44', source_id: 'unknown', gpu_count: null }),
     ]);
     const result = summarize(data);
-    expect(result.knownAllocated).toBe(4);
-    expect(result.unknownAllocationSources).toBe(1);
+    expect(result.known_allocated).toBe(4);
+    expect(result.unknown_allocation_sources).toBe(1);
     expect(result.allocated).toBeNull();
   });
   it('requires a current jobs capability but accepts useful partial source data', () => {
     const data = dashboard([job({})]);
     data.sources = [source({ capabilities: ['nodes'] })];
-    expect(summarize(data).knownAllocated).toBeNull();
-    expect(summarize(data).unknownAllocationSources).toBe(1);
+    expect(summarize(data).known_allocated).toBeNull();
+    expect(summarize(data).unknown_allocation_sources).toBe(1);
     data.sources = [source({ capabilities: ['jobs'], warnings: ['Nodes are unavailable'] })];
-    expect(summarize(data).knownAllocated).toBe(4);
+    expect(summarize(data).known_allocated).toBe(4);
     expect(summarize(data).allocated).toBe(4);
   });
   it('counts a running machine added by hand only by the GPUs a check found busy', () => {
@@ -316,8 +330,8 @@ describe('allocation accounting', () => {
     // Without a process count the GPUs typed in are not GPUs in use.
     data.instances = [instance({ state: 'running', manual: true, source_id: 'manual' })];
     const result = summarize(data);
-    expect(result.knownAllocated).toBe(4);
-    expect(result.unknownAllocationSources).toBe(1);
+    expect(result.known_allocated).toBe(4);
+    expect(result.unknown_allocation_sources).toBe(1);
     expect(result.allocated).toBeNull();
     expect(result.covered).toBe(2);
   });
@@ -335,15 +349,15 @@ describe('allocation accounting', () => {
     data.instances = [machine];
     expect(summarize(data)).toMatchObject({
       allocated: 5,
-      knownAllocated: 5,
-      unknownAllocationSources: 0,
+      known_allocated: 5,
+      unknown_allocation_sources: 0,
     });
     // An old or failed check: unmeasured again, never 0.
-    data.instances = [{ ...machine, state: 'unknown' }];
+    data.instances = [{ ...machine, state: 'unknown', ssh_status: 'error' }];
     expect(summarize(data)).toMatchObject({
       allocated: null,
-      knownAllocated: 4,
-      unknownAllocationSources: 1,
+      known_allocated: 4,
+      unknown_allocation_sources: 1,
     });
   });
   it('keeps the listed GPUs of a provider instance after a check found no processes', () => {
@@ -352,27 +366,27 @@ describe('allocation accounting', () => {
     data.instances = [instance({ state: 'running', gpu_allocated: 0, gpu_utilization: 0 })];
     expect(summarize(data)).toMatchObject({
       allocated: 4,
-      knownAllocated: 4,
-      unknownAllocationSources: 0,
+      known_allocated: 4,
+      unknown_allocation_sources: 0,
     });
   });
   it('keeps missing instances unknown instead of turning them into deletions', () => {
     const data = dashboard([job({})]);
     data.instances = [instance({ state: 'missing' })];
-    expect(summarize(data).knownAllocated).toBe(4);
+    expect(summarize(data).known_allocated).toBe(4);
     expect(summarize(data).allocated).toBeNull();
-    expect(summarize(data).unknownAllocationSources).toBe(1);
+    expect(summarize(data).unknown_allocation_sources).toBe(1);
     expect(data.instances[0].state).toBe('missing');
   });
   it('does not turn all-unknown pending GPU demand into zero', () => {
     const data = dashboard([job({ state: 'PENDING', gpu_count: null })]);
-    expect(summarize(data).knownRequested).toBeNull();
+    expect(summarize(data).known_requested).toBeNull();
     expect(summarize(data).requested).toBeNull();
     data.jobs.push(job({ id: '43', state: 'PENDING', gpu_count: 8 }));
-    expect(summarize(data).knownRequested).toBe(8);
+    expect(summarize(data).known_requested).toBe(8);
     expect(summarize(data).requested).toBeNull();
     data.jobs = [];
-    expect(summarize(data).knownRequested).toBe(0);
+    expect(summarize(data).known_requested).toBe(0);
     expect(summarize(data).requested).toBe(0);
   });
 });
@@ -403,10 +417,12 @@ describe('visible cluster capacity', () => {
     expect(summarizeNodes(nodes)).toMatchObject({
       nodes: 3,
       capacity: 20,
-      allocated: 7,
-      unallocated: 13,
+      usable: 16,
+      unavailable: 4,
+      allocated: 6,
+      unallocated: 10,
       abnormal: 1,
-      ratio: 35,
+      ratio: 37.5,
     });
   });
   it('counts INVAL nodes as abnormal and power-saving transitions as normal', () => {
@@ -564,12 +580,12 @@ describe('current and partial resource readings', () => {
         job({ id: 'unknown', state: 'PENDING', gpu_count: null }),
       ]),
     );
-    expect(partialCount(summary.requested, summary.knownRequested)).toBe('≥ 4');
+    expect(partialCount(summary.requested, summary.known_requested)).toBe('≥ 4');
   });
   it('does not revive a failed snapshot merely because a retry is syncing', () => {
     const data = dashboard([job({})]);
     data.sources = [source({ status: 'syncing', error: 'connection failed' })];
-    expect(summarize(data).knownAllocated).toBeNull();
+    expect(summarize(data).known_allocated).toBeNull();
     expect(currentJobs(data)).toEqual([]);
   });
 });
@@ -608,8 +624,8 @@ describe('SSH process-based GPU use', () => {
       };
       const totals = summarize(data);
       expect(totals.allocated).toBe(gpu_allocated);
-      expect(totals.unknownAllocationSources).toBe(gpu_allocated === null ? 1 : 0);
-      expect(totals.knownAllocated).toBe(gpu_allocated ?? 0);
+      expect(totals.unknown_allocation_sources).toBe(gpu_allocated === null ? 1 : 0);
+      expect(totals.known_allocated).toBe(gpu_allocated ?? 0);
     },
   );
 });

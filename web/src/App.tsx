@@ -33,7 +33,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { relativeTime, uniqueJobs } from './domain';
+import { partialCount, relativeTime } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf, sourceLabel } from './groups';
@@ -462,7 +462,7 @@ export default function App() {
       ]
     : [];
   const problems = attention.filter((item) => item.tone !== 'gray').length;
-  const jobCount = data ? uniqueJobs(data.jobs).length : 0;
+  const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
@@ -576,7 +576,7 @@ export default function App() {
                       {problems}
                     </b>
                   )}
-                  {id === 'jobs' && jobCount > 0 && <b className="badge">{jobCount}</b>}
+                  {id === 'jobs' && jobCount !== 0 && <b className="badge">{jobCount}</b>}
                 </a>
               ))}
             </div>

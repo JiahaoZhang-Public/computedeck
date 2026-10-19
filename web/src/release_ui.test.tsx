@@ -1,3 +1,4 @@
+import { serverDashboard } from './test-server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
@@ -28,7 +29,7 @@ const source: Source = {
 };
 
 function renderPlan(login: Source) {
-  const data: Dashboard = {
+  const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [login],
     jobs: [],
@@ -52,7 +53,7 @@ function renderPlan(login: Source) {
     history: [],
     updated_at: null,
     refreshing: false,
-  };
+  });
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   return renderToStaticMarkup(<PlanPage ctx={ctx} />);
 }

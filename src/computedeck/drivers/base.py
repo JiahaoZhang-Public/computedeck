@@ -146,30 +146,32 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             raise ValueError("Collection timestamp needs a timezone")
 
 
+def node_health(state: str) -> Literal["usable", "unavailable", "unknown"]:
+    """Power saving alone is normal; reservations and nonresponsive nodes cannot take work."""
+    state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
+    if re.search(
+        r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|reserved|unknown|\*",
+        state,
+        re.I,
+    ):
+        return "unavailable"
+    if re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
+        return "usable"
+    return "unknown"
+
+
 def cluster_state(
     nodes: list[dict[str, Any]] | None,
 ) -> Literal["available", "degraded", "unavailable", "unknown"]:
-    """Availability of the visible inventory; power-saving alone is not an outage."""
+    """Availability of the visible inventory, using the same rule as usable capacity."""
     if not nodes:
         return "unknown"
-    unavailable = 0
-    known = 0
-    for node in nodes:
-        state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", node["state"], flags=re.I)
-        if re.search(
-            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval",
-            state,
-            re.I,
-        ):
-            unavailable += 1
-            known += 1
-        elif re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
-            known += 1
-    if unavailable == len(nodes):
+    health = [node_health(node.get("state", "")) for node in nodes]
+    if all(value == "unavailable" for value in health):
         return "unavailable"
-    if known < len(nodes):
+    if "unknown" in health:
         return "unknown"
-    return "degraded" if (len(nodes) - unavailable) / len(nodes) < 0.2 else "available"
+    return "degraded" if health.count("usable") / len(health) < 0.2 else "available"
 
 
 class Batch(BaseModel):

@@ -1,3 +1,4 @@
+import { serverNodeHealth } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { gpuModels, idleInstances, planOptions, wallHours } from './plan';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
@@ -41,6 +42,7 @@ const node = (name: string, extra: Partial<ComputeNode> = {}): ComputeNode => ({
   cluster_id: 'cluster-a',
   name,
   state: 'mixed',
+  health: serverNodeHealth(extra.state ?? 'mixed'),
   gpu_count: 8,
   gpu_allocated: 4,
   gpu_type: 'a100',

@@ -382,7 +382,7 @@ def manual_instance(store: Store, **changes: Any) -> dict[str, Any]:
 async def test_probe_merges_measurements_into_manual_instance(
     monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store
 ) -> None:
-    instance = manual_instance(store, gpu_count=2)
+    instance = manual_instance(store, gpu_count=2, monitoring=True)
     probed: list[dict[str, Any]] = []
 
     async def probe(row: dict[str, Any]) -> dict[str, Any]:

@@ -149,6 +149,7 @@ export interface Instance {
   probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
+  health?: 'usable' | 'unavailable' | 'unknown';
   id: string;
   source_id: string;
   cluster_id: string;
@@ -171,7 +172,54 @@ export interface HistoryPoint {
   known_allocated_gpus?: number | null;
   unknown_allocation_sources?: number;
 }
+export interface Unmeasured {
+  subject: { kind: 'source' | 'instance'; id: string; name: string };
+  reason: Message;
+}
+export interface NodeSummary {
+  nodes: number;
+  capacity: number | null;
+  usable: number | null;
+  known_usable: number | null;
+  unavailable: number | null;
+  allocated: number | null;
+  unallocated: number | null;
+  abnormal: number;
+  unknown: number;
+  observed_at: string | null;
+  ratio: number | null;
+}
+export interface Summary {
+  allocated: number | null;
+  known_allocated: number | null;
+  unknown_allocation_sources: number;
+  unmeasured: Unmeasured[];
+  unmonitored: number;
+  requested: number | null;
+  known_requested: number | null;
+  queued_unmeasured: Unmeasured[];
+  running: number | null;
+  known_running: number;
+  pending: number | null;
+  known_pending: number;
+  utilization: number | null;
+  covered: number;
+  cpu_utilization: number | null;
+  memory_utilization: number | null;
+  nodes: NodeSummary;
+  jobs: {
+    missing_source_ids: string[];
+    known: number;
+    total: number | null;
+  };
+}
+export interface FleetSummary extends Summary {
+  groups: Record<string, Summary>;
+  sources: Record<string, Summary>;
+  jobs: Summary['jobs'] & { current_ids: string[]; listed_ids: string[] };
+}
 export interface Dashboard {
+  summary: FleetSummary;
   mode: string;
   sources: Source[];
   jobs: Job[];

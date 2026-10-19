@@ -1,3 +1,4 @@
+import { serverDashboard } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DiagnosticRows } from './ConnectionChecks';
@@ -59,7 +60,7 @@ describe('optional capabilities', () => {
 });
 
 it('keeps unknown and unassociated QoS options in closed disclosures', () => {
-  const data: Dashboard = {
+  const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [
       {
@@ -77,7 +78,7 @@ it('keeps unknown and unassociated QoS options in closed disclosures', () => {
     history: [],
     updated_at: null,
     refreshing: false,
-  };
+  });
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   const html = renderToStaticMarkup(<PlanPage ctx={ctx} />);
   const disclosures = [...html.matchAll(/<details[^>]*>(.*?)<\/details>/g)];

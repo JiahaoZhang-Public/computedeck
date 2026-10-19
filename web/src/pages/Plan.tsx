@@ -8,6 +8,7 @@ import { gpuModels, idleInstances, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, QosRule, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
+import type { NodeSummary } from '../types';
 
 const TONES: Record<Verdict, string> = {
   likely: 'green',
@@ -47,7 +48,7 @@ function duration(hours: number) {
     : t('plan.hours', { count: Math.round(hours * 10) / 10 });
 }
 
-function explain(option: PlanOption, request: PlanRequest) {
+function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
   const parts: string[] = [];
   const key: Record<Verdict, MessageKey | null> = {
     // The numbers in the row already say why; repeating them only makes the row taller.
@@ -62,10 +63,15 @@ function explain(option: PlanOption, request: PlanRequest) {
     limit: 'plan.why.limit',
     wall: 'plan.why.wall',
     unknown: 'plan.why.unknown',
-    unavailable: 'plan.why.unavailable',
+    unavailable: null,
     denied: 'plan.why.denied',
     none: request.gpuType ? 'plan.why.none' : 'plan.why.noGpus',
   };
+  if (option.verdict === 'unavailable') {
+    parts.push(
+      t('summary.capacity', { usable: nodes.usable ?? '—', unavailable: nodes.unavailable ?? '—' }),
+    );
+  }
   const { rule } = option;
   const ruleText = rule && RULES[rule.kind][rule.effect];
   const reason = key[option.verdict];
@@ -240,7 +246,7 @@ function OptionsTable({
         </thead>
         <tbody>
           {options.map((option) => {
-            const why = explain(option, request);
+            const why = explain(option, request, ctx.data.summary.sources[option.source.id].nodes);
             return (
               <tr key={option.key}>
                 <td>

@@ -1,8 +1,10 @@
+import { serverDashboard, serverNodeHealth } from './test-server';
+type Dashboard = Omit<ServerDashboard, 'summary'>;
 import { describe, expect, it } from 'vitest';
 import { groupLabel, groupsOf, initials, instanceGroupKey } from './groups';
 import { groupSummary, instanceCount } from './pages/summary';
 import { nodeTone, sourceState } from './labels';
-import type { Dashboard, Instance, Source } from './types';
+import type { Dashboard as ServerDashboard, Instance, Source } from './types';
 
 const source = (extra: Partial<Source>): Source => ({
   id: 'cluster-a-alice',
@@ -93,7 +95,7 @@ it('ignores a disabled stale login when reporting a healthy cluster', () => {
     refreshing: false,
   };
   expect(sourceState(sources[1])).toBe('disabled');
-  expect(groupSummary(data, groupsOf(data)[0]).state).toBe('ready');
+  expect(groupSummary(serverDashboard(data), groupsOf(data)[0]).state).toBe('ready');
 });
 it('shows a login disabled under an older version as disabled, not stale', () => {
   // Older versions kept the last success of a disabled login, so the service marks it stale.
@@ -117,23 +119,34 @@ it('shows a login disabled under an older version as disabled, not stale', () =>
     updated_at: null,
     refreshing: false,
   };
-  expect(groupSummary(data, groupsOf(data)[0]).state).toBe('disabled');
+  expect(groupSummary(serverDashboard(data), groupsOf(data)[0]).state).toBe('disabled');
 });
 it('distinguishes power-saving nodes from unavailable or reserved nodes', () => {
-  expect(nodeTone('idle+cloud+powered_down')).toBe('green');
-  expect(nodeTone('down+powered_down')).toBe('red');
-  expect(nodeTone('idle+reserved')).toBe('red');
+  expect(
+    nodeTone({
+      state: 'idle+cloud+powered_down',
+      health: serverNodeHealth('idle+cloud+powered_down'),
+    }),
+  ).toBe('green');
+  expect(
+    nodeTone({ state: 'down+powered_down', health: serverNodeHealth('down+powered_down') }),
+  ).toBe('red');
+  expect(nodeTone({ state: 'idle+reserved', health: serverNodeHealth('idle+reserved') })).toBe(
+    'red',
+  );
 });
 it.each(['idle+power_down', 'idle+cloud+powering_down', 'idle+power_up', 'idle+powering_up'])(
   'treats the Slurm power-saving transition %s as normal',
   (state) => {
-    expect(nodeTone(state)).toBe('green');
+    expect(nodeTone({ state: state, health: serverNodeHealth(state) })).toBe('green');
   },
 );
 it('marks a Slurm INVAL node as abnormal', () => {
-  expect(nodeTone('inval')).toBe('red');
-  expect(nodeTone('idle+inval')).toBe('red');
-  expect(nodeTone('down+powering_up')).toBe('red');
+  expect(nodeTone({ state: 'inval', health: serverNodeHealth('inval') })).toBe('red');
+  expect(nodeTone({ state: 'idle+inval', health: serverNodeHealth('idle+inval') })).toBe('red');
+  expect(
+    nodeTone({ state: 'down+powering_up', health: serverNodeHealth('down+powering_up') }),
+  ).toBe('red');
 });
 
 describe('instance counts', () => {

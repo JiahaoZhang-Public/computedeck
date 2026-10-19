@@ -4,6 +4,9 @@ import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .drivers.base import cluster_state, node_health
+from .summary import summarize
+
 _SOURCES = [
     # id, label, driver, cluster_id, username
     ("cluster-a-alice", "Cluster A", "slurm", "cluster-a", "alice"),
@@ -186,7 +189,36 @@ def dashboard() -> dict[str, Any]:
             "manual": True,
         },
     ]
-    nodes = [
+    instances.append(
+        {
+            **instances[1],
+            "id": "manual:lab-workstation-buildbox",
+            "external_id": "buildbox",
+            "name": "build-box",
+            "state": "unknown",
+            "gpu_allocated": None,
+            "observed_at": None,
+            "last_probe_attempt": None,
+            "ssh_status": "unverified",
+            "gpu_utilization": None,
+            "cpu_utilization": None,
+            "memory_utilization": None,
+            "host": "192.0.2.21",
+            "ssh_alias": "cd-lab-workstation-buildbox",
+        }
+    )
+    instances.append(
+        {
+            **instances[-1],
+            "id": "manual:lab-workstation-shortcut",
+            "external_id": "shortcut",
+            "name": "ssh-shortcut",
+            "monitoring": False,
+            "host": "192.0.2.22",
+            "ssh_alias": "cd-lab-workstation-shortcut",
+        }
+    )
+    nodes: list[dict[str, Any]] = [
         {
             "id": f"{cluster_id}:{cluster_id[-1]}-gpu-{i:02}",
             "source_id": source_id,
@@ -207,8 +239,24 @@ def dashboard() -> dict[str, Any]:
         ]
         for i in range(1, 9)
     ]
+    for node in nodes:
+        if node["cluster_id"] == "cluster-b":
+            if node["name"] in {"b-gpu-07", "b-gpu-08"}:
+                node.update(
+                    state="down*" if node["name"] == "b-gpu-07" else "drained",
+                    gpu_allocated=0,
+                    cpu_allocated=0,
+                )
+            elif node["name"] == "b-gpu-02":
+                node["gpu_allocated"] = 8  # The 8-GPU running example job is on this node.
+        node["health"] = node_health(node["state"])
+    for source in sources:
+        if source["kind"] == "cluster":
+            source["cluster_state"] = cluster_state(
+                [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
+            )
     history = demo_history(24)
-    return {
+    data = {
         "mode": "demo",
         "sources": sources,
         "jobs": jobs,
@@ -223,6 +271,9 @@ def dashboard() -> dict[str, Any]:
         ],
         "failure_history_observed_at": observed,
     }
+
+    data["summary"] = summarize(data)
+    return data
 
 
 def events() -> list[dict[str, Any]]:
