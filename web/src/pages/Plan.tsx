@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Clock3, Plus } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -13,6 +13,7 @@ import type { NodeSummary } from '../types';
 const TONES: Record<Verdict, string> = {
   likely: 'green',
   possible: 'amber',
+  behind: 'wait',
   busy: 'red',
   limit: 'red',
   wall: 'red',
@@ -59,6 +60,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
         : option.freeGpus == null
           ? 'plan.why.possibleFree'
           : null,
+    behind: 'plan.why.behind',
     busy: 'plan.why.busy',
     limit: 'plan.why.limit',
     wall: 'plan.why.wall',
@@ -82,6 +84,8 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
       t(reason, {
         free: option.freeGpus,
         headroom: option.headroom,
+        queued: option.queuedGpus,
+        left: option.headroomAfterQueue == null ? '—' : Math.max(0, option.headroomAfterQueue),
         used: option.used,
         limit: option.limit,
         max: option.maxWallHours == null ? null : duration(option.maxWallHours),
@@ -95,7 +99,11 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
     option.largestNodeFree < request.gpus
   )
     parts.push(t('plan.why.multiNode', { count: request.gpus }));
-  if (option.access === 'unknown') parts.push(t('plan.why.accessUnknown'));
+  if (
+    option.queuedGpus == null ||
+    (request.gpuType && option.headroom != null && option.headroomAfterQueue == null)
+  )
+    parts.push(t('plan.why.queueUnknown'));
   if (option.source.cluster_state === 'degraded') parts.push(t('plan.why.degraded'));
   return parts.join(' ');
 }
@@ -111,7 +119,17 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     hours: hours.trim() ? Number(hours) : null,
   };
   const options = planOptions(data, request);
-  const verified = options.filter((option) => option.access === 'verified');
+  const visible = options.filter((option) => option.access !== 'not_associated');
+  const denied = options.filter((option) => option.access === 'not_associated');
+  const unchecked = [
+    ...new Map(
+      visible
+        .filter((option) => option.access === 'unknown')
+        .map((option) => [option.source.id, option.source]),
+    ).values(),
+  ];
+  const first = visible[0];
+  const best = first && ['likely', 'possible'].includes(first.verdict) ? first : null;
   const models = gpuModels(data.nodes);
   const idle = idleInstances(data.instances);
   const hasClusters = data.sources.some((source) => source.kind === 'cluster');
@@ -155,15 +173,58 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           </label>
         </form>
       </Panel>
-      <Panel title={t('plan.options')} count={verified.length}>
-        {verified.length ? (
-          <OptionsTable options={verified} request={request} ctx={ctx} />
+      {best && (
+        <Panel title={t('plan.best')}>
+          <div className="plan-best">
+            <strong>
+              {best.source.name} · {best.source.username}
+              {best.qos && ` · ${best.qos}`}
+            </strong>
+            <span className={`status ${TONES[best.verdict]}`}>
+              <i />
+              {verdictLabel(best, request)}
+            </span>
+            {best.access === 'unknown' && <span className="tag">{t('plan.accessUnchecked')}</span>}
+            <span>
+              {t('plan.best.free', {
+                count: best.freeGpus == null ? '—' : best.freeGpus - request.gpus,
+              })}
+            </span>
+            <span>
+              {t('plan.best.room', {
+                count:
+                  best.headroomAfterQueue == null
+                    ? '—'
+                    : best.headroomAfterQueue === Infinity
+                      ? t('plan.noLimit')
+                      : Math.max(0, best.headroomAfterQueue),
+              })}
+            </span>
+            {best.largestNodeFree != null && best.largestNodeFree >= request.gpus && (
+              <span>{t('plan.best.oneNode')}</span>
+            )}
+            {best.nodesObservedAt && (
+              <span className="muted">
+                {t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
+              </span>
+            )}
+          </div>
+        </Panel>
+      )}
+      <Panel title={t('plan.options')} count={visible.length}>
+        {unchecked.map((source) => (
+          <p className="panel-note" key={source.id}>
+            {t('plan.accessNote', { source: `${source.name} · ${source.username}` })}
+          </p>
+        ))}
+        {visible.length ? (
+          <OptionsTable options={visible} request={request} ctx={ctx} />
         ) : (
           <Empty
-            title={t(options.length ? 'plan.noVerified' : 'plan.empty')}
+            title={t(denied.length ? 'plan.noAccess' : 'plan.empty')}
             text={
-              options.length
-                ? t('plan.noVerifiedHint')
+              denied.length
+                ? t('plan.noAccessHint')
                 : hasClusters
                   ? t('plan.emptyDisabled')
                   : t('plan.emptyHint')
@@ -182,17 +243,12 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         )}
         <p className="panel-note">{t('plan.note')}</p>
       </Panel>
-      {(['unknown', 'not_associated'] as const).map((access) => {
-        const rows = options.filter((option) => option.access === access);
-        return (
-          rows.length > 0 && (
-            <details className="panel" key={access}>
-              <summary>{t(`plan.access.${access}`, { count: rows.length })}</summary>
-              <OptionsTable options={rows} request={request} ctx={ctx} />
-            </details>
-          )
-        );
-      })}
+      {denied.length > 0 && (
+        <details className="panel">
+          <summary>{t('plan.access.not_associated', { count: denied.length })}</summary>
+          <OptionsTable options={denied} request={request} ctx={ctx} />
+        </details>
+      )}
       {idle.length > 0 && (
         <Panel title={t('plan.idle')} count={idle.length}>
           <ul className="rows">
@@ -256,6 +312,9 @@ function OptionsTable({
                       <strong>
                         {option.source.name}
                         {option.qos && <span className="tag plan-qos">{option.qos}</span>}
+                        {option.access === 'unknown' && (
+                          <span className="tag plan-qos">{t('plan.accessUnchecked')}</span>
+                        )}
                       </strong>
                       <span className="sub">
                         {option.source.username}
@@ -280,15 +339,18 @@ function OptionsTable({
                   )}
                 </td>
                 <td className="num" data-label={t('plan.col.queued')}>
-                  {option.queued}
-                  {option.reasons[0] && <span className="sub">{option.reasons[0]}</span>}
+                  {option.queued ?? '—'}
+                  <span className="sub">
+                    {t('plan.queuedGpus', { count: option.queuedGpus ?? '—' })}
+                  </span>
+                  {option.reasons?.[0] && <span className="sub">{option.reasons[0]}</span>}
                 </td>
                 <td className="num" data-label={t('plan.col.wall')}>
                   {option.maxWallHours == null ? '—' : duration(option.maxWallHours)}
                 </td>
                 <td className="plan-verdict">
                   <span className={`status ${TONES[option.verdict]}`}>
-                    <i />
+                    {option.verdict === 'behind' ? <Clock3 size={13} /> : <i />}
                     {verdictLabel(option, request)}
                   </span>
                   {why && <span className="sub plan-why">{why}</span>}

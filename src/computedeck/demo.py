@@ -94,7 +94,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
         "cpu_count": gpus * 8,
         "node": f"{cluster_id[-1]}-gpu-{index + 1:02}" if state == "RUNNING" else None,
         "elapsed": elapsed,
-        "reason": "QOSMaxGRESPerUser" if state == "PENDING" else None,
+        "reason": "Priority" if state == "PENDING" else None,
         "gpu_utilization": gpu,
         "cpu_utilization": cpu,
         "memory_utilization": 58 if gpu is not None else None,

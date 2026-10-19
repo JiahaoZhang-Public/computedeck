@@ -1841,6 +1841,23 @@ form > .form-error {
 
 /* ---------- Where to run ---------- */
 
+.plan-best {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 18px;
+  overflow-wrap: anywhere;
+}
+.plan-best strong {
+  flex-basis: 100%;
+}
+.plan-table .status.wait {
+  color: var(--accent-text);
+}
+.plan-table .tag {
+  white-space: normal;
+}
 .plan-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 220px));

@@ -77,8 +77,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'msg.summary_lifecycle_unknown': '分配状态未知',
 
   'msg.plugin_load_failed': '插件无法导入；请检查已安装的依赖',
-  'plan.noVerified': '尚无已验证的 QoS 权限',
-  'plan.noVerifiedHint': '展开下方权限未知的选项，并检查账户的关联权限。',
 
   'sources.testConnection': '测试连接',
   'sources.checking': '正在检查连接…',
@@ -88,9 +86,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.verdict.unavailable': '集群不可用',
   'plan.verdict.denied': '未关联权限',
   'plan.why.denied': '此账户没有授予该 QoS 的关联。',
-  'plan.why.accessUnknown': '无法验证 QoS 访问权限，请向调度器确认。',
   'plan.why.degraded': '可见节点中可用的不足 20%。',
-  'plan.access.unknown': '权限未知（{count}）',
   'plan.access.not_associated': '未关联权限（{count}）',
   'market.official': '官方市场',
 
@@ -528,6 +524,19 @@ const zhCN: Record<keyof typeof en, string> = {
   'sources.capability.missing': '不可用',
   'sources.capability.pending': '尚未采集',
   'toast.collectSource': '正在采集 {name}。',
+  'plan.verdict.behind': '较可能等待你的排队作业',
+  'plan.why.behind':
+    '你的可调度排队作业申请了 {queued} 张 GPU；若先启动，预计剩余 {left} 张。实际调度顺序可能不同。',
+  'plan.why.queueUnknown': '你的可调度排队作业所需 GPU 数未知，估计无法计入这部分需求。',
+  'plan.queuedGpus': '申请 {count} 张 GPU',
+  'plan.accessUnchecked': '权限未验证',
+  'plan.accessNote': '{source}：无法验证访问权限，请向调度器确认；估计最多为“可能”。',
+  'plan.noAccess': '未找到有权限的选项',
+  'plan.noAccessHint': '已采集的关联未授予下方选项的访问权限。',
+  'plan.best': '当前最佳估计',
+  'plan.best.free': '本次申请后空闲：{count} 张 GPU',
+  'plan.best.room': '你的排队作业启动后余量（估计）：{count}',
+  'plan.best.oneNode': '可容纳于一个可见节点',
   'plan.gpus': 'GPU 数量',
   'plan.model': 'GPU 型号',
   'plan.anyModel': '任意型号',
@@ -573,7 +582,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.emptyHint': '添加集群后，即可比较作业在哪里更可能启动。',
   'plan.emptyDisabled': '启用一个集群登录身份后即可比较。',
   'plan.note':
-    '这是根据上次采集的估计。预留、优先级、分区和公平共享仍可能让作业等待，不同 QoS 的上限也不能相加。',
+    '这是根据上次采集的估计。排队数量不含被挂起、等待依赖或指定开始时间的作业。预留、优先级、分区和公平共享仍可能让作业等待，不同 QoS 的上限也不能相加。',
   'plan.idle': '几乎空闲、仍在运行的云 GPU',
   'plan.idleUtil': 'GPU 利用率 {value}%',
   'plan.idleNote': '这些实例已经在计费。利用率是整台机器的最近一次快照。',

@@ -91,7 +91,7 @@ describe('optional capabilities', () => {
   });
 });
 
-it('keeps unknown and unassociated QoS options in closed disclosures', () => {
+it('shows unknown access inline and keeps only unassociated options in a closed disclosure', () => {
   const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [
@@ -114,9 +114,12 @@ it('keeps unknown and unassociated QoS options in closed disclosures', () => {
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   const html = renderToStaticMarkup(<PlanPage ctx={ctx} />);
   const disclosures = [...html.matchAll(/<details[^>]*>(.*?)<\/details>/g)];
-  expect(disclosures).toHaveLength(2);
+  expect(disclosures).toHaveLength(1);
   expect(disclosures.every((match) => !match[0].match(/<details[^>]*\sopen/))).toBe(true);
-  expect(disclosures[0][1]).toContain('Unverified access (1)');
-  expect(disclosures[1][1]).toContain('Not associated (1)');
+  expect(disclosures[0][1]).toContain('Not associated (1)');
+  expect(disclosures[0][1]).toContain('denied');
+  expect(disclosures[0][1]).not.toContain('unverified');
+  expect(html.slice(0, html.indexOf('<details'))).toContain('unverified');
+  expect(html.slice(0, html.indexOf('<details'))).toContain('Access not checked');
   expect(html.slice(0, html.indexOf('<details'))).toContain('allowed');
 });

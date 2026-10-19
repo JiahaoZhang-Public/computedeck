@@ -267,3 +267,12 @@ def test_demo_failure_coverage_uses_only_fresh_history_sources() -> None:
         "example:cluster-a-bob",
     }.intersection(data["failure_history_sources"])
     assert data["failure_history_observed_at"] == min(source["last_success"] for source in covered)
+
+
+def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
+    data = dashboard()
+    queued = [job for job in data["jobs"] if job["state"] == "PENDING"]
+    assert queued
+    assert all(job["reason"] == "Priority" for job in queued)
+    # The planner's queue estimate is visible without inventing a scheduler limit failure.
+    assert any(job["gpu_count"] == 4 and job["qos"] == "normal" for job in queued)

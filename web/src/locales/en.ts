@@ -75,8 +75,6 @@ const en = {
   'msg.summary_lifecycle_unknown': 'allocation state unknown',
 
   'msg.plugin_load_failed': 'The plugin could not be imported; check its installed dependencies',
-  'plan.noVerified': 'No verified QoS access yet',
-  'plan.noVerifiedHint': 'Expand the unverified options below and check association permissions.',
 
   'sources.testConnection': 'Test connection',
   'sources.checking': 'Checking connection…',
@@ -86,9 +84,7 @@ const en = {
   'plan.verdict.unavailable': 'Cluster unavailable',
   'plan.verdict.denied': 'Not associated',
   'plan.why.denied': 'This login has no association granting this QoS.',
-  'plan.why.accessUnknown': 'QoS access could not be verified; confirm it with the scheduler.',
   'plan.why.degraded': 'Fewer than 20% of visible nodes are available.',
-  'plan.access.unknown': 'Unverified access ({count})',
   'plan.access.not_associated': 'Not associated ({count})',
   'market.official': 'Official marketplace',
 
@@ -568,6 +564,21 @@ const en = {
   'sources.capability.missing': 'not available',
   'sources.capability.pending': 'not collected yet',
   'toast.collectSource': 'Collecting {name}.',
+  'plan.verdict.behind': 'Likely to wait for your queue',
+  'plan.why.behind':
+    'Your queued GPU demand is {queued}; about {left} would remain if those jobs start first. Scheduling order may differ.',
+  'plan.why.queueUnknown':
+    'Your eligible queued GPU demand is unknown; the estimate cannot account for it.',
+  'plan.queuedGpus': 'GPUs requested: {count}',
+  'plan.accessUnchecked': 'Access not checked',
+  'plan.accessNote':
+    '{source}: access could not be verified. Confirm it with the scheduler; estimates are at most possible.',
+  'plan.noAccess': 'No accessible options found',
+  'plan.noAccessHint': 'The collected associations do not grant access to the options below.',
+  'plan.best': 'Best estimate',
+  'plan.best.free': 'GPUs free after this request: {count}',
+  'plan.best.room': 'Room after your queue (estimate): {count}',
+  'plan.best.oneNode': 'Fits on one visible node',
   'plan.gpus': 'GPUs',
   'plan.model': 'GPU model',
   'plan.anyModel': 'Any model',
@@ -617,7 +628,7 @@ const en = {
   'plan.emptyHint': 'Add a cluster to compare where a job could start.',
   'plan.emptyDisabled': 'Enable a cluster login to compare where a job could start.',
   'plan.note':
-    'An estimate from the last collection. Reservations, priorities, partitions and fair-share can still delay a job, and limits of different QoS do not add up.',
+    'An estimate from the last collection. The queue excludes held jobs and jobs waiting for dependencies or a begin time. Reservations, priorities, partitions and fair-share can still delay a job, and limits of different QoS do not add up.',
   'plan.idle': 'Running cloud GPUs that are almost idle',
   'plan.idleUtil': '{value}% GPU utilization',
   'plan.idleNote':
