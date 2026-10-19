@@ -225,9 +225,14 @@ def test_service_faults_filter_inactive_owners_and_derivation_does_not_mutate() 
 
 def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
     data = demo.dashboard()
-    assert [item["kind"] for item in data["attention"]] == ["instance_ssh_failed"]
-    assert data["attention"][0]["subject"]["id"] == "runpod:demo-pod"
-    pod = next(row for row in data["instances"] if row["id"] == "runpod:demo-pod")
+    assert [item["kind"] for item in data["attention"]] == [
+        "source_stale",
+        "source_failed",
+        "source_failed",
+        "instance_ssh_failed",
+    ]
+    assert data["attention"][-1]["subject"]["id"] == "example:runpod:demo-pod"
+    pod = next(row for row in data["instances"] if row["id"] == "example:runpod:demo-pod")
     for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
         assert pod[metric] is None
 

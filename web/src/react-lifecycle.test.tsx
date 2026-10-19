@@ -136,6 +136,12 @@ describe('dashboard lifecycle', () => {
     });
     await render(<App />);
     expect(container.querySelector('a[href="#/jobs"] .badge')?.textContent).toBe('≥ 2');
+    const more = [...container.querySelectorAll<HTMLButtonElement>('.stat-hint button')].find(
+      (button) =>
+        button.textContent === t('summary.more', { count: data.summary.unmeasured.length - 2 }),
+    );
+    expect(more).toBeDefined();
+    await act(async () => more!.click());
     const missing = [...container.querySelectorAll<HTMLButtonElement>('.stat-hint button')].find(
       (button) => button.textContent?.includes('build-box'),
     );
@@ -733,7 +739,8 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => test.click());
     expect(
       request.mock.calls.some(
-        ([path, body]) => path === `/sources/${source.id}/check` && body != null,
+        ([path, body]) =>
+          path === `/sources/${encodeURIComponent(source.id)}/check` && body != null,
       ),
     ).toBe(true);
     const firstCalls = request.mock.calls.filter(([path]) => path.endsWith('/check')).length;
@@ -791,7 +798,7 @@ it.each(['en', 'zh-CN'] as const)(
   'labels repeated observations as Last seen in %s',
   async (locale) => {
     const data = serverDemo();
-    const item = data.attention![0];
+    const item = data.attention!.find((entry) => entry.kind === 'instance_ssh_failed')!;
     expect(item.since).toBeNull();
     expect(item.observed_at).not.toBeNull();
     request.mockImplementation(async (path) => {
@@ -827,10 +834,10 @@ it.each(['en', 'zh-CN'] as const)(
 
 it.each(['instance', 'toolbox'] as const)('opens the %s attention target', async (action) => {
   const data = serverDemo();
-  const instance = data.instances.find((row) => row.id === 'runpod:demo-pod')!;
+  const instance = data.instances.find((row) => row.id === 'example:runpod:demo-pod')!;
   data.attention = [
     action === 'instance'
-      ? data.attention![0]
+      ? data.attention!.find((item) => item.kind === 'instance_ssh_failed')!
       : {
           ...data.attention![0],
           key: 'plugin_error:example',

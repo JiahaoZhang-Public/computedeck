@@ -6,30 +6,33 @@ from typing import Any
 
 from . import attention, drivers
 from .drivers.base import cluster_state, node_health
-from .summary import freshness, summarize
+from .summary import fresh, freshness, summarize
 
 _SOURCES = [
     # id, label, driver, cluster_id, username
-    ("cluster-a-alice", "Cluster A", "slurm", "cluster-a", "alice"),
-    ("cluster-a-bob", "Cluster A", "slurm", "cluster-a", "bob"),
-    ("cluster-b-alice", "Cluster B", "slurm", "cluster-b", "alice"),
-    ("runpod-runpod", "RunPod", "runpod", "runpod", ""),
+    ("example:cluster-a-alice", "Cluster A", "slurm", "example:cluster-a", "alice"),
+    ("example:cluster-a-bob", "Cluster A", "slurm", "example:cluster-a", "bob"),
+    ("example:cluster-b-alice", "Cluster B", "slurm", "example:cluster-b", "alice"),
+    ("example:runpod-runpod", "RunPod", "runpod", "example:runpod", ""),
+    ("example:cluster-a-carol", "Cluster A", "slurm", "example:cluster-a", "carol"),
+    ("example:cluster-c-alice", "Cluster C", "pbs", "example:cluster-c", "alice"),
+    ("example:runpod-secondary", "RunPod secondary", "runpod", "example:runpod", ""),
 ]
-_GPU = {"cluster-a": "A100 80GB", "cluster-b": "H100"}
+_GPU = {"example:cluster-a": "A100 80GB", "example:cluster-b": "H100"}
 _JOBS = [
     # source, name, state, gpus, gpu %, cpu %, elapsed
-    ("cluster-a-alice", "llm-sft / lr sweep", "RUNNING", 4, 86, 62, "12:42:18"),
-    ("cluster-b-alice", "vit-pretrain / stage 2", "RUNNING", 8, 94, 78, "1-06:12:04"),
-    ("cluster-a-bob", "speech-asr / eval", "RUNNING", 2, 73, 47, "03:28:51"),
-    ("cluster-b-alice", "diffusion / fid eval", "RUNNING", 4, None, None, "08:14:32"),
-    ("cluster-a-alice", "llm-sft / ablation", "PENDING", 4, None, None, "00:00:00"),
-    ("cluster-b-alice", "rl-agent / rollout", "PENDING", 8, None, None, "00:00:00"),
+    ("example:cluster-a-alice", "llm-sft / lr sweep", "RUNNING", 4, 86, 62, "12:42:18"),
+    ("example:cluster-b-alice", "vit-pretrain / stage 2", "RUNNING", 8, 94, 78, "1-06:12:04"),
+    ("example:cluster-a-bob", "speech-asr / eval", "RUNNING", 2, 73, 47, "03:28:51"),
+    ("example:cluster-b-alice", "diffusion / fid eval", "RUNNING", 4, None, None, "08:14:32"),
+    ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 4, None, None, "00:00:00"),
+    ("example:cluster-b-alice", "rl-agent / rollout", "PENDING", 8, None, None, "00:00:00"),
 ]
 
 
 def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any]:
     source_id, name, driver, cluster_id, username = row
-    cluster = driver == "slurm"
+    cluster = driver in {"slurm", "pbs"}
     return {
         "id": source_id,
         "name": name,
@@ -37,11 +40,11 @@ def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any
         "kind": "cluster" if cluster else "cloud",
         "cluster_id": cluster_id,
         "username": username,
-        "ssh_alias": cluster_id if cluster else "",
+        "ssh_alias": cluster_id.removeprefix("example:") if cluster else "",
         "credential": "" if cluster else "env:RUNPOD_API_KEY",
         "options": {},
         # Cluster B is reachable only from the lab gateway, which collects it.
-        "node": "lab-gateway" if cluster_id == "cluster-b" else "",
+        "node": "example:lab-gateway" if cluster_id == "example:cluster-b" else "",
         "enabled": True,
         "status": "ready",
         "last_success": observed,
@@ -132,24 +135,82 @@ def dashboard() -> dict[str, Any]:
         last_attempt=(current - timedelta(seconds=15)).isoformat(),
         next_due_at=(current - timedelta(seconds=15)).isoformat(),
     )
+    # A missing optional command has never worked here: a gap, not a regression.
+    sources[1]["capabilities"].remove("history")
+    sources[1]["warnings"] = [{"code": "history_unavailable", "detail": "sacct: command not found"}]
+    sources[4].update(
+        stale=True,
+        last_success=(current - timedelta(minutes=47)).isoformat(),
+        last_attempt=(current - timedelta(minutes=47)).isoformat(),
+        next_due_at=(current + timedelta(minutes=3)).isoformat(),
+    )
+    sources[5].update(
+        status="error",
+        stale=True,
+        last_success=(current - timedelta(hours=2, minutes=40)).isoformat(),
+        last_attempt=(current - timedelta(minutes=2)).isoformat(),
+        next_due_at=(current + timedelta(minutes=8)).isoformat(),
+        failures=3,
+        error={"code": "ssh_failed", "detail": "Permission denied (publickey)."},
+        capabilities=["jobs", "nodes", "qos_limits", "history"],
+        capabilities_seen=["history", "jobs", "nodes", "qos_limits"],
+        qos=[],
+    )
+    # RunPod raises a failed listing on HTTP 429; it cannot report fresh instances.
+    sources[6].update(
+        status="error",
+        stale=True,
+        last_success=(current - timedelta(minutes=25)).isoformat(),
+        last_attempt=(current - timedelta(minutes=1)).isoformat(),
+        next_due_at=(current + timedelta(minutes=9)).isoformat(),
+        failures=2,
+        error={"code": "http_status", "status": 429},
+        capabilities=["instances", "ssh_discovery", "ssh_probe"],
+        capabilities_seen=["instances", "ssh_discovery", "ssh_probe"],
+    )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
     for job in jobs:
         if job["source_id"] == sources[1]["id"]:
             job["observed_at"] = sources[1]["last_success"]
+    jobs.append(
+        _job(
+            len(_JOBS) + 2,
+            ("example:cluster-a-carol", "text-encoder / eval", "RUNNING", 1, 52, 30, "00:42:00"),
+            sources[4]["last_success"],
+        )
+    )
+    jobs[-1]["node"] = "a-gpu-01"
     failure = {
         **_job(
             len(_JOBS),
-            ("cluster-a-alice", "llm-sft / long context", "FAILED", 4, None, None, "02:11:40"),
+            (
+                "example:cluster-a-alice",
+                "llm-sft / long context",
+                "FAILED",
+                4,
+                None,
+                None,
+                "02:11:40",
+            ),
             observed,
         ),
         "state": "OUT_OF_MEMORY",
         "end": (current - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:125",
     }
+    timeout = {
+        **_job(
+            len(_JOBS) + 1,
+            ("example:cluster-a-alice", "vision / baseline", "TIMEOUT", 2, None, None, "02:00:00"),
+            observed,
+        ),
+        "end": (current - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "exit_code": "0:0",
+    }
     instances = [
         {
-            "id": "runpod:demo-pod",
-            "source_id": "runpod-runpod",
+            "id": "example:runpod:demo-pod",
+            "source_id": "example:runpod-runpod",
             "platform": "RunPod",
             "name": "sd-inference",
             "state": "reported_running",
@@ -172,7 +233,7 @@ def dashboard() -> dict[str, Any]:
             "last_probe_attempt": probed,
         },
         {
-            "id": "manual:lab-workstation-devbox",
+            "id": "example:manual:lab-workstation-devbox",
             "source_id": "manual",
             "platform": "Lab workstation",
             "external_id": "devbox",
@@ -206,7 +267,7 @@ def dashboard() -> dict[str, Any]:
     instances.append(
         {
             **instances[1],
-            "id": "manual:lab-workstation-buildbox",
+            "id": "example:manual:lab-workstation-buildbox",
             "external_id": "buildbox",
             "name": "build-box",
             "state": "unknown",
@@ -224,7 +285,7 @@ def dashboard() -> dict[str, Any]:
     instances.append(
         {
             **instances[-1],
-            "id": "manual:lab-workstation-shortcut",
+            "id": "example:manual:lab-workstation-shortcut",
             "external_id": "shortcut",
             "name": "ssh-shortcut",
             "monitoring": False,
@@ -239,8 +300,8 @@ def dashboard() -> dict[str, Any]:
             "cluster_id": cluster_id,
             "name": f"{cluster_id[-1]}-gpu-{i:02}",
             "state": "mixed" if i % 3 else "idle",
-            "gpu_count": 8 if cluster_id == "cluster-b" else 4,
-            "gpu_allocated": (4 if cluster_id == "cluster-b" else 2) if i % 3 else 0,
+            "gpu_count": 8 if cluster_id == "example:cluster-b" else 4,
+            "gpu_allocated": (4 if cluster_id == "example:cluster-b" else 2) if i % 3 else 0,
             "gpu_type": _GPU[cluster_id],
             "cpu_count": 128,
             "cpu_allocated": 48 if i % 3 else 0,
@@ -248,13 +309,13 @@ def dashboard() -> dict[str, Any]:
             "observed_at": observed,
         }
         for cluster_id, source_id in [
-            ("cluster-a", "cluster-a-alice"),
-            ("cluster-b", "cluster-b-alice"),
+            ("example:cluster-a", "example:cluster-a-alice"),
+            ("example:cluster-b", "example:cluster-b-alice"),
         ]
         for i in range(1, 9)
     ]
     for node in nodes:
-        if node["cluster_id"] == "cluster-b":
+        if node["cluster_id"] == "example:cluster-b":
             if node["name"] in {"b-gpu-07", "b-gpu-08"}:
                 node.update(
                     state="down*" if node["name"] == "b-gpu-07" else "drained",
@@ -281,12 +342,10 @@ def dashboard() -> dict[str, Any]:
         "refreshing": True,
         "collecting": [sources[1]["id"]],
         **freshness(sources),
-        "recent_failures": [failure],
-        "failure_history_sources": [
-            source["id"] for source in sources if source["kind"] == "cluster"
-        ],
+        "recent_failures": [timeout, failure],
+        "failure_history_sources": [source["id"] for source in sources if fresh(source, "history")],
         "failure_history_observed_at": min(
-            source["last_success"] for source in sources if source["kind"] == "cluster"
+            source["last_success"] for source in sources if fresh(source, "history")
         ),
     }
 
@@ -314,21 +373,34 @@ def events() -> list[dict[str, Any]]:
         }
 
     rows = [
-        ("job.started", "cluster-b-alice", 25, {"job": jobs["cluster-b:48211"]}),
-        ("job.failed", failure["source_id"], 140, {"job": failure}),
+        ("job.started", "example:cluster-b-alice", 25, {"job": jobs["example:cluster-b:48211"]}),
+        (
+            "source.failed",
+            "example:cluster-c-alice",
+            2,
+            {"error": next(s["error"] for s in data["sources"] if s["driver"] == "pbs")},
+        ),
+        ("job.failed", failure["source_id"], 120, {"job": failure}),
+        (
+            "job.failed",
+            data["recent_failures"][1]["source_id"],
+            300,
+            {"job": data["recent_failures"][1]},
+        ),
         (
             "job.ended",
-            "cluster-a-bob",
+            "example:cluster-a-bob",
             210,
-            {"job": {**jobs["cluster-a:48212"], "name": "speech-asr / prep"}},
+            {"job": {**jobs["example:cluster-a:48212"], "name": "speech-asr / prep"}},
         ),
-        ("source.recovered", "cluster-b-alice", 390, {}),
-        ("source.failed", "cluster-b-alice", 420, {"error": {"code": "timeout"}}),
+        ("source.recovered", "example:cluster-b-alice", 390, {}),
+        ("source.failed", "example:cluster-b-alice", 420, {"error": {"code": "timeout"}}),
     ]
+    rows.sort(key=lambda row: row[2])
     return [
         {
             "id": 100 - index,
-            "key": f"demo:{index}",
+            "key": f"example:{index}",
             "type": kind,
             "at": (at - timedelta(minutes=minutes)).isoformat(),
             "source_id": source_id,
@@ -344,7 +416,7 @@ def nodes() -> list[dict[str, Any]]:
     observed = (datetime.now(UTC) - timedelta(minutes=3)).isoformat()
     return [
         {
-            "id": "lab-gateway",
+            "id": "example:lab-gateway",
             "name": "Lab gateway",
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",

@@ -1,4 +1,4 @@
-import { ApiError } from './i18n';
+import { ApiError, t } from './i18n';
 import type { Message } from './i18n';
 import { verifiedToken } from './token';
 
@@ -25,20 +25,50 @@ async function failure(response: Response): Promise<ApiError> {
   return new ApiError(response.status, detail);
 }
 
-export async function api<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
+function checkExampleMode(path: string, method: string) {
+  // The access-token check only authenticates the viewer; it does not change resources.
+  if (path === '/session' && method.toUpperCase() === 'POST') return;
+  if (
+    method.toUpperCase() !== 'GET' &&
+    new URLSearchParams(window.location.search).get('demo') === 'true'
+  )
+    throw new Error(t('toast.demoReadOnly'));
+}
+
+/** All host API traffic, including plugin requests and file uploads, goes through here. */
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = init.method ?? 'GET';
+  checkExampleMode(path, method);
   const auth = await authHeaders();
-  const response = await fetch(
-    `/api${path}`,
-    body === undefined
-      ? { headers: auth, credentials: 'omit' }
-      : {
-          method,
-          credentials: 'omit',
-          headers: { ...auth, 'Content-Type': 'application/json', 'X-ComputeDeck': '1' },
-          body: JSON.stringify(body),
-        },
-  );
+  // The user may have switched modes while the session was being verified.
+  checkExampleMode(path, method);
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: {
+      ...auth,
+      ...(method.toUpperCase() !== 'GET' ? { 'X-ComputeDeck': '1' } : {}),
+      ...init.headers,
+    },
+    credentials: 'omit',
+  });
   if (!response.ok) throw await failure(response);
+  return response;
+}
+
+export async function api<T>(
+  path: string,
+  body?: unknown,
+  method = body === undefined ? 'GET' : 'POST',
+): Promise<T> {
+  const response = await request(path, {
+    method,
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+  });
   // 204 No Content (and other empty replies) carry no JSON body.
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -46,26 +76,17 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
 
 /** Send a file as the raw request body. */
 export async function upload<T>(path: string, file: Blob): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await request(path, {
     method: 'POST',
-    credentials: 'omit',
     headers: {
-      ...(await authHeaders()),
       'Content-Type': 'application/octet-stream',
-      'X-ComputeDeck': '1',
     },
     body: file,
   });
-  if (!response.ok) throw await failure(response);
   return response.json() as Promise<T>;
 }
 
 /** A file the API serves, fetched with the access token, for saving. */
 export async function download(path: string): Promise<Blob> {
-  const response = await fetch(`/api${path}`, {
-    headers: await authHeaders(),
-    credentials: 'omit',
-  });
-  if (!response.ok) throw await failure(response);
-  return response.blob();
+  return (await request(path)).blob();
 }

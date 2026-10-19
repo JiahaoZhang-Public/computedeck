@@ -22,21 +22,23 @@ export function SourceDiagnosis({
         <h2 id="modal-title">{t('attention.diagnosis', { name: source.name })}</h2>
         <p>{source.username || localized(driverInfo(drivers, source.driver).label)}</p>
       </header>
-      <p>
-        {source.last_success
-          ? t('attention.lastSuccess', { time: dateTime(source.last_success) })
-          : t('health.notCollected')}
-      </p>
-      <p>{t('health.nextAttempt', { time: dateTime(source.next_due_at) })}</p>
-      <p>{formatMessage(source.error) || t('attention.noError')}</p>
-      {source.warnings?.map((warning, index) => (
-        <p key={index}>{formatMessage(warning)}</p>
-      ))}
-      <button className="button" disabled={demo} onClick={() => setCheck(check + 1)}>
-        {t('sources.testConnection')}
-      </button>
-      {demo && <p className="muted">{t('attention.exampleCheck')}</p>}
-      {check > 0 && <ConnectionChecks key={check} sourceId={source.id} />}
+      <div className="source-diagnosis-body">
+        <p>
+          {source.last_success
+            ? t('attention.lastSuccess', { time: dateTime(source.last_success) })
+            : t('health.notCollected')}
+        </p>
+        <p>{t('health.nextAttempt', { time: dateTime(source.next_due_at) })}</p>
+        <p>{formatMessage(source.error) || t('attention.noError')}</p>
+        {source.warnings?.map((warning, index) => (
+          <p key={index}>{formatMessage(warning)}</p>
+        ))}
+        <button className="button" disabled={demo} onClick={() => setCheck(check + 1)}>
+          {t('sources.testConnection')}
+        </button>
+        {demo && <p className="muted">{t('attention.exampleCheck')}</p>}
+        {check > 0 && <ConnectionChecks key={check} sourceId={source.id} />}
+      </div>
     </div>
   );
 }

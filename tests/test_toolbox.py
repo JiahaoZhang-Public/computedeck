@@ -137,7 +137,9 @@ async def test_loops_run_only_while_the_tool_is_on(store: Store, tmp_path: Path)
 
 def test_example_events_are_served_in_demo_mode(client: TestClient) -> None:
     rows = client.get("/api/events?demo=true").json()
-    assert rows and rows[0]["type"] == "job.started"
+    assert rows and rows[0]["type"] == "source.failed"
+    assert rows[1]["type"] == "job.started"
+    assert all(row["key"].startswith("example:") for row in rows)
     assert client.get("/api/events").json() == []
 
 

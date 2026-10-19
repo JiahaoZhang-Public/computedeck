@@ -327,7 +327,7 @@ kbd,
   transition: transform 0.15s;
 }
 .demo-toggle input:checked + i {
-  background: var(--amber);
+  background: var(--text-3);
 }
 .demo-toggle input:checked + i::after {
   transform: translateX(10px);
@@ -503,6 +503,11 @@ kbd,
   padding: 8px 24px;
   font-size: 12.5px;
   border-bottom: 1px solid var(--border);
+}
+.demo-banner {
+  background: var(--surface);
+  color: var(--text-3);
+  flex-wrap: wrap;
 }
 .banner.amber {
   background: var(--amber-soft);
@@ -1186,6 +1191,14 @@ form > .form-error {
 
 .source-diagnosis {
   overflow-wrap: anywhere;
+}
+.source-diagnosis-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+}
+.source-diagnosis-body > .button {
+  justify-self: start;
 }
 
 .attention li + li {

@@ -119,6 +119,8 @@ const en = {
   'topbar.refresh': 'Refresh',
   'topbar.refreshHint': 'Collect all enabled sources now',
   'banner.demo': 'Showing example data, not your resources.',
+  'banner.demoTool':
+    'Example data is on. This page shows your own settings and data; changes are paused.',
   'banner.demoOff': 'Turn off example data',
   'banner.localDown':
     'Cannot reach the local service: {error}. Check that the ComputeDeck service is running.',
@@ -479,7 +481,8 @@ const en = {
   'toast.demoReloaded': 'Example data reloaded.',
   'toast.collecting': 'A collection is running; the page updates when it finishes.',
   'toast.collectStarted': 'Collection started; the page updates when it finishes.',
-  'toast.demoReadOnly': 'Example data is read-only. Turn it off at the bottom left first.',
+  'toast.demoReadOnly':
+    'Example data is read-only. Use “Turn off example data” in the banner to make changes.',
   'toast.copied': 'Copied',
   'toast.clipboard': 'Cannot access the clipboard; select the text and copy it manually.',
   'toast.backup': 'Backup saved: {path}',

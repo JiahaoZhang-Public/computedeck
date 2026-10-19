@@ -19,10 +19,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// These unit tests isolate health precedence from the demo's deliberate source faults.
+function healthyDashboard() {
+  const data = serverDemo();
+  data.sources = data.sources.filter((source) => !source.error && !source.stale);
+  data.behind = [];
+  data.as_of = data.sources.map((source) => source.last_success!).sort()[0];
+  return data;
+}
+
 describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
   it('uses server age and stale flags, excludes disabled failures, and keeps age while collecting', () => {
     setLocale(locale);
-    const data = serverDemo();
+    const data = healthyDashboard();
     data.sources[0].enabled = false;
     data.sources[0].error = 'offline';
     data.as_of = new Date(Date.now() - 8 * 60000).toISOString();
@@ -40,7 +49,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
   it('keeps first load, token gate, no sources and missing success honest', () => {
     setLocale(locale);
     expect(computeHealth(null, null, null, false, false).level).toBe('unknown');
-    const data = serverDemo();
+    const data = healthyDashboard();
     expect(computeHealth(data, health, 'unauthorized', true, false).level).toBe('unknown');
     expect(computeHealth(data, health, 'unauthorized', true, false).rows).toEqual([]);
     data.sources[0].last_success = null;
@@ -54,7 +63,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
     'names a single failing or stale source and counts multiple sources (%s)',
     (count) => {
       setLocale(locale);
-      const data = serverDemo();
+      const data = healthyDashboard();
       data.sources = data.sources.slice(0, 2);
       for (const source of data.sources.slice(0, count)) source.stale = true;
       const name = sourceLabel(groupsOf(data), data.sources[0]);
@@ -89,7 +98,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
     for (const key of ['fresh', 'stale', 'behind', 'backoff', 'unreadable'] as const) {
       expect(t(`health.${key}`, { count })).toBe(expected[key][count - 1]);
     }
-    const data = serverDemo();
+    const data = healthyDashboard();
     data.sources = data.sources.slice(0, count);
     expect(computeHealth(data, health, null, false, false).label).toBe(expected.fresh[count - 1]);
     data.behind = data.sources.map((source) => source.id);
@@ -102,7 +111,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
 
   it('distinguishes no enabled sources from first load and the token gate', () => {
     setLocale(locale);
-    const data = serverDemo();
+    const data = healthyDashboard();
     data.as_of = null;
     data.behind = [];
     for (const sources of [[], data.sources.map((source) => ({ ...source, enabled: false }))]) {
@@ -118,7 +127,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
 
   it('ignores loop errors from disabled or removed plugins', () => {
     setLocale(locale);
-    const data = serverDemo();
+    const data = healthyDashboard();
     const broken = {
       ...health,
       plugins: { notify: { enabled: false } },
@@ -154,7 +163,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
 
   it('takes the worst service state and keeps demo neutral', () => {
     setLocale(locale);
-    const data = serverDemo();
+    const data = healthyDashboard();
     const broken = {
       ...health,
       polling: false,
@@ -184,7 +193,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
 });
 
 it('group age uses the oldest enabled source, with probes only for groups without enabled sources', () => {
-  const data = serverDemo();
+  const data = healthyDashboard();
   const group = groupsOf(data)[0];
   const old = '2026-10-13T10:00:00Z';
   group.sources[0].last_success = '2026-10-13T11:00:00Z';

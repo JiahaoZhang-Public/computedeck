@@ -1064,9 +1064,16 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
     assert [(item["kind"], item["severity"]) for item in data["attention"]] == [
         ("source_stale", "error")
     ]
-    assert [
-        item["kind"] for item in client.get("/api/dashboard?demo=true").json()["attention"]
-    ] == ["instance_ssh_failed"]
+    example = client.get("/api/dashboard?demo=true").json()
+    assert [item["kind"] for item in example["attention"]] == [
+        "source_stale",
+        "source_failed",
+        "source_failed",
+        "instance_ssh_failed",
+    ]
+    assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
+    assert source["id"] not in {item["id"] for item in example["sources"]}
+    assert client.get("/api/dashboard").json()["attention"] == data["attention"]
 
 
 @pytest.mark.parametrize(

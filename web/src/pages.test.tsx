@@ -279,7 +279,11 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
     setLocale(locale);
     const data = serverDemo();
+    // Isolate the machine hint; the scenario also has missing cluster logins.
     const context = ctx(data);
+    context.data.summary.unmeasured = context.data.summary.unmeasured.filter(
+      (item) => item.subject.kind === 'instance',
+    );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
     expect(overview).toContain('≥ 21');
     expect(overview).toContain('build-box');

@@ -319,7 +319,6 @@ export default function App() {
     }
   }
   async function updateTool(id: string, body: unknown): Promise<Tool> {
-    if (blockedInDemo()) throw new Error(t('toast.demoReadOnly'));
     const saved = await api<Tool>(`/toolbox/${encodeURIComponent(id)}`, body, 'PUT');
     setTools((current) => current.map((tool) => (tool.id === id ? saved : tool)));
     return saved;
@@ -382,7 +381,15 @@ export default function App() {
     loadId.current += 1;
     setData(null);
     setLoading(true);
-    setDemo((value) => !value);
+    const next = !demo;
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set('demo', 'true');
+    else url.searchParams.delete('demo');
+    window.history.replaceState(null, '', url);
+    setDemo(next);
+    setModal(null);
+    setDetail(null);
+    setHealthOpen(false);
     setGroupState('all');
     setQuery('');
   };
@@ -663,9 +670,9 @@ export default function App() {
             </button>
           </div>
         )}
-        {demo && isDataPage && (
-          <div className="banner amber">
-            <span>{t('banner.demo')}</span>
+        {demo && (
+          <div className="banner demo-banner">
+            <span>{t(isDataPage ? 'banner.demo' : 'banner.demoTool')}</span>
             <button className="link" onClick={toggleDemo}>
               {t('banner.demoOff')}
             </button>
