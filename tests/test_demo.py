@@ -48,3 +48,18 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     unavailable = [node for node in data["nodes"] if node["health"] == "unavailable"]
     assert {node["state"] for node in unavailable} == {"down*", "drained"}
     assert all(node["gpu_allocated"] == 0 for node in unavailable)
+
+
+def test_demo_collecting_keeps_the_previous_success_age() -> None:
+    data = dashboard()
+    assert data["refreshing"] is True
+    [collecting] = [s for s in data["sources"] if s["id"] in data["collecting"]]
+    assert collecting["status"] == "syncing"
+    assert collecting["last_attempt"] > data["as_of"] == collecting["last_success"]
+    assert data["as_of"] < data["updated_at"]
+    assert data["behind"] == []
+    assert data["failure_history_observed_at"] == data["as_of"]
+    assert all(source["next_due_at"] for source in data["sources"])
+    for job in data["jobs"]:
+        if job["source_id"] == collecting["id"]:
+            assert job["observed_at"] == collecting["last_success"]

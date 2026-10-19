@@ -332,6 +332,25 @@ hand-added machines) and `sources[source_id]`:
 share their login's missing count; unmeasured hand-added machines count individually.
 The summary does not add cost accounting or failure-history coverage.
 
+## Dashboard freshness
+
+`GET /api/dashboard` also adds `as_of`, `behind` and `collecting`:
+
+- `as_of` is the oldest enabled source's `last_success`, or null if any enabled
+  source has never succeeded (also null when none are enabled). Disabled sources
+  and manual probes do not contribute. `updated_at` keeps its previous meaning.
+- `behind` lists enabled source IDs without current successful collection, using
+  the same freshness rule as the summary, without requiring a specific capability.
+- `collecting` lists pending source IDs, sorted. `refreshing` remains unchanged.
+  Refresh may still enqueue sources that are not already pending.
+
+The optional health fields `background_errors` and `unreadable_rows` are now typed
+for web plugins. Collector scheduling errors use `collector:schedule`; commit
+errors use `collector:commit:<source_id>`. A clean scheduling pass or a successful
+commit for that same source clears its error. Commit errors are also cleared when
+the source is deleted or disabled. Unreadable rows are reported by table; consult
+the service log for details.
+
 ## Marketplaces
 
 A marketplace is a `computedeck-marketplace.json` file at the root of a git repository, at

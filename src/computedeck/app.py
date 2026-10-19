@@ -319,6 +319,7 @@ def create_app(
             return demo_dashboard()
         result = store().dashboard()
         result["refreshing"] = bool(collector.pending)
+        result["collecting"] = sorted(collector.pending)
         return result
 
     @app.get("/api/history")
@@ -401,6 +402,7 @@ def create_app(
                 failures=0,
             )
         store().save_source(source)
+        collector.clear_inactive_commit_errors()
         return store().source(source_id) or source
 
     def check_node(source: dict[str, Any]) -> None:
@@ -470,6 +472,7 @@ def create_app(
     async def delete_source(source_id: str) -> dict[str, bool]:
         if not store().delete_source(source_id):
             raise HTTPException(404, message("source_not_found"))
+        collector.clear_inactive_commit_errors()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
@@ -567,6 +570,7 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
+        collector.clear_inactive_commit_errors()
         return {
             "status": "ok",
             "application": "ComputeDeck",

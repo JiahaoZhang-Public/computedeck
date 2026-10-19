@@ -593,3 +593,33 @@ def test_bad_stored_times_are_unknown_not_a_failure(store: Store, add_source: Ad
     store.save_instance({"id": "manual:lab-box", "state": "running", "observed_at": "soon"})
     assert store.dashboard()["instances"][0]["observed_at"] is None
     store.record_history()
+
+
+def test_fleet_freshness_uses_oldest_enabled_success(store: Store, add_source: AddSource) -> None:
+    current = datetime.now(UTC)
+    old = (current - timedelta(hours=3)).isoformat()
+    recent = (current - timedelta(minutes=1)).isoformat()
+    first = add_source(last_success=old)
+    add_source("Cluster B", last_success=recent)
+    add_source("Disabled", last_success=None, enabled=False)
+    store.save_instance({"id": "manual:box", "observed_at": now()})
+    data = store.dashboard()
+    assert data["as_of"] == old
+    assert data["behind"] == [first["id"]]
+    assert data["updated_at"] > recent  # The legacy newest-observation contract is unchanged.
+    missing = add_source("New", fresh=False)
+    data = store.dashboard()
+    assert data["as_of"] is None
+    assert data["behind"] == sorted([first["id"], missing["id"]])
+
+
+def test_fleet_freshness_failure_and_recovery(store: Store, add_source: AddSource) -> None:
+    source = add_source(error={"code": "ssh_failed"}, status="syncing")
+    data = store.dashboard()
+    assert data["as_of"] == source["last_success"]
+    assert data["behind"] == [source["id"]]
+    store.save_source({**source, "error": None})
+    assert store.dashboard()["behind"] == []
+    store.save_source({**source, "enabled": False})
+    data = store.dashboard()
+    assert data["as_of"] is None and data["behind"] == []

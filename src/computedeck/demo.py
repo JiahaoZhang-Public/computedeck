@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .drivers.base import cluster_state, node_health
-from .summary import summarize
+from .summary import freshness, summarize
 
 _SOURCES = [
     # id, label, driver, cluster_id, username
@@ -45,6 +45,8 @@ def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any
         "status": "ready",
         "last_success": observed,
         "last_attempt": observed,
+        "next_due_at": (datetime.fromisoformat(observed) + timedelta(minutes=10)).isoformat(),
+        "failures": 0,
         "error": None,
         "stale": False,
         "interval_minutes": 10,
@@ -122,7 +124,17 @@ def dashboard() -> dict[str, Any]:
     observed = (current - timedelta(minutes=3)).isoformat()
     probed = (current - timedelta(minutes=2)).isoformat()
     sources = [_source(row, observed) for row in _SOURCES]
+    # A background collection must not hide the age of the previous success.
+    sources[1].update(
+        status="syncing",
+        last_success=(current - timedelta(minutes=8)).isoformat(),
+        last_attempt=(current - timedelta(seconds=15)).isoformat(),
+        next_due_at=(current - timedelta(seconds=15)).isoformat(),
+    )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
+    for job in jobs:
+        if job["source_id"] == sources[1]["id"]:
+            job["observed_at"] = sources[1]["last_success"]
     failure = {
         **_job(
             len(_JOBS),
@@ -264,12 +276,16 @@ def dashboard() -> dict[str, Any]:
         "nodes": nodes,
         "history": history,
         "updated_at": observed,
-        "refreshing": False,
+        "refreshing": True,
+        "collecting": [sources[1]["id"]],
+        **freshness(sources),
         "recent_failures": [failure],
         "failure_history_sources": [
             source["id"] for source in sources if source["kind"] == "cluster"
         ],
-        "failure_history_observed_at": observed,
+        "failure_history_observed_at": min(
+            source["last_success"] for source in sources if source["kind"] == "cluster"
+        ),
     }
 
     data["summary"] = summarize(data)

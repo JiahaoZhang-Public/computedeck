@@ -863,3 +863,86 @@ def test_unreadable_rows_of_the_tools_do_not_break_their_pages(data_dir: Path) -
             assert client.get(path).status_code == 200, path
         unreadable = client.get("/api/health").json()["unreadable_rows"]
         assert {"chat_messages", "notify_rules", "notify_channels", "notify_log"} <= set(unreadable)
+
+
+def test_pending_collections_are_exposed_and_refresh_can_queue_other_sources(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = Event()
+    release = Event()
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        started.set()
+        await asyncio.to_thread(release.wait, 5)
+        return Batch(jobs=[], capabilities=["jobs"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    first = post(client, "/api/sources", CLUSTER).json()
+    second = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+    try:
+        post(client, "/api/refresh", {"source_id": first["id"]})
+        assert started.wait(2)
+        data = client.get("/api/dashboard").json()
+        assert data["collecting"] == [first["id"]]
+        assert data["refreshing"] is True
+        assert data["as_of"] is None
+        post(client, "/api/refresh")
+        assert client.get("/api/dashboard").json()["collecting"] == sorted(
+            [first["id"], second["id"]]
+        )
+    finally:
+        release.set()
+    assert wait_until_idle(client)["collecting"] == []
+
+
+def test_collector_commit_fault_reaches_health_and_recovers(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    key = f"collector:commit:{source['id']}"
+    assert client.get("/api/health").json()["background_errors"][key]["error"] == (
+        "OSError: database write failed"
+    )
+
+    async def succeed(self: collector_module.Collector, source_id: str) -> None:
+        pass
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", succeed)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    assert key not in client.get("/api/health").json()["background_errors"]
+
+
+@pytest.mark.parametrize("action", ["delete", "disable"])
+def test_commit_fault_clears_when_source_is_removed_from_collection(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    other = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    key = f"collector:commit:{source['id']}"
+    other_key = f"collector:commit:{other['id']}"
+    assert {key, other_key} <= client.get("/api/health").json()["background_errors"].keys()
+    path = f"/api/sources/{source['id']}"
+    response = (
+        client.delete(path, headers=HEADERS)
+        if action == "delete"
+        else client.put(path, json={"enabled": False}, headers=HEADERS)
+    )
+    assert response.status_code == 200
+    errors = client.get("/api/health").json()["background_errors"]
+    assert key not in errors
+    assert other_key in errors

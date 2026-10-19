@@ -74,14 +74,25 @@ class Collector:
         self.spawn(self.collect(source_id))
         return True
 
+    def clear_inactive_commit_errors(self) -> None:
+        """Deleted and disabled sources no longer have a commit to retry."""
+        enabled = {source["id"] for source in self.store.sources() if source["enabled"]}
+        prefix = "collector:commit:"
+        for key in list(self.runtime.loop_errors):
+            if key.startswith(prefix) and key.removeprefix(prefix) not in enabled:
+                self.runtime.loop_errors.pop(key, None)
+
     async def collect(self, source_id: str) -> None:
         try:
             source = self.store.source(source_id)
-            if not source:
+            if not source or not source["enabled"]:
+                self.clear_inactive_commit_errors()
                 return
             async with self.runtime.semaphore, self.runtime.cluster_lock(source["cluster_id"]):
                 await self._collect(source_id)
-        except Exception:
+                self.runtime.loop_errors.pop(f"collector:commit:{source_id}", None)
+        except Exception as error:
+            self.runtime.report(f"collector:commit:{source_id}", error)
             logger.exception("Collection could not be committed for %s", source_id)
         finally:
             self.pending.discard(source_id)
@@ -250,7 +261,9 @@ class Collector:
         while True:
             try:
                 self._schedule()
-            except Exception:
+                self.runtime.loop_errors.pop("collector:schedule", None)
+            except Exception as error:
+                self.runtime.report("collector:schedule", error)
                 # One bad row must not stop collection for every other source.
                 logger.exception("Scheduling pass failed")
             await asyncio.sleep(15)

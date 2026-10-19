@@ -719,3 +719,71 @@ async def test_a_source_failing_before_a_restart_is_still_failing_after_it(
     use_driver(monkeypatch, collect)
     await collector.collect(source["id"])
     assert [row["type"] for row in store.events()] == expected
+
+
+async def test_commit_fault_is_exposed_until_that_source_recovers(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, add_source: AddSource
+) -> None:
+    first = add_source()
+    second = add_source("Cluster B")
+
+    async def fail(source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector, "_collect", fail)
+    await collector.collect(first["id"])
+    key = f"collector:commit:{first['id']}"
+    assert collector.runtime.loop_errors[key]["error"] == "OSError: database write failed"
+    assert collector.runtime.loop_errors[key]["at"]
+
+    async def succeed(source_id: str) -> None:
+        pass
+
+    monkeypatch.setattr(collector, "_collect", succeed)
+    await collector.collect(second["id"])
+    assert key in collector.runtime.loop_errors
+    await collector.collect(first["id"])
+    assert key not in collector.runtime.loop_errors
+
+
+async def test_schedule_fault_is_exposed_and_cleared_on_next_clean_pass(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector
+) -> None:
+    passes = 0
+
+    def schedule() -> None:
+        nonlocal passes
+        passes += 1
+        if passes == 1:
+            raise ValueError("invalid schedule")
+
+    async def sleep(seconds: int) -> None:
+        if passes == 1:
+            assert collector.runtime.loop_errors["collector:schedule"]["error"] == (
+                "ValueError: invalid schedule"
+            )
+        else:
+            assert "collector:schedule" not in collector.runtime.loop_errors
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(collector, "_schedule", schedule)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await collector.run()
+
+
+@pytest.mark.parametrize("action", ["delete", "disable"])
+async def test_collect_clears_a_commit_fault_for_an_inactive_source(
+    collector: Collector, store: Store, add_source: AddSource, action: str
+) -> None:
+    source = add_source()
+    key = f"collector:commit:{source['id']}"
+    collector.runtime.report(key, OSError("database write failed"))
+    collector.runtime.report("collector:schedule", ValueError("invalid schedule"))
+    if action == "delete":
+        store.delete_source(source["id"])
+    else:
+        store.save_source({**source, "enabled": False})
+    await collector.collect(source["id"])
+    assert key not in collector.runtime.loop_errors
+    assert "collector:schedule" in collector.runtime.loop_errors

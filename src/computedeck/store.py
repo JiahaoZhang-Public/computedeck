@@ -15,7 +15,7 @@ from .drivers.base import cluster_state, node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
-from .summary import fresh, summarize, timestamp
+from .summary import fresh, freshness, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
 from .summary import manual_state as manual_state
 
@@ -600,6 +600,8 @@ class Store:
                 source["cluster_state"] = cluster_state(source_nodes)
         data = {
             "mode": "live",
+            **freshness(sources),
+            "collecting": [],
             "sources": sources,
             "jobs": list(jobs.values()),
             "nodes": list(nodes.values()),

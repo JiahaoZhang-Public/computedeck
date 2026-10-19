@@ -51,15 +51,27 @@ def ssh_sampled_at(row: dict[str, Any]) -> str | None:
     return timestamp(row.get("last_probe_attempt"))
 
 
-def fresh(source: dict[str, Any], capability: str) -> bool:
+def fresh(source: dict[str, Any], capability: str | None = None) -> bool:
     return bool(
         source["enabled"]
         and source.get("last_success")
         and not source.get("stale")
         and not source.get("error")
         and source.get("status") in ("ready", "syncing")
-        and capability in source.get("capabilities", [])
+        and (capability is None or capability in source.get("capabilities", []))
     )
+
+
+def freshness(sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fleet age excludes disabled sources and probes; a missing success stays unknown."""
+    enabled = [source for source in sources if source["enabled"]]
+    successes = [source["last_success"] for source in enabled if source.get("last_success")]
+    return {
+        "as_of": min(successes, key=datetime.fromisoformat)
+        if successes and len(successes) == len(enabled)
+        else None,
+        "behind": sorted(source["id"] for source in enabled if not fresh(source)),
+    }
 
 
 def _unique(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
