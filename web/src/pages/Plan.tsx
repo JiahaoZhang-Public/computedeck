@@ -84,7 +84,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
       t(reason, {
         free: option.freeGpus,
         headroom: option.headroom,
-        queued: option.queuedGpus,
+        queued: option.queuedForRoom,
         left: option.headroomAfterQueue == null ? '—' : Math.max(0, option.headroomAfterQueue),
         used: option.used,
         limit: option.limit,
@@ -100,8 +100,10 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
   )
     parts.push(t('plan.why.multiNode', { count: request.gpus }));
   if (
-    option.queuedGpus == null ||
-    (request.gpuType && option.headroom != null && option.headroomAfterQueue == null)
+    (option.verdict === 'likely' || option.verdict === 'possible') &&
+    option.queuedForRoom == null &&
+    (option.queuedGpus == null ||
+      (request.gpuType && option.headroom != null && option.headroomAfterQueue == null))
   )
     parts.push(t('plan.why.queueUnknown'));
   if (option.source.cluster_state === 'degraded') parts.push(t('plan.why.degraded'));
@@ -341,7 +343,7 @@ function OptionsTable({
                 <td className="num" data-label={t('plan.col.queued')}>
                   {option.queued ?? '—'}
                   <span className="sub">
-                    {t('plan.queuedGpus', { count: option.queuedGpus ?? '—' })}
+                    {t('plan.queuedGpus', { count: option.queuedForRoom ?? '—' })}
                   </span>
                   {option.reasons?.[0] && <span className="sub">{option.reasons[0]}</span>}
                 </td>

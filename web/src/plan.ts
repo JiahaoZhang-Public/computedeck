@@ -76,6 +76,8 @@ export interface PlanOption {
   /** Eligible queued jobs; null when the login's job list is not current. */
   queued: number | null;
   queuedGpus: number | null;
+  /** Reduction in available headroom from the queue, across the applicable GPU caps. */
+  queuedForRoom: number | null;
   headroomAfterQueue: number | null;
   reasons: string[] | null;
   maxWallHours: number | null;
@@ -185,8 +187,8 @@ function typedCaps(tres: string | null | undefined, model: string) {
   return model ? [] : gpuTres(tres).filter((entry) => entry.model && Number.isFinite(entry.value));
 }
 
-// These jobs cannot compete for resources yet. Limit waits still count as an estimate:
-// the scheduler may let a smaller job overtake them; this is not a queue position.
+// These jobs cannot compete for resources yet. Limit waits count only if they fit
+// the current room; this is an estimate, not a queue position.
 const QUEUE_BLOCKED = new Set([
   'Held', // PBS without a scheduler comment.
   'JobHeldUser',
@@ -197,9 +199,11 @@ const QUEUE_BLOCKED = new Set([
   'BeginTime',
 ]);
 
-function queuedGpus(jobs: Job[], model = ''): number | null {
+function queuedGpus(jobs: Job[], model = '', headroom: number | null = null): number | null {
   const relevant = jobs.filter(
-    (job) => !model || !job.gpu_type || models(job.gpu_type).includes(model),
+    (job) =>
+      (!model || !job.gpu_type || models(job.gpu_type).includes(model)) &&
+      (headroom == null || job.gpu_count == null || job.gpu_count <= headroom),
   );
   if (relevant.some((job) => job.gpu_count == null || (model && models(job.gpu_type).length !== 1)))
     return null;
@@ -284,7 +288,7 @@ function verdict(
   // A rule or queue that could not be checked keeps the estimate at "possible".
   if (option.freeGpus != null && option.headroom != null)
     return option.access !== 'verified' ||
-      option.queuedGpus == null ||
+      option.queuedForRoom == null ||
       option.headroomAfterQueue == null ||
       option.source.cluster_state === 'degraded' ||
       rule('doubt')
@@ -336,7 +340,15 @@ export function planOptions(
             ? null
             : running.reduce((sum, job) => sum + (job.gpu_count ?? 0), 0)));
       let headroom = limit != null && used != null ? Math.max(0, limit - used) : null;
-      let headroomAfterQueue = headroom != null && queued != null ? headroom - queued : null;
+      // Kubernetes quota usage already includes admitted pending pods.
+      const includesPending = currentQos?.origin === 'kubernetes_resource_quota';
+      let queuedForRoom = !currentJobs
+        ? null
+        : includesPending
+          ? 0
+          : queuedGpus(eligible, '', headroom);
+      let headroomAfterQueue =
+        headroom != null && queuedForRoom != null ? headroom - queuedForRoom : null;
       if (currentQos && request.gpuType && currentJobs) {
         const constraints = gpuTres(currentQos.limits?.MaxTRESPU).filter(
           (entry) => !entry.model || entry.model === request.gpuType.toLowerCase(),
@@ -354,12 +366,13 @@ export function planOptions(
             )
               ? null
               : relevant.reduce((sum, job) => sum + (job.gpu_count ?? 0), 0));
-          const waiting = queuedGpus(eligible, entry.model);
+          const room = count == null ? null : Math.max(0, entry.value - count);
+          const waiting = includesPending ? 0 : queuedGpus(eligible, entry.model, room);
           return {
-            afterQueue: count == null || waiting == null ? null : entry.value - count - waiting,
+            afterQueue: room == null || waiting == null ? null : room - waiting,
             limit: entry.value,
             used: count,
-            headroom: count == null ? null : Math.max(0, entry.value - count),
+            headroom: room,
           };
         });
         const tightest = rooms
@@ -372,10 +385,22 @@ export function planOptions(
         headroom = rooms.some((room) => room.headroom == null)
           ? null
           : (tightest?.headroom ?? headroom);
-        if (rooms.length)
+        if (rooms.length) {
           headroomAfterQueue = rooms.some((room) => room.afterQueue == null)
             ? null
             : Math.min(...rooms.map((room) => room.afterQueue!));
+          // Different caps can bind before and after the queue. Report the reduction
+          // in available room so the displayed arithmetic still adds up.
+          queuedForRoom =
+            headroom != null &&
+            headroomAfterQueue != null &&
+            Number.isFinite(headroom) &&
+            Number.isFinite(headroomAfterQueue)
+              ? headroom - headroomAfterQueue
+              : headroomAfterQueue == null
+                ? null
+                : queuedForRoom;
+        }
       }
       // Without a model choice, a finite typed cap may still reject the request.
       if (
@@ -387,6 +412,7 @@ export function planOptions(
       ) {
         headroom = null;
         headroomAfterQueue = null;
+        queuedForRoom = null;
       }
       const option = {
         source,
@@ -402,6 +428,7 @@ export function planOptions(
         headroom,
         queued: currentJobs ? eligible.length : null,
         queuedGpus: queued,
+        queuedForRoom,
         headroomAfterQueue,
         reasons: currentJobs
           ? [...new Set(eligible.map((job) => job.reason).filter((r): r is string => !!r))]

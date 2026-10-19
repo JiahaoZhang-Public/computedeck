@@ -566,10 +566,10 @@ const en = {
   'toast.collectSource': 'Collecting {name}.',
   'plan.verdict.behind': 'Likely to wait for your queue',
   'plan.why.behind':
-    'Your queued GPU demand is {queued}; about {left} would remain if those jobs start first. Scheduling order may differ.',
+    'Your queue would reduce the available room by {queued} GPUs; about {left} would remain if those jobs start first. Scheduling order may differ.',
   'plan.why.queueUnknown':
     'Your eligible queued GPU demand is unknown; the estimate cannot account for it.',
-  'plan.queuedGpus': 'GPUs requested: {count}',
+  'plan.queuedGpus': 'Room used by queue: {count} GPUs',
   'plan.accessUnchecked': 'Access not checked',
   'plan.accessNote':
     '{source}: access could not be verified. Confirm it with the scheduler; estimates are at most possible.',

@@ -11,7 +11,7 @@ import pytest
 from computedeck.demo import dashboard, events, nodes
 from computedeck.drivers.cloud import instance_lifecycle
 from computedeck.store import gpu_allocation, manual_state
-from computedeck.summary import fresh
+from computedeck.summary import RUNNING, fresh
 
 
 def test_demo_has_verified_planner_choices() -> None:
@@ -273,6 +273,19 @@ def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
     data = dashboard()
     queued = [job for job in data["jobs"] if job["state"] == "PENDING"]
     assert queued
-    assert all(job["reason"] == "Priority" for job in queued)
-    # The planner's queue estimate is visible without inventing a scheduler limit failure.
-    assert any(job["gpu_count"] == 4 and job["qos"] == "normal" for job in queued)
+    limit_held = [job for job in queued if job["reason"] == "QOSMaxGRESPerUser"]
+    assert limit_held
+    for job in limit_held:
+        source = next(source for source in data["sources"] if source["id"] == job["source_id"])
+        qos = next(qos for qos in source["qos"] if qos["name"] == job["qos"])
+        limit = int(qos["limits"]["MaxTRESPU"].removeprefix("gres/gpu="))
+        used = sum(
+            running["gpu_count"]
+            for running in data["jobs"]
+            if running["source_id"] == job["source_id"]
+            and running["qos"] == job["qos"]
+            and running["state"] in RUNNING
+        )
+        assert job["gpu_count"] > max(0, limit - used)
+    # A separate queue still demonstrates demand that can start before a new request.
+    assert any(job["reason"] == "Priority" and job["gpu_count"] == 4 for job in queued)

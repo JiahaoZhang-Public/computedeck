@@ -526,9 +526,9 @@ const zhCN: Record<keyof typeof en, string> = {
   'toast.collectSource': '正在采集 {name}。',
   'plan.verdict.behind': '较可能等待你的排队作业',
   'plan.why.behind':
-    '你的可调度排队作业申请了 {queued} 张 GPU；若先启动，预计剩余 {left} 张。实际调度顺序可能不同。',
+    '若你的排队作业先启动，可用额度预计减少 {queued} 张 GPU，剩余约 {left} 张。实际调度顺序可能不同。',
   'plan.why.queueUnknown': '你的可调度排队作业所需 GPU 数未知，估计无法计入这部分需求。',
-  'plan.queuedGpus': '申请 {count} 张 GPU',
+  'plan.queuedGpus': '排队占用额度：{count} 张 GPU',
   'plan.accessUnchecked': '权限未验证',
   'plan.accessNote': '{source}：无法验证访问权限，请向调度器确认；估计最多为“可能”。',
   'plan.noAccess': '未找到有权限的选项',

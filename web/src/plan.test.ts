@@ -1,4 +1,4 @@
-import { serverNodeHealth } from './test-server';
+import { serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { gpuModels, idleInstances, planOptions, wallHours } from './plan';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
@@ -695,15 +695,16 @@ describe('own queue estimates', () => {
   it('counts only this login and QoS and estimates the room after its queue', () => {
     expect(
       option([
-        { gpu_count: 6, reason: 'Priority' },
+        { gpu_count: 4, reason: 'Priority' },
         { source_id: 'cluster-a-bob', gpu_count: null },
         { qos: 'long', gpu_count: null },
       ]),
     ).toMatchObject({
       headroom: 4,
       queued: 1,
-      queuedGpus: 6,
-      headroomAfterQueue: -2,
+      queuedGpus: 4,
+      queuedForRoom: 4,
+      headroomAfterQueue: 0,
       verdict: 'behind',
     });
     expect(option([{ gpu_count: 2 }], {}, { ...ask, gpus: 2 })).toMatchObject({
@@ -734,9 +735,66 @@ describe('own queue estimates', () => {
     });
   });
 
-  it.each(['PENDING', 'PD', 'Q', 'PEND', 'QUEUED'])('counts pending alias %s', (state) => {
-    expect(option([{ state, gpu_count: 8 }]).verdict).toBe('behind');
+  it.each(serverPendingStates())('counts server pending alias %s', (state) => {
+    expect(option([{ state, gpu_count: 4 }]).verdict).toBe('behind');
   });
+
+  it.each(['', 'a100'])(
+    'lets a smaller request overtake a larger limit-held job (%s)',
+    (gpuType) => {
+      const qos = [
+        { ...source().qos[0], limits: { MaxTRESPU: `gres/gpu${gpuType ? ':a100' : ''}=8` } },
+      ];
+      expect(
+        option([{ gpu_count: 8, reason: 'QOSMaxGRESPerUser' }], { qos }, { ...ask, gpuType }),
+      ).toMatchObject({
+        headroom: 4,
+        queued: 1,
+        queuedGpus: 8,
+        queuedForRoom: 0,
+        headroomAfterQueue: 4,
+        verdict: 'likely',
+      });
+      expect(
+        option([{ gpu_count: 8 }, { gpu_count: null }], { qos }, { ...ask, gpuType }),
+      ).toMatchObject({ headroomAfterQueue: null, verdict: 'possible' });
+    },
+  );
+
+  it.each(['', 'a100'])(
+    'does not subtract admitted pending pods from quota usage again (%s)',
+    (gpuType) => {
+      const tres = `gres/gpu${gpuType ? ':a100' : ''}`;
+      const qos = [
+        {
+          ...source().qos[0],
+          name: 'team',
+          origin: 'kubernetes_resource_quota',
+          limits: { MaxTRESPU: `${tres}=8`, UsedTRESPU: `${tres}=6` },
+        },
+      ];
+      expect(
+        planOptions(
+          {
+            sources: [source({ qos, driver: 'kubernetes' })],
+            nodes: [node('g1')],
+            jobs: [
+              job('running', { qos: 'team', gpu_count: 2 }),
+              job('waiting', { qos: 'team', state: 'PENDING', gpu_count: 4 }),
+            ],
+          },
+          { ...ask, gpus: 2, gpuType },
+        )[0],
+      ).toMatchObject({
+        used: 6,
+        headroom: 2,
+        queued: 1,
+        queuedForRoom: 0,
+        headroomAfterQueue: 2,
+        verdict: 'likely',
+      });
+    },
+  );
 
   it('keeps unknown GPU demand unknown but preserves definite limits', () => {
     expect(option([{ gpu_count: null }])).toMatchObject({
@@ -771,6 +829,8 @@ describe('own queue estimates', () => {
       verdict: 'likely',
     });
     expect(option([{ gpu_type: 'h100', gpu_count: 10 }], { qos }, request)).toMatchObject({
+      headroom: 4,
+      queuedForRoom: 2,
       headroomAfterQueue: 2,
       verdict: 'behind',
     });
@@ -781,6 +841,23 @@ describe('own queue estimates', () => {
     expect(option([{ gpu_type: null, gpu_count: 2 }], { qos }, request)).toMatchObject({
       headroomAfterQueue: null,
       verdict: 'possible',
+    });
+    const typedOnly = [{ ...qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }];
+    expect(
+      option(
+        [
+          { gpu_type: 'h100', gpu_count: 8 },
+          { gpu_type: 'a100', gpu_count: 2 },
+        ],
+        { qos: typedOnly },
+        request,
+      ),
+    ).toMatchObject({
+      headroom: 4,
+      queuedGpus: 10,
+      queuedForRoom: 2,
+      headroomAfterQueue: 2,
+      verdict: 'behind',
     });
   });
 
@@ -813,5 +890,47 @@ describe('own queue estimates', () => {
       ask,
     );
     expect(options.map((row) => row.source.id)).toEqual(['cluster-a-alice', 'b']);
+  });
+
+  it('sorts equal verdicts by room after the queue, then free GPUs, then verified access', () => {
+    const base = source().qos[0];
+    const options = planOptions(
+      {
+        sources: [
+          source({
+            cluster_state: 'degraded', // All options stay possible, including verified access.
+            qos: [
+              { ...base, name: 'a-unchecked', access: 'unknown' },
+              { ...base, name: 'b-verified' },
+              { ...base, name: 'c-roomy' },
+            ],
+          }),
+        ],
+        nodes: [node('g1')],
+        jobs: [
+          job('1', { state: 'PENDING', qos: 'a-unchecked', gpu_count: 2 }),
+          job('2', { state: 'PENDING', qos: 'b-verified', gpu_count: 2 }),
+        ],
+      },
+      ask,
+    );
+    expect(options.map((row) => row.verdict)).toEqual(['possible', 'possible', 'possible']);
+    expect(options.map((row) => row.qos)).toEqual(['c-roomy', 'b-verified', 'a-unchecked']);
+    expect(options.map((row) => row.headroomAfterQueue)).toEqual([8, 6, 6]);
+
+    const moreFree = source({ id: 'z', cluster_id: 'z', qos: [base] });
+    const freeOptions = planOptions(
+      {
+        sources: [source({ qos: [base] }), moreFree],
+        nodes: [
+          node('g1'),
+          node('z1', { id: 'z:1', cluster_id: 'z', source_id: 'z', gpu_allocated: 0 }),
+        ],
+        jobs: [],
+      },
+      ask,
+    );
+    expect(freeOptions.map((row) => row.headroomAfterQueue)).toEqual([8, 8]);
+    expect(freeOptions.map((row) => row.source.id)).toEqual(['z', 'cluster-a-alice']);
   });
 });

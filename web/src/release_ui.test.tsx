@@ -2,12 +2,14 @@
 import { serverDashboard, serverDemo } from './test-server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { groupsOf } from './groups';
 import { setLocale, t } from './i18n';
 import { planOptions } from './plan';
 import { PlanPage } from './pages/Plan';
 import type { Ctx } from './pages/shared';
-import type { Dashboard, Job, Source } from './types';
+import type { Dashboard, Job, QosLimit, Source } from './types';
 
 const source: Source = {
   id: 'cluster-a-alice',
@@ -30,7 +32,7 @@ const source: Source = {
   ],
 };
 
-function renderPlan(login: Source, jobs: Job[] = []) {
+function planContext(login: Source, jobs: Job[] = []) {
   const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [login],
@@ -56,8 +58,11 @@ function renderPlan(login: Source, jobs: Job[] = []) {
     updated_at: null,
     refreshing: false,
   });
-  const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
-  return renderToStaticMarkup(<PlanPage ctx={ctx} />);
+  return { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
+}
+
+function renderPlan(login: Source, jobs: Job[] = []) {
+  return renderToStaticMarkup(<PlanPage ctx={planContext(login, jobs)} />);
 }
 
 afterEach(() => setLocale('en'));
@@ -170,6 +175,56 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       '—' + t('plan.queuedGpus', { count: '—' }),
     );
     expect(stale.textContent).not.toContain('Priority');
+    expect(stale.textContent).not.toContain(t('plan.why.queueUnknown'));
+  });
+
+  it('shows matching queue arithmetic for a model-specific limit', async () => {
+    setLocale(locale);
+    const ctx = planContext(
+      {
+        ...source,
+        qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }],
+      },
+      [
+        pending({ id: 'running', state: 'RUNNING', gpu_count: 4 }),
+        pending({ id: 'other-model', gpu_type: 'H100', gpu_count: 8 }),
+        pending({ id: 'matching', gpu_count: 2 }),
+      ],
+    );
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<PlanPage ctx={ctx} />));
+      await act(async () => {
+        const model = container.querySelector('select')!;
+        model.value = 'A100';
+        model.dispatchEvent(new Event('change', { bubbles: true }));
+        const gpus = container.querySelector<HTMLInputElement>('input[type="number"]')!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(gpus, '4');
+        gpus.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const row = container.querySelector('.plan-table tbody tr')!;
+      expect(row.textContent).toContain(t('plan.verdict.behind'));
+      expect(row.textContent).toContain(t('plan.why.behind', { queued: 2, left: 2 }));
+      expect(row.textContent).toContain(t('plan.queuedGpus', { count: 2 }));
+      expect(row.textContent).not.toContain(t('plan.queuedGpus', { count: 10 }));
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it.each<Partial<QosLimit>>([
+    { access: 'not_associated' as const },
+    { limits: { MaxTRESPU: 'gres/gpu=0' } },
+    { limits: { GrpTRES: 'gres/gpu=0' } },
+  ])('omits irrelevant queue uncertainty for an ineligible option: %j', (extra) => {
+    setLocale(locale);
+    const root = page(
+      renderPlan({ ...source, qos: [{ ...source.qos[0], ...extra }] }, [
+        pending({ gpu_count: null }),
+      ]),
+    );
+    expect(root.textContent).not.toContain(t('plan.why.queueUnknown'));
   });
 
   it.each([
@@ -202,6 +257,10 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     const data = serverDemo();
     const options = planOptions(data, { gpus: 1, gpuType: '', hours: null });
     expect(options.some((option) => option.verdict === 'behind')).toBe(true);
+    const held = data.jobs.find((job) => job.reason === 'QOSMaxGRESPerUser')!;
+    expect(
+      options.find((option) => option.source.id === held.source_id && option.qos === held.qos),
+    ).toMatchObject({ queuedForRoom: 0, verdict: 'likely' });
     const root = page(
       renderToStaticMarkup(<PlanPage ctx={{ data, groups: groupsOf(data), demo: true } as Ctx} />),
     );
