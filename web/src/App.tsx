@@ -329,8 +329,10 @@ export default function App() {
   async function refresh(sourceId?: string) {
     setRefreshing(true);
     try {
-      if (demo) notify(t('toast.demoReloaded'));
-      else {
+      if (demo) {
+        notify(t('toast.demoReloaded'));
+        await load();
+      } else {
         const result = await api<{ status: string }>(
           '/refresh',
           sourceId ? { source_id: sourceId } : {},
@@ -338,7 +340,6 @@ export default function App() {
         followCollection();
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
-      await load();
     } catch (reason) {
       notify(errorText(reason, 'error.refresh'), 'error');
     } finally {
@@ -351,9 +352,9 @@ export default function App() {
       const followsCollection =
         path.endsWith('/probe') ||
         (method === 'POST' && (path === '/sources' || path === '/instances'));
-      if (followsCollection) followCollection();
       const result = await api<T>(path, body, method);
-      await load();
+      if (followsCollection) followCollection();
+      else await load();
       return result;
     } finally {
       setBusy(false);
@@ -395,7 +396,6 @@ export default function App() {
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
       );
-      await load();
     } catch (reason) {
       notify(errorText(reason, 'error.refresh'), 'error');
     }
@@ -958,10 +958,11 @@ export default function App() {
                 ctx={ctx}
                 onProbe={async () => {
                   try {
-                    await mutate(`/instances/${encodeURIComponent(detail.item.id)}/probe`, {});
-                    const latest = await api<Dashboard>('/dashboard?demo=false');
-                    const item = latest.instances.find((each) => each.id === detail.item.id);
-                    if (item) setDetail({ kind: 'instance', item });
+                    const item = await mutate<Instance>(
+                      `/instances/${encodeURIComponent(detail.item.id)}/probe`,
+                      {},
+                    );
+                    setDetail({ kind: 'instance', item });
                     notify(t('toast.probed'));
                   } catch (reason) {
                     notify(errorText(reason, 'error.probe'), 'error');

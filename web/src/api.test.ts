@@ -119,3 +119,60 @@ it('defers initial and plugin requests while hidden, then rechecks example mode'
   expect(calls[0].method).toBe('GET');
   hidden.mockRestore();
 });
+
+it('coalesces hidden GETs by path with one visibility listener and readable bodies for all callers', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const listen = vi.spyOn(document, 'addEventListener');
+  const fetch = vi.fn(async (path: string) => new Response(JSON.stringify({ path })));
+  vi.stubGlobal('fetch', fetch);
+  const reads = Array.from({ length: 100 }, () => api('/plugins/example/status'));
+  const other = api('/plugins/example/status?detail=true');
+  const writes = [api('/plugins/example/action', {}), api('/plugins/example/action', {})];
+  await Promise.resolve();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(listen.mock.calls.filter(([event]) => event === 'visibilitychange')).toHaveLength(1);
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(await Promise.all(reads)).toEqual(
+    Array.from({ length: 100 }, () => ({ path: '/api/plugins/example/status' })),
+  );
+  await expect(other).resolves.toEqual({ path: '/api/plugins/example/status?detail=true' });
+  await Promise.all(writes);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+    '/api/plugins/example/status',
+    '/api/plugins/example/status?detail=true',
+    '/api/plugins/example/action',
+    '/api/plugins/example/action',
+  ]);
+  // A later hidden period must get a fresh response, not the previous held GET.
+  hidden.mockReturnValue(true);
+  const next = api('/plugins/example/status');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await expect(next).resolves.toEqual({ path: '/api/plugins/example/status' });
+  expect(fetch).toHaveBeenCalledTimes(5);
+  listen.mockRestore();
+  hidden.mockRestore();
+});
+
+it('releases failed held GETs so they can be retried', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const fetch = vi.fn(async () => new Response('{}', { status: 503 }));
+  vi.stubGlobal('fetch', fetch);
+  const reads = Promise.allSettled([
+    api('/plugins/example/status'),
+    api('/plugins/example/status'),
+  ]);
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect((await reads).map((result) => result.status)).toEqual(['rejected', 'rejected']);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  hidden.mockReturnValue(true);
+  fetch.mockImplementation(async () => new Response('{}'));
+  const retry = api('/plugins/example/status');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await expect(retry).resolves.toEqual({});
+  expect(fetch).toHaveBeenCalledTimes(2);
+  hidden.mockRestore();
+});

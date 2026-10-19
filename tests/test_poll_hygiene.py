@@ -1,5 +1,6 @@
 """Content tokens follow the response, including changes without a database write."""
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -56,6 +57,32 @@ def test_dashboard_token_preserves_the_full_contract_and_skips_unchanged_history
         assert changed["token"] != data["token"]
         assert changed["sources"]
         assert changed["history"] == data["history"]
+    finally:
+        db.db.close()
+
+
+@pytest.mark.parametrize("point_count", [700, 900, 1440])
+def test_thinned_history_token_is_stable_between_polls(
+    client: TestClient, tmp_path: Path, clock: list[datetime], point_count: int
+) -> None:
+    db = store.Store(tmp_path / "computedeck.sqlite")
+    try:
+        # Leave room at both ends so no point enters or leaves during these polls.
+        start = clock[0] - timedelta(hours=23, minutes=55)
+        with db.db:
+            for index in range(point_count):
+                point = {
+                    "at": (start + timedelta(seconds=index * 86000 / point_count)).isoformat(),
+                    "allocated_gpus": index,
+                }
+                db.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))
+        before = client.get("/api/dashboard").json()
+        assert 0 < len(before["history"]) <= 600 < point_count
+        for _ in range(6):
+            clock[0] += timedelta(seconds=10)
+            response = client.get("/api/dashboard", params={"since": before["token"]})
+            assert response.status_code == 200
+            assert response.json() == {"unchanged": True, "token": before["token"]}
     finally:
         db.db.close()
 

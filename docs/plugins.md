@@ -497,7 +497,7 @@ files and SQLite database in your own backups while its database connections are
 
 ## Dashboard polling
 
-`GET /api/dashboard` adds an optional `token`, a short SHA-256 of the serialized
+Every full `GET /api/dashboard` response includes `token`, a short SHA-256 of the serialized
 response before the token is added. Send it back as `?since=<token>` (alongside
 `demo=true` for example data). When the content matches, the service returns HTTP
 200 with `{"unchanged": true, "token": "..."}`; otherwise it returns the complete
@@ -511,7 +511,9 @@ example timestamps advance once per minute.
 The web pauses polling while hidden and reloads on visibility or focus. Requests
 made through its request function while the page is hidden wait until it is
 visible again; this includes plugin requests and writes. Visible requests do
-not wait for visibility.
+not wait for visibility. Hidden GETs to the same path share one request on return,
+with a separate response body for each caller; writes remain separate.
+
 Visible dashboard polls run every ten seconds, or every second for up to sixty
 seconds after the viewer's Refresh, Probe or add action. Health, toolbox and
 collection-machine status keep their ten-second cadence; `/api/health` checks

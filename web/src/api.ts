@@ -32,20 +32,39 @@ function checkExampleMode(path: string, method: string) {
     throw new Error(t('toast.demoReadOnly'));
 }
 
-async function waitUntilVisible(): Promise<void> {
-  if (!document.hidden) return;
-  await new Promise<void>((resolve) => {
+let visibilityWait: Promise<void> | undefined;
+const heldGets = new Map<string, Promise<Response>>();
+
+function waitUntilVisible(): Promise<void> {
+  if (!document.hidden) return Promise.resolve();
+  if (visibilityWait) return visibilityWait;
+  visibilityWait = new Promise<void>((resolve) => {
     const visible = () => {
       if (document.hidden) return;
       document.removeEventListener('visibilitychange', visible);
+      visibilityWait = undefined;
       resolve();
     };
     document.addEventListener('visibilitychange', visible);
   });
+  return visibilityWait;
 }
 
 /** All host API traffic, including plugin requests and file uploads, goes through here. */
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  if (document.hidden && (init.method ?? 'GET').toUpperCase() === 'GET') {
+    let shared = heldGets.get(path);
+    if (!shared) {
+      shared = sendRequest(path, init).finally(() => heldGets.delete(path));
+      heldGets.set(path, shared);
+    }
+    // Each caller consumes its own body, including download() callers.
+    return shared.then((response) => response.clone());
+  }
+  return sendRequest(path, init);
+}
+
+async function sendRequest(path: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   checkExampleMode(path, method);
   let auth: Record<string, string>;

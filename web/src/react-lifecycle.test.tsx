@@ -947,6 +947,11 @@ describe('visible dashboard polling', () => {
       if (path === '/settings') return { language: 'en' };
       if (path === '/health') return null;
       if (path === '/refresh') return { status: 'started' };
+      if (path.endsWith('/probe'))
+        return {
+          ...data.instances.find((item) => path.includes(encodeURIComponent(item.id))),
+          name: 'Probed machine',
+        };
       return [];
     });
   }
@@ -993,11 +998,13 @@ describe('visible dashboard polling', () => {
       mockDashboard(data);
       if (action !== 'refresh') window.history.replaceState(null, '', '/#/cloud');
       await render(<App />);
+      request.mockClear();
       if (action === 'refresh') await click(`button[aria-label="${t('topbar.refresh')}"]`);
       if (action === 'probe') {
         await click('tr.clickable');
         await click('.drawer .button.primary');
         expect(request.mock.calls.some(([path]) => path.endsWith('/probe'))).toBe(true);
+        expect(container.querySelector('.drawer')?.textContent).toContain('Probed machine');
       }
       if (action === 'add') {
         await click(`button[aria-label="${t('cloud.add')}"]`);
@@ -1008,6 +1015,7 @@ describe('visible dashboard polling', () => {
         });
         expect(request.mock.calls.some(([path]) => path === '/instances')).toBe(true);
       }
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
       request.mockClear();
       await act(async () => vi.advanceTimersByTimeAsync(999));
       expect(request).not.toHaveBeenCalled();
@@ -1026,6 +1034,34 @@ describe('visible dashboard polling', () => {
       expect(request).not.toHaveBeenCalled();
       await act(async () => vi.advanceTimersByTimeAsync(1));
       expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+    },
+  );
+
+  it.each(['refresh', 'probe', 'add'] as const)(
+    'does not start following after a failed %s',
+    async (action) => {
+      const data = { ...serverDemo(), mode: 'live' as const, token: 'live-token' };
+      mockDashboard(data);
+      if (action !== 'refresh') window.history.replaceState(null, '', '/#/cloud');
+      await render(<App />);
+      if (action === 'probe') await click('tr.clickable');
+      if (action === 'add') await click(`button[aria-label="${t('cloud.add')}"]`);
+      request.mockRejectedValueOnce(new Error('Request failed'));
+      if (action === 'refresh') await click(`button[aria-label="${t('topbar.refresh')}"]`);
+      if (action === 'probe') await click('.drawer .button.primary');
+      if (action === 'add') {
+        await act(async () => {
+          container
+            .querySelector('form')!
+            .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+      }
+      expect(container.textContent).toContain('Request failed');
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(9999));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(0);
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
     },
   );
 

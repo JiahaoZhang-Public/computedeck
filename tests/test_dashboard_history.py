@@ -403,15 +403,25 @@ def test_history_range_excludes_older_points(store: Store) -> None:
 
 def test_thinning_keeps_whole_points_and_gaps(store: Store) -> None:
     current = datetime.now(UTC)
+    boundary = current.replace(hour=current.hour // 2 * 2, minute=0, second=0, microsecond=0)
     # Two points per bucket when thinning 24 h to 12 points; the later one is kept as is.
     for index in range(24):
-        at = current - timedelta(hours=23.9 - index)
+        at = boundary - timedelta(hours=24 - index)
         insert_point(store, at, None if index % 2 else index)
     points = store.history(24, max_points=12)
-    assert 10 <= len(points) <= 13
+    assert 11 <= len(points) <= 12
     assert all(point["allocated_gpus"] is None for point in points)
     times = [point["at"] for point in points]
     assert times == sorted(times)
+
+
+def test_thinning_caps_buckets_when_the_window_is_not_aligned(store: Store) -> None:
+    current = datetime.now(UTC)
+    for index in range(1440):
+        insert_point(store, current - timedelta(minutes=index), index)
+    points = store.history(24)
+    assert len(points) == 600
+    assert points[-1]["at"] == current.isoformat()
 
 
 def test_ssh_process_use_matches_dashboard_history(store: Store, add_source: AddSource) -> None:

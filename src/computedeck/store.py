@@ -648,12 +648,12 @@ class Store:
         if len(rows) <= max_points:
             return rows
         bucket = hours * 3600 / max_points
-        start = datetime.fromisoformat(since)
         kept: dict[int, dict[str, Any]] = {}
         for row in rows:
-            index = int((datetime.fromisoformat(row["at"]) - start).total_seconds() // bucket)
+            index = int(datetime.fromisoformat(row["at"]).timestamp() // bucket)
             kept[index] = row
-        return [kept[index] for index in sorted(kept)]
+        # A sliding window can overlap an extra absolute bucket; keep the newest ones.
+        return [kept[index] for index in sorted(kept)[-max_points:]]
 
     def record_history(self) -> None:
         dashboard = self.dashboard()
