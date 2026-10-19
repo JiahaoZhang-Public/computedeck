@@ -26,9 +26,10 @@ export function sourceHasData(source: Source, capability: string) {
  * Slurm states in which a job holds its GPUs: starting on its nodes (CONFIGURING), running,
  * and finishing until the scheduler releases them (COMPLETING).
  */
-const ALLOCATED_STATES = ['CONFIGURING', 'RUNNING', 'COMPLETING'];
+export const RUNNING_STATES = ['CONFIGURING', 'RUNNING', 'COMPLETING', 'R', 'CF', 'CG'];
+export const PENDING_STATES = ['PENDING', 'PD', 'Q', 'PEND', 'QUEUED'];
 export function holdsAllocation(job: Pick<Job, 'state'>) {
-  return ALLOCATED_STATES.includes(job.state.toUpperCase());
+  return RUNNING_STATES.includes(job.state.toUpperCase());
 }
 /** Instance GPU allocation lifecycle; kept in parity with drivers/cloud.py. */
 export const INSTANCE_LIFECYCLE = {
@@ -81,10 +82,10 @@ export function partialCount(total: number | null, known: number | null) {
 }
 
 export function jobGpuResources(job: Job) {
-  const state = job.state.toUpperCase();
+  const pending = PENDING_STATES.includes(job.state.toUpperCase());
   return {
-    requested: state === 'PENDING' ? job.gpu_count : null,
-    allocated: holdsAllocation(job) ? job.gpu_count : state === 'PENDING' ? 0 : null,
+    requested: pending ? job.gpu_count : null,
+    allocated: holdsAllocation(job) ? job.gpu_count : pending ? 0 : null,
   };
 }
 export function uniqueNodes(nodes: ComputeNode[]) {

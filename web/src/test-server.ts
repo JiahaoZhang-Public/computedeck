@@ -12,7 +12,7 @@ function server(input: unknown) {
         '-c',
         `
 import json, sys
-from computedeck.summary import PENDING, summarize, summarize_nodes
+from computedeck.summary import PENDING, RUNNING, summarize, summarize_nodes
 from computedeck import attention, drivers
 from datetime import datetime, UTC
 from computedeck.drivers.base import node_health
@@ -22,6 +22,8 @@ if 'demo' in request:
     result = dashboard()
 elif 'state' in request:
     result = node_health(request['state'])
+elif 'running_states' in request:
+    result = sorted(RUNNING)
 elif 'pending_states' in request:
     result = sorted(PENDING)
 elif 'nodes' in request:
@@ -57,4 +59,8 @@ export function serverDemo(): Dashboard {
 
 export function serverPendingStates(): string[] {
   return server({ pending_states: true });
+}
+
+export function serverRunningStates(): string[] {
+  return server({ running_states: true });
 }

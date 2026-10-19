@@ -624,3 +624,17 @@ describe('SSH process-based GPU use', () => {
     },
   );
 });
+
+it('uses the server running and pending aliases for GPU resources', async () => {
+  const { serverRunningStates, serverPendingStates } = await import('./test-server');
+  const { holdsAllocation, RUNNING_STATES, PENDING_STATES } = await import('./domain');
+  expect([...RUNNING_STATES].sort()).toEqual(serverRunningStates());
+  for (const state of serverRunningStates()) {
+    expect(holdsAllocation({ state })).toBe(true);
+    expect(jobGpuResources(job({ state })).allocated).toBe(4);
+  }
+  expect([...PENDING_STATES].sort()).toEqual(serverPendingStates());
+  for (const state of serverPendingStates())
+    expect(jobGpuResources(job({ state }))).toEqual({ requested: 4, allocated: 0 });
+  expect(holdsAllocation({ state: 'FAILED' })).toBe(false);
+});

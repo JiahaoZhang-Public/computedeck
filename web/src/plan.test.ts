@@ -1010,3 +1010,76 @@ describe('own queue estimates', () => {
     expect(freeOptions.map((row) => row.source.id)).toEqual(['z', 'cluster-a-alice']);
   });
 });
+
+it('does not let a CPU-only queued job consume or obscure a typed GPU cap', () => {
+  const login = source({
+    qos: [
+      {
+        name: 'normal',
+        access: 'verified',
+        origin: 'test',
+        limits: { MaxTRESPU: 'gres/gpu:a100=4' },
+        usage: { MaxTRESPU: 'gres/gpu:a100=0' },
+      },
+    ],
+  });
+  const [option] = planOptions(
+    {
+      sources: [login],
+      nodes: [node('idle', { gpu_allocated: 0 })],
+      jobs: [job('cpu', { state: 'PENDING', gpu_count: 0, gpu_type: null, reason: 'Priority' })],
+    },
+    { gpus: 2, gpuType: 'a100', hours: null },
+  );
+  expect(option.verdict).toBe('likely');
+  expect(option.queuedForRoom).toBe(0);
+  expect(option.headroomAfterQueue).toBe(4);
+});
+
+it.each([{ health: 'unknown' as const }, { gpu_count: null }])(
+  'keeps unmeasured matching capacity unknown: %s',
+  (unknown) => {
+    const [option] = planOptions(
+      {
+        sources: [source()],
+        nodes: [
+          node('full', { gpu_allocated: 8 }),
+          node('unmeasured', { gpu_allocated: 0, ...unknown }),
+        ],
+        jobs: [],
+      },
+      { gpus: 2, gpuType: 'a100', hours: null },
+    );
+    expect(option.freeGpus).toBeNull();
+    expect(option.verdict).toBe('possible');
+  },
+);
+
+it.each(['R', 'CF', 'CG'])('counts %s allocation against planner limits', (state) => {
+  const [option] = planOptions(
+    {
+      sources: [source({ qos: [source().qos[0]] })],
+      nodes: [node('idle', { gpu_allocated: 0 })],
+      jobs: [job('running', { state, gpu_count: 8 })],
+    },
+    { gpus: 2, gpuType: '', hours: null },
+  );
+  expect(option.used).toBe(8);
+  expect(option.headroom).toBe(0);
+  expect(option.verdict).toBe('limit');
+});
+
+it.each([{ health: 'unknown' as const }, { gpu_count: null }, { gpu_allocated: null }])(
+  'keeps enough known free GPUs as a lower bound beside uncertain capacity: %s',
+  (unknown) => {
+    const [option] = planOptions(
+      {
+        sources: [source()],
+        nodes: [node('idle', { gpu_allocated: 0 }), node('unmeasured', unknown)],
+        jobs: [],
+      },
+      { gpus: 2, gpuType: 'a100', hours: null },
+    );
+    expect(option).toMatchObject({ freeGpus: 8, freeGpusPartial: true, verdict: 'likely' });
+  },
+);

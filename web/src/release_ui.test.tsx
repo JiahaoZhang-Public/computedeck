@@ -284,3 +284,24 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     expect(root.querySelector('.plan-table tbody tr .plan-qos')!.textContent).toBe(options[0].qos);
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'renders partial free GPUs in the row and best estimate in %s',
+  (locale) => {
+    setLocale(locale);
+    const context = planContext(source);
+    context.data = serverDashboard({
+      ...context.data,
+      nodes: [
+        context.data.nodes[0],
+        { ...context.data.nodes[0], id: 'cluster-a:unknown', name: 'unknown', state: 'FUTURE' },
+      ],
+    });
+    const root = page(renderToStaticMarkup(<PlanPage ctx={context} />));
+    const free = root.querySelector(`td[data-label="${t('plan.col.free')}"]`)!;
+    expect(free.textContent).toContain('≥ 4');
+    const best = root.querySelector('.plan-best')!;
+    expect(best.textContent).toContain(t('plan.verdict.likely'));
+    expect(best.textContent).toContain(t('plan.best.free', { count: '≥ 3' }));
+  },
+);

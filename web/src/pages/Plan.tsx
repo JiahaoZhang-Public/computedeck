@@ -49,6 +49,12 @@ function duration(hours: number) {
     : t('plan.hours', { count: Math.round(hours * 10) / 10 });
 }
 
+function freeGpuCount(option: PlanOption, used = 0) {
+  if (option.freeGpus == null) return '—';
+  const count = option.freeGpus - used;
+  return option.freeGpusPartial ? `≥ ${count}` : count;
+}
+
 function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
   const parts: string[] = [];
   const key: Record<Verdict, MessageKey | null> = {
@@ -82,7 +88,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
   else if (reason)
     parts.push(
       t(reason, {
-        free: option.freeGpus,
+        free: freeGpuCount(option),
         headroom: option.headroom,
         queued: option.queuedForRoom,
         count: option.queuedForRoom,
@@ -190,7 +196,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             {best.access === 'unknown' && <span className="tag">{t('plan.accessUnchecked')}</span>}
             <span>
               {t('plan.best.free', {
-                count: best.freeGpus == null ? '—' : best.freeGpus - request.gpus,
+                count: freeGpuCount(best, request.gpus),
               })}
             </span>
             <span>
@@ -291,7 +297,7 @@ function OptionsTable({
 }) {
   const { groups } = ctx;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap plan-options">
       <table className="table plan-table">
         <thead>
           <tr>
@@ -328,7 +334,7 @@ function OptionsTable({
                   </span>
                 </td>
                 <td className="num" data-label={t('plan.col.free')}>
-                  {option.freeGpus ?? '—'}
+                  {freeGpuCount(option)}
                   {option.largestNodeFree != null && (
                     <span className="sub">
                       {t('plan.largestNode', { count: option.largestNodeFree })}

@@ -1,6 +1,7 @@
 import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
 import {
   holdsAllocation,
+  PENDING_STATES,
   instanceLifecycle,
   gpuTres,
   qosGpuLimit,
@@ -67,6 +68,8 @@ export interface PlanOption {
   qos: string | null;
   /** Unallocated GPUs of the requested model on healthy visible nodes. */
   freeGpus: number | null;
+  /** Free GPUs are a lower bound because matching capacity is partly unmeasured. */
+  freeGpusPartial: boolean;
   /** The most free GPUs of that model on one node; fewer than requested means multi-node. */
   largestNodeFree: number | null;
   matchingNodes: number;
@@ -127,7 +130,7 @@ function matchesModel(node: ComputeNode, gpuType: string) {
   return models(node.gpu_type).includes(gpuType.toLowerCase());
 }
 
-function capacity(nodes: ComputeNode[], gpuType: string) {
+function capacity(nodes: ComputeNode[], gpuType: string, requestedGpus: number) {
   // Nodes that may hold GPUs: one with an unknown count might.
   const gpuNodes = nodes.filter((node) => node.gpu_count == null || node.gpu_count > 0);
   const matching = gpuNodes.filter((node) => matchesModel(node, gpuType));
@@ -151,15 +154,24 @@ function capacity(nodes: ComputeNode[], gpuType: string) {
         node.gpu_count != null &&
         (!gpuType || !!node.gpu_type),
     );
+  const knownFree = known.reduce((a, b) => a + b, 0);
+  const partial =
+    known.length < free.length ||
+    matching.some(
+      (node) =>
+        node.health !== 'unavailable' &&
+        (node.health !== 'usable' || node.gpu_count == null || node.gpu_allocated == null),
+    );
   return {
     matchingNodes: usable.length,
-    freeGpus: usable.length
-      ? known.length === free.length
-        ? known.reduce((a, b) => a + b, 0)
+    freeGpus: partial
+      ? knownFree >= requestedGpus
+        ? knownFree
         : null
-      : complete
-        ? 0
+      : usable.length || complete
+        ? knownFree
         : null,
+    freeGpusPartial: partial,
     largestNodeFree: known.length ? Math.max(...known) : null,
     noMatchingGpus: complete && !matching.length,
     observedAt:
@@ -205,6 +217,7 @@ function queuedGpus(jobs: Job[], model = '', headroom: number | null = null): nu
   let total = 0;
   // Listed order is an estimate, not scheduler priority. Skip jobs that no longer fit.
   for (const job of jobs) {
+    if (job.gpu_count === 0) continue;
     if (model && job.gpu_type && !models(job.gpu_type).includes(model)) continue;
     const remaining = headroom == null ? null : headroom - total;
     if (remaining === 0) break;
@@ -321,6 +334,7 @@ export function planOptions(
     const cluster = capacity(
       nodes.filter((node) => node.cluster_id === source.cluster_id),
       request.gpuType,
+      request.gpus,
     );
     const mine = jobs.filter((job) => job.source_id === source.id);
     const currentJobs = sourceHasData(source, 'jobs');
@@ -329,9 +343,7 @@ export function planOptions(
       const currentQos = sourceHasData(source, 'qos_limits') ? qos : null;
       const inQos = mine.filter((job) => !qos || job.qos === qos.name);
       const running = inQos.filter(holdsAllocation);
-      const pending = inQos.filter((job) =>
-        ['PENDING', 'PD', 'Q', 'PEND', 'QUEUED'].includes(job.state.toUpperCase()),
-      );
+      const pending = inQos.filter((job) => PENDING_STATES.includes(job.state.toUpperCase()));
       const eligible = pending.filter((job) => !QUEUE_BLOCKED.has(job.reason ?? ''));
       const queued = currentJobs ? queuedGpus(eligible) : null;
       let limit = currentQos ? qosGpuLimit(currentQos, request.gpuType) : null;
@@ -428,6 +440,7 @@ export function planOptions(
           : ('unknown' as const),
         qos: qos?.name ?? null,
         freeGpus: cluster.freeGpus,
+        freeGpusPartial: cluster.freeGpusPartial,
         largestNodeFree: cluster.largestNodeFree,
         matchingNodes: cluster.matchingNodes,
         limit,
