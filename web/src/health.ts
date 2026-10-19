@@ -30,16 +30,14 @@ export function computeHealth(
   }[] = [];
   if (!demo && !needsToken) {
     for (const [id, fault] of Object.entries(health?.background_errors ?? {})) {
+      const collector = id === 'collector' || id.startsWith('collector:');
+      if (!collector && !health?.plugins?.[id.split(':')[0]]?.enabled) continue;
       faults.push({
         id,
-        title: t(
-          id === 'collector' || id.startsWith('collector:')
-            ? 'health.collectorFault'
-            : 'health.pluginFault',
-        ),
+        title: t(collector ? 'health.collectorFault' : 'health.pluginFault'),
         detail: `${id}: ${fault.error}`,
         at: fault.at,
-        page: id === 'collector' || id.startsWith('collector:') ? undefined : 'toolbox',
+        page: collector ? undefined : 'toolbox',
       });
     }
     const unreadable = Object.entries(health?.unreadable_rows ?? {}).filter(

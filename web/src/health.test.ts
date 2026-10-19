@@ -116,6 +116,42 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
     expect(computeHealth(null, null, null, false, false).label).toBe(t('health.unknown'));
   });
 
+  it('ignores loop errors from disabled or removed plugins', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const broken = {
+      ...health,
+      plugins: { notify: { enabled: false } },
+      background_errors: { 'notify:events': { at: '', error: 'delivery failed' } },
+    };
+    expect(computeHealth(data, broken, null, false, false).faults).toEqual([]);
+    expect(computeHealth(data, { ...broken, plugins: {} }, null, false, false).level).toBe('ok');
+    data.sources[0].error = 'offline';
+    expect(computeHealth(data, broken, null, false, false).label).toBe(
+      t('health.sourceFailing', { name: sourceLabel(groupsOf(data), data.sources[0]) }),
+    );
+  });
+
+  it('reports collection-machine failures', () => {
+    setLocale(locale);
+    const state = computeHealth(serverDemo(), health, null, false, false, [
+      {
+        id: 'relay-a',
+        name: 'Relay A',
+        ssh_alias: 'relay-a',
+        command: 'computedeck',
+        status: 'error',
+        version: null,
+        drivers: [],
+        checked_at: null,
+        error: { code: 'ssh_failed', detail: 'SSH failed' },
+      },
+    ]);
+    expect(state.level).toBe('bad');
+    expect(state.label).toBe(t('health.nodeFault', { name: 'Relay A' }));
+    expect(state.faults[0].page).toBe('sources');
+  });
+
   it('takes the worst service state and keeps demo neutral', () => {
     setLocale(locale);
     const data = serverDemo();

@@ -673,10 +673,10 @@ export default function App() {
                 <span aria-hidden="true">
                   {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
                 </span>
-                {healthState.label !== healthState.age && (
-                  <span className="health-label">{healthState.label} · </span>
-                )}
-                <span className="health-age">{healthState.age}</span>
+                <span className="health-label">{healthDescription}</span>
+                <span className="health-age" aria-hidden="true">
+                  {healthState.age}
+                </span>
               </button>
             </div>
             {!!data?.collecting?.length && !needsToken && (

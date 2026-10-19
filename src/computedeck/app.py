@@ -570,7 +570,8 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        collector.clear_inactive_commit_errors()
+        sources = store().sources()
+        enabled = {source["id"] for source in sources if source["enabled"]}
         return {
             "status": "ok",
             "application": "ComputeDeck",
@@ -580,11 +581,16 @@ def create_app(
             "database_path": str(store().path),
             "polling": polling,
             "ssh_installed": ssh_state()["installed"],
-            "source_count": len(store().sources()),
+            "source_count": len(sources),
             "plugins": {
                 context.id: {**context.status(), "enabled": context.enabled} for context in contexts
             },
-            "background_errors": runtime.loop_errors,
+            "background_errors": {
+                key: error
+                for key, error in runtime.loop_errors.items()
+                if not key.startswith("collector:commit:")
+                or key.removeprefix("collector:commit:") in enabled
+            },
             "unreadable_rows": store().unreadable_rows(),
         }
 

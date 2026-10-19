@@ -391,15 +391,14 @@ kbd,
 }
 .health-label,
 .health-age {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .health-label {
   flex-shrink: 1;
 }
 .health-age {
-  flex-shrink: 0;
+  display: none;
 }
 .health-bad {
   color: var(--red);
@@ -454,17 +453,17 @@ kbd,
   font-size: 12px;
 }
 @media (max-width: 1100px) {
-  .health-label {
-    display: none;
-  }
   .health-pill {
-    max-width: 150px;
-  }
-  .health-age {
-    flex-shrink: 1;
+    max-width: 220px;
   }
 }
 @media (max-width: 560px) {
+  .health-label {
+    display: none;
+  }
+  .health-age {
+    display: block;
+  }
   .topbar {
     height: auto;
     min-height: 52px;

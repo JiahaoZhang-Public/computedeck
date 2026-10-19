@@ -946,3 +946,31 @@ def test_commit_fault_clears_when_source_is_removed_from_collection(
     errors = client.get("/api/health").json()["background_errors"]
     assert key not in errors
     assert other_key in errors
+
+
+def test_health_filters_inactive_commit_faults_without_mutating_runtime(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    other = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+    runtimes = []
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        runtimes.append(self.runtime)
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    runtime = runtimes[0]
+    recorded = dict(runtime.loop_errors)
+    # A CLI edit can disable a source without going through the service's write routes.
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        store.save_source({**source, "enabled": False})
+    finally:
+        store.db.close()
+    errors = client.get("/api/health").json()["background_errors"]
+    assert f"collector:commit:{source['id']}" not in errors
+    assert f"collector:commit:{other['id']}" in errors
+    assert runtime.loop_errors == recorded

@@ -31,7 +31,7 @@ export function HealthPanel({
   }, [close]);
   const groups = groupsOf(data ?? { sources: [], instances: [] });
   return (
-    <div className="overlay health-overlay" onClick={close}>
+    <div className="overlay health-overlay" onMouseDown={close}>
       <section
         className="modal health-panel"
         role="dialog"
@@ -39,15 +39,16 @@ export function HealthPanel({
         aria-labelledby="health-title"
         tabIndex={-1}
         ref={ref}
-        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <button className="icon-button modal-close" aria-label={t('common.close')} onClick={close}>
           <X size={16} />
         </button>
         <h2 id="health-title">{t('health.title')}</h2>
         <p>
-          {state.label !== state.age && `${state.label} · `}
-          {state.age}
+          {state.label === state.age
+            ? state.age
+            : t('health.withAge', { label: state.label, age: state.age })}
         </p>
         {state.faults.map((fault) => (
           <div className="health-row" key={fault.id}>
@@ -79,9 +80,11 @@ export function HealthPanel({
             </p>
             {source.enabled && (
               <p>
-                {collecting
+                {source.status === 'syncing'
                   ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
-                  : t('health.nextAttempt', { time: dateTime(source.next_due_at) })}
+                  : collecting
+                    ? t('health.queued')
+                    : t('health.nextAttempt', { time: dateTime(source.next_due_at) })}
                 {!collecting &&
                   (source.failures ?? 0) > 0 &&
                   ` · ${t('health.backoff', { count: source.failures })}`}

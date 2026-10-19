@@ -7,13 +7,15 @@ import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Puzzle } from 'lucide-react';
 import App from './App';
+import { HealthPanel } from './HealthPanel';
+import { computeHealth } from './health';
 import { api } from './api';
 import { setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
 import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
-import { dateTime } from './domain';
+import { dateTime, relativeTime } from './domain';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
@@ -468,6 +470,9 @@ it.each(['en', 'zh-CN'] as const)(
       return [];
     });
     await render(<App />);
+    expect(container.querySelector('.banner.red[role="alert"]')?.textContent).toContain(
+      t('health.collectorFault'),
+    );
     const pill = container.querySelector<HTMLButtonElement>('.health-pill')!;
     expect(pill.textContent).toContain(t('time.minutesAgo', { count: 8 }));
     expect(pill.title).toContain(dateTime(data.as_of));
@@ -511,6 +516,7 @@ it.each(['en', 'zh-CN'] as const)(
         window.location.hash = `#/${page}`;
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       });
+      expect(container.querySelector('.banner.red[role="alert"]')).toBeNull();
       expect(container.querySelector('.health-pill')).not.toBeNull();
       expect(container.querySelector(`button[aria-label="${t('topbar.refresh')}"]`)).toBeNull();
     }
@@ -556,3 +562,115 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => pending.resolve(serverDemo()));
   },
 );
+
+describe.each(['en', 'zh-CN'] as const)('health panel details in %s', (locale) => {
+  it.each([null, '2026-10-13T10:00:00Z'])(
+    'shows pending sources as queued with prior attempt %s',
+    async (lastAttempt) => {
+      setLocale(locale);
+      const data = serverDemo();
+      data.sources = [{ ...data.sources[0], status: 'ready', last_attempt: lastAttempt }];
+      data.collecting = [data.sources[0].id];
+      const close = vi.fn();
+      const panel = () => (
+        <HealthPanel
+          state={computeHealth(data, null, null, false, false)}
+          data={data}
+          busy={false}
+          refresh={vi.fn()}
+          close={close}
+        />
+      );
+      await render(panel());
+      expect(container.textContent).toContain(t('health.queued'));
+      expect(container.textContent).not.toContain(
+        t('health.collectingSince', { time: dateTime(lastAttempt) }),
+      );
+      data.sources[0].status = 'syncing';
+      data.sources[0].last_attempt = now.toISOString();
+      await render(panel());
+      expect(container.textContent).toContain(
+        t('health.collectingSince', { time: dateTime(now.toISOString()) }),
+      );
+      expect(container.textContent).not.toContain(t('health.queued'));
+      await act(async () => {
+        container
+          .querySelector('.health-panel')!
+          .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        container.querySelector<HTMLElement>('.health-overlay')!.click();
+      });
+      expect(close).not.toHaveBeenCalled();
+      await act(async () =>
+        container
+          .querySelector('.health-overlay')!
+          .dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+      );
+      expect(close).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([false, true])(
+    'labels retained nodes with the oldest age or unknown (missing time: %s)',
+    async (missingTime) => {
+      setLocale(locale);
+      const data = serverDemo();
+      const source = data.sources[0];
+      data.sources = [{ ...source, capabilities: ['jobs', 'instances'] }];
+      const oldest = '2026-10-13T10:00:00Z';
+      data.nodes = [
+        { ...data.nodes[0], source_id: source.id, observed_at: now.toISOString() },
+        {
+          ...data.nodes[0],
+          id: 'node-b',
+          source_id: source.id,
+          observed_at: missingTime ? null : oldest,
+        },
+        { ...data.nodes[0], id: 'node-c', source_id: 'other-source', observed_at: null },
+      ];
+      await render(
+        <HealthPanel
+          state={computeHealth(data, null, null, false, false)}
+          data={data}
+          busy={false}
+          refresh={vi.fn()}
+          close={vi.fn()}
+        />,
+      );
+      expect(container.textContent).toContain(
+        t('health.retained', {
+          inventory: t('health.inventory.nodes'),
+          time: missingTime ? t('health.unknown') : relativeTime(oldest),
+        }),
+      );
+    },
+  );
+
+  it('shows enabled plugin faults with a Toolbox link', async () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const state = computeHealth(
+      data,
+      {
+        status: 'ok',
+        started_at: '',
+        database_path: '',
+        polling: true,
+        ssh_installed: true,
+        source_count: 1,
+        plugins: { notify: { enabled: true } },
+        background_errors: { 'notify:events': { at: now.toISOString(), error: 'delivery failed' } },
+      },
+      null,
+      false,
+      false,
+    );
+    expect(state.level).toBe('bad');
+    expect(state.label).toBe(t('health.pluginFault'));
+    await render(
+      <HealthPanel state={state} data={data} busy={false} refresh={vi.fn()} close={vi.fn()} />,
+    );
+    expect(container.textContent).toContain(t('health.pluginFault'));
+    expect(container.textContent).toContain('notify:events: delivery failed');
+    expect(container.querySelector('a[href="#/toolbox"]')?.textContent).toBe(t('nav.toolbox'));
+  });
+});
