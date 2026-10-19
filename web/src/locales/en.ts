@@ -233,7 +233,7 @@ const en = {
   'clusters.mine': 'Mine in use / queued',
   'clusters.nodeData': 'Node data',
   'clusters.note':
-    'Cluster allocation includes other accounts. Unallocated GPUs can still be unavailable because of maintenance, reservations or QoS limits.',
+    'Cluster allocation includes other accounts. QoS limits and your access still constrain where you can run.',
   'clusters.qosNote':
     'QoS limits are what the scheduler shows for this login. They are per-QoS maxima, not free capacity, and access is not verified.',
   'clusters.qosLimit': '≤ {count} GPU',

@@ -323,9 +323,10 @@ hand-added machines) and `sources[source_id]`:
   Only enabled, current inventories contribute.
   Each dashboard node also gains `health: "usable" | "unavailable" | "unknown"`.
 - `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the
-  fleet-level `summary.jobs` includes `current_ids` and `listed_ids`; these lists are
-  not repeated under groups or sources. Listed IDs include retained stale jobs; the
-  count excludes those rows.
+  fleet-level `summary.jobs` includes `current_ids`, `listed_ids`, `running_ids` and
+  `pending_ids`; these lists are not repeated under groups or sources. The running
+  and pending IDs select the corresponding tabs from listed jobs using the server's
+  state rules. Listed and tab IDs include retained stale jobs; counts exclude those rows.
 
 `unknown_allocation_sources` retains the history coverage count: provider instances
 share their login's missing count; unmeasured hand-added machines count individually.

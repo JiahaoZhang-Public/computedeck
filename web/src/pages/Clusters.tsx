@@ -65,8 +65,12 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 <Status state={row.state} />
               </header>
               <div className="cluster-capacity">
-                <strong className={capacity.tone}>{capacity.text}</strong>
-                {!capacity.outage && (
+                {row.nodes.nodes === 0 ? (
+                  <span className="muted">—</span>
+                ) : (
+                  <strong className={capacity.tone}>{capacity.text}</strong>
+                )}
+                {row.nodes.nodes > 0 && !capacity.outage && (
                   <>
                     <p className="muted">{capacity.detail}</p>
                     <Meter value={row.nodes.ratio} text="" />

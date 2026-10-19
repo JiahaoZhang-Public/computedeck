@@ -15,10 +15,9 @@ from .drivers.base import cluster_state, node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
-from .summary import _timestamp, fresh, summarize
+from .summary import fresh, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
 from .summary import manual_state as manual_state
-from .summary import ssh_sampled_at as ssh_sampled_at
 
 SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
@@ -347,7 +346,7 @@ class Store:
             for name in ("ssh_alias", "command"):
                 if not isinstance(node.get(name), str):
                     node[name] = ""
-            node["checked_at"] = _timestamp(node.get("checked_at"))
+            node["checked_at"] = timestamp(node.get("checked_at"))
             # What a node reported before replies were checked: never shown as is.
             node["version"] = nodes.reported_version(node.get("version"))
             node["drivers"] = nodes.reported_drivers(node.get("drivers")) or []
@@ -396,7 +395,7 @@ class Store:
                 continue
             for key in ("last_success", "last_attempt", "next_due_at"):
                 if key in source:
-                    source[key] = _timestamp(source[key])
+                    source[key] = timestamp(source[key])
             if not isinstance(source.get("options", {}), dict):
                 source["options"] = {}
             for key in ("account", "qos", "warnings", "capabilities", "error"):
@@ -478,7 +477,7 @@ class Store:
             if instance is not None:
                 for name in ("observed_at", "last_probe_attempt"):
                     if name in instance:
-                        instance[name] = _timestamp(instance[name])
+                        instance[name] = timestamp(instance[name])
                 result.append(instance)
         return result
 
@@ -636,7 +635,7 @@ class Store:
             "SELECT at, data FROM history WHERE at >= ? ORDER BY at", (since,)
         ):
             row = self._read("history", at, data, {"at": str})
-            if row is not None and _timestamp(row["at"]) is None:
+            if row is not None and timestamp(row["at"]) is None:
                 self._skip("history", at, "no valid at")
             elif row is not None:
                 rows.append(row)

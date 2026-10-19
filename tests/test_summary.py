@@ -138,6 +138,8 @@ def test_disabled_and_stale_logins_do_not_hide_a_fresh_shared_job(store, add_sou
         "total": None,
         "current_ids": ["cluster-a:1", fresh["id"] + ":queued"],
         "listed_ids": ["cluster-a:1", fresh["id"] + ":queued", stale["id"] + ":queued"],
+        "running_ids": ["cluster-a:1"],
+        "pending_ids": [fresh["id"] + ":queued", stale["id"] + ":queued"],
         "missing_source_ids": [stale["id"]],
     }
     assert figures["unmeasured"][0]["subject"]["name"] == "Cluster A · bob"
@@ -315,4 +317,65 @@ def test_summary_keys_are_snake_case_and_job_ids_only_appear_at_fleet_level():
         assert {"known", "total", "missing_source_ids"} <= scope["jobs"].keys()
         assert ("current_ids" in scope["jobs"]) == (scope is summary)
         assert ("listed_ids" in scope["jobs"]) == (scope is summary)
+        assert ("running_ids" in scope["jobs"]) == (scope is summary)
+        assert ("pending_ids" in scope["jobs"]) == (scope is summary)
     assert len(summary["jobs"]["current_ids"]) == summary["jobs"]["known"] == 6
+
+
+@pytest.mark.parametrize("known_source", [True, False])
+def test_null_instance_platform_does_not_break_dashboard_or_history(
+    store, add_source, known_source
+):
+    if known_source:
+        source = add_source(driver="runpod")
+        store.save_snapshot(
+            source["id"],
+            {
+                "instances": [
+                    {
+                        "id": "pod-1",
+                        "source_id": source["id"],
+                        "platform": None,
+                        "state": "running",
+                        "gpu_count": 1,
+                    }
+                ]
+            },
+        )
+        group = source["cluster_id"]
+    else:
+        store.save_instance(machine(platform=None))
+        group = "platform:"
+    data = store.dashboard()
+    assert data["instances"][0]["platform"] is None
+    assert data["summary"]["groups"][group]["allocated"] == 1
+    assert data["summary"]["allocated"] == 1
+    store.record_history()
+    assert store.history(24)[-1]["allocated_gpus"] == 1
+
+
+def test_job_tab_ids_use_the_same_states_as_counts(store, add_source):
+    from computedeck.summary import PENDING, RUNNING
+
+    source = add_source()
+    states = sorted(RUNNING | PENDING | {"COMPLETED", "FAILED", "UNKNOWN"})
+    store.save_snapshot(
+        source["id"],
+        {
+            "jobs": [
+                {
+                    "id": f"cluster-a:{state}",
+                    "source_id": source["id"],
+                    "cluster_id": source["cluster_id"],
+                    "state": state.lower(),
+                    "gpu_count": 1,
+                }
+                for state in states
+            ]
+        },
+    )
+    summary = store.dashboard()["summary"]
+    assert set(summary["jobs"]["running_ids"]) == {f"cluster-a:{state}" for state in RUNNING}
+    assert set(summary["jobs"]["pending_ids"]) == {f"cluster-a:{state}" for state in PENDING}
+    assert len(summary["jobs"]["running_ids"]) == summary["known_running"]
+    assert len(summary["jobs"]["pending_ids"]) == summary["known_pending"]

@@ -53,7 +53,7 @@ export function instanceCount(sources: Source[], count: number) {
 
 /** Allocation and usable capacity share wording and severity on cards and overview rows. */
 export function capacityText(nodes: NodeSummary, state: string) {
-  const outage = state === 'unavailable' && nodes.usable === 0 && (nodes.unavailable ?? 0) > 0;
+  const outage = nodes.nodes > 0 && nodes.usable === 0 && (nodes.unavailable ?? 0) > 0;
   const tone = state === 'unavailable' ? 'red-text' : state === 'degraded' ? 'amber-text' : '';
   return {
     outage,

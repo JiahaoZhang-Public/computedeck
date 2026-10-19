@@ -12,6 +12,8 @@ import { setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
 import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
+import { JobsPage } from './pages/Jobs';
+import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
 import type { Ctx } from './pages/shared';
@@ -166,13 +168,75 @@ describe('dashboard lifecycle', () => {
         expect(hint.textContent).toContain('second-login');
         expect(hint.textContent).not.toContain('third-login');
         expect(hint.textContent).not.toContain('fourth-login');
-        const more = hint.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+        for (const item of hint.querySelectorAll('.sub')) {
+          expect(item.textContent?.startsWith(' · ')).toBe(false);
+        }
+        const more = [...hint.querySelectorAll('button')].find(
+          (button) => button.textContent === t('summary.more', { count: 2 }),
+        );
+        expect(more?.hasAttribute('aria-expanded')).toBe(false);
         expect(more?.textContent).toBe(t('summary.more', { count: 2 }));
         await act(async () => more!.click());
         expect(hint.textContent).toContain('third-login');
         expect(hint.textContent).toContain('fourth-login');
-        expect(hint.querySelector('button[aria-expanded="false"]')).toBeNull();
+        expect(hint.contains(more!)).toBe(false);
       }
+    },
+  );
+
+  it.each(['en', 'zh-CN'] as const)(
+    'matches Jobs tab rows and counts for plugin state aliases in %s',
+    async (locale) => {
+      setLocale(locale);
+      request.mockResolvedValue([]);
+      const data = serverDemo();
+      const source = data.sources.find((item) => item.kind === 'cluster')!;
+      source.enabled = true;
+      source.status = 'ready';
+      source.error = null;
+      source.stale = false;
+      source.last_success = now.toISOString();
+      source.capabilities = ['jobs'];
+      data.sources = [source];
+      data.jobs = ['R', 'CF', 'CG', 'PD', 'Q', 'PEND', 'QUEUED', 'COMPLETED'].map((state) => ({
+        ...data.jobs[0],
+        id: `cluster-a:${state}`,
+        name: `train-${state}`,
+        source_id: source.id,
+        cluster_id: source.cluster_id,
+        state,
+      }));
+      data.instances = [];
+      data.nodes = [];
+      const ctx = {
+        data: serverDashboard(data),
+        groups: groupsOf(data),
+        group: 'all',
+        query: '',
+        configure: vi.fn(),
+        openJob: vi.fn(),
+        setGroup: vi.fn(),
+      } as unknown as Ctx;
+      await render(<JobsPage ctx={ctx} />);
+      for (const [index, states] of [
+        [2, ['R', 'CF', 'CG']],
+        [3, ['PD', 'Q', 'PEND', 'QUEUED']],
+      ] as const) {
+        await click(`[role="tab"]:nth-child(${index})`);
+        expect(
+          container.querySelector('[role="tab"][aria-selected="true"] span')?.textContent,
+        ).toBe(String(states.length));
+        const rows = [...container.querySelectorAll('tr.clickable')];
+        expect(rows).toHaveLength(states.length);
+        for (const state of states)
+          expect(rows.some((row) => row.textContent?.includes(`train-${state}`))).toBe(true);
+      }
+      ctx.query = 'train-Q';
+      await render(<JobsPage ctx={ctx} />);
+      expect(container.querySelector('[role="tab"][aria-selected="true"] span')?.textContent).toBe(
+        '2',
+      );
+      expect(container.querySelectorAll('tr.clickable')).toHaveLength(2);
     },
   );
 

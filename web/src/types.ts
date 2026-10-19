@@ -216,7 +216,12 @@ export interface Summary {
 export interface FleetSummary extends Summary {
   groups: Record<string, Summary>;
   sources: Record<string, Summary>;
-  jobs: Summary['jobs'] & { current_ids: string[]; listed_ids: string[] };
+  jobs: Summary['jobs'] & {
+    current_ids: string[];
+    listed_ids: string[];
+    running_ids: string[];
+    pending_ids: string[];
+  };
 }
 export interface Dashboard {
   summary: FleetSummary;

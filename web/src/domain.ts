@@ -12,10 +12,6 @@ import type {
 export function uniqueJobs(jobs: Job[]): Job[] {
   return [...new Map(jobs.map((job) => [job.id, job])).values()];
 }
-export function knownSum(values: (number | null | undefined)[]): number | null {
-  if (values.some((value) => value == null)) return null;
-  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
-}
 export function sourceHasData(source: Source, capability: string) {
   return (
     source.enabled &&
@@ -54,12 +50,6 @@ export function instanceLifecycle(state: string | null | undefined) {
     ? INSTANCE_LIFECYCLE[key as keyof typeof INSTANCE_LIFECYCLE]
     : 'unknown';
 }
-/** Current jobs exclude retained snapshots from disabled or failed collectors. */
-export function currentJobs(data: Pick<Dashboard, 'summary' | 'jobs'>) {
-  const ids = new Set(data.summary.jobs.current_ids);
-  return uniqueJobs(data.jobs.filter((job) => ids.has(job.id)));
-}
-
 /** Enabled cluster logins without a current job list, as selected by the server. */
 export function jobsMissing(data: Pick<Dashboard, 'summary' | 'sources'>) {
   const ids = new Set(data.summary.jobs.missing_source_ids);
@@ -128,20 +118,6 @@ export function instanceAllocation(instance: Instance): number | null {
   return instance.manual || instance.metrics_scope === 'host_visible'
     ? (instance.gpu_allocated ?? null)
     : instance.gpu_count;
-}
-/**
- * When SSH last measured an instance: the reading of a machine read over SSH, or the last
- * check of an instance a provider lists, whose listing time measures nothing on it.
- */
-export function sshSampledAt(instance: Instance): string | null {
-  return instance.manual || instance.metrics_scope === 'host_visible'
-    ? instance.observed_at
-    : (instance.last_probe_attempt ?? null);
-}
-
-export function mean(values: (number | null)[]): number | null {
-  const observed = values.filter((value): value is number => value !== null);
-  return observed.length ? observed.reduce((a, b) => a + b, 0) / observed.length : null;
 }
 export function percentage(value: number | null | undefined) {
   return value == null ? '—' : `${Math.round(value)}%`;

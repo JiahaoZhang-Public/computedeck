@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   runningPrice,
   instanceLifecycle,
-  currentJobs as readCurrentJobs,
   partialCount,
   elapsedSeconds,
   sortJobs,
@@ -12,7 +11,6 @@ import {
   jobGpuResources,
   jobsMissing as readJobsMissing,
   listedJobs as readListedJobs,
-  knownSum,
   percentage,
   uniqueJobs,
   uniqueNodes,
@@ -29,7 +27,6 @@ import type {
 import { serverDashboard, serverNodes as summarizeNodes } from './test-server';
 type Dashboard = Omit<ServerDashboard, 'summary'>;
 const summarize = (data: Dashboard) => serverDashboard(data).summary;
-const currentJobs = (data: Dashboard) => readCurrentJobs(serverDashboard(data));
 const listedJobs = (data: Dashboard) => readListedJobs(serverDashboard(data));
 const jobsMissing = (sources: Source[]) =>
   readJobsMissing(serverDashboard({ ...dashboard([]), sources }));
@@ -212,7 +209,6 @@ describe('allocation accounting', () => {
     expect(result.allocated).toBe(14);
   });
   it('preserves unknown allocations and legitimate zero readings', () => {
-    expect(knownSum([4, null])).toBeNull();
     expect(percentage(null)).toBe('—');
     expect(percentage(0)).toBe('0%');
     expect(summarize(dashboard([])).allocated).toBeNull();
@@ -481,7 +477,6 @@ describe('recorded GPU meaning', () => {
     expect(
       historyAllocation({ ...point, allocated_gpus: 4, known_allocated_gpus: null }),
     ).toBeNull();
-    expect(knownSum([4, undefined])).toBeNull();
   });
   it('marks a recorded subtotal that leaves sources out as partial', () => {
     const point: HistoryPoint = {
@@ -537,7 +532,7 @@ describe('current and partial resource readings', () => {
       source({ id: 'disabled', enabled: false }),
       source({ id: 'stale', stale: true }),
     ];
-    expect(currentJobs(data).map((item) => item.id)).toEqual(['cluster-a:42']);
+    expect(summarize(data).jobs.current_ids).toEqual(['cluster-a:42']);
   });
   it('lists the last-known jobs of a login that stopped collecting after the current ones', () => {
     const data = dashboard([
@@ -586,7 +581,7 @@ describe('current and partial resource readings', () => {
     const data = dashboard([job({})]);
     data.sources = [source({ status: 'syncing', error: 'connection failed' })];
     expect(summarize(data).known_allocated).toBeNull();
-    expect(currentJobs(data)).toEqual([]);
+    expect(summarize(data).jobs.current_ids).toEqual([]);
   });
 });
 

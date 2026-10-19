@@ -339,7 +339,9 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                 <td className="num">{allocatedCell(row.scoped)}</td>
                 <td>
                   {cluster ? (
-                    capacity.outage ? (
+                    row.nodes.nodes === 0 ? (
+                      <span className="muted">—</span>
+                    ) : capacity.outage ? (
                       <span className={capacity.tone}>{capacity.text}</span>
                     ) : (
                       <span>
@@ -378,9 +380,8 @@ function UnmeasuredLinks({ items, ctx }: { items: Unmeasured[]; ctx: Ctx }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <>
-      {(expanded ? items : items.slice(0, 2)).map(({ subject, reason }, index) => (
+      {(expanded ? items : items.slice(0, 2)).map(({ subject, reason }) => (
         <span className="sub" key={`${subject.kind}:${subject.id}`}>
-          {index > 0 && ' · '}
           <button
             className="link"
             onClick={() => {
@@ -398,7 +399,7 @@ function UnmeasuredLinks({ items, ctx }: { items: Unmeasured[]; ctx: Ctx }) {
         </span>
       ))}
       {!expanded && items.length > 2 && (
-        <button className="link" aria-expanded={false} onClick={() => setExpanded(true)}>
+        <button className="link" onClick={() => setExpanded(true)}>
           {t('summary.more', { count: items.length - 2 })}
         </button>
       )}

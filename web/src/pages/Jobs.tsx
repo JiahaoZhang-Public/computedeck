@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { groupLabel } from '../groups';
 import { t } from '../i18n';
-import { holdsAllocation, jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
+import { jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
 import { routeHash } from '../routes';
 import { Chips, Empty, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -39,8 +39,10 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         groupLabel(groups, job.cluster_id),
       ),
   );
-  const running = scoped.filter(holdsAllocation);
-  const pending = scoped.filter((job) => job.state.toUpperCase() === 'PENDING');
+  const runningIds = new Set(data.summary.jobs.running_ids);
+  const pendingIds = new Set(data.summary.jobs.pending_ids);
+  const running = scoped.filter((job) => runningIds.has(job.id));
+  const pending = scoped.filter((job) => pendingIds.has(job.id));
   const covered = data.failure_history_sources ?? [];
   const failures = (data.recent_failures ?? []).filter(
     (job) =>

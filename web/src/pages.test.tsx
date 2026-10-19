@@ -306,6 +306,52 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     expect(plan).toContain(t('plan.verdict.unavailable'));
   });
 
+  it.each(['error', 'stale'] as const)(
+    'keeps the outage wording when another login is %s',
+    (status) => {
+      setLocale(locale);
+      const data = clusterData(['down'], 'unavailable');
+      data.sources.push(
+        source({
+          id: 'a-bob',
+          username: 'bob',
+          status,
+          error: status === 'error' ? { code: 'ssh_timeout' } : null,
+          stale: status === 'stale',
+        }),
+      );
+      const context = ctx(data);
+      for (const html of [
+        renderToStaticMarkup(<OverviewPage ctx={context} />),
+        renderToStaticMarkup(<ClustersPage ctx={context} />),
+      ]) {
+        expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: 8 }));
+        expect(html).not.toContain(t('summary.allocation', { allocated: 0, usable: 0 }));
+      }
+    },
+  );
+
+  it.each(['empty', 'failed', 'stale', 'unsupported'])(
+    'uses a quiet placeholder for %s node data',
+    (condition) => {
+      setLocale(locale);
+      const data = clusterData(condition === 'empty' ? [] : ['mixed']);
+      if (condition === 'failed') data.sources[0].error = { code: 'ssh_timeout' };
+      if (condition === 'stale') data.sources[0].stale = true;
+      if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
+      const context = ctx(data);
+      const overview = renderToStaticMarkup(<OverviewPage ctx={context} />).split('</table>')[0];
+      const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
+      expect(context.data.summary.nodes.nodes).toBe(0);
+      for (const html of [overview, clusters]) {
+        expect(html).toContain('<span class="muted">—</span>');
+        expect(html).not.toContain(t('summary.allocation', { allocated: '—', usable: '—' }));
+        expect(html).not.toContain(t('summary.capacityTotal', { total: '—' }));
+        expect(html).not.toContain('meter-track');
+      }
+    },
+  );
+
   it.each(['FUTURE', 'ERROR'])('keeps the usable subtotal when a node is %s', (state) => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', state], 'unknown'));

@@ -23,7 +23,7 @@ def gpu_allocation(row: dict[str, Any]) -> int | None:
     )
 
 
-def _timestamp(value: Any) -> str | None:
+def timestamp(value: Any) -> str | None:
     """A stored time the readers can compare, or None."""
     try:
         if isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None:
@@ -36,7 +36,7 @@ def _timestamp(value: Any) -> str | None:
 def manual_state(row: dict[str, Any]) -> str:
     """A machine added by hand has no provider lifecycle. It is running while its last SSH
     check reached it within two check intervals, and unknown otherwise, never stopped."""
-    observed = _timestamp(row.get("observed_at"))
+    observed = timestamp(row.get("observed_at"))
     if row.get("ssh_status") != "reachable" or observed is None:
         return "unknown"
     age = datetime.now(UTC) - datetime.fromisoformat(observed)
@@ -47,8 +47,8 @@ def ssh_sampled_at(row: dict[str, Any]) -> str | None:
     """When SSH last measured this machine: the reading of a machine read over SSH, or the
     last check of an instance a provider lists, whose listing time measures nothing on it."""
     if row.get("manual") or row.get("metrics_scope") == "host_visible":
-        return _timestamp(row.get("observed_at"))
-    return _timestamp(row.get("last_probe_attempt"))
+        return timestamp(row.get("observed_at"))
+    return timestamp(row.get("last_probe_attempt"))
 
 
 def fresh(source: dict[str, Any], capability: str) -> bool:
@@ -287,6 +287,12 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
                 {
                     "current_ids": [j["id"] for j in current],
                     "listed_ids": [j["id"] for j in [*current, *old]],
+                    "running_ids": [
+                        j["id"] for j in [*current, *old] if j.get("state", "").upper() in RUNNING
+                    ],
+                    "pending_ids": [
+                        j["id"] for j in [*current, *old] if j.get("state", "").upper() in PENDING
+                    ],
                 }
                 if include_job_ids
                 else {}
@@ -303,8 +309,11 @@ def summarize(data: dict[str, Any]) -> dict[str, Any]:
     source_groups = {s["id"]: s["cluster_id"] for s in data["sources"]}
 
     def instance_group(item: dict[str, Any]) -> str:
-        return source_groups.get(
-            item["source_id"], f"platform:{item.get('platform', '').strip().lower()}"
+        group = source_groups.get(item["source_id"])
+        return (
+            group
+            if group is not None
+            else f"platform:{(item.get('platform') or '').strip().lower()}"
         )
 
     keys = dict.fromkeys([*source_groups.values(), *map(instance_group, data["instances"])])

@@ -219,7 +219,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'clusters.abnormal': '{count} 异常',
   'clusters.mine': '我的账户在用 / 排队',
   'clusters.nodeData': '节点数据',
-  'clusters.note': '集群分配包含其他账户。未分配的 GPU 仍可能因维护、预留或 QoS 限制而无法申请。',
+  'clusters.note': '集群分配包含其他账户。QoS 限制和你的访问权限仍会限制可运行的位置。',
   'clusters.qosNote':
     'QoS 上限是调度器对这个登录身份显示的值，是各 QoS 的上限，不是空闲容量，也未验证是否有权使用。',
   'clusters.qosLimit': '≤ {count} GPU',
