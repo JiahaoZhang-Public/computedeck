@@ -725,6 +725,7 @@ describe('own queue estimates', () => {
     'Dependency',
     'DependencyNeverSatisfied',
     'BeginTime',
+    'JobArrayTaskLimit',
   ])('excludes %s even when its GPU demand is unknown', (reason) => {
     expect(option([{ reason, gpu_count: null }])).toMatchObject({
       queued: 0,
@@ -733,6 +734,81 @@ describe('own queue estimates', () => {
       reasons: [],
       verdict: 'likely',
     });
+  });
+
+  it.each(['', 'a100'])('subtracts queued jobs only while they fit (%s)', (gpuType) => {
+    const qos = [
+      { ...source().qos[0], limits: { MaxTRESPU: `gres/gpu${gpuType ? ':a100' : ''}=8` } },
+    ];
+    const estimate = (used: number, counts: (number | null)[]) =>
+      planOptions(
+        {
+          sources: [source({ qos })],
+          nodes: [node('g1', { gpu_allocated: used })],
+          jobs: [
+            job('running', { gpu_count: used }),
+            ...counts.map((gpu_count, i) =>
+              job(`waiting-${i}`, { state: 'PENDING', reason: 'Priority', gpu_count }),
+            ),
+          ],
+        },
+        { ...ask, gpus: 2, gpuType },
+      )[0];
+    expect(estimate(2, [4, 4])).toMatchObject({
+      headroom: 6,
+      queuedGpus: 8,
+      queuedForRoom: 4,
+      headroomAfterQueue: 2,
+      verdict: 'likely',
+    });
+    expect(estimate(0, [4, 4])).toMatchObject({
+      queuedForRoom: 8,
+      headroomAfterQueue: 0,
+      verdict: 'behind',
+    });
+    expect(estimate(2, [4, 4, 1])).toMatchObject({
+      queuedForRoom: 5,
+      headroomAfterQueue: 1,
+      verdict: 'behind',
+    });
+    expect(estimate(2, [4, 4, null])).toMatchObject({
+      queuedForRoom: null,
+      headroomAfterQueue: null,
+      verdict: 'possible',
+    });
+    expect(estimate(0, [4, 4, null])).toMatchObject({
+      queuedGpus: null,
+      queuedForRoom: 8,
+      headroomAfterQueue: 0,
+      verdict: 'behind',
+    });
+  });
+
+  it('leaves room available while array siblings are throttled', () => {
+    expect(
+      option(
+        Array.from({ length: 46 }, () => ({ gpu_count: 1, reason: 'JobArrayTaskLimit' })),
+        {},
+        { ...ask, gpus: 2 },
+      ),
+    ).toMatchObject({ queued: 0, queuedForRoom: 0, headroomAfterQueue: 4, verdict: 'likely' });
+  });
+
+  it.each(['', 'a100'])('keeps unlimited room despite unknown queued demand (%s)', (gpuType) => {
+    const qos = [
+      { ...source().qos[0], limits: { MaxTRESPU: `gres/gpu${gpuType ? ':a100' : ''}=N` } },
+    ];
+    for (const model of ['a100', 'h100', null]) {
+      expect(
+        option([{ gpu_type: model, gpu_count: null }], { qos }, { ...ask, gpuType }),
+      ).toMatchObject({
+        queuedGpus: null,
+        headroom: Infinity,
+        queuedForRoom: 0,
+        headroomAfterQueue: Infinity,
+        verdict: 'likely',
+      });
+    }
   });
 
   it.each(serverPendingStates())('counts server pending alias %s', (state) => {

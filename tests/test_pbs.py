@@ -235,7 +235,7 @@ def test_running_job_reads_ngpus_queue_host_and_walltime() -> None:
     assert jobs[0]["observed_at"]
 
 
-def test_pending_and_held_jobs_carry_the_scheduler_comment() -> None:
+def test_pending_jobs_keep_comments_and_blocked_jobs_keep_their_reason() -> None:
     output = qstat(
         {
             "1002.pbs-server": queued(),
@@ -251,7 +251,19 @@ def test_pending_and_held_jobs_carry_the_scheduler_comment() -> None:
     assert pending["node"] is None
     assert pending["elapsed"] == ""
     assert jobs["cluster-a:1003"]["reason"] == "Held"
-    assert jobs["cluster-a:1004"]["reason"] is None
+    assert jobs["cluster-a:1004"]["reason"] == "BeginTime"
+
+
+@pytest.mark.parametrize(("state", "reason"), [("H", "Held"), ("W", "BeginTime")])
+@pytest.mark.parametrize("comment", [None, "", "Not Running: waiting for resources"])
+def test_blocked_states_take_precedence_over_comments(
+    state: str, reason: str, comment: str | None
+) -> None:
+    row = pbs.parse_jobs(
+        qstat({"1001.pbs-server": queued(job_state=state, comment=comment)}), SOURCE
+    )[0]
+    assert row["state"] == "PENDING"
+    assert row["reason"] == reason
 
 
 def test_multi_chunk_jobs_sum_gpus_and_list_every_host() -> None:

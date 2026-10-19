@@ -527,8 +527,12 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.verdict.behind': '较可能等待你的排队作业',
   'plan.why.behind':
     '若你的排队作业先启动，可用额度预计减少 {queued} 张 GPU，剩余约 {left} 张。实际调度顺序可能不同。',
+  'plan.why.behind.one':
+    '若你的排队作业先启动，可用额度预计减少 {queued} 张 GPU，剩余约 {left} 张。实际调度顺序可能不同。',
   'plan.why.queueUnknown': '你的可调度排队作业所需 GPU 数未知，估计无法计入这部分需求。',
   'plan.queuedGpus': '排队占用额度：{count} 张 GPU',
+  'plan.queuedGpus.one': '排队占用额度：{count} 张 GPU',
+  'plan.queueRoomUnknown': '排队占用额度：未知',
   'plan.accessUnchecked': '权限未验证',
   'plan.accessNote': '{source}：无法验证访问权限，请向调度器确认；估计最多为“可能”。',
   'plan.noAccess': '未找到有权限的选项',
@@ -582,7 +586,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.emptyHint': '添加集群后，即可比较作业在哪里更可能启动。',
   'plan.emptyDisabled': '启用一个集群登录身份后即可比较。',
   'plan.note':
-    '这是根据上次采集的估计。排队数量不含被挂起、等待依赖或指定开始时间的作业。预留、优先级、分区和公平共享仍可能让作业等待，不同 QoS 的上限也不能相加。',
+    '这是根据上次采集的估计。排队数量不含被挂起、等待依赖、指定开始时间或数组任务并发限制的作业。预留、优先级、分区和公平共享仍可能让作业等待，不同 QoS 的上限也不能相加。',
   'plan.idle': '几乎空闲、仍在运行的云 GPU',
   'plan.idleUtil': 'GPU 利用率 {value}%',
   'plan.idleNote': '这些实例已经在计费。利用率是整台机器的最近一次快照。',

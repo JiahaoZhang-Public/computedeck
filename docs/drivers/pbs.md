@@ -46,7 +46,7 @@ When an optional command fails, its data is left as it was and the source shows 
 |---|---|
 | `id` | `<cluster id>:<job id without the server suffix>`, e.g. `cluster-c:1234[5]` |
 | `state` | `job_state`: Q, H, W, T → `PENDING`; R → `RUNNING`; E → `COMPLETING`; S, U → `SUSPENDED` |
-| `reason` | `comment` of pending jobs without the `Not Running:` prefix; `Held` for held jobs without a comment |
+| `reason` | `Held` for held (`H`) jobs and `BeginTime` for waiting (`W`, begin time) jobs, regardless of any comment; other pending jobs carry `comment` without the `Not Running:` prefix |
 | `gpu_count` | `Resource_List.ngpus`; otherwise the sum of `ngpus` over `exec_vnode` (running) or `select` chunks; `0` when the request names no GPU resource; unknown when it names another GPU-like resource |
 | `gpu_type` | `gpu_model`, `gpu_type` or `accelerator_model` in the request, if the site defines one |
 | `cpu_count` | `Resource_List.ncpus` |

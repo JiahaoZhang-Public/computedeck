@@ -567,9 +567,13 @@ const en = {
   'plan.verdict.behind': 'Likely to wait for your queue',
   'plan.why.behind':
     'Your queue would reduce the available room by {queued} GPUs; about {left} would remain if those jobs start first. Scheduling order may differ.',
+  'plan.why.behind.one':
+    'Your queue would reduce the available room by {queued} GPU; about {left} would remain if those jobs start first. Scheduling order may differ.',
   'plan.why.queueUnknown':
     'Your eligible queued GPU demand is unknown; the estimate cannot account for it.',
   'plan.queuedGpus': 'Room used by queue: {count} GPUs',
+  'plan.queuedGpus.one': 'Room used by queue: {count} GPU',
+  'plan.queueRoomUnknown': 'Room used by queue: unknown',
   'plan.accessUnchecked': 'Access not checked',
   'plan.accessNote':
     '{source}: access could not be verified. Confirm it with the scheduler; estimates are at most possible.',
@@ -628,7 +632,7 @@ const en = {
   'plan.emptyHint': 'Add a cluster to compare where a job could start.',
   'plan.emptyDisabled': 'Enable a cluster login to compare where a job could start.',
   'plan.note':
-    'An estimate from the last collection. The queue excludes held jobs and jobs waiting for dependencies or a begin time. Reservations, priorities, partitions and fair-share can still delay a job, and limits of different QoS do not add up.',
+    'An estimate from the last collection. The queue excludes held jobs and jobs waiting for dependencies, a begin time or an array task limit. Reservations, priorities, partitions and fair-share can still delay a job, and limits of different QoS do not add up.',
   'plan.idle': 'Running cloud GPUs that are almost idle',
   'plan.idleUtil': '{value}% GPU utilization',
   'plan.idleNote':

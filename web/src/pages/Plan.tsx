@@ -85,6 +85,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
         free: option.freeGpus,
         headroom: option.headroom,
         queued: option.queuedForRoom,
+        count: option.queuedForRoom,
         left: option.headroomAfterQueue == null ? '—' : Math.max(0, option.headroomAfterQueue),
         used: option.used,
         limit: option.limit,
@@ -343,7 +344,9 @@ function OptionsTable({
                 <td className="num" data-label={t('plan.col.queued')}>
                   {option.queued ?? '—'}
                   <span className="sub">
-                    {t('plan.queuedGpus', { count: option.queuedForRoom ?? '—' })}
+                    {option.queuedForRoom == null
+                      ? t('plan.queueRoomUnknown')
+                      : t('plan.queuedGpus', { count: option.queuedForRoom })}
                   </span>
                   {option.reasons?.[0] && <span className="sub">{option.reasons[0]}</span>}
                 </td>

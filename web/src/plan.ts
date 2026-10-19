@@ -190,24 +190,29 @@ function typedCaps(tres: string | null | undefined, model: string) {
 // These jobs cannot compete for resources yet. Limit waits count only if they fit
 // the current room; this is an estimate, not a queue position.
 const QUEUE_BLOCKED = new Set([
-  'Held', // PBS without a scheduler comment.
+  'Held', // PBS and LSF holds.
   'JobHeldUser',
   'JobHeldAdmin',
   'JobHoldMaxRequeue',
   'Dependency',
   'DependencyNeverSatisfied',
   'BeginTime',
+  'JobArrayTaskLimit',
 ]);
 
 function queuedGpus(jobs: Job[], model = '', headroom: number | null = null): number | null {
-  const relevant = jobs.filter(
-    (job) =>
-      (!model || !job.gpu_type || models(job.gpu_type).includes(model)) &&
-      (headroom == null || job.gpu_count == null || job.gpu_count <= headroom),
-  );
-  if (relevant.some((job) => job.gpu_count == null || (model && models(job.gpu_type).length !== 1)))
-    return null;
-  return relevant.reduce((sum, job) => sum + job.gpu_count!, 0);
+  if (headroom === Infinity) return 0;
+  let total = 0;
+  // Listed order is an estimate, not scheduler priority. Skip jobs that no longer fit.
+  for (const job of jobs) {
+    if (model && job.gpu_type && !models(job.gpu_type).includes(model)) continue;
+    const remaining = headroom == null ? null : headroom - total;
+    if (remaining === 0) break;
+    if (remaining != null && job.gpu_count != null && job.gpu_count > remaining) continue;
+    if (job.gpu_count == null || (model && models(job.gpu_type).length !== 1)) return null;
+    total += job.gpu_count;
+  }
+  return total;
 }
 
 /**
@@ -392,14 +397,16 @@ export function planOptions(
           // Different caps can bind before and after the queue. Report the reduction
           // in available room so the displayed arithmetic still adds up.
           queuedForRoom =
-            headroom != null &&
-            headroomAfterQueue != null &&
-            Number.isFinite(headroom) &&
-            Number.isFinite(headroomAfterQueue)
-              ? headroom - headroomAfterQueue
-              : headroomAfterQueue == null
-                ? null
-                : queuedForRoom;
+            headroom === Infinity
+              ? 0
+              : headroom != null &&
+                  headroomAfterQueue != null &&
+                  Number.isFinite(headroom) &&
+                  Number.isFinite(headroomAfterQueue)
+                ? headroom - headroomAfterQueue
+                : headroomAfterQueue == null
+                  ? null
+                  : queuedForRoom;
         }
       }
       // Without a model choice, a finite typed cap may still reject the request.

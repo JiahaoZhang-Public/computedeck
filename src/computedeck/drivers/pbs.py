@@ -261,12 +261,16 @@ def _elapsed(job: dict[str, Any]) -> str:
 
 
 def _reason(job: dict[str, Any], letter: str) -> str | None:
+    if letter == "H":
+        return "Held"
+    if letter == "W":
+        return "BeginTime"
     comment = str(job.get("comment") or "").strip()
     if comment.startswith("Not Running:"):
         comment = comment[len("Not Running:") :].strip()
     if comment and comment not in EMPTY:
         return comment
-    return "Held" if letter == "H" else None
+    return None
 
 
 def _job(job_id: str, job: dict[str, Any], state: str, source: dict[str, Any]) -> dict[str, Any]:

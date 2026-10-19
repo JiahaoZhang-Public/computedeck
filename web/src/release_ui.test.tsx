@@ -161,10 +161,23 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     expect(root.textContent).toContain(t('plan.why.behind', { queued: 8, left: 0 }));
   });
 
+  it('uses singular GPU units for one GPU of queue room', () => {
+    setLocale(locale);
+    const login = {
+      ...source,
+      qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=1' } }],
+    };
+    const root = page(renderPlan(login, [pending({ gpu_count: 1 })]));
+    expect(root.textContent).toContain(t('plan.queuedGpus', { count: 1 }));
+    expect(root.textContent).toContain(t('plan.why.behind', { count: 1, queued: 1, left: 0 }));
+    expect(root.textContent).not.toContain('1 GPUs');
+  });
+
   it('shows unknown demand without inventing zero or a likely verdict', () => {
     setLocale(locale);
     const root = page(renderPlan(source, [pending({ gpu_count: null })]));
-    expect(root.textContent).toContain(t('plan.queuedGpus', { count: '—' }));
+    expect(root.textContent).toContain(t('plan.queueRoomUnknown'));
+    expect(root.textContent).not.toContain('— GPUs');
     expect(root.textContent).toContain(t('plan.why.queueUnknown'));
     expect(root.textContent).not.toContain(t('plan.verdict.likely'));
     expect(root.querySelector('.plan-best')!.textContent).toContain(
@@ -172,7 +185,7 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     );
     const stale = page(renderPlan({ ...source, stale: true }, [pending()]));
     expect(stale.querySelector('[data-label="' + t('plan.col.queued') + '"]')!.textContent).toBe(
-      '—' + t('plan.queuedGpus', { count: '—' }),
+      '—' + t('plan.queueRoomUnknown'),
     );
     expect(stale.textContent).not.toContain('Priority');
     expect(stale.textContent).not.toContain(t('plan.why.queueUnknown'));
