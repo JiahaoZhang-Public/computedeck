@@ -36,7 +36,7 @@ export interface WebPlugin {
   requires?: string;
   /** Extra pages, listed under "Tools" in the sidebar. */
   pages?: PluginPage[];
-  /** Rendered beside the 24-hour chart on the overview. */
+  /** Rendered beside the 24-hour chart at the bottom of the Overview. */
   overview?: ComponentType<PluginProps>;
   /** Rendered on the settings page below the data sources. */
   settings?: ComponentType<PluginProps>;

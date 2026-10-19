@@ -90,6 +90,17 @@ const tabs = (html: string) =>
     (match) => `${match[1]}=${match[2]}`,
   );
 
+function overviewGroupsTable(html: string) {
+  const heading = `<h2>${t('overview.sources').replaceAll('&', '&amp;')}</h2>`;
+  const start = html.indexOf(heading);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const end = html.indexOf('</table>', start);
+  expect(end).toBeGreaterThan(start);
+  const table = html.slice(start, end + '</table>'.length);
+  expect(table).toContain('<tbody><tr');
+  return table;
+}
+
 // The only cluster login is failing (SSH timeout); its last snapshot still lists 3 jobs.
 const failing = source({
   status: 'error',
@@ -275,6 +286,54 @@ describe('the last SSH check of a machine', () => {
 });
 
 afterEach(() => setLocale('en'));
+describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
+  it('keeps the empty attention panel immediately before current jobs', () => {
+    setLocale(locale);
+    const html = renderToStaticMarkup(<OverviewPage ctx={ctx(dash({ jobs: [job('1')] }))} />);
+    expect(html).toContain('id="attention"');
+    expect(html).toContain(
+      `<p class="panel-note">${t('overview.attention.none')}</p></section><section class="panel "><header class="panel-header"><h2>${t('overview.jobs')}`,
+    );
+  });
+
+  it.each([false, true])('puts current information before history (example mode: %s)', (demo) => {
+    setLocale(locale);
+    const data = serverDemo();
+    const context = ctx(data);
+    context.demo = demo;
+    context.attention = data.attention ?? [];
+    context.webPlugins = [
+      { id: 'test-aside', overview: () => <aside data-testid="overview-aside" /> },
+    ];
+    const html = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    const headings = [...html.matchAll(/<h2>([^<]*)/g)].map((match) => match[1]);
+    expect(headings).toEqual(
+      [
+        t('overview.attention'),
+        t('overview.jobs'),
+        t('overview.failures'),
+        t('overview.sources'),
+        t('chart.heading'),
+      ].map((heading) => heading.replaceAll('&', '&amp;')),
+    );
+    expect(html.startsWith('<div class="stats">')).toBe(true);
+    expect(html).toContain('class="table jobs-table"');
+    expect(html).toContain('id="attention"');
+    expect(html.indexOf('id="attention"')).toBeLessThan(html.indexOf(`<h2>${t('overview.jobs')}`));
+    const groups = overviewGroupsTable(html);
+    expect(groups).toContain('<strong>Cluster A</strong>');
+    expect(html.indexOf('class="table jobs-table"')).toBeLessThan(html.indexOf(groups));
+    expect(html).toContain(`href="#/jobs">${t('overview.allJobs')}`);
+    if (demo) {
+      expect(html).not.toContain('data-testid="overview-aside"');
+    } else {
+      expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(
+        html.indexOf(t('chart.heading')),
+      );
+    }
+  });
+});
+
 describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (locale) => {
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
     setLocale(locale);
@@ -306,7 +365,9 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     }
     expect(overview).toContain(`<span class="red-text">${text}</span>`);
     expect(clusters).toContain(`<strong class="red-text">${text}</strong>`);
-    expect(overview.split('</table>')[0]).not.toContain('meter-track');
+    const groups = overviewGroupsTable(overview);
+    expect(groups).toContain('<strong>A</strong>');
+    expect(groups).not.toContain('meter-track');
     expect(clusters.split('</section>')[0]).not.toContain('meter-track');
     expect(plan).toContain(t('plan.verdict.unavailable'));
   });
@@ -345,7 +406,8 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       if (condition === 'stale') data.sources[0].stale = true;
       if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
       const context = ctx(data);
-      const overview = renderToStaticMarkup(<OverviewPage ctx={context} />).split('</table>')[0];
+      const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+      expect(overview).toContain('<strong>A</strong>');
       const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
       expect(context.data.summary.nodes.nodes).toBe(0);
       for (const html of [overview, clusters]) {

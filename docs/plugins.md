@@ -283,7 +283,7 @@ register({
   id: 'lab-alerts',
   requires: 'lab-alerts',            // hidden while this server plugin is off
   pages: [{ id: 'lab-alerts', label: { en: 'Lab alerts' }, icon: Icon, render: (props) => <Page {...props} /> }],
-  overview: OverviewCard,             // optional: beside the overview chart
+  overview: OverviewCard,             // optional: beside the 24-hour chart at the bottom of the Overview
   settings: SettingsPanel,            // optional: on the Settings page
   banner: Banner,                     // optional: above every page
 });

@@ -127,66 +127,43 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           }
         />
       </div>
-      <div className="grid wide-narrow">
-        <Panel
-          title={t('overview.sources')}
-          actions={
-            <a className="link" href={routeHash('sources')}>
-              {t('overview.manageSources')} <ArrowRight size={13} />
-            </a>
-          }
-        >
-          <GroupsTable ctx={ctx} />
-        </Panel>
-        <Panel title={t('overview.attention')} count={ctx.attention.length} id="attention">
-          {ctx.attention.length ? (
-            <ul className="attention">
-              {ctx.attention.map((item) => (
-                <li key={item.key}>
-                  <button onClick={() => ctx.openAttention(item)}>
-                    <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
-                    <span>
-                      <strong>{formatMessage(item.message)}</strong>
-                      {item.details.map((detail, index) => (
-                        <small key={index}>{formatMessage(detail)}</small>
-                      ))}
-                      <small>
-                        {item.since
-                          ? t('attention.since', {
-                              time: dateTime(item.since),
-                              age: relativeTime(item.since),
+      <Panel title={t('overview.attention')} count={ctx.attention.length} id="attention">
+        {ctx.attention.length ? (
+          <ul className="attention">
+            {ctx.attention.map((item) => (
+              <li key={item.key}>
+                <button onClick={() => ctx.openAttention(item)}>
+                  <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
+                  <span>
+                    <strong>{formatMessage(item.message)}</strong>
+                    {item.details.map((detail, index) => (
+                      <small key={index}>{formatMessage(detail)}</small>
+                    ))}
+                    <small>
+                      {item.since
+                        ? t('attention.since', {
+                            time: dateTime(item.since),
+                            age: relativeTime(item.since),
+                          })
+                        : item.observed_at
+                          ? t('attention.lastSeen', {
+                              time: dateTime(item.observed_at),
+                              age: relativeTime(item.observed_at),
                             })
-                          : item.observed_at
-                            ? t('attention.lastSeen', {
-                                time: dateTime(item.observed_at),
-                                age: relativeTime(item.observed_at),
-                              })
-                            : t('attention.sinceUnknown')}
-                        {item.next_attempt &&
-                          ` · ${t('health.nextAttempt', { time: dateTime(item.next_attempt) })}`}
-                      </small>
-                    </span>
-                    <ChevronRight size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="panel-note">{t('overview.attention.none')}</p>
-          )}
-        </Panel>
-      </div>
-      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
-        <HistoryPanel day={data.history} demo={demo} />
-        {asides.length > 0 && (
-          <div className="stack">
-            {asides.map((plugin) => {
-              const Aside = plugin.overview!;
-              return <Aside key={plugin.id} {...ctx.plugin} />;
-            })}
-          </div>
+                          : t('attention.sinceUnknown')}
+                      {item.next_attempt &&
+                        ` · ${t('health.nextAttempt', { time: dateTime(item.next_attempt) })}`}
+                    </small>
+                  </span>
+                  <ChevronRight size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="panel-note">{t('overview.attention.none')}</p>
         )}
-      </div>
+      </Panel>
       <Panel
         title={t('overview.jobs')}
         count={jobCount(summary.jobs.known, summary.jobs.missing_source_ids.length)}
@@ -229,6 +206,27 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} />
         </Panel>
       )}
+      <Panel
+        title={t('overview.sources')}
+        actions={
+          <a className="link" href={routeHash('sources')}>
+            {t('overview.manageSources')} <ArrowRight size={13} />
+          </a>
+        }
+      >
+        <GroupsTable ctx={ctx} />
+      </Panel>
+      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
+        <HistoryPanel day={data.history} demo={demo} />
+        {asides.length > 0 && (
+          <div className="stack">
+            {asides.map((plugin) => {
+              const Aside = plugin.overview!;
+              return <Aside key={plugin.id} {...ctx.plugin} />;
+            })}
+          </div>
+        )}
+      </div>
     </>
   );
 }
