@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import en from './locales/en';
 import zhCN from './locales/zh-CN';
 import { ApiError, errorText, formatMessage, setLocale, t } from './i18n';
-import { statusLabel } from './labels';
+import { statusLabel, statusTone } from './labels';
 
 afterEach(() => setLocale('en'));
 
@@ -22,6 +22,15 @@ describe('translations', () => {
     expect(t('nav.jobs')).toBe('作业');
     expect(statusLabel('PENDING')).toBe('排队中');
     expect(statusLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW');
+  });
+  it('labels provider-reported running separately from a starting instance', () => {
+    expect(statusLabel('reported_running')).toBe('Running (reported by provider)');
+    expect(statusTone('reported_running')).toBe('green');
+    expect(statusLabel('desired_running')).toBe('Expected running');
+    expect(statusTone('desired_running')).toBe('amber');
+    setLocale('zh-CN');
+    expect(statusLabel('reported_running')).toBe('运行中（服务商报告）');
+    expect(statusLabel('desired_running')).toBe('期望运行');
   });
   it('spaces Latin names and numbers from Chinese text', () => {
     setLocale('zh-CN');

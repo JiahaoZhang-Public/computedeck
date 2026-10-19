@@ -242,6 +242,38 @@ def test_a_source_that_reaches_the_machine_itself_is_not_overruled(store: Store)
 
 
 @pytest.mark.parametrize(
+    "state", ["stopped", "terminated", "deleted", "desired_stopped", "desired_terminated"]
+)
+@pytest.mark.parametrize("ssh_status", ["reachable", "error"])
+def test_a_released_instance_drops_its_old_check_even_with_the_same_endpoint(
+    store: Store, state: str, ssh_status: str
+) -> None:
+    pod = {
+        "id": "runpod:a",
+        "state": "reported_running",
+        "host": "192.0.2.1",
+        "port": 22001,
+        "username": "root",
+        "ssh_status": "unverified",
+    }
+    store.save_snapshot("runpod-runpod", {"instances": [pod]})
+    store.update_cloud_metrics(
+        pod["id"],
+        {"host": pod["host"], "port": pod["port"], "username": pod["username"]},
+        {"ssh_status": ssh_status, "ssh_error": None, "last_probe_attempt": now()},
+    )
+    store.save_snapshot("runpod-runpod", {"instances": [{**pod, "state": state}]})
+    [stopped] = store.dashboard()["instances"]
+    assert stopped["ssh_status"] == "unverified"
+    assert "last_probe_attempt" not in stopped
+    assert "ssh_error" not in stopped
+    store.save_snapshot("runpod-runpod", {"instances": [pod]})
+    [restarted] = store.dashboard()["instances"]
+    assert restarted["ssh_status"] == "unverified"
+    assert "last_probe_attempt" not in restarted
+
+
+@pytest.mark.parametrize(
     ("ssh_status", "minutes", "state"),
     [
         ("reachable", 1, "running"),

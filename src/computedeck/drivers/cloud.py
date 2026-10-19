@@ -39,6 +39,7 @@ from .base import (
 Text = dict[str, str]
 State = Literal[
     "running",
+    "reported_running",
     "stopped",
     "terminated",
     "desired_running",
@@ -47,6 +48,27 @@ State = Literal[
     "unknown",
 ]
 
+INSTANCE_LIFECYCLE = {
+    "running": "held",
+    "reported_running": "held",
+    "stopped": "not_held",
+    "terminated": "not_held",
+    "deleted": "not_held",
+    "desired_stopped": "not_held",
+    "desired_terminated": "not_held",
+    "desired_running": "unknown",
+    "unknown": "unknown",
+    "missing": "unknown",
+}
+
+
+def instance_lifecycle(state: str | None) -> str:
+    """GPU allocation lifecycle, independent of SSH readiness and utilization.
+
+    Mirrored in web/src/domain.ts and checked for parity by tests.
+    """
+    return INSTANCE_LIFECYCLE.get((state or "").lower(), "unknown")
+
 
 class CloudInstance(BaseModel):
     """One instance as a provider reports it. Leave what the provider does not say as None."""
@@ -54,7 +76,8 @@ class CloudInstance(BaseModel):
     id: str
     name: str
     # Use running/stopped/terminated only for observed states; desired_* when the API
-    # reports only what the instance should be doing.
+    # reports only what the instance should be doing. reported_running is the provider's
+    # normal running report, without an observation of readiness (e.g. RunPod REST).
     state: State = "unknown"
     gpu_count: int | None = None
     gpu_type: str | None = None

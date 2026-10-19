@@ -53,7 +53,7 @@ def test_expected_lifecycle_endpoints_and_no_secret_fields() -> None:
     assert instance["id"] == "runpod:pod123abc"
     assert instance["source_id"] == "runpod-runpod"
     assert instance["platform"] == "RunPod"
-    assert instance["state"] == "desired_running"
+    assert instance["state"] == "reported_running"
     assert instance["ssh_status"] == "unverified"
     assert instance["host"] == "203.0.113.5"
     assert instance["port"] == 23456
@@ -104,7 +104,7 @@ def test_gpu_type_fallback_and_unknown_count() -> None:
 @pytest.mark.parametrize(
     ("status", "state"),
     [
-        ("RUNNING", "desired_running"),
+        ("RUNNING", "reported_running"),
         ("EXITED", "desired_stopped"),
         ("TERMINATED", "desired_terminated"),
         ("STARTING", "unknown"),
@@ -130,7 +130,7 @@ def test_a_stop_recorded_long_ago_is_stopped() -> None:
     assert state("EXITED", "Exited by user") == "desired_stopped"
     assert state("EXITED", "Exited by user: Tue Sep 31 2026 99:00:00 GMT+0000") == "desired_stopped"
     # A running pod is never inferred to be ready.
-    assert state("RUNNING", old.replace("Exited", "Started")) == "desired_running"
+    assert state("RUNNING", old.replace("Exited", "Started")) == "reported_running"
 
 
 @pytest.mark.parametrize(

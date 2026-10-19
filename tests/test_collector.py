@@ -508,7 +508,7 @@ async def test_cloud_probe_updates_snapshot_without_changing_inventory(
     pod = {
         "id": "runpod:pod1",
         "source_id": "runpod-runpod",
-        "state": "desired_running",
+        "state": "reported_running",
         "host": "192.0.2.5",
         "port": 22005,
         "username": "root",
@@ -527,19 +527,24 @@ async def test_cloud_probe_updates_snapshot_without_changing_inventory(
     assert saved["gpu_utilization"] == 70
     assert saved["gpu_count"] == 2
     assert saved["gpu_type"] == "A100"
-    assert saved["state"] == "desired_running"
+    assert saved["state"] == "reported_running"
     assert store.manual_instances() == []
 
 
+@pytest.mark.parametrize("state", ["running", "reported_running"])
 async def test_a_check_never_changes_what_a_provider_listed(
-    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    state: str,
 ) -> None:
     source = add_source("RunPod", driver="runpod")
     listed_at = now()
     pod = {
         "id": "runpod:pod1",
         "source_id": source["id"],
-        "state": "running",
+        "state": state,
         "host": "192.0.2.5",
         "port": 22005,
         "username": "root",

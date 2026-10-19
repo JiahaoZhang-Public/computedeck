@@ -136,7 +136,7 @@ def dashboard() -> dict[str, Any]:
             "source_id": "runpod-runpod",
             "platform": "RunPod",
             "name": "sd-inference",
-            "state": "desired_running",
+            "state": "reported_running",
             "gpu_count": 2,
             "gpu_type": "RTX 4090",
             "gpu_utilization": 68,

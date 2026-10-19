@@ -12,6 +12,7 @@ from typing import Any
 
 from . import drivers, nodes
 from .drivers.base import validate_row
+from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 
 SCHEMA_VERSION = 2
@@ -109,9 +110,11 @@ def ssh_sampled_at(row: dict[str, Any]) -> str | None:
 
 def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
     """A listed instance with the last SSH check of its unchanged endpoint. A listing cannot
-    check SSH, so a failed connection stays failed until it is checked again."""
+    check SSH, so a failed connection stays failed until checked again or no longer held."""
     if (
         old is None
+        or instance_lifecycle(row.get("state")) == "not_held"
+        or instance_lifecycle(old.get("state")) == "not_held"
         or not old.get("last_probe_attempt")
         or row.get("ssh_status", "unverified") != "unverified"
         or not row.get("host")
@@ -682,34 +685,40 @@ class Store:
             for row in dashboard["instances"]
             if row.get("manual") or row.get("source_id") not in disabled
         ]
-        # A machine added by hand is running only while a recent check reached it.
-        running = [
+        running_jobs = [
             row
-            for row in dashboard["jobs"] + instances
-            if (row.get("manual") or row.get("source_id") in fresh)
+            for row in dashboard["jobs"]
+            if row.get("source_id") in fresh
             and str(row.get("state", "unknown")).lower()
             in ("running", "r", "completing", "cg", "configuring", "cf")
         ]
+        # A machine added by hand is running only while a recent check reached it.
+        held_instances = [
+            row
+            for row in instances
+            if (row.get("manual") or row.get("source_id") in fresh)
+            and instance_lifecycle(row.get("state")) == "held"
+        ]
+        allocated = [*running_jobs, *held_instances]
         unknown_sources = {
             source["id"]
             for source in dashboard["sources"]
             if source["enabled"] and source["id"] not in fresh
         }
         unknown_sources.update(
-            row.get("source_id", "unknown") for row in running if gpu_allocation(row) is None
+            row.get("source_id", "unknown") for row in allocated if gpu_allocation(row) is None
         )
         unknown_sources.update(
             row.get("source_id", "unknown")
             for row in instances
-            if str(row.get("state", "unknown")).lower()
-            not in ("running", "stopped", "terminated", "deleted")
+            if instance_lifecycle(row.get("state")) == "unknown"
             or (
-                str(row.get("state", "unknown")).lower() == "running"
+                instance_lifecycle(row.get("state")) == "held"
                 and not row.get("manual")
                 and row.get("source_id") not in fresh
             )
         )
-        counted = [value for value in map(gpu_allocation, running) if value is not None]
+        counted = [value for value in map(gpu_allocation, allocated) if value is not None]
         known_allocated = sum(counted) if fresh or counted else None
         # Actual SSH observations remain useful even when the provider has not
         # confirmed lifecycle state. They never increase allocated GPU counts.
@@ -722,7 +731,7 @@ class Store:
         ]
         measured_by_id = {
             row["id"]: row
-            for row in [*running, *sampled_cloud]
+            for row in [*running_jobs, *sampled_cloud]
             if row.get("gpu_utilization") is not None
         }
         measured = list(measured_by_id.values())

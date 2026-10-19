@@ -268,8 +268,12 @@ describe('idle cloud GPUs', () => {
       { ...base, id: 'd', state: 'stopped' },
       // A machine added by hand is not a cloud GPU being billed.
       { ...base, id: 'e', manual: true },
+      { ...base, id: 'reported', state: 'reported_running' },
+      { ...base, id: 'starting', state: 'desired_running' },
+      { ...base, id: 'stopping', state: 'desired_stopped' },
+      { ...base, id: 'unknown', state: 'unknown' },
     ]);
-    expect(rows.map((row) => row.id)).toEqual(['a']);
+    expect(rows.map((row) => row.id)).toEqual(['a', 'reported']);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
 import {
   holdsAllocation,
+  instanceLifecycle,
   gpuTres,
   qosGpuLimit,
   qosGpuUsed,
@@ -390,7 +391,7 @@ export function idleInstances(instances: Instance[], threshold = 10) {
   return instances.filter(
     (item) =>
       !item.manual &&
-      ['running', 'desired_running'].includes(item.state) &&
+      instanceLifecycle(item.state) === 'held' &&
       item.gpu_utilization != null &&
       item.gpu_utilization < threshold &&
       (item.gpu_count ?? 0) > 0,

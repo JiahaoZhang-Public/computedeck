@@ -100,6 +100,59 @@ def test_unknown_cloud_does_not_erase_confirmed_cluster_gpu_subtotal(
     assert store.dashboard()["instances"][1]["state"] == "missing"
 
 
+@pytest.mark.parametrize(
+    ("state", "gpus", "expected"),
+    [
+        ("running", 2, 2),
+        ("reported_running", 2, 2),
+        ("reported_running", 0, 0),
+        ("reported_running", None, None),
+        ("desired_running", 2, None),
+        ("missing", 2, None),
+        ("unknown", 2, None),
+        (None, 2, None),
+        ("stopped", 2, 0),
+        ("terminated", 2, 0),
+        ("deleted", 2, 0),
+        ("desired_stopped", 2, 0),
+        ("desired_terminated", None, 0),
+    ],
+)
+def test_provider_allocation_follows_lifecycle(
+    store: Store, add_source: AddSource, state: str | None, gpus: int | None, expected: int | None
+) -> None:
+    cloud = add_source("RunPod", driver="runpod")
+    store.save_snapshot(
+        cloud["id"],
+        {"instances": [{"id": "pod", "source_id": cloud["id"], "state": state, "gpu_count": gpus}]},
+    )
+    point = latest_point(store)
+    assert point["allocated_gpus"] == expected
+    assert point["known_allocated_gpus"] == (expected or 0)
+    assert point["unknown_allocation_sources"] == int(expected is None)
+    assert point["gpu_utilization"] is None
+
+
+def test_reported_running_from_a_stale_source_is_still_unknown(
+    store: Store, add_source: AddSource
+) -> None:
+    cloud = add_source(
+        "RunPod", driver="runpod", last_success=(datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    )
+    store.save_snapshot(
+        cloud["id"],
+        {
+            "instances": [
+                {"id": "pod", "source_id": cloud["id"], "state": "reported_running", "gpu_count": 2}
+            ]
+        },
+    )
+    point = latest_point(store)
+    assert point["allocated_gpus"] is None
+    assert point["known_allocated_gpus"] is None
+    assert point["unknown_allocation_sources"] == 1
+
+
 def test_unknown_gpu_counts_and_stale_sources_are_counted_once_per_source(
     store: Store, add_source: AddSource
 ) -> None:
@@ -261,7 +314,7 @@ def test_a_provider_listing_is_not_an_ssh_reading_of_its_instance(
     pod = {
         "id": "runpod:a",
         "source_id": cloud["id"],
-        "state": "desired_running",
+        "state": "reported_running",
         "gpu_count": 2,
         "gpu_utilization": 90,
         # Reached an hour ago and kept by each listing since; listed just now.

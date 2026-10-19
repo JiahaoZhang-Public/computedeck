@@ -218,6 +218,24 @@ Override `account(api, source)` to return `Account(balance=...)` when the provid
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
 
+`CloudInstance.state` also accepts `reported_running`: the provider's normal running
+report without an observation of readiness, as with RunPod REST. It can still be starting
+its image; it is not proof that SSH or the workload is ready. `desired_running` retains
+its meaning for transitional or intended running states (for example EC2 pending).
+
+The allocation lifecycle is defined in `drivers/cloud.py` by `INSTANCE_LIFECYCLE` and
+`instance_lifecycle(state)`, mirrored in the web app with a parity test:
+
+| Allocation lifecycle | Instance states |
+| --- | --- |
+| `held` | `running`, `reported_running` |
+| `not_held` | `stopped`, `terminated`, `deleted`, `desired_stopped`, `desired_terminated` |
+| `unknown` | Everything else, including `desired_running`, `unknown`, `missing` and absent states |
+
+Held instances count their listed `gpu_count`; a missing count or stale source remains
+unknown. SSH checks do not replace a provider's allocation with a process count. Existing
+stored states are unchanged until the next collection. `PLUGIN_API` and `WEB_API` remain 1.
+
 ## Notification channels
 
 The Notifications tool sends to email and webhooks. A plugin can add a channel kind:

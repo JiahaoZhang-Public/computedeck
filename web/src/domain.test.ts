@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   runningPrice,
+  instanceLifecycle,
   currentJobs,
   partialCount,
   elapsedSeconds,
@@ -96,6 +97,57 @@ const instance = (extra: Partial<Instance>): Instance => ({
   ...extra,
 });
 describe('allocation accounting', () => {
+  it.each([
+    ['running', 2, 2],
+    ['reported_running', 2, 2],
+    ['reported_running', 0, 0],
+    ['reported_running', null, null],
+    ['desired_running', 2, null],
+    ['missing', 2, null],
+    ['unknown', 2, null],
+    ['new_state', 2, null],
+    ['stopped', 2, 0],
+    ['terminated', 2, 0],
+    ['deleted', 2, 0],
+    ['desired_stopped', 2, 0],
+    ['desired_terminated', null, 0],
+  ] as const)('counts %s with %s GPUs as %s', (state, gpu_count, allocated) => {
+    const data = dashboard([]);
+    data.sources = [
+      source({ id: 'cloud', driver: 'runpod', kind: 'cloud', capabilities: ['instances'] }),
+    ];
+    data.instances = [instance({ state, gpu_count, gpu_allocated: null })];
+    expect(summarize(data)).toMatchObject({
+      allocated,
+      knownAllocated: allocated ?? 0,
+      unknownAllocationSources: allocated === null ? 1 : 0,
+    });
+  });
+  it('leaves absent and unrecognized lifecycle states unknown', () => {
+    expect(instanceLifecycle(null)).toBe('unknown');
+    expect(instanceLifecycle(undefined)).toBe('unknown');
+    expect(instanceLifecycle('new_state')).toBe('unknown');
+    expect(instanceLifecycle('constructor')).toBe('unknown');
+    expect(instanceLifecycle('REPORTED_RUNNING')).toBe('held');
+  });
+  it('does not count a reported running instance from a stale source', () => {
+    const data = dashboard([]);
+    data.sources = [
+      source({
+        id: 'cloud',
+        driver: 'runpod',
+        kind: 'cloud',
+        capabilities: ['instances'],
+        stale: true,
+      }),
+    ];
+    data.instances = [instance({ state: 'reported_running' })];
+    expect(summarize(data)).toMatchObject({
+      allocated: null,
+      knownAllocated: null,
+      unknownAllocationSources: 1,
+    });
+  });
   it('deduplicates observations across accounts and preserves cross-cluster IDs', () => {
     const jobs = [
       job({}),
@@ -525,11 +577,14 @@ describe('current and partial resource readings', () => {
 describe('running price', () => {
   it('is not shown as the rate of a stopped or terminated instance', () => {
     expect(runningPrice(instance({ state: 'running', hourly_cost: 0.59 }))).toBe(0.59);
+    expect(runningPrice(instance({ state: 'reported_running', hourly_cost: 0.59 }))).toBe(0.59);
     expect(runningPrice(instance({ state: 'desired_running', hourly_cost: 0.59 }))).toBe(0.59);
     expect(runningPrice(instance({ state: 'unknown', hourly_cost: 0.59 }))).toBe(0.59);
     expect(runningPrice(instance({ state: 'desired_stopped', hourly_cost: 0.59 }))).toBeNull();
     expect(runningPrice(instance({ state: 'stopped', hourly_cost: 0.59 }))).toBeNull();
     expect(runningPrice(instance({ state: 'terminated', hourly_cost: 1 }))).toBeNull();
+    expect(runningPrice(instance({ state: 'desired_terminated', hourly_cost: 1 }))).toBeNull();
+    expect(runningPrice(instance({ state: 'deleted', hourly_cost: 1 }))).toBeNull();
   });
 });
 

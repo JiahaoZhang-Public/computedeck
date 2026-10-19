@@ -35,6 +35,26 @@ const ALLOCATED_STATES = ['CONFIGURING', 'RUNNING', 'COMPLETING'];
 export function holdsAllocation(job: Pick<Job, 'state'>) {
   return ALLOCATED_STATES.includes(job.state.toUpperCase());
 }
+/** Instance GPU allocation lifecycle; kept in parity with drivers/cloud.py. */
+export const INSTANCE_LIFECYCLE = {
+  running: 'held',
+  reported_running: 'held',
+  stopped: 'not_held',
+  terminated: 'not_held',
+  deleted: 'not_held',
+  desired_stopped: 'not_held',
+  desired_terminated: 'not_held',
+  desired_running: 'unknown',
+  unknown: 'unknown',
+  missing: 'unknown',
+} as const;
+
+export function instanceLifecycle(state: string | null | undefined) {
+  const key = state?.toLowerCase() ?? '';
+  return Object.hasOwn(INSTANCE_LIFECYCLE, key)
+    ? INSTANCE_LIFECYCLE[key as keyof typeof INSTANCE_LIFECYCLE]
+    : 'unknown';
+}
 /** Current jobs exclude retained snapshots from disabled or failed collectors. */
 export function currentJobs(data: Pick<Dashboard, 'sources' | 'jobs'>) {
   const ids = new Set(
@@ -173,7 +193,7 @@ export function summarize(data: Dashboard) {
         .map((item) => [item.id, item]),
     ).values(),
   ];
-  const activeInstances = instances.filter((item) => item.state.toLowerCase() === 'running');
+  const activeInstances = instances.filter((item) => instanceLifecycle(item.state) === 'held');
   const unconfigured =
     !data.sources.some((source) => source.enabled && source.last_success) &&
     !jobs.length &&
@@ -190,9 +210,6 @@ export function summarize(data: Dashboard) {
   );
   const jobsUnavailable =
     !clusterSources.length || clusterSources.some((source) => !sourceHasData(source, 'jobs'));
-  const unknownLifecycle = instances.some(
-    (item) => !['running', 'stopped', 'terminated', 'deleted'].includes(item.state.toLowerCase()),
-  );
   const allocatedInstance = (item: Instance) => ({ ...item, gpu_count: instanceAllocation(item) });
   const allocations = [...running, ...activeInstances.map(allocatedInstance)];
   const sourceFresh = (sourceId: string, capability: string) => {
@@ -211,8 +228,7 @@ export function summarize(data: Dashboard) {
   for (const item of activeInstances) if (!instanceFresh(item)) unknownSources.add(item.source_id);
   for (const item of allocations) if (item.gpu_count == null) unknownSources.add(item.source_id);
   for (const item of instances)
-    if (!['running', 'stopped', 'terminated', 'deleted'].includes(item.state.toLowerCase()))
-      unknownSources.add(item.source_id);
+    if (instanceLifecycle(item.state) === 'unknown') unknownSources.add(item.source_id);
   const knownAllocations = [...freshRunning, ...freshInstances.map(allocatedInstance)].filter(
     (item) => item.gpu_count != null,
   );
@@ -247,7 +263,7 @@ export function summarize(data: Dashboard) {
     : null;
   return {
     allocated:
-      unconfigured || unknownSources.size > 0 || unknownLifecycle
+      unconfigured || unknownSources.size > 0
         ? null
         : knownSum(allocations.map((item) => item.gpu_count)),
     knownAllocated,
@@ -292,6 +308,11 @@ export function dateTime(value: string | null | undefined) {
 }
 /** The hourly price applies while an instance runs; a stopped or terminated one is not billed at it. */
 export function runningPrice(item: Instance): number | null {
+  const lifecycle = instanceLifecycle(item.state);
+  if (lifecycle === 'held') return item.hourly_cost;
+  if (lifecycle === 'not_held') return null;
+  // Keep the existing price display for unknown/transitional states until cost accounting
+  // defines them. A displayed price is not evidence that the instance holds GPUs.
   return /stopped|terminated|deleted|exited/i.test(item.state) ? null : item.hourly_cost;
 }
 export function money(value: number | null, currency: string) {

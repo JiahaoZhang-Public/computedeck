@@ -462,6 +462,7 @@ const en = {
   'status.reachable': 'Reachable',
   'status.unverified': 'Not checked',
   'status.desired_running': 'Expected running',
+  'status.reported_running': 'Running (reported by provider)',
   'status.desired_stopped': 'Expected stopped',
   'status.desired_terminated': 'Expected terminated',
 

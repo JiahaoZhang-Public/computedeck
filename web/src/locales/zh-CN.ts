@@ -427,6 +427,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'status.reachable': '可连接',
   'status.unverified': '未验证',
   'status.desired_running': '期望运行',
+  'status.reported_running': '运行中（服务商报告）',
   'status.desired_stopped': '期望停止',
   'status.desired_terminated': '期望释放',
 

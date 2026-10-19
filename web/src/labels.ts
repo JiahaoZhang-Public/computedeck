@@ -7,7 +7,8 @@ export function statusLabel(state: string) {
 }
 export type Tone = 'green' | 'amber' | 'red' | 'gray';
 export function statusTone(state: string): Tone {
-  if (['RUNNING', 'running', 'ready', 'reachable', 'COMPLETED'].includes(state)) return 'green';
+  if (['RUNNING', 'running', 'reported_running', 'ready', 'reachable', 'COMPLETED'].includes(state))
+    return 'green';
   if (
     [
       'PENDING',
