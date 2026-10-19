@@ -392,6 +392,8 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
         last_success=now(),
         capabilities=["jobs", "nodes", "history"],
         capabilities_seen=["jobs", "nodes", "history"],
+        warnings=[{"code": "partitions_unavailable"}],
+        cluster_state="degraded",
     )
     store.save_source(source)
     config.apply(store, CONFIG.replace('ssh_alias = "cluster-a"', 'ssh_alias = "other-cluster"'))
@@ -401,3 +403,21 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
     assert saved["last_success"] is None
     assert saved["capabilities"] == []
     assert saved["capabilities_seen"] == []
+    assert saved["warnings"] == []
+    assert saved["cluster_state"] == "unknown"
+
+
+def test_import_enabled_toggle_preserves_capability_history(store: Store) -> None:
+    config.apply(store, CONFIG)
+    source = store.source("cluster-a-alice")
+    assert source is not None
+    source.update(capabilities=["jobs"], capabilities_seen=["jobs", "history"])
+    store.save_source(source)
+    disabled = CONFIG.replace('ssh_alias = "cluster-a"', 'ssh_alias = "cluster-a"\nenabled = false')
+    for content, enabled in [(disabled, False), (CONFIG, True)]:
+        config.apply(store, content)
+        saved = store.source(source["id"])
+        assert saved is not None
+        assert saved["enabled"] is enabled
+        assert saved["capabilities"] == ["jobs"]
+        assert saved["capabilities_seen"] == ["jobs", "history"]

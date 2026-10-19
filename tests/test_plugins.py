@@ -181,6 +181,28 @@ def test_one_plugin_failing_does_not_stop_the_service(tmp_path: Path) -> None:
         assert client.get("/api/plugins/example/status").status_code == 200
 
 
+@pytest.mark.parametrize("result", [None, [], "invalid", 1])
+def test_invalid_plugin_health_does_not_stop_the_dashboard(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, result: Any
+) -> None:
+    def setup(context: PluginContext) -> None:
+        context.health = lambda: result
+
+    app = api.create_app(tmp_path, polling=False, plugins=[Plugin("invalid", setup)])
+    error = f"{type(result).__name__} is not a health dict"
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard")
+        assert response.status_code == 200
+        [item] = response.json()["attention"]
+        assert item["kind"] == "plugin_error"
+        assert item["subject"]["id"] == "invalid"
+        assert item["details"] == [error]
+        response = client.get("/api/health")
+        assert response.status_code == 200
+        assert response.json()["plugins"]["invalid"] == {"error": error, "enabled": True}
+    assert error in caplog.text
+
+
 def test_duplicate_plugin_ids_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Duplicate plugin id: example"):
         api.create_app(tmp_path, plugins=[example_plugin([]), quiet_plugin("example")])

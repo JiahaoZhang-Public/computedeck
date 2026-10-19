@@ -17,6 +17,7 @@ import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
 import { dateTime, relativeTime } from './domain';
+import { driverInfo } from './drivers';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
@@ -709,6 +710,11 @@ it.each(['en', 'zh-CN'] as const)(
       (element) => element.querySelector('.stat-label')?.textContent === t('overview.attention'),
     );
     expect(tile?.querySelector('.stat-value')?.textContent).toBe('1');
+    const panel = container.querySelector<HTMLElement>('#attention')!;
+    panel.scrollIntoView = vi.fn();
+    await click('.stat-hint a[href="#attention"]');
+    expect(panel.scrollIntoView).toHaveBeenCalledOnce();
+    expect(window.location.hash).not.toBe('#attention');
     expect(container.querySelectorAll('#attention li')).toHaveLength(1);
     expect(container.querySelector('#attention')?.textContent).toContain('second detail');
     expect(container.querySelector('#attention')?.textContent).toContain(
@@ -730,6 +736,12 @@ it.each(['en', 'zh-CN'] as const)(
         ([path, body]) => path === `/sources/${source.id}/check` && body != null,
       ),
     ).toBe(true);
+    const firstCalls = request.mock.calls.filter(([path]) => path.endsWith('/check')).length;
+    expect(test.disabled).toBe(false);
+    await act(async () => test.click());
+    expect(request.mock.calls.filter(([path]) => path.endsWith('/check')).length).toBeGreaterThan(
+      firstCalls,
+    );
   },
 );
 
@@ -766,7 +778,7 @@ it.each(['en', 'zh-CN'] as const)('keeps example diagnosis read-only in %s', asy
   setLocale(locale);
   const source = serverDemo().sources[0];
   source.error = { code: 'ssh_timeout' };
-  await render(<SourceDiagnosis source={source} demo />);
+  await render(<SourceDiagnosis source={source} demo drivers={[]} />);
   const button = container.querySelector('button')!;
   expect(button.disabled).toBe(true);
   expect(button.textContent).toBe(t('sources.testConnection'));
@@ -795,3 +807,81 @@ it.each(['en', 'zh-CN'] as const)(
     expect(text).not.toContain(t('attention.since', params));
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'localizes diagnosis for a source never collected in %s',
+  async (locale) => {
+    setLocale(locale);
+    const source = { ...serverDemo().sources[0], username: '', last_success: null };
+    const driver = {
+      ...driverInfo([], source.driver),
+      label: { en: 'Example scheduler', 'zh-CN': '示例调度器' },
+    };
+    await render(<SourceDiagnosis source={source} demo={false} drivers={[driver]} />);
+    expect(container.querySelector('.modal-header p')?.textContent).toBe(driver.label[locale]);
+    expect(container.textContent).toContain(t('health.notCollected'));
+    expect(container.textContent).not.toContain(t('attention.lastSuccess', { time: '—' }));
+    expect(request).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['instance', 'toolbox'] as const)('opens the %s attention target', async (action) => {
+  const data = serverDemo();
+  const instance = data.instances.find((row) => row.id === 'runpod:demo-pod')!;
+  data.attention = [
+    action === 'instance'
+      ? data.attention![0]
+      : {
+          ...data.attention![0],
+          key: 'plugin_error:example',
+          kind: 'plugin_error',
+          subject: { kind: 'plugin', id: 'example', name: 'Example' },
+          message: { code: 'attention_plugin_error', name: 'Example' },
+          action,
+        },
+  ];
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path === '/settings') return { language: 'en' };
+    if (path === '/health') return null;
+    return [];
+  });
+  await render(<App />);
+  await click('#attention button');
+  if (action === 'instance') {
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(instance.name);
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(instance.host);
+  } else {
+    expect(window.location.hash).toBe('#/toolbox');
+    await act(async () => window.dispatchEvent(new HashChangeEvent('hashchange')));
+    expect(container.querySelector('a[href="#/toolbox"]')?.getAttribute('aria-current')).toBe(
+      'page',
+    );
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  }
+});
+
+it('opens diagnosis from an unmeasured login in the GPUs-in-use hint', async () => {
+  const data = serverDemo();
+  const source = data.sources[0];
+  data.summary.unmeasured = [
+    {
+      subject: { kind: 'source', id: source.id, name: source.name },
+      reason: { code: 'summary_source_stale' },
+    },
+  ];
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path === '/settings') return { language: 'en' };
+    if (path === '/health') return null;
+    return [];
+  });
+  await render(<App />);
+  await click('.stat-hint button');
+  const dialog = container.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector('h2')?.textContent).toBe(
+    t('attention.diagnosis', { name: source.name }),
+  );
+  expect(dialog.querySelector('form')).toBeNull();
+  expect(request.mock.calls.some(([path]) => path.endsWith('/check'))).toBe(false);
+});

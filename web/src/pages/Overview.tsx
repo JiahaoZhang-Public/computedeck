@@ -108,11 +108,22 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           label={t('overview.issues')}
           value={issues}
           hint={
-            issues
-              ? t('overview.issues.some')
-              : connected
-                ? t('overview.issues.none')
-                : t('overview.issues.unconfigured')
+            issues ? (
+              <a
+                className="link"
+                href="#attention"
+                onClick={(event) => {
+                  event.preventDefault();
+                  document.getElementById('attention')?.scrollIntoView();
+                }}
+              >
+                {t('overview.issues.some')}
+              </a>
+            ) : connected ? (
+              t('overview.issues.none')
+            ) : (
+              t('overview.issues.unconfigured')
+            )
           }
         />
       </div>

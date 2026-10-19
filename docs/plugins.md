@@ -90,7 +90,7 @@ what follows. Nothing it registers runs or resolves until the plugin is switched
 | `ctx.on_event(handler, types)` | Receive events while on (see below). |
 | `ctx.background(loop)` | A coroutine run while the plugin is on; restarted after a crash, stopped when switched off. |
 | `ctx.on_startup(fn)`, `ctx.on_shutdown(fn)` | Prepare and release resources, e.g. tables in `ctx.store.db`. Startup runs once, when the plugin is first on (at service start or when switched on); shutdown runs at service stop if startup ran. |
-| `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. |
+| `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. Also called synchronously on every `/api/dashboard` request, so it must be cheap. Exceptions and non-dict results are reported as plugin health errors. |
 | `ctx.credential_scheme(name, resolver)` | Add a credential reference scheme, e.g. `vault:path`. While the plugin is off, its references fail with a message saying so. |
 | `ctx.runtime.cluster_lock(id)`, `ctx.runtime.semaphore` | Share the collector's connection budget when you reach clusters. |
 | `ctx.data_dir` | Private files in `plugins/<id>/` below the service data directory (mode 700). |
@@ -376,7 +376,8 @@ Source rows gain `capabilities_seen`, the union of capabilities delivered by
 successful collections. Older rows need no migration: their current capabilities
 seed the union on the next successful collection. Connection changes through
 source edits or configuration import clear both current and seen capabilities;
-name and interval edits preserve them.
+name, interval and enabled edits preserve them. Connection changes also clear
+warnings and cluster state from the old connection.
 
 ## Marketplaces
 

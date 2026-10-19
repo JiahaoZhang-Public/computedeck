@@ -55,3 +55,15 @@ describe('translations', () => {
     expect(errorText('nonsense', 'error.save')).toBe('Could not save');
   });
 });
+
+it.each(['en', 'zh-CN'] as const)('renders unreadable-row counts in %s', (locale) => {
+  setLocale(locale);
+  for (const count of [1, 2]) {
+    const text = formatMessage({ code: 'attention_unreadable_rows', name: 'jobs', count });
+    expect(text).toBe(
+      t(`msg.attention_unreadable_rows${count === 1 ? '.one' : ''}`, { name: 'jobs', count }),
+    );
+    if (locale === 'en')
+      expect(text).toContain(`${count} unreadable ${count === 1 ? 'row;' : 'rows;'}`);
+  }
+});

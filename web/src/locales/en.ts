@@ -9,6 +9,7 @@ const en = {
   'msg.attention_instance_ssh_failed': '{name}: SSH check failed',
   'msg.attention_service_loop_failed': '{name}: background task failed',
   'msg.attention_unreadable_rows': '{name}: {count} unreadable rows; check the service log',
+  'msg.attention_unreadable_rows.one': '{name}: {count} unreadable row; check the service log',
   'msg.attention_plugin_error': '{name}: plugin error',
   'attention.since': 'Since {time} · {age}',
   'attention.lastSeen': 'Last seen {time} · {age}',

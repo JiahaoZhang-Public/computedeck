@@ -399,7 +399,7 @@ def create_app(
         source.setdefault("node", "")
         connection_changed = any(
             key in changes and changes[key] != source.get(key)
-            for key in ("ssh_alias", "credential", "username", "options", "node", "enabled")
+            for key in ("ssh_alias", "credential", "username", "options", "node")
         )
         source.update(changes)
         check_node(source)
@@ -411,6 +411,8 @@ def create_app(
                 last_success=None,
                 capabilities=[],
                 capabilities_seen=[],
+                warnings=[],
+                cluster_state="unknown",
                 error=None,
                 failures=0,
             )

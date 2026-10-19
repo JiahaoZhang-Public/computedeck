@@ -53,7 +53,7 @@ def derive(
             }
         )
 
-    clusters: set[str] = set()
+    clusters: dict[str, dict[str, Any]] = {}
     for source in sources.values():
         if not source["enabled"]:
             continue
@@ -72,7 +72,7 @@ def derive(
                 next_attempt=next_attempt,
             )
         elif source.get("stale"):
-            age = (now - datetime.fromisoformat(since)).total_seconds() if since else 0
+            age = (now - datetime.fromisoformat(source["last_success"])).total_seconds()
             severity = "error" if age > 3 * source["interval_minutes"] * 60 else "warn"
             add("source_stale", subject, severity, since=since, **timing)
 
@@ -80,15 +80,9 @@ def derive(
         # needs only one item, even when several logins report its nodes.
         cluster = source.get("cluster_id") or source["id"]
         state = source.get("cluster_state")
-        if (
-            fresh(source, "nodes")
-            and state in {"unavailable", "degraded"}
-            and cluster not in clusters
-        ):
-            clusters.add(cluster)
-            add(
-                f"cluster_{state}", subject, "error" if state == "unavailable" else "warn", **timing
-            )
+        if fresh(source, "nodes") and state in {"unavailable", "degraded"}:
+            if cluster not in clusters or state == "unavailable":
+                clusters[cluster] = source
 
         checks = descriptions.get(source["driver"], {}).get("checks", [])
         capabilities = {
@@ -119,6 +113,16 @@ def derive(
             )
         if partial:
             add("partial_data", subject, "warn", details=partial, **timing)
+
+    for source in clusters.values():
+        state = source["cluster_state"]
+        add(
+            f"cluster_{state}",
+            {"kind": "source", "id": source["id"], "name": _source_name(source)},
+            "error" if state == "unavailable" else "warn",
+            observed_at=source.get("last_success"),
+            next_attempt=source.get("next_due_at"),
+        )
 
     for instance in dashboard["instances"]:
         source = sources.get(instance.get("source_id"))

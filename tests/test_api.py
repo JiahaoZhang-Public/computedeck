@@ -1013,6 +1013,7 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
         {"ssh_alias": "cluster-b"},
         {"interval_minutes": 20},
         {"name": "Renamed cluster"},
+        {"enabled": False},
     ],
 )
 def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
@@ -1023,7 +1024,13 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
     store = Store(data_dir / "computedeck.sqlite")
     try:
         store.save_source(
-            {**source, "capabilities": capabilities, "capabilities_seen": capabilities}
+            {
+                **source,
+                "capabilities": capabilities,
+                "capabilities_seen": capabilities,
+                "warnings": [{"code": "partitions_unavailable"}],
+                "cluster_state": "degraded",
+            }
         )
     finally:
         store.db.close()
@@ -1034,6 +1041,17 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
     expected = [] if changed_connection else capabilities
     assert response.json()["capabilities"] == expected
     assert response.json()["capabilities_seen"] == expected
+    assert response.json()["warnings"] == (
+        [] if changed_connection else [{"code": "partitions_unavailable"}]
+    )
+    assert response.json()["cluster_state"] == ("unknown" if changed_connection else "degraded")
+    if changes.get("enabled") is False:
+        assert client.get("/api/dashboard").json()["attention"] == []
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": True}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["capabilities_seen"] == capabilities
 
     async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
         return Batch(jobs=[], capabilities=["jobs"], warnings=[{"code": "history_unavailable"}])

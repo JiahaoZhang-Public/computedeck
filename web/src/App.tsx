@@ -781,7 +781,12 @@ export default function App() {
             </button>
             {modal.kind === 'diagnosis' &&
               (diagnosisSource ? (
-                <SourceDiagnosis key={diagnosisSource.id} source={diagnosisSource} demo={demo} />
+                <SourceDiagnosis
+                  key={diagnosisSource.id}
+                  source={diagnosisSource}
+                  demo={demo}
+                  drivers={drivers}
+                />
               ) : (
                 <h2 id="modal-title">{t('msg.source_not_found')}</h2>
               ))}

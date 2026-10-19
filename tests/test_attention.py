@@ -104,6 +104,22 @@ def test_cluster_faults_are_current_and_shared_across_logins(state: str, severit
     assert items[0]["observed_at"] == row["last_success"]
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_shared_cluster_uses_worst_fresh_login_state(reverse: bool) -> None:
+    rows = [
+        source(cluster_state="degraded"),
+        source(id="cluster-a-bob", username="bob", cluster_state="unavailable"),
+    ]
+    if reverse:
+        rows.reverse()
+    [item] = derive(rows)
+    assert item["kind"] == "cluster_unavailable"
+    assert item["severity"] == "error"
+    assert item["subject"]["id"] == "cluster-a-bob"
+    rows = [dict(row, stale=True) if row["username"] == "bob" else row for row in rows]
+    assert {item["kind"] for item in derive(rows)} == {"source_stale", "cluster_degraded"}
+
+
 def test_only_stable_failed_ssh_checks_on_monitored_instances() -> None:
     instance = {
         "id": "box",
@@ -161,6 +177,9 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
     data = demo.dashboard()
     assert [item["kind"] for item in data["attention"]] == ["instance_ssh_failed"]
     assert data["attention"][0]["subject"]["id"] == "runpod:demo-pod"
+    pod = next(row for row in data["instances"] if row["id"] == "runpod:demo-pod")
+    for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
+        assert pod[metric] is None
 
 
 def test_collector_commit_fault_names_the_source_without_changing_its_id_or_action() -> None:

@@ -17,7 +17,8 @@ The Overview tile, navigation badge and attention panel count the same server
 list. A collection failure appears after two consecutive failures, or immediately
 if its data is stale. Stale data becomes an error after three collection intervals.
 Cluster availability uses the existing node-health rule and current node data,
-with one item per cluster. A capability warning counts only when the source has
+with one item per cluster, using the worst state reported by its current logins.
+A capability warning counts only when the source has
 delivered that capability before; permanent gaps stay on Sources. Other warnings
 are all included. Unchecked connections and machines with monitoring off do not
 produce attention items; failed SSH checks on monitored machines and provider
@@ -33,3 +34,7 @@ an SSH check, or a background error report. Repeated observations do not imply a
 new incident onset. Unreadable rows and plugin health errors have neither time.
 Attention is derived on every dashboard read; there is no acknowledge, snooze or
 additional collection request.
+
+Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
+`instances_skipped` as driver capability checks or coverage-only conditions.
+They currently count as partial data, including when the gap is permanent.
