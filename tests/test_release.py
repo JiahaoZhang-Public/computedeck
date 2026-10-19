@@ -12,7 +12,7 @@ _spec.loader.exec_module(_module)
 
 
 @pytest.mark.parametrize(
-    "version,stable", [("0.3.0", True), ("0.3.0rc1", False), ("0.3.0a0", False)]
+    "version,stable", [("0.4.0", True), ("0.4.0rc1", False), ("0.4.0a0", False)]
 )
 def test_release_tag(tmp_path, version, stable):
     (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n')

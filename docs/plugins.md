@@ -16,6 +16,15 @@ surface; other modules may change between releases.
 A plugin runs inside the service with the permissions of the user who runs it. Install
 only plugins you trust, and say plainly in your plugin what it does.
 
+## Compatibility with 0.4.0
+
+`PLUGIN_API = 1`, `WEB_API = 1`, the database schema version, route IDs and documented
+event types are unchanged. Dashboard additions are described below; callers that do
+not opt into conditional polling still receive a full response. Plugins supporting
+both 0.3 and 0.4 should declare `requires=">=0.3,<0.5"` and widen matching package
+dependencies and marketplace entries. A plugin that requires the new dashboard fields
+should require `>=0.4,<0.5`, or handle their absence on 0.3.
+
 ## Quick start
 
 While packages are unreleased, follow the [local plugin development guide](https://github.com/JiahaoZhang-Public/computedeck-plugins/blob/main/CONTRIBUTING.md#create-a-plugin)
@@ -45,7 +54,7 @@ plugin = Plugin(
     permissions=({"en": "posts failed jobs to the lab chat"},),
     settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
     default_enabled=False,  # start off until the owner turns it on
-    requires=">=0.3,<0.4",  # ComputeDeck versions it supports
+    requires=">=0.3,<0.5",  # ComputeDeck versions it supports
     api=1,  # the plugin API it was written for
     page="lab-alerts",  # the page its web bundle adds, if any
     web=Path(__file__).parent / "web",  # the built web bundle, if any
@@ -306,6 +315,25 @@ each tool's own settings and data; the banner says so. Plugins must use the supp
 pause the service's background collectors. Example resource IDs use the `example:`
 namespace; example data is never stored.
 
+`request(path, body?, method?)` defaults to GET without a body and POST with one.
+An explicit method is honored even without a body, normalized to uppercase, and
+every non-GET request includes `X-ComputeDeck: 1`. Turning example mode on adds
+`?demo=true` to the URL; turning it off removes that parameter. Either change closes
+open dialogs and drawers.
+
+## Instance observations
+
+Dashboard instance rows can carry `last_probe_attempt`, independently of the provider
+listing's `observed_at`. The last `ssh_status`, `ssh_error` and check time survive a
+listing with the same host, port and user, until the provider reports the instance
+released. Provider allocation fields are not overwritten by an SSH check.
+
+Hand-added rows carry `gpu_allocated` (GPUs with compute processes, or null) and
+`probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
+Their dashboard `state` is `running` while a successful check is less than twenty
+minutes old, otherwise `unknown`. Use `summary` for totals: typed-in GPU inventory
+is not evidence of use, and hand-added machines with monitoring off are excluded.
+
 ## Dashboard summaries
 
 `GET /api/dashboard` (including example data) adds `summary`. Existing dashboard
@@ -352,6 +380,9 @@ The summary does not add cost accounting or failure-history coverage.
 - `collecting` lists pending source IDs, sorted. `refreshing` remains unchanged.
   Refresh may still enqueue sources that are not already pending.
 
+Source rows also expose `next_due_at` and `failures` for retry scheduling. A pending
+source may still be queued; only `status: "syncing"` means collection has started.
+
 The optional health fields `background_errors` and `unreadable_rows` are now typed
 for web plugins. Collector scheduling errors use `collector:schedule`; commit
 errors use `collector:commit:<source_id>`. A clean scheduling pass or a successful
@@ -386,6 +417,8 @@ seed the union on the next successful collection. Connection changes through
 source edits or configuration import clear both current and seen capabilities;
 name, interval and enabled edits preserve them. Connection changes also clear
 warnings and cluster state from the old connection.
+Enabled toggles clear the collection error and retry count, resetting status to
+`ready` or `unconfigured`, without clearing last success or capability history.
 
 ## Marketplaces
 
@@ -405,7 +438,7 @@ an https address, or in a folder. The format follows Claude Code's `marketplace.
       "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
                   "sha256": ["<sha256 of the wheel>"] },
       "permissions": [{ "en": "posts failed jobs to the lab chat" }],
-      "requires": ">=0.3,<0.4",
+      "requires": ">=0.3,<0.5",
       "license": "MIT",
       "homepage": "https://example.com/lab-alerts"
     }
@@ -507,6 +540,10 @@ there are no ETags or 304 responses. The token covers time-derived freshness,
 summaries, attention, the sliding history window and pending collections, so it
 can change without a database write. Live and example data have separate tokens;
 example timestamps advance once per minute.
+
+Keep health reports cheap and avoid changing error text on every call (for example,
+by embedding the current time). Plugin health errors feed attention and therefore
+the dashboard token; a changing error prevents unchanged responses.
 
 The web pauses polling while hidden and reloads on visibility or focus. Requests
 made through its request function while the page is hidden wait until it is

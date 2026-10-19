@@ -430,7 +430,7 @@ def nodes() -> list[dict[str, Any]]:
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
             "status": "ok",
-            "version": "0.3.0",
+            "version": "0.4.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,

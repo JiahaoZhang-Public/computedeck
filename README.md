@@ -10,16 +10,29 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 [![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
 
-*All screenshots use the built-in example data. Click the overview for the 20-second demo.*
+*All screenshots use built-in example data from an earlier preview; the 0.4.0 layout and figures have changed. Click the overview for the 20-second demo.*
 
 ## Features
 
 - Running, queued and recently failed jobs across cluster accounts.
-- GPU capacity and QoS limits, compared by GPU model, count and run time.
+- Usable GPU capacity and QoS limits, compared by GPU model, count and run time, with estimates that account for your own queue.
 - Cloud instances, known hourly prices and GPU usage on SSH hosts.
-- Collection history and connection diagnostics with repair suggestions.
+- One Needs attention list, collection age and service health on every page, and connection diagnostics with repair suggestions.
 
 The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
+
+In **0.4.0 — Numbers you can trust**, partial totals show `≥` and name the unmeasured
+machines or logins. Overview, Usage and history share the same figures. Running cloud
+instances count their provider's GPU allocation; SSH machines count GPUs with compute
+processes, and hand-added machines with monitoring off are excluded. SSH checks keep
+their own age across provider updates.
+
+The **Data freshness and service health** indicator in the top bar shows the oldest
+enabled source's successful collection, or **Not collected yet** if any enabled source
+has never succeeded. Open it for errors and retry times.
+Overview puts Needs attention and current jobs before the chart. Hidden tabs pause
+browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
+for upgrade details, including possible steps in the history chart.
 
 ## Terms in the interface
 
@@ -30,6 +43,8 @@ The core only reads resources; it does not submit jobs or stop instances. Missin
 | Instance / machine | One rented or owned machine. **Cloud and machines** includes cloud instances, SSH sources and hand-added machines. |
 | Collection machine | Another computer that collects sources for this service, shown as **via {name}**. It is not a compute node. |
 | Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
+| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with compute processes on SSH machines. This is not GPU utilization. |
+| “usable GPUs” in the capacity reading | Capacity on usable nodes across all users, not a promise that your login can allocate it. |
 | Needs attention | The single list of current faults and warnings; its badge, tile and panel use the same count. |
 
 Job details use the scheduler's terms: Account / Partition / QoS for Slurm,
@@ -79,7 +94,12 @@ npm --prefix web run build
 uv run computedeck serve --open
 ```
 
-Turn on **Example data** to try the interface without connecting a resource. The service listens on `http://127.0.0.1:8710`.
+Turn on **Example data** to try the interface without connecting a resource. It includes
+failed and stale collections, a rate-limited cloud account and a timed-out job. The
+mode survives reloads and blocks changes through the web app, including Notify, Chat
+and plugin requests; signing in remains possible. Tool and settings pages still show
+your own data, and existing background collection continues. Use **Turn off example
+data** in the banner to resume changes. The service listens on `http://127.0.0.1:8710`.
 
 To connect a cluster, choose **Sources → Add source** and enter the SSH alias and username you already use. SSH must work without prompts. For cloud providers, enter a credential reference such as `env:RUNPOD_API_KEY`, not the key itself. See [configuration](docs/configuration.md) and the [Slurm setup guide](docs/drivers/slurm.md).
 

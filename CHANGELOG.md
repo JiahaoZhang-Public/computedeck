@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- Use the same GPU, job and utilization figures across Overview, Usage, cluster views and history. Partial totals name the machines or logins that could not be measured; machines with monitoring off are excluded.
+- Count running instances reported by a cloud provider as GPUs in use, including RunPod pods. SSH checks measure utilization without changing the provider's allocation.
+- Keep an instance's last SSH check across provider updates until its connection changes or the instance is released. Hand-added machines count measured GPUs with compute processes while their checks are current; failed, old or unavailable readings stay unknown.
+- Show usable GPU capacity separately from unavailable GPUs. A cluster with every node down reads “0 usable”; unknown node states preserve a lower bound instead of appearing free.
+- Show collection age and service health on every page. Age follows the oldest enabled source, so it may look older after upgrading. Open the health panel for failures, retries and collection progress; Refresh remains available during background collection.
+- Use one Needs attention list and count for collection failures, stale data, cluster faults, lost capabilities, failed SSH checks and service or plugin errors. Missing capabilities that have never worked and unchecked connections no longer count as faults. Source items open connection diagnosis.
+- Clarify the interface with “Clusters & clouds” and “Cloud and machines”, a bilingual glossary and job-detail labels appropriate to Slurm, PBS, LSF or Kubernetes.
+- Make example data read-only across tools and plugin requests, while still allowing sign-in. Keep example mode in the URL and show a neutral banner on every page. Examples now include failed and stale logins, a rate-limited cloud account and a timed-out job.
+- Pause browser requests while the tab is hidden, send a small response when the dashboard is unchanged and follow Refresh, SSH checks and newly added resources more quickly. Service health checks do less work; example timestamps advance once per minute.
+- Account for your eligible queued GPU demand in Where to run, with a “Likely to wait for your queue” estimate when it uses the available room. Held, dependency, delayed-start and array-throttled jobs are excluded; unknown counts stay unknown. Kubernetes quota usage is not counted twice.
+- Show options with unchecked access in the main planning table, with one note per login. Within each verdict, rank by whether the request fits one node, room after your queue, free GPUs and verified access. Show the first row as the best estimate only when it is likely or possible.
+- Put Needs attention, current jobs and recent failures before Clusters & clouds and the history chart on Overview. Plugin overview cards appear beside the chart at the bottom.
+- Preserve existing history points. The corrected allocation and monitoring rules can cause a step in the chart after upgrading. Repointing a source clears its old capability history; switching it off or on preserves that history and clears collection errors and retry counts.
+
 ## 0.3.0 (unreleased)
 
 - Verify Slurm QoS association access and separate unknown or unassociated planner choices.
