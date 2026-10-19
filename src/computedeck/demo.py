@@ -162,8 +162,8 @@ def dashboard() -> dict[str, Any]:
         status="error",
         stale=True,
         last_success=(current - timedelta(minutes=25)).isoformat(),
-        last_attempt=(current - timedelta(minutes=1)).isoformat(),
-        next_due_at=(current + timedelta(minutes=9)).isoformat(),
+        last_attempt=(current - timedelta(minutes=5)).isoformat(),
+        next_due_at=(current + timedelta(minutes=5)).isoformat(),
         failures=2,
         error={"code": "http_status", "status": 429},
         capabilities=["instances", "ssh_discovery", "ssh_probe"],
@@ -361,12 +361,13 @@ def dashboard() -> dict[str, Any]:
 def events() -> list[dict[str, Any]]:
     """Recent example events, newest first."""
     data = dashboard()
+    sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
     timeout, oom = data["recent_failures"]
     at = datetime.now(UTC)
 
     def context(source_id: str) -> dict[str, Any]:
-        source = next(item for item in data["sources"] if item["id"] == source_id)
+        source = sources[source_id]
         return {
             "source_name": source["name"],
             "cluster_id": source["cluster_id"],
@@ -375,12 +376,18 @@ def events() -> list[dict[str, Any]]:
         }
 
     rows = [
+        (
+            "source.failed",
+            "example:runpod-secondary",
+            15,
+            {"error": sources["example:runpod-secondary"]["error"]},
+        ),
         ("job.started", "example:cluster-b-alice", 25, {"job": jobs["example:cluster-b:48211"]}),
         (
             "source.failed",
             "example:cluster-c-alice",
             150,
-            {"error": next(s["error"] for s in data["sources"] if s["driver"] == "pbs")},
+            {"error": sources["example:cluster-c-alice"]["error"]},
         ),
         ("job.failed", timeout["source_id"], 120, {"job": timeout}),
         ("job.failed", oom["source_id"], 300, {"job": oom}),

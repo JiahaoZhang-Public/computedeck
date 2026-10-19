@@ -27,26 +27,24 @@ async function failure(response: Response): Promise<ApiError> {
 
 function checkExampleMode(path: string, method: string) {
   // The access-token check only authenticates the viewer; it does not change resources.
-  if (path === '/session' && method.toUpperCase() === 'POST') return;
-  if (
-    method.toUpperCase() !== 'GET' &&
-    new URLSearchParams(window.location.search).get('demo') === 'true'
-  )
+  if (path === '/session' && method === 'POST') return;
+  if (method !== 'GET' && new URLSearchParams(window.location.search).get('demo') === 'true')
     throw new Error(t('toast.demoReadOnly'));
 }
 
 /** All host API traffic, including plugin requests and file uploads, goes through here. */
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
-  const method = init.method ?? 'GET';
+  const method = (init.method ?? 'GET').toUpperCase();
   checkExampleMode(path, method);
   const auth = await authHeaders();
   // The user may have switched modes while the session was being verified.
   checkExampleMode(path, method);
   const response = await fetch(`/api${path}`, {
     ...init,
+    method,
     headers: {
       ...auth,
-      ...(method.toUpperCase() !== 'GET' ? { 'X-ComputeDeck': '1' } : {}),
+      ...(method !== 'GET' ? { 'X-ComputeDeck': '1' } : {}),
       ...init.headers,
     },
     credentials: 'omit',

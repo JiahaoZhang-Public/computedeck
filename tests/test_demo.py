@@ -187,8 +187,19 @@ def test_demo_next_attempts_follow_collection_intervals_and_backoff() -> None:
         if source["status"] != "syncing":
             attempt = datetime.fromisoformat(source["last_attempt"])
             due = datetime.fromisoformat(source["next_due_at"])
-            delay = 30 if source["driver"] == "pbs" else source["interval_minutes"]
-            assert due == attempt + timedelta(minutes=delay)
+            interval = source["interval_minutes"] * 60
+            failures = source["failures"]
+            delay = max(interval, min(1800, 60 * 2 ** min(failures, 5))) if failures else interval
+            assert due == attempt + timedelta(seconds=delay)
+            if failures:
+                expected_attempt = datetime.fromisoformat(source["last_success"]) + timedelta(
+                    seconds=interval
+                )
+                for count in range(1, failures):
+                    expected_attempt += timedelta(
+                        seconds=max(interval, min(1800, 60 * 2 ** min(count, 5)))
+                    )
+                assert attempt == expected_attempt
             if source["stale"] and not source["error"]:
                 assert due < current
             else:
@@ -198,6 +209,15 @@ def test_demo_next_attempts_follow_collection_intervals_and_backoff() -> None:
 def test_demo_source_failure_events_match_current_outages_or_recoveries() -> None:
     sources = {source["id"]: source for source in dashboard()["sources"]}
     rows = events()
+    for source in sources.values():
+        if source["enabled"] and source["error"] and source["last_success"]:
+            assert (
+                sum(
+                    row["type"] == "source.failed" and row["source_id"] == source["id"]
+                    for row in rows
+                )
+                == 1
+            )
     for event in rows:
         if event["type"] != "source.failed":
             continue
@@ -206,10 +226,9 @@ def test_demo_source_failure_events_match_current_outages_or_recoveries() -> Non
         success = datetime.fromisoformat(source["last_success"])
         attempt = datetime.fromisoformat(source["last_attempt"])
         if source["error"]:
+            assert event["data"]["error"] == source["error"]
             assert success < at <= attempt
             assert abs((at - success).total_seconds() - source["interval_minutes"] * 60) < 1
-            # Seven retries after the initial failure: 10, 10, 10, 16, 30, 30, 30 min.
-            assert abs((attempt - at).total_seconds() - 136 * 60) < 1
         else:
             # A historical failure precedes a recovery, then subsequent successes.
             assert any(

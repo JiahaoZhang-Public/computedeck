@@ -19,6 +19,12 @@ function stubFetch(response: Response) {
 }
 
 describe('api', () => {
+  it.each(['get', 'post', 'pAtCh'])('normalises %s for fetch and write headers', async (method) => {
+    const calls = stubFetch(new Response('{}'));
+    await api('/plugins/example/action', undefined, method);
+    expect(calls[0].method).toBe(method.toUpperCase());
+    expect(calls[0].headers).toEqual(method === 'get' ? {} : { 'X-ComputeDeck': '1' });
+  });
   it('accepts empty replies', async () => {
     stubFetch(new Response(null, { status: 204 }));
     await expect(api('/session', { token: 'x' })).resolves.toBeUndefined();
@@ -49,21 +55,24 @@ describe.each(['en', 'zh-CN'] as const)('example request isolation in %s', (loca
       expect(calls).toEqual([]);
     },
   );
-  it('allows only the access-token check while other writes stay blocked', async () => {
-    setLocale(locale);
-    window.history.replaceState(null, '', '/?demo=true');
-    const calls = stubFetch(new Response(JSON.stringify({ token: 'example-session' })));
-    await expect(api('/session', { token: 'example-access-token' })).resolves.toEqual({
-      token: 'example-session',
-    });
-    expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe('POST');
-    expect(JSON.parse(calls[0].body as string)).toEqual({ token: 'example-access-token' });
-    for (const path of ['/refresh', '/session/', '/session?extra=1', '/session-extra'])
-      await expect(api(path, {})).rejects.toThrow(t('toast.demoReadOnly'));
-    await expect(api('/session', {}, 'DELETE')).rejects.toThrow(t('toast.demoReadOnly'));
-    expect(calls).toHaveLength(1);
-  });
+  it.each(['POST', 'post'])(
+    'allows only the %s access-token check while other writes stay blocked',
+    async (method) => {
+      setLocale(locale);
+      window.history.replaceState(null, '', '/?demo=true');
+      const calls = stubFetch(new Response(JSON.stringify({ token: 'example-session' })));
+      await expect(api('/session', { token: 'example-access-token' }, method)).resolves.toEqual({
+        token: 'example-session',
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].method).toBe('POST');
+      expect(JSON.parse(calls[0].body as string)).toEqual({ token: 'example-access-token' });
+      for (const path of ['/refresh', '/session/', '/session?extra=1', '/session-extra'])
+        await expect(api(path, {})).rejects.toThrow(t('toast.demoReadOnly'));
+      await expect(api('/session', {}, 'DELETE')).rejects.toThrow(t('toast.demoReadOnly'));
+      expect(calls).toHaveLength(1);
+    },
+  );
   it('refuses implicit POST and uploads, allows reads, and resumes writes when turned off', async () => {
     setLocale(locale);
     window.history.replaceState(null, '', '/?demo=true');
@@ -77,7 +86,7 @@ describe.each(['en', 'zh-CN'] as const)('example request isolation in %s', (loca
     );
     expect(fetch).not.toHaveBeenCalled();
     await api('/dashboard?demo=true');
-    await api('/health', undefined, 'GET');
+    await api('/health', undefined, 'get');
     await download('/config');
     expect(fetch).toHaveBeenCalledTimes(3);
     window.history.replaceState(null, '', '/');
