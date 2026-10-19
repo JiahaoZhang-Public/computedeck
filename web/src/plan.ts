@@ -385,10 +385,11 @@ export function gpuModels(nodes: ComputeNode[]) {
   ].sort();
 }
 
-/** Cloud instances you already pay for that are almost idle. */
+/** Cloud instances you already pay for that are almost idle; not machines added by hand. */
 export function idleInstances(instances: Instance[], threshold = 10) {
   return instances.filter(
     (item) =>
+      !item.manual &&
       ['running', 'desired_running'].includes(item.state) &&
       item.gpu_utilization != null &&
       item.gpu_utilization < threshold &&

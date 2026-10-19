@@ -2,7 +2,7 @@ import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { Instance, Job, SSHConfig } from '../types';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
-import { jobGpuResources, money, relativeTime, runningPrice } from '../domain';
+import { instanceAllocation, jobGpuResources, money, relativeTime, runningPrice } from '../domain';
 import { directSSHCommand } from '../connections';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
@@ -163,6 +163,8 @@ export function InstanceDetail({
 }) {
   const { demo, remote, busy } = ctx;
   const direct = remote || !!item.existing_alias;
+  // GPUs with compute processes, as the last SSH check counted them.
+  const inUse = instanceAllocation(item);
   async function copyCommand() {
     if (direct) {
       const command = directSSHCommand(item);
@@ -249,8 +251,25 @@ export function InstanceDetail({
           <dt>{t('instance.sshState')}</dt>
           <dd>
             <Status state={item.ssh_status} />
+            {item.last_probe_attempt && (
+              <span className="muted">
+                {' · '}
+                {t('instance.checked', { time: relativeTime(item.last_probe_attempt) })}
+              </span>
+            )}
           </dd>
         </div>
+        {(item.manual || item.metrics_scope === 'host_visible') && (
+          <div>
+            <dt>{t('instance.gpusBusy')}</dt>
+            <dd>
+              {inUse ?? '—'}
+              {inUse == null && item.probe_warnings?.length ? (
+                <span className="muted"> · {formatMessage(item.probe_warnings[0])}</span>
+              ) : null}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>{item.existing_alias ? t('instance.existingAlias') : t('instance.hostPort')}</dt>
           <dd className="mono">

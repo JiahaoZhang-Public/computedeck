@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
+import { CloudPage } from './pages/Cloud';
+import { InstanceDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
-import type { Dashboard, Job, Source } from './types';
+import type { Dashboard, Instance, Job, Source } from './types';
 
 const now = new Date().toISOString();
 const hourAgo = new Date(Date.now() - 3600_000).toISOString();
@@ -188,4 +190,69 @@ it('shows a fully unavailable cluster instead of an idle load bar', () => {
   const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
   expect(html).toContain('70/70 nodes unavailable');
   expect(html).toContain('Unavailable');
+});
+
+describe('the last SSH check of a machine', () => {
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+  const machine: Instance = {
+    id: 'manual:lab-box1',
+    source_id: 'manual',
+    platform: 'Lab workstation',
+    name: 'dev-box',
+    state: 'running',
+    gpu_count: 2,
+    gpu_allocated: 1,
+    gpu_type: 'RTX 4090',
+    gpu_utilization: 40,
+    cpu_utilization: 10,
+    memory_utilization: 20,
+    host: '192.0.2.20',
+    port: 22,
+    username: 'alice',
+    ssh_alias: 'cd-lab-workstation-box1',
+    identity_file: null,
+    hourly_cost: null,
+    currency: 'USD',
+    observed_at: twoMinutesAgo,
+    ssh_status: 'reachable',
+    last_probe_attempt: twoMinutesAgo,
+    metrics_scope: 'host_visible',
+    manual: true,
+  };
+  const drawer = (item: Instance) =>
+    renderToStaticMarkup(
+      <InstanceDetail
+        item={item}
+        ctx={ctx(dash({ instances: [item] }))}
+        onProbe={async () => {}}
+        onEdit={() => {}}
+        onDelete={async () => {}}
+      />,
+    );
+
+  it('shows when it was checked and how many GPUs had processes', () => {
+    const html = drawer(machine);
+    expect(html).toContain('Reachable');
+    expect(html).toContain('checked 2 min ago');
+    expect(html).toMatch(/GPUs with processes<\/dt><dd>1</);
+    const page = renderToStaticMarkup(
+      <CloudPage ctx={ctx(dash({ sources: [], instances: [machine] }))} />,
+    );
+    expect(page).toContain('checked 2 min ago');
+  });
+
+  it('says why the GPUs in use are unknown instead of showing 0', () => {
+    const html = drawer({
+      ...machine,
+      gpu_allocated: null,
+      probe_warnings: [{ code: 'gpu_processes_unavailable', detail: 'rocm-smi' }],
+    });
+    expect(html).toMatch(/GPUs with processes<\/dt><dd>—/);
+    expect(html).toContain('GPU processes unavailable: rocm-smi');
+  });
+
+  it('leaves the busy count out for a provider instance, which holds what it rents', () => {
+    const html = drawer({ ...machine, manual: false, metrics_scope: undefined });
+    expect(html).not.toContain('GPUs with processes');
+  });
 });

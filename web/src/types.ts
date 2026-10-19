@@ -143,6 +143,10 @@ export interface Instance {
   gpu_observed_count?: number | null;
   metrics_scope?: string;
   ssh_error?: Message | string | null;
+  /** When the last SSH check started; a provider listing keeps it while the endpoint holds. */
+  last_probe_attempt?: string | null;
+  /** Why a reading of the last check is unknown, e.g. `gpu_processes_unavailable`. */
+  probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
   id: string;

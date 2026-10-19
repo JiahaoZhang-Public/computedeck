@@ -92,6 +92,7 @@ const instance = (extra: Partial<Instance>): Instance => ({
   currency: 'USD',
   observed_at: new Date().toISOString(),
   ssh_status: 'reachable',
+  last_probe_attempt: new Date().toISOString(),
   ...extra,
 });
 describe('allocation accounting', () => {
@@ -219,10 +220,14 @@ describe('allocation accounting', () => {
     expect(summarize(data).allocated).toBeNull();
   });
   it('does not include expired cloud measurements in utilization', () => {
+    const hourAgo = new Date(Date.now() - 3600000).toISOString();
     const data = dashboard([]);
-    data.instances = [instance({ observed_at: new Date(Date.now() - 3600000).toISOString() })];
+    data.instances = [instance({ observed_at: hourAgo, last_probe_attempt: hourAgo })];
     expect(summarize(data).covered).toBe(0);
     expect(summarize(data).utilization).toBeNull();
+    // A fresh listing is not a fresh SSH reading of the instance it lists.
+    data.instances = [instance({ last_probe_attempt: hourAgo })];
+    expect(summarize(data).covered).toBe(0);
   });
   it('keeps a fresh subtotal while retaining stale source rows and an unknown complete total', () => {
     const data = dashboard([job({}), job({ id: '43', source_id: 'stale', gpu_count: 8 })]);
@@ -253,15 +258,51 @@ describe('allocation accounting', () => {
     expect(summarize(data).knownAllocated).toBe(4);
     expect(summarize(data).allocated).toBe(4);
   });
-  it('does not treat a fresh SSH sample as proof of a manual instance lifecycle', () => {
+  it('counts a running machine added by hand only by the GPUs a check found busy', () => {
     const data = dashboard([job({})]);
     data.sources.push(source({ id: 'cloud', kind: 'cloud', driver: 'runpod', enabled: false }));
-    data.instances = [instance({ state: 'running', manual: true })];
+    // Without a process count the GPUs typed in are not GPUs in use.
+    data.instances = [instance({ state: 'running', manual: true, source_id: 'manual' })];
     const result = summarize(data);
     expect(result.knownAllocated).toBe(4);
     expect(result.unknownAllocationSources).toBe(1);
     expect(result.allocated).toBeNull();
     expect(result.covered).toBe(2);
+  });
+  it('gives an exact total with a recently checked machine added by hand', () => {
+    const data = dashboard([job({})]);
+    // The service reports it running while a check within 20 minutes reached it.
+    const machine = instance({
+      id: 'manual:lab-box1',
+      source_id: 'manual',
+      manual: true,
+      state: 'running',
+      gpu_allocated: 1,
+      metrics_scope: 'host_visible',
+    });
+    data.instances = [machine];
+    expect(summarize(data)).toMatchObject({
+      allocated: 5,
+      knownAllocated: 5,
+      unknownAllocationSources: 0,
+    });
+    // An old or failed check: unmeasured again, never 0.
+    data.instances = [{ ...machine, state: 'unknown' }];
+    expect(summarize(data)).toMatchObject({
+      allocated: null,
+      knownAllocated: 4,
+      unknownAllocationSources: 1,
+    });
+  });
+  it('keeps the listed GPUs of a provider instance after a check found no processes', () => {
+    const data = dashboard([]);
+    data.sources = [source({ id: 'cloud', kind: 'cloud', capabilities: ['instances'] })];
+    data.instances = [instance({ state: 'running', gpu_allocated: 0, gpu_utilization: 0 })];
+    expect(summarize(data)).toMatchObject({
+      allocated: 4,
+      knownAllocated: 4,
+      unknownAllocationSources: 0,
+    });
   });
   it('keeps missing instances unknown instead of turning them into deletions', () => {
     const data = dashboard([job({})]);

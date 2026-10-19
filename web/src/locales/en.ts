@@ -281,6 +281,8 @@ const en = {
   'instance.deleteConfirm':
     'Remove {name}? This only removes it from ComputeDeck; the machine is not touched.',
   'instance.sshState': 'SSH',
+  'instance.checked': 'checked {time}',
+  'instance.gpusBusy': 'GPUs with processes',
   'instance.hostPort': 'Host / port',
   'instance.existingAlias': 'SSH alias in your config',
   'instance.username': 'Username',
@@ -289,7 +291,7 @@ const en = {
   'instance.defaultKey': 'Default key',
   'instance.id': 'Instance ID',
   'instance.note.local':
-    '“Check connection” reads GPU, CPU and memory over SSH and changes nothing on the machine.',
+    '“Check connection” reads GPUs, their processes, CPU and memory over SSH and changes nothing on the machine.',
   'instance.note.remote':
     '“Check from {server}” runs on the server; copied commands run on this computer.',
   'instance.note.scope': 'CPU and memory are host-wide, not container quotas.',

@@ -140,10 +140,24 @@ export function historyPartial(point: HistoryPoint) {
     (point.allocated_gpus == null || (point.unknown_allocation_sources ?? 0) > 0)
   );
 }
+/**
+ * GPUs an instance holds: those with compute processes on a machine read over SSH, the
+ * allocation a provider lists otherwise. A machine added by hand counts only what an SSH
+ * check measured, never the GPUs typed in.
+ */
 export function instanceAllocation(instance: Instance): number | null {
-  return instance.metrics_scope === 'host_visible'
+  return instance.manual || instance.metrics_scope === 'host_visible'
     ? (instance.gpu_allocated ?? null)
     : instance.gpu_count;
+}
+/**
+ * When SSH last measured an instance: the reading of a machine read over SSH, or the last
+ * check of an instance a provider lists, whose listing time measures nothing on it.
+ */
+export function sshSampledAt(instance: Instance): string | null {
+  return instance.manual || instance.metrics_scope === 'host_visible'
+    ? instance.observed_at
+    : (instance.last_probe_attempt ?? null);
 }
 
 export function summarize(data: Dashboard) {
@@ -187,11 +201,14 @@ export function summarize(data: Dashboard) {
   };
   const freshRunning = running.filter((job) => sourceFresh(job.source_id, 'jobs'));
   const freshPending = pending.filter((job) => sourceFresh(job.source_id, 'jobs'));
-  const freshInstances = activeInstances.filter((item) => sourceFresh(item.source_id, 'instances'));
+  // The service reports a machine added by hand as running only while a recent check
+  // reached it; it has no source to be fresh.
+  const instanceFresh = (item: Instance) =>
+    !!item.manual || sourceFresh(item.source_id, 'instances');
+  const freshInstances = activeInstances.filter(instanceFresh);
   for (const job of running)
     if (!sourceFresh(job.source_id, 'jobs')) unknownSources.add(job.source_id);
-  for (const item of activeInstances)
-    if (!sourceFresh(item.source_id, 'instances')) unknownSources.add(item.source_id);
+  for (const item of activeInstances) if (!instanceFresh(item)) unknownSources.add(item.source_id);
   for (const item of allocations) if (item.gpu_count == null) unknownSources.add(item.source_id);
   for (const item of instances)
     if (!['running', 'stopped', 'terminated', 'deleted'].includes(item.state.toLowerCase()))
@@ -208,13 +225,15 @@ export function summarize(data: Dashboard) {
       : null;
   const sampled = [
     ...freshRunning,
-    ...instances.filter(
-      (item) =>
+    ...instances.filter((item) => {
+      const sampledAt = sshSampledAt(item);
+      return (
         data.mode === 'demo' ||
         (item.ssh_status === 'reachable' &&
-          item.observed_at &&
-          Date.now() - new Date(item.observed_at).getTime() < 720000),
-    ),
+          !!sampledAt &&
+          Date.now() - new Date(sampledAt).getTime() < 720000)
+      );
+    }),
   ];
   const observedCount = (item: (typeof sampled)[number]) =>
     'gpu_observed_count' in item ? (item.gpu_observed_count ?? 0) : (item.gpu_count ?? 0);
