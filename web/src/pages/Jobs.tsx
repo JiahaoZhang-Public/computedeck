@@ -165,6 +165,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
                 groups={groups}
                 missing={missing}
                 staleRows={shown.some((job) => stale.has(job.source_id))}
+                staleCount={shown.filter((job) => stale.has(job.source_id)).length}
               />
             )}
             <p className="panel-note">{t('jobs.note')}</p>

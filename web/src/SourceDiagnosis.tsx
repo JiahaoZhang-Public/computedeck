@@ -1,3 +1,4 @@
+import { collectionOverdue, nextAttemptText } from './health';
 import { useState } from 'react';
 import { ConnectionChecks } from './ConnectionChecks';
 import { dateTime } from './domain';
@@ -10,12 +11,15 @@ export function SourceDiagnosis({
   source,
   demo,
   drivers,
+  collecting = false,
 }: {
   source: Source;
   demo: boolean;
   drivers: DriverInfo[];
+  collecting?: boolean;
 }) {
   const [check, setCheck] = useState(0);
+  const active = collecting || source.status === 'syncing';
   return (
     <div className="source-diagnosis">
       <header className="modal-header">
@@ -28,8 +32,15 @@ export function SourceDiagnosis({
             ? t('attention.lastSuccess', { time: dateTime(source.last_success) })
             : t('health.notCollected')}
         </p>
-        <p>{t('health.nextAttempt', { time: dateTime(source.next_due_at) })}</p>
-        <p>{formatMessage(source.error) || t('attention.noError')}</p>
+        <p>{nextAttemptText(source.next_due_at, active)}</p>
+        <p>
+          {formatMessage(source.error) ||
+            t(
+              collectionOverdue(source.next_due_at, active)
+                ? 'health.overdueReason'
+                : 'attention.noError',
+            )}
+        </p>
         {source.warnings?.map((warning, index) => (
           <p key={index}>{formatMessage(warning)}</p>
         ))}

@@ -161,7 +161,7 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
     expect(state.faults[0].page).toBe('sources');
   });
 
-  it('takes the worst service state and keeps demo neutral', () => {
+  it('takes the worst service state and isolates example sources from live service faults', () => {
     setLocale(locale);
     const data = healthyDashboard();
     const broken = {
@@ -186,8 +186,9 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
       t('health.unreachable'),
     );
     const demo = computeHealth(data, broken, null, false, true);
-    expect(demo.level).toBe('unknown');
-    expect(demo.label).toBe(t('health.example'));
+    expect(demo.level).toBe('ok');
+    expect(demo.label).toBe(t('health.fresh', { count: data.sources.length }));
+    expect(computeHealth(serverDemo(), broken, null, false, true).level).toBe('bad');
     expect(demo.faults).toEqual([]);
   });
 });
@@ -211,3 +212,93 @@ it('group age uses the oldest enabled source, with probes only for groups withou
     .sort();
   expect(groupSummary(data, manualGroup).updated).toBe(times[0]);
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'uses translated subjects and overdue wording in %s',
+  async (locale) => {
+    setLocale(locale);
+    const { attentionText, nextAttemptText, inventoryLabel } = await import('./health');
+    const { sourceState } = await import('./labels');
+    const data = serverDemo();
+    const failed = data.sources.find((source) => source.error && source.stale)!;
+    expect(sourceState(failed)).toBe('error');
+    const item = data.attention![0];
+    expect(
+      attentionText(
+        {
+          ...item,
+          kind: 'service_loop_failed',
+          subject: { kind: 'service', id: 'collector:schedule', name: 'collector:schedule' },
+          message: { code: 'attention_service_loop_failed' },
+        },
+        [],
+      ),
+    ).toContain(t('health.collector'));
+    expect(
+      attentionText(
+        {
+          ...item,
+          kind: 'unreadable_rows',
+          subject: { kind: 'service', id: 'jobs', name: 'jobs' },
+          message: { code: 'attention_unreadable_rows', count: 2 },
+        },
+        [],
+      ),
+    ).toContain(t('health.inventory.jobs'));
+    const tool = {
+      id: 'example',
+      name: { en: 'Example tool', 'zh-CN': '示例工具' },
+    };
+    const plugin = {
+      ...item,
+      kind: 'plugin_error',
+      subject: { kind: 'plugin' as const, id: tool.id, name: tool.id },
+      message: { code: 'attention_plugin_error' },
+    };
+    expect(attentionText(plugin, [tool])).toContain(locale === 'en' ? 'Example tool' : '示例工具');
+    expect(inventoryLabel('jobs')).toBe(t('health.inventory.jobs'));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
+    const { dateTime } = await import('./domain');
+    expect(nextAttemptText('2026-01-01T11:00:00Z')).toBe(
+      t('health.overdue', { time: dateTime('2026-01-01T11:00:00Z') }),
+    );
+    expect(nextAttemptText('2026-01-01T13:00:00Z')).toBe(
+      t('health.nextAttempt', { time: dateTime('2026-01-01T13:00:00Z') }),
+    );
+  },
+);
+
+it.each([1, 2])('matches attention severity after %s collection failures', (failures) => {
+  const data = healthyDashboard();
+  data.sources[0] = {
+    ...data.sources[0],
+    status: 'error',
+    error: { code: 'ssh_timeout' },
+    stale: false,
+    failures,
+  };
+  expect(computeHealth(data, health, null, false, false).level).toBe(
+    failures === 1 ? 'warn' : 'bad',
+  );
+  data.sources[0].stale = true;
+  expect(computeHealth(data, health, null, false, false).level).toBe('bad');
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'allows overdue grace and active collection in %s',
+  async (locale) => {
+    setLocale(locale);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
+    const { nextAttemptText } = await import('./health');
+    const { dateTime } = await import('./domain');
+    for (const seconds of [-60, 0, 15, 120, 121, 600]) {
+      const due = new Date(Date.now() - seconds * 1000).toISOString();
+      expect(nextAttemptText(due)).toBe(
+        t(seconds > 120 ? 'health.overdue' : 'health.nextAttempt', { time: dateTime(due) }),
+      );
+      expect(nextAttemptText(due, true)).toBe(t('health.nextAttempt', { time: dateTime(due) }));
+    }
+  },
+);

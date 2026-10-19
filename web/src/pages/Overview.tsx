@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import type { Summary, Unmeasured } from '../types';
+import type { Summary } from '../types';
+import { UnmeasuredLinks } from './UnmeasuredLinks';
+import { attentionText, nextAttemptText } from '../health';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
 import { formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
@@ -32,11 +33,11 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
     !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
   const issues = ctx.attention.length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
-  const jobsKnown = summary.known_requested != null || summary.known_running > 0;
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
   ).length;
   const hasClusters = clusterLogins > 0;
+  const jobsKnown = summary.jobs.missing_source_ids.length < clusterLogins;
   const asides = demo ? [] : ctx.webPlugins.filter((plugin) => plugin.overview);
   // Before anything is connected the dashboard has nothing to say; show how to start.
   if (setupNeeded) return <SetupGuide ctx={ctx} />;
@@ -92,7 +93,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           hint={
             summary.running != null ? (
               t('overview.running.complete')
-            ) : jobsKnown ? (
+            ) : hasClusters ? (
               <UnmeasuredLinks
                 items={summary.queued_unmeasured.filter((item) =>
                   summary.jobs.missing_source_ids.includes(item.subject.id),
@@ -114,7 +115,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
                 href="#attention"
                 onClick={(event) => {
                   event.preventDefault();
-                  document.getElementById('attention')?.scrollIntoView();
+                  document.getElementById('attention')?.focus();
                 }}
               >
                 {t('overview.issues.some')}
@@ -127,7 +128,12 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           }
         />
       </div>
-      <Panel title={t('overview.attention')} count={ctx.attention.length} id="attention">
+      <Panel
+        title={t('overview.attention')}
+        count={ctx.attention.length}
+        id="attention"
+        tabIndex={-1}
+      >
         {ctx.attention.length ? (
           <ul className="attention">
             {ctx.attention.map((item) => (
@@ -135,7 +141,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
                 <button onClick={() => ctx.openAttention(item)}>
                   <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
                   <span>
-                    <strong>{formatMessage(item.message)}</strong>
+                    <strong>{attentionText(item, ctx.tools)}</strong>
                     {item.details.map((detail, index) => (
                       <small key={index}>{formatMessage(detail)}</small>
                     ))}
@@ -146,13 +152,26 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
                             age: relativeTime(item.since),
                           })
                         : item.observed_at
-                          ? t('attention.lastSeen', {
-                              time: dateTime(item.observed_at),
-                              age: relativeTime(item.observed_at),
-                            })
+                          ? t(
+                              item.kind === 'instance_ssh_failed'
+                                ? 'attention.checked'
+                                : 'attention.lastSeen',
+                              {
+                                time: dateTime(item.observed_at),
+                                age: relativeTime(item.observed_at),
+                              },
+                            )
                           : t('attention.sinceUnknown')}
                       {item.next_attempt &&
-                        ` · ${t('health.nextAttempt', { time: dateTime(item.next_attempt) })}`}
+                        ` · ${nextAttemptText(
+                          item.next_attempt,
+                          item.subject.kind === 'source' &&
+                            (data.collecting?.includes(item.subject.id) ||
+                              data.sources.some(
+                                (source) =>
+                                  source.id === item.subject.id && source.status === 'syncing',
+                              )),
+                        )}`}
                     </small>
                   </span>
                   <ChevronRight size={14} />
@@ -198,6 +217,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
             groups={ctx.groups}
             missing={missingJobs}
             staleRows={allJobs.slice(0, 8).some((job) => stale.has(job.source_id))}
+            staleCount={allJobs.slice(0, 8).filter((job) => stale.has(job.source_id)).length}
           />
         )}
       </Panel>
@@ -292,7 +312,7 @@ function SetupGuide({ ctx }: { ctx: Ctx }) {
 }
 
 /** GPUs in use for one row: "≥ n" when part of the use is unknown, never a false 0. */
-function allocatedCell(summary: Summary) {
+function allocatedCell(summary: Summary, ctx: Ctx) {
   if (summary.allocated != null) return summary.allocated;
   return (
     <span
@@ -300,6 +320,7 @@ function allocatedCell(summary: Summary) {
       title={t('overview.allocated.unknownCell')}
     >
       {summary.known_allocated ? `≥ ${summary.known_allocated}` : '—'}
+      <UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />
     </span>
   );
 }
@@ -345,7 +366,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                 tabIndex={0}
                 onClick={open}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') open();
+                  if (event.key === 'Enter' && event.target === event.currentTarget) open();
                 }}
               >
                 <td>
@@ -371,7 +392,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                           ),
                       ].join(' · ')}
                 </td>
-                <td className="num">{allocatedCell(row.scoped)}</td>
+                <td className="num">{allocatedCell(row.scoped, ctx)}</td>
                 <td>
                   {cluster ? (
                     row.nodes.nodes === 0 ? (
@@ -408,36 +429,5 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function UnmeasuredLinks({ items, ctx }: { items: Unmeasured[]; ctx: Ctx }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <>
-      {(expanded ? items : items.slice(0, 2)).map(({ subject, reason }) => (
-        <span className="sub" key={`${subject.kind}:${subject.id}`}>
-          <button
-            className="link"
-            onClick={() => {
-              if (subject.kind === 'instance') {
-                const instance = ctx.data.instances.find((item) => item.id === subject.id);
-                if (instance) ctx.openInstance(instance);
-              } else {
-                const source = ctx.data.sources.find((item) => item.id === subject.id);
-                if (source) ctx.diagnose(source);
-              }
-            }}
-          >
-            {subject.name} — {formatMessage(reason)} ▸
-          </button>
-        </span>
-      ))}
-      {!expanded && items.length > 2 && (
-        <button className="link" onClick={() => setExpanded(true)}>
-          {t('summary.more', { count: items.length - 2 })}
-        </button>
-      )}
-    </>
   );
 }

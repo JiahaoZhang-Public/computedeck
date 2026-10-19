@@ -53,23 +53,24 @@ export function instanceCount(sources: Source[], count: number) {
 
 /** Allocation and usable capacity share wording and severity on cards and overview rows. */
 export function capacityText(nodes: NodeSummary, state: string) {
-  const outage = nodes.nodes > 0 && nodes.usable === 0 && (nodes.unavailable ?? 0) > 0;
+  const outage = nodes.nodes > 0 && (nodes.abnormal === nodes.nodes || state === 'unavailable');
   const tone = state === 'unavailable' ? 'red-text' : state === 'degraded' ? 'amber-text' : '';
   return {
     outage,
     tone,
     text: outage
-      ? t('summary.capacity', { usable: 0, unavailable: nodes.unavailable })
+      ? t('summary.capacity', { usable: 0, unavailable: nodes.unavailable ?? '—' })
       : t('summary.allocation', {
           allocated: nodes.allocated ?? '—',
           usable: partialCount(nodes.usable, nodes.known_usable),
         }),
     detail:
-      (nodes.unavailable ?? 0) > 0 || (nodes.usable == null && nodes.known_usable != null)
+      (nodes.unknown ? `${t('summary.unknownNodes', { count: nodes.unknown })} · ` : '') +
+      ((nodes.unavailable ?? 0) > 0 || (nodes.usable == null && nodes.known_usable != null)
         ? t('summary.capacityDetail', {
             unavailable: nodes.unavailable ?? '—',
             total: nodes.capacity ?? '—',
           })
-        : t('summary.capacityTotal', { total: nodes.capacity ?? '—' }),
+        : t('summary.capacityTotal', { total: nodes.capacity ?? '—' })),
   };
 }

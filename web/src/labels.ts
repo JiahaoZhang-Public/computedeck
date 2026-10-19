@@ -76,6 +76,7 @@ export function sourceState(source: Source) {
   // A disabled login is never "stale", whatever an older version left in its status.
   if (!source.enabled)
     return source.status === 'unconfigured' && !source.last_success ? 'unconfigured' : 'disabled';
+  if (source.error || source.status === 'error') return 'error';
   if (source.stale) return 'stale';
   if (source.status === 'ready' && !source.last_success) return 'configured';
   if (

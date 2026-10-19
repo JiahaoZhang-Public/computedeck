@@ -1,9 +1,10 @@
+import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { Source } from '../types';
 import { findGroup } from '../groups';
 import { formatMessage, t } from '../i18n';
-import { qosGpuLimit, relativeTime, uniqueNodes } from '../domain';
+import { qosGpuLimit, relativeTime, uniqueNodes, sourceHasData } from '../domain';
 import { partialCount } from '../domain';
 import { nodeTone, sourceState } from '../labels';
 import { Chips, Empty, GroupMark, Meter, Panel, Status } from '../ui';
@@ -21,9 +22,15 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
   const accounts = data.sources.filter(
     (source) => source.kind === 'cluster' && keys.has(source.cluster_id),
   );
-  const nodes = uniqueNodes(data.nodes.filter((node) => keys.has(node.cluster_id))).filter((node) =>
-    matches(query, node.name, node.partitions.join(' '), node.state),
-  );
+  const nodes = uniqueNodes(
+    data.nodes.filter(
+      (node) =>
+        keys.has(node.cluster_id) &&
+        data.sources.some(
+          (source) => source.id === node.source_id && sourceHasData(source, 'nodes'),
+        ),
+    ),
+  ).filter((node) => matches(query, node.name, node.partitions.join(' '), node.state));
   const idle = nodes.filter((node) => nodeTone(node) === 'green');
   const abnormal = nodes.filter((node) => nodeTone(node) === 'red');
   const shownNodes = nodeFilter === 'idle' ? idle : nodeFilter === 'abnormal' ? abnormal : nodes;
@@ -95,6 +102,20 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                   <dd>
                     {partialCount(row.scoped.allocated, row.scoped.known_allocated)} /{' '}
                     {partialCount(row.scoped.requested, row.scoped.known_requested)}
+                    <UnmeasuredLinks
+                      items={[
+                        ...row.scoped.unmeasured,
+                        ...row.scoped.queued_unmeasured.filter(
+                          (item) =>
+                            !row.scoped.unmeasured.some(
+                              (other) =>
+                                other.subject.id === item.subject.id &&
+                                other.reason.code === item.reason.code,
+                            ),
+                        ),
+                      ]}
+                      ctx={ctx}
+                    />
                   </dd>
                 </div>
                 <div>
@@ -236,6 +257,20 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
         <td className="num">
           {partialCount(summary.allocated, summary.known_allocated)} /{' '}
           {partialCount(summary.requested, summary.known_requested)}
+          <UnmeasuredLinks
+            items={[
+              ...summary.unmeasured,
+              ...summary.queued_unmeasured.filter(
+                (item) =>
+                  !summary.unmeasured.some(
+                    (other) =>
+                      other.subject.id === item.subject.id &&
+                      other.reason.code === item.reason.code,
+                  ),
+              ),
+            ]}
+            ctx={ctx}
+          />
         </td>
         <td>
           {source.qos.length ? (

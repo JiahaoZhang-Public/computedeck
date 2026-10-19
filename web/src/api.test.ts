@@ -19,12 +19,17 @@ function stubFetch(response: Response) {
 }
 
 describe('api', () => {
-  it.each(['get', 'post', 'pAtCh'])('normalises %s for fetch and write headers', async (method) => {
-    const calls = stubFetch(new Response('{}'));
-    await api('/plugins/example/action', undefined, method);
-    expect(calls[0].method).toBe(method.toUpperCase());
-    expect(calls[0].headers).toEqual(method === 'get' ? {} : { 'X-ComputeDeck': '1' });
-  });
+  it.each(['get', 'post', 'pAtCh', 'DELETE'])(
+    'normalises %s for fetch and write headers',
+    async (method) => {
+      const calls = stubFetch(new Response('{}'));
+      await api('/plugins/example/action', undefined, method);
+      expect(calls[0].method).toBe(method.toUpperCase());
+      expect(calls[0].headers).toEqual(
+        method === 'get' ? {} : { 'X-ComputeDeck': '1', 'Content-Type': 'application/json' },
+      );
+    },
+  );
   it('accepts empty replies', async () => {
     stubFetch(new Response(null, { status: 204 }));
     await expect(api('/session', { token: 'x' })).resolves.toBeUndefined();

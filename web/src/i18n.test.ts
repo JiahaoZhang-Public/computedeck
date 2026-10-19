@@ -67,3 +67,19 @@ it.each(['en', 'zh-CN'] as const)('renders unreadable-row counts in %s', (locale
       expect(text).toContain(`${count} unreadable ${count === 1 ? 'row;' : 'rows;'}`);
   }
 });
+
+it.each(['en', 'zh-CN'] as const)('uses singular count hints in %s', (locale) => {
+  setLocale(locale);
+  expect(t('jobs.lastKnownCount', { count: 1 })).toBe(
+    locale === 'en' ? '+1 last-known job not counted' : '+1 个上次已知作业未计入',
+  );
+  expect(t('summary.unknownNodes', { count: 1 })).toBe(
+    locale === 'en' ? '1 node has unknown state or measurements' : '1 个节点的状态或测量数据未知',
+  );
+  if (locale === 'en') {
+    expect(t('jobs.lastKnownCount', { count: 2 })).toBe('+2 last-known jobs not counted');
+    expect(t('summary.unknownNodes', { count: 2 })).toBe(
+      '2 nodes have unknown state or measurements',
+    );
+  }
+});

@@ -1,8 +1,8 @@
 import { groupsOf, sourceLabel } from './groups';
-import { relativeTime } from './domain';
-import { formatMessage, t } from './i18n';
+import { dateTime, relativeTime } from './domain';
+import { formatMessage, hasKey, localized, t } from './i18n';
 import { sourceState } from './labels';
-import type { CollectionNode, Dashboard, Health } from './types';
+import type { Attention, CollectionNode, Dashboard, Health, Tool } from './types';
 
 export function computeHealth(
   data: Dashboard | null,
@@ -49,7 +49,7 @@ export function computeHealth(
         title: t('health.unreadable', {
           count: unreadable.reduce((sum, [, count]) => sum + count, 0),
         }),
-        detail: `${unreadable.map(([table, count]) => `${table}: ${count}`).join(', ')}. ${t('health.serviceLog')}`,
+        detail: `${unreadable.map(([table, count]) => `${inventoryLabel(table)}: ${count}`).join(', ')}. ${t('health.serviceLog')}`,
       });
     for (const node of nodes.filter((node) => node.status === 'error'))
       faults.push({
@@ -67,12 +67,11 @@ export function computeHealth(
   else if (error) {
     level = 'bad';
     label = t('health.unreachable');
-  } else if (demo) label = t('health.example');
-  else if (faults.length) {
+  } else if (faults.length) {
     level = 'bad';
     label = faults[0].title;
   } else if (failing.length) {
-    level = 'bad';
+    level = failing.some((source) => (source.failures ?? 0) >= 2 || source.stale) ? 'bad' : 'warn';
     label =
       failing.length === 1
         ? t('health.sourceFailing', { name: sourceLabel(groupsOf(data!), failing[0]) })
@@ -85,7 +84,7 @@ export function computeHealth(
         : t('health.stale', { count: stale.length });
   } else if (data && !enabled.length) {
     label = t('health.noSourcesConnected');
-  } else if (health?.polling === false) {
+  } else if (!demo && health?.polling === false) {
     level = 'warn';
     label = t('health.pollingOff');
   } else if (enabled.some((source) => !source.last_success)) {
@@ -94,7 +93,7 @@ export function computeHealth(
   } else if (data?.behind?.length) {
     level = 'warn';
     label = t('health.behind', { count: data.behind.length });
-  } else if (data?.as_of && enabled.length && health && data.behind) {
+  } else if (data?.as_of && enabled.length && (demo || health) && data.behind) {
     level = 'ok';
     label = t('health.fresh', { count: enabled.length });
   }
@@ -114,4 +113,35 @@ export function computeHealth(
           collecting: data?.collecting?.includes(source.id) || source.status === 'syncing',
         })),
   };
+}
+
+/** Allow the scheduler's tick and normal collection time before calling an attempt overdue. */
+export function collectionOverdue(at: string | null | undefined, collecting = false) {
+  return !collecting && !!at && Date.parse(at) < Date.now() - 2 * 60_000;
+}
+
+export function nextAttemptText(at: string | null | undefined, collecting = false) {
+  return t(collectionOverdue(at, collecting) ? 'health.overdue' : 'health.nextAttempt', {
+    time: dateTime(at),
+  });
+}
+
+export function inventoryLabel(table: string) {
+  const key = `health.inventory.${table}`;
+  return hasKey(key) ? t(key) : t('health.inventory.other');
+}
+
+export function attentionText(item: Attention, tools: Pick<Tool, 'id' | 'name'>[]) {
+  let name = item.subject.name;
+  if (item.kind === 'unreadable_rows') name = inventoryLabel(item.subject.id);
+  else if (item.subject.kind === 'plugin' || item.subject.kind === 'service') {
+    const id = item.subject.id;
+    if (id === 'collector' || id.startsWith('collector:')) {
+      if (!id.startsWith('collector:commit:')) name = t('health.collector');
+    } else {
+      const tool = tools.find((tool) => tool.id === id.split(':')[0]);
+      name = tool ? localized(tool.name) : t('health.plugin');
+    }
+  }
+  return formatMessage({ ...item.message, name });
 }

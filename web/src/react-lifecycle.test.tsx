@@ -141,6 +141,7 @@ describe('dashboard lifecycle', () => {
         button.textContent === t('summary.more', { count: data.summary.unmeasured.length - 2 }),
     );
     expect(more).toBeDefined();
+    more!.focus();
     await act(async () => more!.click());
     const missing = [...container.querySelectorAll<HTMLButtonElement>('.stat-hint button')].find(
       (button) => button.textContent?.includes('build-box'),
@@ -185,12 +186,16 @@ describe('dashboard lifecycle', () => {
         const more = [...hint.querySelectorAll('button')].find(
           (button) => button.textContent === t('summary.more', { count: 2 }),
         );
-        expect(more?.hasAttribute('aria-expanded')).toBe(false);
+        expect(more?.getAttribute('aria-expanded')).toBe('false');
         expect(more?.textContent).toBe(t('summary.more', { count: 2 }));
+        more!.focus();
         await act(async () => more!.click());
         expect(hint.textContent).toContain('third-login');
         expect(hint.textContent).toContain('fourth-login');
-        expect(hint.contains(more!)).toBe(false);
+        expect(hint.contains(more!)).toBe(true);
+        expect(more?.getAttribute('aria-expanded')).toBe('true');
+        expect(document.activeElement).toBe(more);
+        expect(more?.textContent).toBe(t('summary.fewer'));
       }
     },
   );
@@ -765,7 +770,7 @@ it.each(['en', 'zh-CN'] as const)(
     const panel = container.querySelector<HTMLElement>('#attention')!;
     panel.scrollIntoView = vi.fn();
     await click('.stat-hint a[href="#attention"]');
-    expect(panel.scrollIntoView).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(panel);
     expect(window.location.hash).not.toBe('#attention');
     expect(container.querySelectorAll('#attention li')).toHaveLength(1);
     expect(container.querySelector('#attention')?.textContent).toContain('second detail');
@@ -840,26 +845,23 @@ it.each(['en', 'zh-CN'] as const)('keeps example diagnosis read-only in %s', asy
   expect(request).not.toHaveBeenCalled();
 });
 
-it.each(['en', 'zh-CN'] as const)(
-  'labels repeated observations as Last seen in %s',
-  async (locale) => {
-    const data = serverDemo();
-    const item = data.attention!.find((entry) => entry.kind === 'instance_ssh_failed')!;
-    expect(item.since).toBeNull();
-    expect(item.observed_at).not.toBeNull();
-    request.mockImplementation(async (path) => {
-      if (path.startsWith('/dashboard')) return data;
-      if (path === '/settings') return { language: locale };
-      if (path === '/health') return null;
-      return [];
-    });
-    await render(<App />);
-    const params = { time: dateTime(item.observed_at), age: relativeTime(item.observed_at) };
-    const text = container.querySelector('#attention')?.textContent;
-    expect(text).toContain(t('attention.lastSeen', params));
-    expect(text).not.toContain(t('attention.since', params));
-  },
-);
+it.each(['en', 'zh-CN'] as const)('labels failed SSH checks as Checked in %s', async (locale) => {
+  const data = serverDemo();
+  const item = data.attention!.find((entry) => entry.kind === 'instance_ssh_failed')!;
+  expect(item.since).toBeNull();
+  expect(item.observed_at).not.toBeNull();
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path === '/settings') return { language: locale };
+    if (path === '/health') return null;
+    return [];
+  });
+  await render(<App />);
+  const params = { time: dateTime(item.observed_at), age: relativeTime(item.observed_at) };
+  const text = container.querySelector('#attention')?.textContent;
+  expect(text).toContain(t('attention.checked', params));
+  expect(text).not.toContain(t('attention.since', params));
+});
 
 it.each(['en', 'zh-CN'] as const)(
   'localizes diagnosis for a source never collected in %s',
@@ -1174,3 +1176,68 @@ describe('visible dashboard polling', () => {
     expect(request).toHaveBeenCalledWith('/plugins/chat/messages?channel=general&after=0');
   });
 });
+
+it('announces health without clock chatter and gives retry buttons source-specific names', async () => {
+  const data = serverDemo();
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path === '/health') return { status: 'ok', polling: true };
+    return [];
+  });
+  await render(<App />);
+  const live = container.querySelector('.health-status [role="status"]')!;
+  const before = live.textContent;
+  expect(before).toBe(computeHealth(data, null, null, false, false).label);
+  expect(live.closest('button')).toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(60000));
+  expect(live.textContent).toBe(before);
+  await click('.health-pill');
+  const retries = [...container.querySelectorAll<HTMLButtonElement>('.health-row .link')];
+  expect(retries.length).toBe(data.sources.length);
+  expect(new Set(retries.map((button) => button.getAttribute('aria-label'))).size).toBe(
+    retries.length,
+  );
+  for (const retry of retries)
+    expect(retry.getAttribute('aria-label')).toContain(t('common.retry'));
+});
+
+it('keeps real host identifiers out of example collection-machine text', async () => {
+  window.history.replaceState(null, '', '/?demo=true#/sources');
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return serverDemo();
+    if (path === '/health')
+      return { status: 'ok', server_host: 'private-host-fixture', polling: true };
+    return [];
+  });
+  await render(<App />);
+  expect(container.textContent).not.toContain('private-host-fixture');
+  expect(container.textContent).toContain(t('where.local'));
+});
+
+it.each(['queued', 'syncing'])(
+  'does not call an active %s source overdue in attention or diagnosis',
+  async (state) => {
+    const data = serverDemo();
+    const source = data.sources.find((source) => source.stale && !source.error)!;
+    source.next_due_at = new Date(now.getTime() - 10 * 60000).toISOString();
+    source.status = state === 'syncing' ? 'syncing' : 'ready';
+    data.collecting = state === 'queued' ? [source.id] : [];
+    data.attention = data.attention!.filter((item) => item.subject.id === source.id);
+    data.attention[0].next_attempt = source.next_due_at;
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    const next = t('health.nextAttempt', { time: dateTime(source.next_due_at) });
+    expect(container.querySelector('#attention')?.textContent).toContain(next);
+    expect(container.querySelector('#attention')?.textContent).not.toContain(
+      t('health.overdue', { time: dateTime(source.next_due_at) }),
+    );
+    await click('#attention button');
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain(next);
+    expect(dialog.textContent).not.toContain(t('health.overdueReason'));
+  },
+);

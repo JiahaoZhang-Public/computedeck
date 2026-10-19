@@ -139,15 +139,20 @@ export function JobsMissingNote({
   groups,
   missing,
   staleRows,
+  staleCount = 0,
 }: {
   groups: Group[];
   missing: Source[];
   staleRows: boolean;
+  staleCount?: number;
 }) {
   return (
     <p className="panel-note">
       {t('jobs.missing.text', { sources: sourceList(groups, missing) })}
       {staleRows && ` ${t('jobs.missing.stale')}`}
+      {staleCount > 0 && (
+        <span className="sub">{t('jobs.lastKnownCount', { count: staleCount })}</span>
+      )}
     </p>
   );
 }

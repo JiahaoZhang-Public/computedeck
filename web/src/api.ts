@@ -83,7 +83,7 @@ async function sendRequest(path: string, init: RequestInit): Promise<Response> {
     method,
     headers: {
       ...auth,
-      ...(method !== 'GET' ? { 'X-ComputeDeck': '1' } : {}),
+      ...(method !== 'GET' ? { 'X-ComputeDeck': '1', 'Content-Type': 'application/json' } : {}),
       ...init.headers,
     },
     credentials: 'omit',

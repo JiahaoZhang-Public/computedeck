@@ -184,7 +184,9 @@ export default function App() {
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
     [],
   );
-  const serverName = health?.server_name || health?.server_host || t('where.server');
+  const serverName = demo
+    ? t('where.local')
+    : health?.server_name || health?.server_host || t('where.server');
 
   const changeLocale = useCallback((next: Locale) => {
     setLocale(next);
@@ -659,7 +661,10 @@ export default function App() {
           </button>
           <h1>{title}</h1>
           <div className="topbar-actions">
-            <div className="health-status" role="status">
+            <div className="health-status">
+              <span className="sr-only" role="status">
+                {healthState.label}
+              </span>
               <button
                 className={`health-pill health-${healthState.level}`}
                 onClick={() => setHealthOpen(true)}
@@ -836,6 +841,7 @@ export default function App() {
                 <SourceDiagnosis
                   key={diagnosisSource.id}
                   source={diagnosisSource}
+                  collecting={data?.collecting?.includes(diagnosisSource.id)}
                   demo={demo}
                   drivers={drivers}
                 />

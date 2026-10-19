@@ -3,6 +3,7 @@ import { ConnectionChecks } from '../ConnectionChecks';
 import { ArrowRight, Plus, RefreshCw } from 'lucide-react';
 import type { DriverInfo, Source } from '../types';
 import type { Group } from '../groups';
+import { instanceGroupKey } from '../groups';
 import { formatMessage, localized, t } from '../i18n';
 import { driverInfo, fieldValue, primaryField } from '../drivers';
 import { money, relativeTime } from '../domain';
@@ -131,6 +132,9 @@ function SourceRow({
       <tr className={note ? 'has-note' : ''}>
         <td className={primary === 'username' ? '' : 'mono'}>
           {label || source.driver}
+          {source.kind === 'cloud' && source.name !== localized(info.label) && (
+            <span className="sub">{source.name}</span>
+          )}
           {source.account?.balance != null && (
             <span className="sub">
               {t('sources.balance', {
@@ -248,7 +252,9 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
                   <strong>{group.label}</strong>
                   <span className="sub">
                     {t('overview.instances', {
-                      count: data.instances.filter((item) => item.platform === group.label).length,
+                      count: data.instances.filter(
+                        (item) => instanceGroupKey(item, data.sources) === group.key,
+                      ).length,
                     })}
                   </span>
                 </div>

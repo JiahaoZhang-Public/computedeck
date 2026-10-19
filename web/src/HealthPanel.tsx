@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { dateTime, relativeTime } from './domain';
 import { formatMessage, t } from './i18n';
 import { groupsOf, sourceLabel } from './groups';
-import { computeHealth } from './health';
+import { computeHealth, nextAttemptText } from './health';
 import { Status } from './ui';
 import { useDialogFocus } from './useDialogFocus';
 import type { Dashboard } from './types';
@@ -84,7 +84,7 @@ export function HealthPanel({
                   ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
                   : collecting
                     ? t('health.queued')
-                    : t('health.nextAttempt', { time: dateTime(source.next_due_at) })}
+                    : nextAttemptText(source.next_due_at, collecting)}
                 {!collecting &&
                   (source.failures ?? 0) > 0 &&
                   ` · ${t('health.backoff', { count: source.failures })}`}
@@ -116,7 +116,12 @@ export function HealthPanel({
                 );
               })}
             {source.enabled && (
-              <button className="link" disabled={busy} onClick={() => void refresh(source.id)}>
+              <button
+                className="link"
+                aria-label={t('health.retrySource', { name: sourceLabel(groups, source) })}
+                disabled={busy}
+                onClick={() => void refresh(source.id)}
+              >
                 {t('common.retry')}
               </button>
             )}

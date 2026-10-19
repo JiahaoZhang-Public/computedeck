@@ -568,3 +568,69 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
     }
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains partial capacity and all-down unknown totals in %s',
+  (locale) => {
+    setLocale(locale);
+    const data = clusterData(['down', 'drained'], 'unavailable');
+    data.nodes[1].gpu_count = null;
+    const context = ctx(data);
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
+    }
+    const unknown = ctx(clusterData(['mixed', 'FUTURE'], 'unknown'));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={unknown} />),
+      renderToStaticMarkup(<ClustersPage ctx={unknown} />),
+    ])
+      expect(html).toContain(t('summary.unknownNodes', { count: 1 }));
+  },
+);
+
+it.each(['disabled', 'failed', 'stale', 'unsupported'])(
+  'excludes retained %s nodes from the node panel',
+  (condition) => {
+    const data = clusterData(['idle']);
+    if (condition === 'disabled') data.sources[0].enabled = false;
+    if (condition === 'failed') data.sources[0].error = { code: 'ssh_timeout' };
+    if (condition === 'stale') data.sources[0].stale = true;
+    if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
+    const context = ctx(data);
+    const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(html).toContain(`<h2>${t('clusters.nodes')}<span class="count">0</span>`);
+    expect(html).not.toContain(`<td class="mono">${data.nodes[0].name}</td>`);
+  },
+);
+
+it('names the missing login when current pending GPU counts are unknown and no jobs run', () => {
+  const data = dash({
+    sources: [source(), source({ id: 'a-bob', username: 'bob', stale: true })],
+    jobs: [job('queued', { state: 'PENDING', gpu_count: null })],
+  });
+  const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
+  const running = html.split(t('overview.running'))[1].split('</article>')[0];
+  expect(running).not.toContain(t('overview.running.none'));
+  expect(running).toContain('A · bob');
+});
+
+it('counts hand-added machines by normalized manual group and names secondary cloud logins', async () => {
+  const { SourcesPage } = await import('./pages/Sources');
+  const data = serverDemo();
+  data.instances = [
+    data.instances[0],
+    ...data.instances
+      .slice(1, 3)
+      .map((instance, index) => ({ ...instance, platform: index ? ' runpod ' : 'RunPod' })),
+  ];
+  const context = { ...ctx(data), nodes: [], serverName: t('where.local') };
+  const html = renderToStaticMarkup(<SourcesPage ctx={context} />);
+  const manual = html.split(t('sources.manual'))[1];
+  expect(manual).toContain(t('overview.instances', { count: 2 }));
+  expect(manual).not.toContain(t('overview.instances', { count: 3 }));
+  expect(html).toContain('RunPod secondary');
+});

@@ -79,6 +79,7 @@ export function Panel({
   children,
   className = '',
   id,
+  tabIndex,
 }: {
   title?: ReactNode;
   /** A number, or a partial ("≥ 3") or unknown ("—") count. */
@@ -87,9 +88,10 @@ export function Panel({
   children: ReactNode;
   className?: string;
   id?: string;
+  tabIndex?: number;
 }) {
   return (
-    <section className={`panel ${className}`} id={id}>
+    <section className={`panel ${className}`} id={id} tabIndex={tabIndex}>
       {(title || actions) && (
         <header className="panel-header">
           <h2>

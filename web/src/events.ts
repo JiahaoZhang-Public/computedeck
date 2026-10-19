@@ -1,3 +1,4 @@
+import { statusLabel } from './labels';
 import type { DeckEvent } from './types';
 import { formatMessage, t } from './i18n';
 
@@ -18,7 +19,7 @@ export function eventText(event: DeckEvent): string {
     case 'job.failed':
       return t('event.jobFailed', {
         job: name,
-        state: job?.state ?? '',
+        state: statusLabel(job?.state ?? ''),
         code: job?.exit_code ?? '—',
       });
     case 'source.failed':
