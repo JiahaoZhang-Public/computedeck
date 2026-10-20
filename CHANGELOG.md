@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Keep cluster account details readable when a login exposes many QoS entries. Wrap queue labels within their column and preserve the narrow-screen card layout.
+
 ## 0.5.1 (2026-10-20)
 
 - Recognize both `gres:gpu` and `gres/gpu` in Slurm job requests, including typed GPUs and per-node counts when GPU accounting is unavailable. Missing resource information remains unknown.

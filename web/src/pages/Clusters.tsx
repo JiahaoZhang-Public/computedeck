@@ -146,7 +146,17 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
         }
       >
         <div className="table-wrap">
-          <table className="table stack-on-phone">
+          <table className="table stack-on-phone cluster-accounts-table">
+            <colgroup>
+              <col style={{ width: 170 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 110 }} />
+              <col />
+              <col style={{ width: 76 }} />
+              <col style={{ width: 100 }} />
+              <col style={{ width: 104 }} />
+              <col style={{ width: 96 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>{t('clusters.col.account')}</th>
