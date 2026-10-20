@@ -1,3 +1,4 @@
+import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
 import { HealthPanel } from './HealthPanel';
 import { SourceDiagnosis } from './SourceDiagnosis';
@@ -37,7 +38,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, partialCount } from './domain';
+import { dateTime, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf } from './groups';
@@ -139,8 +140,9 @@ export default function App() {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const [hash, setHash] = useState(() => window.location.hash);
-  const [group, setGroupState] = useState<Filter>(() => readRoute(startPages).group);
-  const [query, setQuery] = useState('');
+  const group = readRoute(startPages, hash).group;
+  const query = routeParams(hash).get('q') ?? '';
+  const setQuery = (value: string) => setRouteParams({ q: value });
   const [demo, setDemo] = useState(
     () => new URLSearchParams(window.location.search).get('demo') === 'true',
   );
@@ -151,9 +153,37 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
-  const [detail, setDetail] = useState<Detail>(null);
+  const params = routeParams(hash);
+  const detailId = params.get('job') || params.get('failure') || params.get('instance');
+  const job = params.get('failure')
+    ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
+    : params.get('job')
+      ? data && uniqueJobs(data.jobs).find((item) => item.id === params.get('job'))
+      : null;
+  const instance = params.get('instance')
+    ? data?.instances.find((item) => item.id === params.get('instance'))
+    : null;
+  const detail: Detail = job
+    ? { kind: 'job', item: job }
+    : instance
+      ? { kind: 'instance', item: instance }
+      : null;
+  const setDetail = useCallback((next: Detail) => {
+    setRouteParams(
+      {
+        job: next?.kind === 'job' && !next.item.end ? next.item.id : null,
+        failure: next?.kind === 'job' && next.item.end ? next.item.id : null,
+        instance: next?.kind === 'instance' ? next.item.id : null,
+      },
+      !!next,
+    );
+  }, []);
+  const closeDetail = useCallback(() => {
+    if (window.history.state?.detail) window.history.back();
+    else setDetail(null);
+  }, [setDetail]);
   const modalRef = useDialogFocus(undefined, !!modal);
-  const detailRef = useDialogFocus(undefined, !!detail);
+  const detailRef = useDialogFocus(undefined, !!detailId);
   const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
@@ -207,18 +237,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let previous = window.location.hash;
     const onHashChange = () => {
-      const next = readRoute(corePages);
-      setHash(window.location.hash);
-      setGroupState(next.group);
-      setQuery('');
-      setSidebarOpen(false);
-      setDetail(null);
-      setModal(null);
-      window.scrollTo(0, 0);
+      const next = window.location.hash;
+      setHash(next);
+      if (previous.split('?')[0] !== next.split('?')[0]) {
+        setSidebarOpen(false);
+        setModal(null);
+        window.scrollTo(0, 0);
+      }
+      previous = next;
     };
     window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
   }, []);
   const navigate = useCallback((next: Page, filter: Filter = 'all') => {
     const hash = routeHash(next, filter);
@@ -226,8 +261,7 @@ export default function App() {
     else window.location.hash = hash;
   }, []);
   const setGroup = (filter: Filter) => {
-    setGroupState(filter);
-    window.history.replaceState(null, '', routeHash(page, filter));
+    setRouteParams({ group: filter === 'all' ? null : filter, provider: null });
   };
 
   const load = useCallback(
@@ -278,7 +312,7 @@ export default function App() {
           if (requestId === loadId.current) setLoading(false);
         });
     },
-    [demo],
+    [demo, setData],
   );
   useEffect(
     () => () => {
@@ -315,7 +349,7 @@ export default function App() {
     function keydown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         if (modal) setModal(null);
-        else if (detail) setDetail(null);
+        else if (detailId) closeDetail();
         else setSidebarOpen(false);
       }
       if ((event.metaKey || event.ctrlKey) && event.key === 'k' && searchRef.current) {
@@ -326,7 +360,7 @@ export default function App() {
     }
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [modal, detail]);
+  }, [modal, detailId, closeDetail]);
 
   async function refresh(sourceId?: string) {
     setRefreshing(true);
@@ -437,8 +471,7 @@ export default function App() {
     setModal(null);
     setDetail(null);
     setHealthOpen(false);
-    setGroupState('all');
-    setQuery('');
+    setRouteParams({ group: null, provider: null, q: null });
   };
 
   const groups = useMemo(
@@ -841,6 +874,8 @@ export default function App() {
                 <SourceDiagnosis
                   key={diagnosisSource.id}
                   source={diagnosisSource}
+                  configure={() => configure(diagnosisSource)}
+                  collect={() => collect(diagnosisSource)}
                   collecting={data?.collecting?.includes(diagnosisSource.id)}
                   demo={demo}
                   drivers={drivers}
@@ -929,8 +964,27 @@ export default function App() {
           </section>
         </div>
       )}
+      {detailId && !detail && ctx && (
+        <div className="drawer-overlay" onMouseDown={closeDetail}>
+          <aside
+            className="drawer"
+            ref={detailRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="detail-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2 id="detail-title">{t('drawer.unavailable')}</h2>
+            <p>{t('drawer.unavailableHint')}</p>
+            <button className="button" onClick={closeDetail}>
+              {t('common.close')}
+            </button>
+          </aside>
+        </div>
+      )}
       {detail && ctx && (
-        <div className="drawer-overlay" onMouseDown={() => setDetail(null)}>
+        <div className="drawer-overlay" onMouseDown={closeDetail}>
           <aside
             className="drawer"
             ref={detailRef}
@@ -948,11 +1002,7 @@ export default function App() {
                 <h2 id="detail-title">{detail.item.name}</h2>
                 <Status state={detail.item.state} />
               </div>
-              <button
-                className="icon-button"
-                aria-label={t('common.close')}
-                onClick={() => setDetail(null)}
-              >
+              <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
                 <X size={16} />
               </button>
             </header>
@@ -968,7 +1018,15 @@ export default function App() {
                       `/instances/${encodeURIComponent(detail.item.id)}/probe`,
                       {},
                     );
-                    setDetail({ kind: 'instance', item });
+                    setData(
+                      (current) =>
+                        current && {
+                          ...current,
+                          instances: current.instances.map((row) =>
+                            row.id === item.id ? item : row,
+                          ),
+                        },
+                    );
                     notify(t('toast.probed'));
                   } catch (reason) {
                     notify(errorText(reason, 'error.probe'), 'error');

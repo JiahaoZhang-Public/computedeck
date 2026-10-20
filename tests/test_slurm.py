@@ -34,6 +34,8 @@ def job_line(**changes: str) -> str:
         "NumNodes": "2",
         "NodeList": "node-[01-02]",
         "TimeUsed": "1:20:00",
+        "SubmitTime": "2026-01-05T07:00:00+0400",
+        "StartTime": "2026-01-05T08:00:00+0400",
         "Reason": "None",
         "tres-alloc": "cpu=16,mem=64G,node=2,billing=16,gres/gpu=8,gres/gpu:a100=8",
         "tres-per-node": "gres/gpu:a100:4",
@@ -358,7 +360,7 @@ def fake_cluster(
 ) -> Any:
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, command, options))
-        if command.startswith("squeue"):
+        if command.startswith("env SLURM_TIME_FORMAT="):
             return job_line(UserName=SOURCE["username"]) + "\n"
         if failure is not None:
             raise failure
@@ -388,7 +390,7 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     calls: list[tuple[str, str, list[str] | None]] = []
 
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
-        if command.startswith("squeue"):
+        if command.startswith("env SLURM_TIME_FORMAT="):
             calls.append((destination, command, options))
             return job_line(UserName=user, QOS="long") + "\n"
         if command.startswith("sacctmgr"):
@@ -425,9 +427,11 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
 
     assert all(dest == "cluster-a" and opts == ["-l", user] for dest, _, opts in calls)
     commands = [command for _, command, _ in calls]
-    squeue = next(command for command in commands if command.startswith("squeue"))
+    squeue = next(command for command in commands if command.startswith("env SLURM_TIME_FORMAT="))
     assert f"--user={user}" in squeue
     assert "--array" in squeue
+    assert squeue.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z squeue ")
+    assert "SubmitTime" in squeue and "StartTime" in squeue
     sacct = next(command for command in commands if command.startswith("sacct "))
     assert f"--user={user}" in sacct
     assert "--allocations" in sacct and "--parsable2" in sacct
@@ -436,7 +440,7 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     assert "--state=" + ",".join(slurm.FAILURE_STATES) in sacct
     # Collection is read-only.
     assert {command.split()[0] for command in commands} == {
-        "squeue",
+        "env",
         "scontrol",
         "sacct",
         "sacctmgr",
@@ -694,3 +698,13 @@ async def test_database_query_failure_keeps_permissions_unknown(monkeypatch):
     assert batch.qos and all(item["access"] == "unknown" for item in batch.qos)
     assert "qos_access" not in batch.capabilities
     assert batch.jobs
+
+
+def test_job_timestamps_keep_offsets_and_do_not_treat_estimated_starts_as_actual() -> None:
+    running = slurm.parse_jobs(job_line(), SOURCE)[0]
+    assert running["submitted_at"] == "2026-01-05T07:00:00+04:00"
+    assert running["started_at"] == "2026-01-05T08:00:00+04:00"
+    pending = slurm.parse_jobs(job_line(State="PENDING"), SOURCE)[0]
+    assert pending["started_at"] is None
+    unknown = slurm.parse_jobs(job_line(SubmitTime="Unknown", StartTime="N/A"), SOURCE)[0]
+    assert unknown["submitted_at"] is None and unknown["started_at"] is None

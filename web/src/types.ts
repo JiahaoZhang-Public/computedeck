@@ -107,6 +107,10 @@ export interface Job {
   cpu_count: number | null;
   node: string | null;
   elapsed: string;
+  submitted_at?: string | null;
+  started_at?: string | null;
+  end?: string | null;
+  exit_code?: string | null;
   reason: string | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;

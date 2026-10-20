@@ -20,7 +20,8 @@ import { routeHash } from '../routes';
 import type { Locale } from '../i18n';
 import { t } from '../i18n';
 import type { PluginProps, WebPlugin } from '../plugins';
-import { dateTime, jobGpuResources, relativeTime } from '../domain';
+import { jobGpuResources, relativeTime } from '../domain';
+import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { Chips, Empty, Status } from '../ui';
 
 export type Ctx = {
@@ -174,7 +175,7 @@ export function JobsTable({
   if (!jobs.length) return <>{empty}</>;
   return (
     <div className="table-wrap">
-      <table className="table jobs-table">
+      <table className="table jobs-table stack-on-phone">
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
@@ -183,7 +184,7 @@ export function JobsTable({
             <th className="num">CPU</th>
             <th>{t('jobs.col.state')}</th>
             <th>{t('jobs.col.nodeReason')}</th>
-            <th className="num">{t('jobs.col.elapsed')}</th>
+            <th className="num">{t('jobs.col.timing')}</th>
           </tr>
         </thead>
         <tbody>
@@ -191,6 +192,10 @@ export function JobsTable({
             const gpu = jobGpuResources(job);
             const pending = job.state.toUpperCase() === 'PENDING';
             const old = !!stale?.has(job.source_id);
+            const driver =
+              groups.flatMap((group) => group.sources).find((source) => source.id === job.source_id)
+                ?.driver ?? '';
+            const explanation = pending ? jobReason(job, driver) : null;
             return (
               <tr
                 key={job.id}
@@ -216,11 +221,11 @@ export function JobsTable({
                     </span>
                   )}
                 </td>
-                <td>
+                <td data-label={t('jobs.col.clusterQos')}>
                   {groupLabel(groups, job.cluster_id)}
                   <span className="sub">{job.qos || '—'}</span>
                 </td>
-                <td className="num">
+                <td className="num" data-label={'GPU'}>
                   {pending ? (
                     <span className="muted">
                       {t('jobs.requested', { count: gpu.requested ?? '?' })}
@@ -230,17 +235,22 @@ export function JobsTable({
                   )}
                   <span className="sub">{job.gpu_type || ''}</span>
                 </td>
-                <td className="num">{job.cpu_count ?? '—'}</td>
-                <td>
+                <td className="num" data-label={'CPU'}>
+                  {job.cpu_count ?? '—'}
+                </td>
+                <td data-label={t('jobs.col.state')}>
                   <Status state={job.state} />
                 </td>
-                <td>
+                <td data-label={t('jobs.col.nodeReason')}>
                   <span className="clamp" title={(pending ? job.reason : job.node) ?? ''}>
-                    {pending ? job.reason || t('jobs.waiting') : job.node || '—'}
+                    {pending
+                      ? explanation?.summary || job.reason || t('jobs.waiting')
+                      : job.node || '—'}
                   </span>
+                  {pending && job.reason && <code className="sub">{job.reason}</code>}
                 </td>
-                <td className="num mono">
-                  {job.elapsed || '—'}
+                <td className="num mono" data-label={t('jobs.col.timing')}>
+                  {pending ? jobWaiting(job) : job.elapsed || '—'}
                   <span className="sub" title={job.observed_at ?? ''}>
                     {relativeTime(job.observed_at)}
                   </span>
@@ -254,10 +264,18 @@ export function JobsTable({
   );
 }
 
-export function FailuresTable({ jobs, groups }: { jobs: FailedJob[]; groups: Group[] }) {
+export function FailuresTable({
+  jobs,
+  groups,
+  onOpen,
+}: {
+  jobs: FailedJob[];
+  groups: Group[];
+  onOpen?: (job: Job) => void;
+}) {
   return (
     <div className="table-wrap">
-      <table className="table">
+      <table className="table stack-on-phone">
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
@@ -269,22 +287,35 @@ export function FailuresTable({ jobs, groups }: { jobs: FailedJob[]; groups: Gro
         </thead>
         <tbody>
           {jobs.map((job) => (
-            <tr key={job.id}>
+            <tr
+              key={job.id}
+              className={onOpen ? 'clickable' : undefined}
+              tabIndex={onOpen ? 0 : undefined}
+              onClick={() => onOpen?.(job)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') onOpen?.(job);
+              }}
+            >
               <td>
                 <strong className="truncate">{job.name}</strong>
                 <span className="sub mono">
                   {job.id} · {job.user}
                 </span>
               </td>
-              <td>
+              <td data-label={t('jobs.col.clusterQos')}>
                 {groupLabel(groups, job.cluster_id)}
                 <span className="sub">{job.qos || '—'}</span>
               </td>
-              <td>
+              <td data-label={t('jobs.col.result')}>
                 <Status state={job.state} />
+                <span className="sub">{jobReason(job, '')?.next}</span>
               </td>
-              <td className="mono">{job.exit_code ?? '—'}</td>
-              <td title={job.end ?? ''}>{dateTime(job.end)}</td>
+              <td className="mono" data-label={t('jobs.col.exitCode')}>
+                {job.exit_code ?? '—'}
+              </td>
+              <td title={job.end ?? ''} data-label={t('jobs.col.ended')}>
+                {jobTime(job.end)}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -1,5 +1,5 @@
 import { UnmeasuredLinks } from './UnmeasuredLinks';
-import { useState } from 'react';
+import { useRouteParam } from '../useRouteParam';
 import { Plus } from 'lucide-react';
 import type { Source } from '../types';
 import { findGroup } from '../groups';
@@ -15,7 +15,10 @@ import { capacityText, groupSummary } from './summary';
 
 export function ClustersPage({ ctx }: { ctx: Ctx }) {
   const { data, group, query, groups } = ctx;
-  const [nodeFilter, setNodeFilter] = useState<'all' | 'idle' | 'abnormal'>('all');
+  const [requestedFilter, setNodeFilter] = useRouteParam('nodes', 'all');
+  const nodeFilter = ['all', 'idle', 'abnormal'].includes(requestedFilter)
+    ? requestedFilter
+    : 'all';
   const clusters = groups.filter((item) => item.kind === 'cluster');
   const visible = clusters.filter((item) => group === 'all' || item.key === group);
   const keys = new Set(visible.map((item) => item.key));
@@ -143,7 +146,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
         }
       >
         <div className="table-wrap">
-          <table className="table">
+          <table className="table stack-on-phone">
             <thead>
               <tr>
                 <th>{t('clusters.col.account')}</th>
@@ -183,7 +186,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
         </div>
         {shownNodes.length ? (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table stack-on-phone">
               <thead>
                 <tr>
                   <th>{t('clusters.col.node')}</th>
@@ -199,8 +202,10 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 {shownNodes.map((node) => (
                   <tr key={node.id}>
                     <td className="mono">{node.name}</td>
-                    <td>{findGroup(groups, node.cluster_id)?.label ?? node.cluster_id}</td>
-                    <td>
+                    <td data-label={t('clusters.col.cluster')}>
+                      {findGroup(groups, node.cluster_id)?.label ?? node.cluster_id}
+                    </td>
+                    <td data-label={t('clusters.col.gpuAllocated')}>
                       <Meter
                         value={
                           node.gpu_count && node.gpu_allocated != null
@@ -210,14 +215,18 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                         text={`${node.gpu_allocated ?? '?'} / ${node.gpu_count ?? '?'}`}
                       />
                     </td>
-                    <td className="num">
+                    <td className="num" data-label={t('clusters.col.cpuAllocated')}>
                       {node.cpu_allocated ?? '?'} / {node.cpu_count ?? '?'}
                     </td>
-                    <td className="muted">{node.partitions.join(', ') || '—'}</td>
-                    <td>
+                    <td className="muted" data-label={t('clusters.col.partition')}>
+                      {node.partitions.join(', ') || '—'}
+                    </td>
+                    <td data-label={t('clusters.col.state')}>
                       <span className={`tag ${nodeTone(node)}`}>{node.state}</span>
                     </td>
-                    <td className="num muted">{relativeTime(node.observed_at)}</td>
+                    <td className="num muted" data-label={t('clusters.col.sampled')}>
+                      {relativeTime(node.observed_at)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -251,10 +260,10 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
             </span>
           </span>
         </td>
-        <td className="mono">
+        <td className="mono" data-label={t('clusters.col.sshHost')}>
           {source.ssh_alias || <span className="muted">{t('common.notSet')}</span>}
         </td>
-        <td className="num">
+        <td className="num" data-label={t('clusters.col.gpus')}>
           {partialCount(summary.allocated, summary.known_allocated)} /{' '}
           {partialCount(summary.requested, summary.known_requested)}
           <UnmeasuredLinks
@@ -272,7 +281,7 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
             ctx={ctx}
           />
         </td>
-        <td>
+        <td data-label={t('clusters.col.qos')}>
           {source.qos.length ? (
             <span className="tags">
               {source.qos.map((qos) => {
@@ -299,9 +308,13 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
             <span className="muted">—</span>
           )}
         </td>
-        <td className="num">{t('common.minutes', { count: source.interval_minutes })}</td>
-        <td className="num">{relativeTime(source.last_success)}</td>
-        <td>
+        <td className="num" data-label={t('clusters.col.interval')}>
+          {t('common.minutes', { count: source.interval_minutes })}
+        </td>
+        <td className="num" data-label={t('clusters.col.lastSuccess')}>
+          {relativeTime(source.last_success)}
+        </td>
+        <td data-label={t('clusters.col.state')}>
           <Status state={sourceState(source)} />
         </td>
         <td className="num">

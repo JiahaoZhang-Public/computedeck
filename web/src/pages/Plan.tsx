@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRouteParam } from '../useRouteParam';
 import { Clock3, Plus } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
@@ -119,9 +119,13 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
 
 export function PlanPage({ ctx }: { ctx: Ctx }) {
   const { data } = ctx;
-  const [gpus, setGpus] = useState(1);
-  const [gpuType, setGpuType] = useState('');
-  const [hours, setHours] = useState('');
+  const [requestedGpus, setGpus] = useRouteParam('gpus', '1');
+  const [gpuType, setGpuType] = useRouteParam('model');
+  const [requestedHours, setHours] = useRouteParam('hours');
+  const count = Number(requestedGpus);
+  const gpus = Number.isInteger(count) && count >= 1 && count <= 1024 ? count : 1;
+  const hours =
+    Number.isFinite(Number(requestedHours)) && Number(requestedHours) >= 0 ? requestedHours : '';
   const request: PlanRequest = {
     gpus: Math.max(1, gpus || 1),
     gpuType,
@@ -153,18 +157,20 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               min="1"
               max="1024"
               value={gpus}
-              onChange={(event) => setGpus(Number(event.target.value))}
+              onChange={(event) => setGpus(event.target.value)}
             />
           </label>
           <label>
             {t('plan.model')}
             <select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>
               <option value="">{t('plan.anyModel')}</option>
-              {models.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
+              {(gpuType && !models.includes(gpuType) ? [gpuType, ...models] : models).map(
+                (model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ),
+              )}
             </select>
           </label>
           <label>

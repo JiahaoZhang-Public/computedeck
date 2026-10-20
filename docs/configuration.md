@@ -103,3 +103,22 @@ Sources hold references, never secrets:
 A source collected on a collection machine resolves its reference there.
 
 Plugins can add further schemes.
+
+
+## Links and view state
+
+The URL preserves view choices without storing credentials:
+
+- Jobs: `#/jobs?state=pending&q=train`; add `group=<cluster-id>` to filter a cluster.
+- Planner: `#/plan?gpus=4&model=A100&hours=12`.
+- Cluster nodes: `#/resources?nodes=abnormal`; history uses `range=24`, `72` or `168`.
+- Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
+
+Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back
+closes the detail while keeping the prior filters. Reloading a link restores the view, and
+open details follow newly collected data. A link to an item no longer present says so.
+These are links within your own dashboard; they do not grant access to its service.
+
+中文：筛选、搜索、“去哪跑”输入和详情保存在地址栏中，刷新和浏览器返回会恢复对应状态。
+链接不会包含凭据，也不会授予他人访问服务的权限。调度器未提供时区的作业时间会明确标注；
+无法可靠计算的等待时长保持未知。

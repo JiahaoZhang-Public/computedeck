@@ -164,6 +164,8 @@ def test_running_job_reads_gpus_hosts_and_run_time() -> None:
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
+            "submitted_at": None,
+            "started_at": None,
             "observed_at": jobs[0]["observed_at"],
         }
     ]
@@ -513,7 +515,8 @@ async def test_collect_reads_jobs_hosts_limits_and_failures(
     assert all(dest == "cluster-b" and opts == ["-l", "alice"] for dest, _, opts in calls)
     commands = [command for _, command, _ in calls]
     assert commands[0] == (
-        "bjobs -u alice -o 'jobid jobindex job_name user queue stat pend_reason exec_host "
+        "bjobs -u alice -o 'jobid jobindex job_name user queue stat pend_reason "
+        "submit_time start_time exec_host "
         "slots run_time proj_name gpu_num gpu_alloc' -json"
     )
     assert "bqueues -u alice -o 'queue_name status max_runlimit' -json" in commands
@@ -768,3 +771,11 @@ async def test_history_without_gpu_fields_keeps_exit_reason(
     )
     assert result == "history with exit_reason"
     assert "exit_reason" in calls[-1] and "gpu_num" not in calls[-1]
+
+
+def test_job_times_preserve_scheduler_text_without_inventing_a_timezone() -> None:
+    running = parse(job(SUBMIT_TIME="Jan 5 08:00", START_TIME="Jan 5 09:00"))[0]
+    assert running["submitted_at"] == "Jan 5 08:00"
+    assert running["started_at"] == "Jan 5 09:00"
+    pending = parse(job(STAT="PEND", START_TIME="Jan 5 13:00"))[0]
+    assert pending["started_at"] is None

@@ -347,6 +347,8 @@ def _record(
         "cpu_count": cores(pod_request(spec, "cpu")),
         "node": node,
         "elapsed": "",
+        "submitted_at": _text(meta.get("creationTimestamp")) or None,
+        "started_at": None,
         "reason": None,
         "gpu_utilization": None,
         "cpu_utilization": None,
@@ -376,6 +378,7 @@ def parse_jobs(
         if job["state"] == "PENDING":
             job["elapsed"] = "0:00"
         elif started:
+            job["started_at"] = started.isoformat()
             job["elapsed"] = elapsed((at - started).total_seconds())
         jobs[job["id"]] = job
     return list(jobs.values())

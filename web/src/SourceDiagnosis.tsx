@@ -12,11 +12,15 @@ export function SourceDiagnosis({
   demo,
   drivers,
   collecting = false,
+  configure,
+  collect,
 }: {
   source: Source;
   demo: boolean;
   drivers: DriverInfo[];
   collecting?: boolean;
+  configure?: () => void;
+  collect?: () => Promise<void>;
 }) {
   const [check, setCheck] = useState(0);
   const active = collecting || source.status === 'syncing';
@@ -47,6 +51,21 @@ export function SourceDiagnosis({
         <button className="button" disabled={demo} onClick={() => setCheck(check + 1)}>
           {t('sources.testConnection')}
         </button>
+        {configure && (
+          <button className="button" disabled={demo} onClick={configure}>
+            {t('sources.editConnection')}
+          </button>
+        )}
+        {collect && (
+          <button
+            className="button"
+            disabled={demo || active || !source.enabled}
+            onClick={() => void collect()}
+          >
+            {t('sources.collectNow')}
+          </button>
+        )}
+        <p className="muted">{t('sources.checkScope')}</p>
         {demo && <p className="muted">{t('attention.exampleCheck')}</p>}
         {check > 0 && <ConnectionChecks key={check} sourceId={source.id} />}
       </div>

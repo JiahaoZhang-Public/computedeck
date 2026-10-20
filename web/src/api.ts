@@ -96,6 +96,7 @@ export async function api<T>(
   path: string,
   body?: unknown,
   method = body === undefined ? 'GET' : 'POST',
+  progress?: { onRows: (rows: T) => void; signal: AbortSignal },
 ): Promise<T> {
   const response = await request(path, {
     method,
@@ -105,7 +106,40 @@ export async function api<T>(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         }),
+    ...(progress
+      ? {
+          signal: progress.signal,
+          headers: { Accept: 'application/x-ndjson', 'Content-Type': 'application/json' },
+        }
+      : {}),
   });
+  if (progress && response.headers.get('content-type')?.includes('application/x-ndjson')) {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    let finished = false;
+    let result: T | undefined;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        pending += decoder.decode(chunk.value, { stream: !chunk.done });
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines.filter(Boolean)) {
+          const event = JSON.parse(line) as { rows: T; done?: boolean };
+          result = event.rows;
+          progress.onRows(event.rows);
+          finished = event.done === true;
+        }
+        if (chunk.done) break;
+      }
+      if (!finished || result === undefined) throw new Error(t('sources.checkInterrupted'));
+      return result;
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
+  }
   // 204 No Content (and other empty replies) carry no JSON body.
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

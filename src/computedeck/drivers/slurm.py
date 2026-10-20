@@ -3,6 +3,7 @@
 import asyncio
 import re
 import shlex
+from datetime import datetime
 from typing import Any, ClassVar, Literal
 
 from ..ssh_config import validate_alias, validate_username
@@ -37,6 +38,8 @@ _FIELDS = (
     "tres-alloc",
     "tres-per-node",
     "tres-per-job",
+    "SubmitTime",
+    "StartTime",
 )
 _HISTORY_FIELDS = (
     "JobID",
@@ -100,6 +103,15 @@ def gpus_tracked(nodes_output: str) -> bool:
     return re.search(r"(?:^|\s)CfgTRES=\S*gres/gpu", nodes_output, re.M) is not None
 
 
+def job_time(value: str) -> str | None:
+    """The queue query requests an explicit UTC offset; unknown dates stay unknown."""
+    try:
+        stamp = datetime.fromisoformat(value)
+        return stamp.isoformat() if stamp.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def parse_jobs(
     output: str, source: dict[str, Any], *, tracked: bool = False
 ) -> list[dict[str, Any]]:
@@ -150,6 +162,9 @@ def parse_jobs(
             "cpu_count": integer(row["NumCPUs"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
             "elapsed": row["TimeUsed"],
+            "submitted_at": job_time(row["SubmitTime"]),
+            # squeue's StartTime for a pending job is an estimate, not an actual start.
+            "started_at": job_time(row["StartTime"]) if row["State"] != "PENDING" else None,
             "reason": None if row["Reason"] in EMPTY else row["Reason"],
             "gpu_utilization": None,
             "cpu_utilization": None,
@@ -450,6 +465,8 @@ class SlurmDriver:
         output_format = ",".join(f"{field}:0\x1f" for field in _FIELDS)
         command = shlex.join(
             [
+                "env",
+                "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
                 "squeue",
                 "--noheader",
                 "--array",

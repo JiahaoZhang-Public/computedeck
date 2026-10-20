@@ -1,3 +1,4 @@
+import { useRouteParam } from '../useRouteParam';
 import { useDialogFocus } from '../useDialogFocus';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -330,8 +331,9 @@ const SECTIONS: { key: 'on' | 'off' | 'broken'; title: MessageKey }[] = [
 
 /** Installed tools as tiles: switch them on with consent, open them, change settings. */
 export function ToolboxPage({ ctx }: { ctx: Ctx }) {
-  const [tab, setTab] = useState<'installed' | 'market'>('installed');
-  const [query, setQuery] = useState('');
+  const [requestedTab, setTab] = useRouteParam('tab', 'installed');
+  const tab = requestedTab === 'market' ? 'market' : 'installed';
+  const [query, setQuery] = useRouteParam('q');
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   useEffect(() => {

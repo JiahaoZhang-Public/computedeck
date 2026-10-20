@@ -229,6 +229,8 @@ def test_running_job_reads_ngpus_queue_host_and_walltime() -> None:
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
+            "submitted_at": None,
+            "started_at": "Mon Jan  5 08:40:00 2026",
             "observed_at": jobs[0]["observed_at"],
         }
     ]
@@ -767,3 +769,13 @@ def test_remote_scripts_run_under_common_login_shells(
     with pytest.raises(SourceError) as error:
         pbs.parse_failures(outputs[1], SOURCE)
     assert error.value.code == "history_unavailable"
+
+
+def test_job_times_preserve_scheduler_local_text_and_ignore_pending_start() -> None:
+    stamp = "Mon Jan  5 10:00:00 2026"
+    jobs = pbs.parse_jobs(qstat({"1001.pbs-server": qstat_job(qtime=stamp, stime=stamp)}), SOURCE)
+    assert jobs[0]["submitted_at"] == stamp and jobs[0]["started_at"] == stamp
+    pending = pbs.parse_jobs(
+        qstat({"1001.pbs-server": qstat_job(job_state="Q", stime=stamp)}), SOURCE
+    )
+    assert pending[0]["started_at"] is None

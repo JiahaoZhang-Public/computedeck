@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useRouteParam } from '../useRouteParam';
 import type { ReactNode } from 'react';
 import type { HistoryPoint } from '../types';
 import { api } from '../api';
@@ -25,7 +26,8 @@ export function HistoryPanel({
   demo: boolean;
   note?: ReactNode;
 }) {
-  const [hours, setHours] = useState(24);
+  const [range, setRange] = useRouteParam('range', '24');
+  const hours = [24, 72, 168].includes(Number(range)) ? Number(range) : 24;
   const [result, setResult] = useState<{
     hours: number;
     demo: boolean;
@@ -68,7 +70,7 @@ export function HistoryPanel({
             value={String(hours)}
             onChange={(value) => {
               if (Number(value) === hours) return;
-              setHours(Number(value));
+              setRange(value);
               setResult(null);
             }}
             options={RANGES.map((range) => ({ value: String(range.hours), label: t(range.label) }))}

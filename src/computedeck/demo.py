@@ -86,6 +86,11 @@ def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any
 def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
     source_id, name, state, gpus, gpu, cpu, elapsed = spec
     cluster_id = source_id.rsplit("-", 1)[0]
+    days, _, clock = elapsed.rpartition("-")
+    hours, minutes, seconds = map(int, clock.split(":"))
+    started = datetime.fromisoformat(observed) - timedelta(
+        days=int(days or 0), hours=hours, minutes=minutes, seconds=seconds
+    )
     return {
         "id": f"{cluster_id}:{48210 + index}",
         "source_id": source_id,
@@ -101,6 +106,8 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
         "cpu_count": gpus * 8,
         "node": f"{cluster_id[-1]}-gpu-{index + 1:02}" if state == "RUNNING" else None,
         "elapsed": elapsed,
+        "submitted_at": (started - timedelta(hours=2)).isoformat(),
+        "started_at": started.isoformat() if state == "RUNNING" else None,
         "reason": "Priority" if state == "PENDING" else None,
         "gpu_utilization": gpu,
         "cpu_utilization": cpu,
@@ -470,7 +477,7 @@ def nodes() -> list[dict[str, Any]]:
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
             "status": "ok",
-            "version": "0.4.0",
+            "version": "0.5.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,

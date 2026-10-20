@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+import shlex
 import shutil
 import socket
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -61,9 +63,24 @@ async def ssh_config(alias: str, options: list[str]) -> dict[str, str]:
 
 
 async def source_checks(
-    source: dict[str, Any], node: dict[str, Any] | None = None
+    source: dict[str, Any],
+    node: dict[str, Any] | None = None,
+    *,
+    report: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    rows = []
+    rows: list[dict[str, Any]] = []
+
+    def add(row: dict[str, Any]) -> None:
+        rows.append(row)
+        if report:
+            report(row)
+
+    def starting(key: str, en: str, zh: str) -> None:
+        if report:
+            row = check(key, True, en, zh)
+            row["state"] = "checking"
+            report(row)
+
     try:
         driver = drivers.get(source["driver"])
         driver.validate(source)
@@ -90,6 +107,7 @@ async def source_checks(
                     "选择已存在的采集节点。",
                 )
             ]
+        starting("node", "Collection on the configured node", "在指定节点采集")
         try:
             async with asyncio.timeout(120):
                 batch = await nodes.collect(node, source)
@@ -104,7 +122,7 @@ async def source_checks(
                     "检查节点连接，并在该节点运行 doctor。",
                 )
             ]
-        rows.append(check("node", True, "Collection on the configured node", "在指定节点采集"))
+        add(check("node", True, "Collection on the configured node", "在指定节点采集"))
         for item in driver.info.checks:
             row = check(
                 item.capability,
@@ -115,7 +133,7 @@ async def source_checks(
                 "检查采集节点上的命令和权限。",
                 optional=True,
             )
-            rows.append(row)
+            add(row)
         return rows
     alias = source.get("ssh_alias") or ""
     options = []
@@ -123,7 +141,7 @@ async def source_checks(
         options = ["-l", validate_username(source["username"])]
     if alias:
         installed = shutil.which("ssh") is not None
-        rows.append(
+        add(
             check(
                 "ssh",
                 installed,
@@ -135,6 +153,7 @@ async def source_checks(
         )
         if not installed:
             return rows
+        starting("ssh_alias", "SSH alias resolves", "SSH 别名可解析")
         try:
             validate_alias(alias)
             config = await ssh_config(alias, options)
@@ -153,7 +172,7 @@ async def source_checks(
             resolved = True
         except (OSError, ValueError, TimeoutError):
             resolved = False
-        rows.append(
+        add(
             check(
                 "ssh_alias",
                 resolved,
@@ -165,12 +184,25 @@ async def source_checks(
         )
         if not resolved:
             return rows
+        starting("ssh_login", "SSH BatchMode login", "SSH BatchMode 登录")
+        failure = "unknown"
         try:
             await ssh.run(alias, "true", options)
             connected = True
-        except (ssh.SSHError, OSError, TimeoutError):
+        except (ssh.SSHError, OSError, TimeoutError) as error:
             connected = False
-        rows.append(
+            text = str(error).lower()
+            if "permission denied" in text or "authentication failed" in text:
+                failure = "authentication"
+            elif "host key" in text or "remote host identification has changed" in text:
+                failure = "host_key"
+            elif isinstance(error, TimeoutError):
+                failure = "timeout"
+            elif "timed out" in text or "no route" in text:
+                failure = "network"
+            elif "connection refused" in text:
+                failure = "refused"
+        add(
             check(
                 "ssh_login",
                 connected,
@@ -182,6 +214,51 @@ async def source_checks(
             )
         )
         if not connected:
+            hints = {
+                "timeout": (
+                    "The check timed out before completion. Wait for any active collection "
+                    "and retry; this alone does not identify a network or authentication failure.",
+                    "检查未能在时限内完成。请等待当前采集结束后重试；仅凭超时无法确定网络或认证故障。",
+                ),
+                "authentication": (
+                    "Authentication was rejected. Check the login name, key access and "
+                    "any required credential update on the collecting machine.",
+                    "认证被拒绝。检查登录用户名、密钥权限，并在采集机器更新所需凭据。",
+                ),
+                "host_key": (
+                    "Host identity verification failed. Verify the host key with its administrator "
+                    "before updating known_hosts; do not disable verification.",
+                    "主机身份验证失败。先向管理员核实主机密钥，再更新 known_hosts；不要关闭验证。",
+                ),
+                "network": (
+                    "The host is unreachable. Check the network, required VPN and jump-host route "
+                    "before retrying.",
+                    "无法到达主机。重试前检查网络、所需 VPN 和跳板路由。",
+                ),
+                "refused": (
+                    "The host refused the connection. Check the SSH port and whether "
+                    "its SSH service is running.",
+                    "主机拒绝了连接。检查 SSH 端口及远端 SSH 服务是否运行。",
+                ),
+            }
+            if failure in hints:
+                en, zh = hints[failure]
+                rows[-1]["detail"] = {"en": en, "zh-CN": zh}
+            rows[-1]["command"] = shlex.join(
+                [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "StrictHostKeyChecking=yes",
+                    *options,
+                    "--",
+                    alias,
+                    "true",
+                ]
+            )
+            if report:
+                report(rows[-1])
             return rows
     commands = {
         "slurm": ("squeue", "scontrol", "sacctmgr", "sacct"),
@@ -192,6 +269,7 @@ async def source_checks(
         "aws-ec2": ("aws",),
     }.get(source["driver"], ())
     for command in commands:
+        starting(f"command:{command}", f"Command: {command}", f"命令：{command}")
         try:
             found = (
                 bool(await ssh.run(alias, f"command -v {command}", options))
@@ -200,7 +278,7 @@ async def source_checks(
             )
         except (ssh.SSHError, OSError, TimeoutError):
             found = False
-        rows.append(
+        add(
             check(
                 f"command:{command}",
                 found,
@@ -212,12 +290,13 @@ async def source_checks(
             )
         )
     if source.get("credential"):
+        starting("credential", "Credential reference resolves", "凭据引用可解析")
         try:
             available = bool(await asyncio.to_thread(credentials.resolve, source["credential"]))
         except Exception:
             # Resolver failures may quote secrets. Never include exception text or the value.
             available = False
-        rows.append(
+        add(
             check(
                 "credential",
                 available,
@@ -229,7 +308,7 @@ async def source_checks(
             )
         )
     if not rows:
-        rows.append(
+        add(
             check(
                 "connection",
                 False,

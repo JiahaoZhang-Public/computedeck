@@ -89,6 +89,17 @@ const en = {
   'msg.plugin_load_failed': 'The plugin could not be imported; check its installed dependencies',
 
   'sources.testConnection': 'Test connection',
+  'sources.checkInterrupted': 'Connection check interrupted. Retry to obtain a complete result.',
+  'sources.checkSteps': 'Connection check steps',
+  'source.check.savedPending':
+    'Settings saved. A successful connection check does not prove collection has recovered; wait for a new collection result below.',
+  'sources.editConnection': 'Edit connection or credential reference',
+  'sources.checkScope':
+    'Checks run on the collection machine. Credentials are never displayed; update secrets in their configured store. Collect again to confirm recovery.',
+  'sources.checkState.ok': 'Passed',
+  'sources.checkState.failed': 'Failed',
+  'sources.checkState.missing': 'Not available',
+  'sources.checkState.checking': 'Checking',
   'sources.checking': 'Checking connection…',
 
   'status.unavailable': 'Unavailable',
@@ -134,6 +145,9 @@ const en = {
     'Cannot reach the local service: {error}. Check that the ComputeDeck service is running.',
   'banner.remoteDown':
     'Cannot reach the service on {server}: {error}. Check the SSH tunnel and the service on the server.',
+  'drawer.unavailable': 'This item is no longer in the current data',
+  'drawer.unavailableHint':
+    'It may have finished or been removed. Close this view to see the latest list.',
   'drawer.job': 'Job',
   'drawer.instance': 'Instance',
 
@@ -280,6 +294,65 @@ const en = {
 
   // Job drawer
   'job.reason': 'Pending reason',
+  'job.submitted': 'Submitted',
+  'job.started': 'Started',
+  'job.waiting': 'Waiting at last check',
+  'job.waitDuration': '{hours}h {minutes}m',
+  'job.schedulerTime': '{time} (scheduler time; timezone not reported)',
+  'job.nextStep': 'Next step',
+  'jobs.col.timing': 'Run / wait time',
+  'job.explain.priority': 'Higher-priority jobs are ahead of this job.',
+  'job.next.priority':
+    'Wait for the scheduler; check priority and fair-share policy with the cluster administrator.',
+  'job.explain.resources': 'The scheduler has not found resources that match the request.',
+  'job.next.resources':
+    'Compare GPU model, count, memory and node constraints with available resources.',
+  'job.explain.dependency': 'This job is waiting for another job.',
+  'job.next.dependency': 'Inspect the dependency jobs and their completion conditions.',
+  'job.explain.dependencyFailed': 'A required dependency cannot be satisfied.',
+  'job.next.dependencyFailed':
+    'Inspect the failed dependency and correct the submission dependency before resubmitting.',
+  'job.explain.begin': 'The requested start time has not arrived.',
+  'job.next.begin': 'Check the requested begin time in the submission options.',
+  'job.explain.hold': 'The job is held by its owner or an administrator.',
+  'job.next.hold': 'Confirm why the hold was set before asking its owner to release it.',
+  'job.explain.array': 'The job array has reached its concurrency limit.',
+  'job.next.array': 'Wait for running array tasks to finish, or review the requested concurrency.',
+  'job.explain.personalLimit': 'Your running jobs have reached an account or per-user limit.',
+  'job.next.personalLimit':
+    'Check your running jobs and quota; compare the room after your queue in Where to run.',
+  'job.explain.requestLimit': 'This request exceeds a per-job policy limit.',
+  'job.next.requestLimit':
+    'Check requested resources and run time against this queue or QoS policy.',
+  'job.explain.groupLimit': 'A shared group quota is currently exhausted.',
+  'job.next.groupLimit': 'Check shared usage; other users may be consuming this quota.',
+  'job.explain.partition': 'The requested partition is unavailable.',
+  'job.next.partition': 'Check partition status or contact the cluster administrator.',
+  'job.explain.nodes': 'Requested nodes are unavailable or reserved.',
+  'job.next.nodes': 'Review node constraints and availability before changing the request.',
+  'job.explain.access': 'The scheduler rejected the account or QoS selection.',
+  'job.next.access': 'Verify the selected account and its allowed QoS with the administrator.',
+  'job.explain.unknown': 'The job is waiting; a specific explanation is not available.',
+  'job.next.unknown':
+    'Check the job ID and any original reason in the scheduler, or ask the administrator.',
+  'job.explain.memory': 'The job exceeded its memory allocation.',
+  'job.next.memory':
+    'Inspect memory usage and logs; reduce the workload or request more memory before retrying.',
+  'job.explain.timeout': 'The job reached its time limit.',
+  'job.next.timeout':
+    'Check for a usable checkpoint and choose a suitable time limit before resuming.',
+  'job.explain.nodeFailure': 'The allocated node failed to run the job reliably.',
+  'job.next.nodeFailure':
+    'Inspect scheduler records and contact the administrator before retrying on that node.',
+  'job.explain.preempted': 'The scheduler preempted the job.',
+  'job.next.preempted':
+    'Check checkpoint and requeue status, then review the queue preemption policy.',
+  'job.explain.cancelled': 'The job was cancelled.',
+  'job.next.cancelled': 'Check who cancelled it and why before deciding to resubmit.',
+  'job.explain.failed': 'The job exited unsuccessfully.',
+  'job.next.failed':
+    'Inspect the exit code and job logs; the scheduler state alone does not identify the application error.',
+  'job.failureReason': 'Failure reason',
   'job.id': 'Job ID',
   'job.cluster': 'Cluster',
   'job.user': 'User',

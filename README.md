@@ -10,7 +10,7 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 [![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
 
-*All screenshots use built-in example data from an earlier preview; the 0.4.0 layout and figures have changed. Click the overview for the 20-second demo.*
+*All screenshots use built-in example data from an earlier preview; the 0.5.0 layout and figures have changed. Click the overview for the 20-second demo.*
 
 ## Features
 
@@ -34,11 +34,13 @@ Overview puts Needs attention and current jobs before the chart. Hidden tabs pau
 browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
 for upgrade details, including possible steps in the history chart.
 
+**0.5.0 — Understand and resolve problems** adds progressive connection checks, job explanations and timestamps, narrow-screen tables, and shareable view state. See the [changelog](CHANGELOG.md).
+
 ## Version preview
 
 Planned work; scope and priorities may change.
 
-- [ ] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
+- [x] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
 - [ ] **v0.6 — Know what changed:** a searchable activity page, deduplicated job and array notifications, attention acknowledgement and snoozing, delivery status, and visible collection gaps.
 - [ ] **v0.7 — Choose resources with confidence:** explainable resource comparisons, cost estimates and usage trends, sustained low-utilization hints, and wait estimates only where history supports them.
 

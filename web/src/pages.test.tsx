@@ -317,7 +317,7 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
       ].map((heading) => heading.replaceAll('&', '&amp;')),
     );
     expect(html.startsWith('<div class="stats">')).toBe(true);
-    expect(html).toContain('class="table jobs-table"');
+    expect(html).toMatch(/class="[^"]*\bjobs-table\b[^"]*"/);
     expect(html).toContain('id="attention"');
     expect(html.indexOf('id="attention"')).toBeLessThan(html.indexOf(`<h2>${t('overview.jobs')}`));
     const groups = overviewGroupsTable(html);

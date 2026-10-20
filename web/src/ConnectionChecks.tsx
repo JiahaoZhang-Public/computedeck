@@ -6,17 +6,20 @@ import type { Localized } from './types';
 
 export interface Diagnostic {
   id: string;
-  state: 'ok' | 'failed' | 'missing';
+  state: 'ok' | 'failed' | 'missing' | 'checking';
+  command?: string;
   label: Localized;
   detail: Localized;
 }
 
 export function DiagnosticRows({ rows }: { rows: Diagnostic[] }) {
   return (
-    <ul className="checklist">
+    <ol className="checklist" aria-label={t('sources.checkSteps')}>
       {rows.map((row) => (
         <li key={row.id} className={row.state}>
-          {row.state === 'ok' ? (
+          {row.state === 'checking' ? (
+            <Loader2 size={16} className="spin" />
+          ) : row.state === 'ok' ? (
             <CheckCircle2 size={16} />
           ) : row.state === 'failed' ? (
             <XCircle size={16} />
@@ -24,12 +27,16 @@ export function DiagnosticRows({ rows }: { rows: Diagnostic[] }) {
             <MinusCircle size={16} />
           )}
           <span>
-            <strong>{localized(row.label)}</strong>
+            <strong>
+              {localized(row.label)}{' '}
+              <small className="check-state">{t(`sources.checkState.${row.state}`)}</small>
+            </strong>
             {Object.keys(row.detail).length > 0 && <small>{localized(row.detail)}</small>}
+            {row.command && <code className="diagnostic-command">{row.command}</code>}
           </span>
         </li>
       ))}
-    </ul>
+    </ol>
   );
 }
 
@@ -38,7 +45,13 @@ export function ConnectionChecks({ sourceId }: { sourceId: string }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let closed = false;
-    void api<Diagnostic[]>(`/sources/${encodeURIComponent(sourceId)}/check`, {})
+    const controller = new AbortController();
+    void api<Diagnostic[]>(`/sources/${encodeURIComponent(sourceId)}/check`, {}, 'POST', {
+      signal: controller.signal,
+      onRows: (next) => {
+        if (!closed) setRows(next);
+      },
+    })
       .then((result) => {
         if (!closed) setRows(result);
       })
@@ -47,18 +60,23 @@ export function ConnectionChecks({ sourceId }: { sourceId: string }) {
       });
     return () => {
       closed = true;
+      controller.abort();
     };
   }, [sourceId]);
-  if (error)
-    return (
-      <p className="red-text" role="alert">
-        {error}
-      </p>
-    );
-  if (rows) return <DiagnosticRows rows={rows} />;
   return (
-    <p>
-      <Loader2 size={16} className="spin" /> {t('sources.checking')}
-    </p>
+    <>
+      {rows && <DiagnosticRows rows={rows} />}
+      {error ? (
+        <p className="red-text" role="alert">
+          {error}
+        </p>
+      ) : (
+        !rows && (
+          <p>
+            <Loader2 size={16} className="spin" /> {t('sources.checking')}
+          </p>
+        )
+      )}
+    </>
   );
 }

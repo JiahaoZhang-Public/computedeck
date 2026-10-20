@@ -39,7 +39,7 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
       <Panel title={t('usage.prices')}>
         {data.instances.length ? (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table stack-on-phone">
               <thead>
                 <tr>
                   <th>{t('cloud.col.instance')}</th>
@@ -55,14 +55,14 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
                     <td>
                       <strong>{item.name}</strong>
                     </td>
-                    <td>{item.platform}</td>
-                    <td>
+                    <td data-label={t('usage.col.platform')}>{item.platform}</td>
+                    <td data-label={t('clusters.col.state')}>
                       <Status state={item.state} />
                     </td>
-                    <td className="num">
+                    <td className="num" data-label={'GPU'}>
                       {item.gpu_count ?? '?'} × {item.gpu_type || 'GPU'}
                     </td>
-                    <td className="num">
+                    <td className="num" data-label={t('cloud.col.price')}>
                       {runningPrice(item) == null
                         ? '—'
                         : `${money(runningPrice(item), item.currency)}/h`}

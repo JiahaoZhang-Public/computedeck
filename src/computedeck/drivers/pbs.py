@@ -296,6 +296,9 @@ def _job(job_id: str, job: dict[str, Any], state: str, source: dict[str, Any]) -
         "cpu_count": integer(resources.get("ncpus")),
         "node": _hosts(job.get("exec_host")),
         "elapsed": _elapsed(job),
+        # qstat ctime strings have no timezone; preserve their scheduler-local meaning.
+        "submitted_at": job.get("qtime") or None,
+        "started_at": job.get("stime") if state != "PENDING" else None,
         "reason": None,
         "gpu_utilization": None,
         "cpu_utilization": None,
