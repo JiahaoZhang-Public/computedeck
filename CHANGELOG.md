@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.5.1 (2026-10-20)
+
+- Recognize both `gres:gpu` and `gres/gpu` in Slurm job requests, including typed GPUs and per-node counts when GPU accounting is unavailable. Missing resource information remains unknown.
+
+## 0.5.0 (2026-10-20)
 
 - Show connection-check progress as each step runs, with specific guidance for authentication, host identity, network and port failures. Closing the check cancels its request. Existing JSON diagnostics remain available.
 - Keep connection and credential-reference edits open until a fresh collection result arrives; saving settings and resolving a credential are not treated as proof of successful collection.

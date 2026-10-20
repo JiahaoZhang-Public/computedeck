@@ -113,6 +113,8 @@ QOS=debug(2)
         ("gres/gpu:a100=2,gres/gpu:h100=4", 6),
         ("gpu:a100:4(S:0-1),gpu:h100:2(IDX:0,1)", 6),
         ("gres/gpu:2", 2),
+        ("gres:gpu:4", 4),
+        ("gres:gpu:a100:2,gres:gpu:h100:4", 6),
         ("cpu=4,mem=8G,node=1", 0),
         ("gres/gpu=0", 0),
         ("gpu:N/A", None),
@@ -152,6 +154,23 @@ def test_jobs_use_total_tres_then_per_node_and_deduplicate() -> None:
         **{"tres-alloc": "N/A", "tres-per-node": "N/A", "tres-per-job": "gres/gpu:2"}
     )
     assert slurm.parse_jobs(per_job, SOURCE)[0]["gpu_count"] == 2
+
+
+@pytest.mark.parametrize("prefix", ["gres/gpu", "gres:gpu"])
+def test_jobs_accept_both_squeue_gres_prefixes_without_gpu_accounting(prefix: str) -> None:
+    per_node = job_line(**{"tres-alloc": "cpu=16,node=2", "tres-per-node": f"{prefix}:a100:4"})
+    job = slurm.parse_jobs(per_node, SOURCE)[0]
+    assert job["gpu_count"] == 8
+    assert job["gpu_type"] == "a100"
+    per_job = job_line(
+        **{
+            "State": "PENDING",
+            "tres-alloc": "cpu=16,node=2",
+            "tres-per-node": "N/A",
+            "tres-per-job": f"{prefix}:4",
+        }
+    )
+    assert slurm.parse_jobs(per_job, SOURCE)[0]["gpu_count"] == 4
 
 
 def test_job_gpu_count_without_gpu_accounting_is_unknown() -> None:
