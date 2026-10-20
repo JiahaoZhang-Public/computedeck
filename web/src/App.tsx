@@ -38,7 +38,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, partialCount } from './domain';
+import { dateTime, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf } from './groups';
@@ -158,7 +158,7 @@ export default function App() {
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
-      ? data?.jobs.find((item) => item.id === params.get('job'))
+      ? data && uniqueJobs(data.jobs).find((item) => item.id === params.get('job'))
       : null;
   const instance = params.get('instance')
     ? data?.instances.find((item) => item.id === params.get('instance'))

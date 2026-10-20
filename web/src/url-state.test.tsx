@@ -146,3 +146,10 @@ it('links to a failed attempt separately from the current job list', async () =>
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.nextStep'));
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain(failed.exit_code!);
 });
+
+it('uses the same deduplicated job record in the list and detail', async () => {
+  const job = data.jobs[0];
+  data = { ...data, jobs: [...data.jobs, { ...job, name: 'Current observation' }] };
+  await render(`/?demo=true#/jobs?job=${encodeURIComponent(job.id)}`);
+  expect(container.querySelector('#detail-title')?.textContent).toBe('Current observation');
+});
