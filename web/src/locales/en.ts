@@ -384,6 +384,7 @@ const en = {
     'Cluster allocation includes other accounts. QoS limits and your access still constrain where you can run.',
   'clusters.qosNote':
     'Limits (QoS, queue or resource quota) are what the scheduler shows for this login. They are maxima, not free capacity, and access is not verified.',
+  'clusters.qosEntries': '{count} entries',
   'clusters.qosLimit': '≤ {count} GPU',
   'clusters.col.account': 'Account',
   'clusters.col.sshHost': 'SSH host',

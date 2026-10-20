@@ -2855,3 +2855,11 @@ td.wrap {
     display: none;
   }
 }
+
+.account-qos summary {
+  color: var(--accent);
+  cursor: pointer;
+}
+.account-qos[open] summary {
+  margin-bottom: 6px;
+}

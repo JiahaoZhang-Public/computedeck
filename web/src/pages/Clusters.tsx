@@ -293,27 +293,30 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
         </td>
         <td data-label={t('clusters.col.qos')}>
           {source.qos.length ? (
-            <span className="tags">
-              {source.qos.map((qos) => {
-                const limit = qosGpuLimit(qos);
-                return (
-                  <span
-                    key={qos.name}
-                    className="tag"
-                    title={`${JSON.stringify(qos.limits)} · ${qos.origin}`}
-                  >
-                    {qos.name}
-                    {limit != null && (
-                      <span className="tag-detail">
-                        {limit === Infinity
-                          ? t('clusters.qosNoLimit')
-                          : t('clusters.qosLimit', { count: limit })}
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
-            </span>
+            <details className="account-qos">
+              <summary>{t('clusters.qosEntries', { count: source.qos.length })}</summary>
+              <span className="tags">
+                {source.qos.map((qos) => {
+                  const limit = qosGpuLimit(qos);
+                  return (
+                    <span
+                      key={qos.name}
+                      className="tag"
+                      title={`${JSON.stringify(qos.limits)} · ${qos.origin}`}
+                    >
+                      {qos.name}
+                      {limit != null && (
+                        <span className="tag-detail">
+                          {limit === Infinity
+                            ? t('clusters.qosNoLimit')
+                            : t('clusters.qosLimit', { count: limit })}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+            </details>
           ) : (
             <span className="muted">—</span>
           )}

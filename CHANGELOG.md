@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Keep cluster account details readable when a login exposes many QoS entries. Wrap queue labels within their column and preserve the narrow-screen card layout.
+- Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.
 
 ## 0.5.1 (2026-10-20)
 
