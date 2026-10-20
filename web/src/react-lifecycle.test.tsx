@@ -583,9 +583,10 @@ it.each(['en', 'zh-CN'] as const)(
 );
 
 it('panel collection actions only reload example data', async () => {
+  const data = serverDemo();
   window.history.replaceState(null, '', '/?demo=true');
   request.mockImplementation(async (path) => {
-    if (path.startsWith('/dashboard')) return serverDemo();
+    if (path.startsWith('/dashboard')) return data;
     if (path === '/settings') return { language: 'en' };
     return [];
   });
