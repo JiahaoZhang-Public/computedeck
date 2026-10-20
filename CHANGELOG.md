@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.
+
 ## 0.5.1 (2026-10-20)
 
 - Recognize both `gres:gpu` and `gres/gpu` in Slurm job requests, including typed GPUs and per-node counts when GPU accounting is unavailable. Missing resource information remains unknown.

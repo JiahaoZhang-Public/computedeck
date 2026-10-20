@@ -2834,3 +2834,32 @@ td.wrap {
   min-width: 0;
   white-space: normal;
 }
+
+/* Long QoS lists must wrap within their column, not squeeze account details. */
+.cluster-accounts-table {
+  table-layout: fixed;
+}
+.cluster-accounts-table .with-mark {
+  max-width: 100%;
+}
+.cluster-accounts-table th {
+  overflow-wrap: normal;
+}
+.cluster-accounts-table .tag {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 900px) {
+  .cluster-accounts-table colgroup {
+    display: none;
+  }
+}
+
+.account-qos summary {
+  color: var(--accent);
+  cursor: pointer;
+}
+.account-qos[open] summary {
+  margin-bottom: 6px;
+}

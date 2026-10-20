@@ -357,6 +357,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'clusters.note': '集群分配包含其他账户。QoS 限制和你的访问权限仍会限制可运行的位置。',
   'clusters.qosNote':
     '限制（QoS、队列或资源配额）是调度器对这个登录身份显示的上限，不是空闲容量，也未验证是否有权使用。',
+  'clusters.qosEntries': '{count} 项',
   'clusters.qosLimit': '≤ {count} GPU',
   'clusters.col.account': '账户',
   'clusters.col.sshHost': 'SSH 主机别名',

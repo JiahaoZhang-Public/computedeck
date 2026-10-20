@@ -146,7 +146,17 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
         }
       >
         <div className="table-wrap">
-          <table className="table stack-on-phone">
+          <table className="table stack-on-phone cluster-accounts-table">
+            <colgroup>
+              <col style={{ width: 170 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 110 }} />
+              <col />
+              <col style={{ width: 76 }} />
+              <col style={{ width: 100 }} />
+              <col style={{ width: 104 }} />
+              <col style={{ width: 96 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>{t('clusters.col.account')}</th>
@@ -283,27 +293,30 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
         </td>
         <td data-label={t('clusters.col.qos')}>
           {source.qos.length ? (
-            <span className="tags">
-              {source.qos.map((qos) => {
-                const limit = qosGpuLimit(qos);
-                return (
-                  <span
-                    key={qos.name}
-                    className="tag"
-                    title={`${JSON.stringify(qos.limits)} · ${qos.origin}`}
-                  >
-                    {qos.name}
-                    {limit != null && (
-                      <span className="tag-detail">
-                        {limit === Infinity
-                          ? t('clusters.qosNoLimit')
-                          : t('clusters.qosLimit', { count: limit })}
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
-            </span>
+            <details className="account-qos">
+              <summary>{t('clusters.qosEntries', { count: source.qos.length })}</summary>
+              <span className="tags">
+                {source.qos.map((qos) => {
+                  const limit = qosGpuLimit(qos);
+                  return (
+                    <span
+                      key={qos.name}
+                      className="tag"
+                      title={`${JSON.stringify(qos.limits)} · ${qos.origin}`}
+                    >
+                      {qos.name}
+                      {limit != null && (
+                        <span className="tag-detail">
+                          {limit === Infinity
+                            ? t('clusters.qosNoLimit')
+                            : t('clusters.qosLimit', { count: limit })}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+            </details>
           ) : (
             <span className="muted">—</span>
           )}
