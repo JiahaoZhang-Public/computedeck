@@ -45,7 +45,7 @@ When an optional command fails, its data is left as it was and the source shows 
 |---|---|
 | `id` | `<cluster id>:<jobid>`, or `<jobid>[<jobindex>]` for an array element |
 | `state` | `STAT`: PEND, PSUSP, WAIT → `PENDING`; RUN → `RUNNING`; USUSP, SSUSP → `SUSPENDED`; PROV → `CONFIGURING`; UNKWN → `UNKNOWN`. DONE and EXIT are not listed. |
-| `reason` | `pend_reason` of pending jobs |
+| `reason` | `Held` for jobs suspended while pending (`PSUSP`); other pending jobs carry `pend_reason` |
 | `gpu_count` | `gpu_num`. A running or suspended job with `-` for both `gpu_num` and `gpu_alloc` counts as `0`; otherwise a missing count is unknown |
 | `cpu_count` | `slots` |
 | `node` | hosts of `exec_host` |

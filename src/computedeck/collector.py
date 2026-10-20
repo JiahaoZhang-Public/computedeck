@@ -13,12 +13,15 @@ from .errors import SourceError, message
 from .hardware import probe_instance
 from .plugins import Runtime
 from .ssh_config import write_config
-from .store import Store, now
+from .store import PROBE_INTERVAL, Store, manual_state, now
 
 logger = logging.getLogger("computedeck")
 # Settings whose change means an in-flight result belongs to an old connection.
 CONNECTION_KEYS = ("ssh_alias", "enabled", "credential", "username", "options", "node")
 PERCENTAGES = ("gpu_utilization", "cpu_utilization", "memory_utilization")
+# What a check may change on an instance a source lists. The source stays the authority for
+# its inventory, its GPUs in use and when it was listed.
+LISTED_PROBE_FIELDS = ("ssh_status", "ssh_error", "gpu_observed_count", *PERCENTAGES)
 
 
 def measured(instance_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -71,14 +74,25 @@ class Collector:
         self.spawn(self.collect(source_id))
         return True
 
+    def clear_inactive_commit_errors(self) -> None:
+        """Deleted and disabled sources no longer have a commit to retry."""
+        enabled = {source["id"] for source in self.store.sources() if source["enabled"]}
+        prefix = "collector:commit:"
+        for key in list(self.runtime.loop_errors):
+            if key.startswith(prefix) and key.removeprefix(prefix) not in enabled:
+                self.runtime.loop_errors.pop(key, None)
+
     async def collect(self, source_id: str) -> None:
         try:
             source = self.store.source(source_id)
-            if not source:
+            if not source or not source["enabled"]:
+                self.clear_inactive_commit_errors()
                 return
             async with self.runtime.semaphore, self.runtime.cluster_lock(source["cluster_id"]):
                 await self._collect(source_id)
-        except Exception:
+                self.runtime.loop_errors.pop(f"collector:commit:{source_id}", None)
+        except Exception as error:
+            self.runtime.report(f"collector:commit:{source_id}", error)
             logger.exception("Collection could not be committed for %s", source_id)
         finally:
             self.pending.discard(source_id)
@@ -115,6 +129,11 @@ class Collector:
                 error=None,
                 failures=0,
                 capabilities=batch.capabilities,
+                capabilities_seen=sorted(
+                    set(source.get("capabilities_seen", []))
+                    | set(source.get("capabilities", []))
+                    | set(batch.capabilities)
+                ),
                 warnings=batch.warnings,
                 cluster_state=batch.cluster_state,
             )
@@ -197,15 +216,29 @@ class Collector:
         }
 
         def persist(updates: dict[str, Any]) -> dict[str, Any]:
-            current = self._instance(instance_id)
+            current = (
+                next(
+                    (row for row in self.store.manual_instances() if row["id"] == instance_id), None
+                )
+                if instance.get("manual")
+                else self._instance(instance_id)
+            )
             if not current or any(current.get(key) != value for key, value in endpoint.items()):
                 raise ProbeConflict("endpoint_changed")
-            current.update(updates, last_probe_attempt=attempt)
             if instance.get("manual"):
+                current.update(updates, last_probe_attempt=attempt)
                 self.store.save_instance(current)
+                return {
+                    **current,
+                    "source_id": "manual",
+                    "manual": True,
+                    "state": manual_state(current),
+                }
             else:
+                listed = {key: updates[key] for key in LISTED_PROBE_FIELDS if key in updates}
+                current.update(listed, last_probe_attempt=attempt)
                 self.store.update_cloud_metrics(
-                    instance_id, endpoint, {**updates, "last_probe_attempt": attempt}
+                    instance_id, endpoint, {**listed, "last_probe_attempt": attempt}
                 )
             return current
 
@@ -243,7 +276,9 @@ class Collector:
         while True:
             try:
                 self._schedule()
-            except Exception:
+                self.runtime.loop_errors.pop("collector:schedule", None)
+            except Exception as error:
+                self.runtime.report("collector:schedule", error)
                 # One bad row must not stop collection for every other source.
                 logger.exception("Scheduling pass failed")
             await asyncio.sleep(15)
@@ -259,8 +294,7 @@ class Collector:
                 attempted = instance.get("last_probe_attempt")
                 if (
                     not attempted
-                    or (datetime.now(UTC) - datetime.fromisoformat(attempted)).total_seconds()
-                    >= 600
+                    or datetime.now(UTC) - datetime.fromisoformat(attempted) >= PROBE_INTERVAL
                 ):
                     self.spawn(self._auto_probe(instance["id"]))
 

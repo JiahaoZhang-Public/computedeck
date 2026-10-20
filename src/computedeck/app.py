@@ -2,6 +2,7 @@
 
 import asyncio
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -24,7 +26,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import attention, auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .errors import SourceError, message
@@ -314,12 +316,34 @@ def create_app(
         return reply
 
     @app.get("/api/dashboard")
-    async def dashboard(demo: bool = False) -> dict[str, Any]:
+    async def dashboard(demo: bool = False, since: str | None = None) -> Response:
         if demo:
-            return demo_dashboard()
-        result = store().dashboard()
-        result["refreshing"] = bool(collector.pending)
-        return result
+            result = demo_dashboard()
+        else:
+            result = store().dashboard()
+            result["refreshing"] = bool(collector.pending)
+            result["collecting"] = sorted(collector.pending)
+            result["attention"] = attention.derive(
+                result,
+                [drivers.describe(name) for name in drivers.names()],
+                now=datetime.now(UTC),
+                loop_errors=runtime.loop_errors,
+                unreadable_rows=store().unreadable_rows(),
+                plugin_status={
+                    context.id: {**context.status(), "enabled": context.enabled}
+                    for context in contexts
+                },
+            )
+        # Hash the complete response, including time-derived state and pending work.
+        # Reuse these bytes so the large dashboard is serialized only once.
+        body = bytes(EncodableJSON(jsonable_encoder(result)).body)
+        token = hashlib.sha256(body).hexdigest()[:16]
+        if since == token:
+            return EncodableJSON({"unchanged": True, "token": token})
+        return Response(
+            content=body[:-1] + f',"token":"{token}"}}'.encode(),
+            media_type="application/json",
+        )
 
     @app.get("/api/history")
     async def history(
@@ -387,20 +411,30 @@ def create_app(
         source.setdefault("node", "")
         connection_changed = any(
             key in changes and changes[key] != source.get(key)
-            for key in ("ssh_alias", "credential", "username", "options", "node", "enabled")
+            for key in ("ssh_alias", "credential", "username", "options", "node")
         )
+        enabled_changed = "enabled" in changes and changes["enabled"] != source["enabled"]
         source.update(changes)
         check_node(source)
         validate_source(source)
         source["next_due_at"] = now()
-        if connection_changed:
+        if connection_changed or enabled_changed:
             source.update(
                 status="ready" if source["enabled"] else "unconfigured",
-                last_success=None,
                 error=None,
                 failures=0,
+                last_success=None,
+            )
+        if connection_changed:
+            source.update(
+                last_success=None,
+                capabilities=[],
+                capabilities_seen=[],
+                warnings=[],
+                cluster_state="unknown",
             )
         store().save_source(source)
+        collector.clear_inactive_commit_errors()
         return store().source(source_id) or source
 
     def check_node(source: dict[str, Any]) -> None:
@@ -470,6 +504,7 @@ def create_app(
     async def delete_source(source_id: str) -> dict[str, bool]:
         if not store().delete_source(source_id):
             raise HTTPException(404, message("source_not_found"))
+        collector.clear_inactive_commit_errors()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
@@ -531,16 +566,21 @@ def create_app(
                 502, message("probe_failed", detail=str(error)[:300] or type(error).__name__)
             ) from None
 
-    def ssh_state() -> dict[str, Any]:
+    def ssh_installed() -> bool:
         path = data_dir / "computedeck.conf"
-        config = render_config(store().dashboard()["instances"], strict=False)
         user_config = Path.home() / ".ssh/config"
         prefix = f"# ComputeDeck managed endpoints\nInclude {quote_path(path.resolve())}\n\n"
         try:
-            installed = user_config.read_text(encoding="utf-8").startswith(prefix)
+            return user_config.read_text(encoding="utf-8").startswith(prefix)
         except (OSError, UnicodeError):
-            installed = False
-        return {"config": config, "path": str(path), "installed": installed}
+            return False
+
+    def ssh_state() -> dict[str, Any]:
+        return {
+            "config": render_config(store().dashboard()["instances"], strict=False),
+            "path": str(data_dir / "computedeck.conf"),
+            "installed": ssh_installed(),
+        }
 
     @app.get("/api/ssh/config")
     async def ssh_config() -> dict[str, Any]:
@@ -567,6 +607,8 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
+        sources = store().sources()
+        enabled = {source["id"] for source in sources if source["enabled"]}
         return {
             "status": "ok",
             "application": "ComputeDeck",
@@ -575,12 +617,17 @@ def create_app(
             "started_at": started,
             "database_path": str(store().path),
             "polling": polling,
-            "ssh_installed": ssh_state()["installed"],
-            "source_count": len(store().sources()),
+            "ssh_installed": ssh_installed(),
+            "source_count": len(sources),
             "plugins": {
                 context.id: {**context.status(), "enabled": context.enabled} for context in contexts
             },
-            "background_errors": runtime.loop_errors,
+            "background_errors": {
+                key: error
+                for key, error in runtime.loop_errors.items()
+                if not key.startswith("collector:commit:")
+                or key.removeprefix("collector:commit:") in enabled
+            },
             "unreadable_rows": store().unreadable_rows(),
         }
 

@@ -1,7 +1,8 @@
+import { serverDashboard } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DiagnosticRows } from './ConnectionChecks';
-import { sourceAttentionTone, sourceState } from './labels';
+import { sourceState } from './labels';
 import { PlanPage } from './pages/Plan';
 import { setLocale } from './i18n';
 import { groupsOf } from './groups';
@@ -31,12 +32,44 @@ describe('optional capabilities', () => {
   it('keeps missing history and inventory out of the anomaly count', () => {
     const partial = {
       ...source,
-      warnings: [{ code: 'history_unavailable' }, { code: 'instances_unavailable' }],
+      capabilities: ['jobs'],
+      warnings: [{ code: 'history_unavailable' }, { code: 'nodes_unavailable' }],
     };
-    expect(sourceAttentionTone(partial)).toBe('gray');
+    expect(
+      serverDashboard({
+        sources: [partial],
+        jobs: [],
+        instances: [],
+        nodes: [],
+        history: [],
+        mode: 'live',
+        updated_at: null,
+        refreshing: false,
+      }).attention,
+    ).toEqual([]);
     expect(sourceState(partial)).toBe('ready');
-    expect(sourceAttentionTone({ ...partial, stale: true })).toBe('amber');
-    expect(sourceAttentionTone({ ...partial, error: { code: 'ssh_failed' } })).toBe('red');
+    const stale = serverDashboard({
+      sources: [{ ...partial, stale: true }],
+      jobs: [],
+      instances: [],
+      nodes: [],
+      history: [],
+      mode: 'live',
+      updated_at: null,
+      refreshing: false,
+    }).attention!;
+    expect(stale.map((item) => [item.kind, item.severity])).toEqual([['source_stale', 'warn']]);
+    const failed = serverDashboard({
+      sources: [{ ...partial, failures: 2, error: { code: 'ssh_failed' } }],
+      jobs: [],
+      instances: [],
+      nodes: [],
+      history: [],
+      mode: 'live',
+      updated_at: null,
+      refreshing: false,
+    }).attention!;
+    expect(failed.map((item) => [item.kind, item.severity])).toEqual([['source_failed', 'error']]);
   });
   it('renders the same failure and repair messages returned by doctor', () => {
     setLocale('en');
@@ -58,8 +91,8 @@ describe('optional capabilities', () => {
   });
 });
 
-it('keeps unknown and unassociated QoS options in closed disclosures', () => {
-  const data: Dashboard = {
+it('shows unknown access inline and keeps only unassociated options in a closed disclosure', () => {
+  const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [
       {
@@ -77,13 +110,16 @@ it('keeps unknown and unassociated QoS options in closed disclosures', () => {
     history: [],
     updated_at: null,
     refreshing: false,
-  };
+  });
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   const html = renderToStaticMarkup(<PlanPage ctx={ctx} />);
   const disclosures = [...html.matchAll(/<details[^>]*>(.*?)<\/details>/g)];
-  expect(disclosures).toHaveLength(2);
+  expect(disclosures).toHaveLength(1);
   expect(disclosures.every((match) => !match[0].match(/<details[^>]*\sopen/))).toBe(true);
-  expect(disclosures[0][1]).toContain('Unverified access (1)');
-  expect(disclosures[1][1]).toContain('Not associated (1)');
+  expect(disclosures[0][1]).toContain('Not associated (1)');
+  expect(disclosures[0][1]).toContain('denied');
+  expect(disclosures[0][1]).not.toContain('unverified');
+  expect(html.slice(0, html.indexOf('<details'))).toContain('unverified');
+  expect(html.slice(0, html.indexOf('<details'))).toContain('Access not checked');
   expect(html.slice(0, html.indexOf('<details'))).toContain('allowed');
 });

@@ -16,6 +16,15 @@ surface; other modules may change between releases.
 A plugin runs inside the service with the permissions of the user who runs it. Install
 only plugins you trust, and say plainly in your plugin what it does.
 
+## Compatibility with 0.4.0
+
+`PLUGIN_API = 1`, `WEB_API = 1`, the database schema version, route IDs and documented
+event types are unchanged. Dashboard additions are described below; callers that do
+not opt into conditional polling still receive a full response. Plugins supporting
+both 0.3 and 0.4 should declare `requires=">=0.3,<0.5"` and widen matching package
+dependencies and marketplace entries. A plugin that requires the new dashboard fields
+should require `>=0.4,<0.5`, or handle their absence on 0.3.
+
 ## Quick start
 
 While packages are unreleased, follow the [local plugin development guide](https://github.com/JiahaoZhang-Public/computedeck-plugins/blob/main/CONTRIBUTING.md#create-a-plugin)
@@ -45,7 +54,7 @@ plugin = Plugin(
     permissions=({"en": "posts failed jobs to the lab chat"},),
     settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
     default_enabled=False,  # start off until the owner turns it on
-    requires=">=0.3,<0.4",  # ComputeDeck versions it supports
+    requires=">=0.3,<0.5",  # ComputeDeck versions it supports
     api=1,  # the plugin API it was written for
     page="lab-alerts",  # the page its web bundle adds, if any
     web=Path(__file__).parent / "web",  # the built web bundle, if any
@@ -90,7 +99,7 @@ what follows. Nothing it registers runs or resolves until the plugin is switched
 | `ctx.on_event(handler, types)` | Receive events while on (see below). |
 | `ctx.background(loop)` | A coroutine run while the plugin is on; restarted after a crash, stopped when switched off. |
 | `ctx.on_startup(fn)`, `ctx.on_shutdown(fn)` | Prepare and release resources, e.g. tables in `ctx.store.db`. Startup runs once, when the plugin is first on (at service start or when switched on); shutdown runs at service stop if startup ran. |
-| `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. |
+| `ctx.health` | A function returning a small dict, shown in the Toolbox and `/api/health` while the plugin is on. Also called synchronously on every `/api/dashboard` request, so it must be cheap. Exceptions and non-dict results are reported as plugin health errors. |
 | `ctx.credential_scheme(name, resolver)` | Add a credential reference scheme, e.g. `vault:path`. While the plugin is off, its references fail with a message saying so. |
 | `ctx.runtime.cluster_lock(id)`, `ctx.runtime.semaphore` | Share the collector's connection budget when you reach clusters. |
 | `ctx.data_dir` | Private files in `plugins/<id>/` below the service data directory (mode 700). |
@@ -218,6 +227,27 @@ Override `account(api, source)` to return `Account(balance=...)` when the provid
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
 
+Drivers emitting `reported_running` or other 0.4-only SDK values must declare
+`requires=">=0.4,<0.5"`, or use `desired_running` on 0.3.
+
+`CloudInstance.state` also accepts `reported_running`: the provider's normal running
+report without an observation of readiness, as with RunPod REST. It can still be starting
+its image; it is not proof that SSH or the workload is ready. `desired_running` retains
+its meaning for transitional or intended running states (for example EC2 pending).
+
+The allocation lifecycle is defined in `drivers/cloud.py` by `INSTANCE_LIFECYCLE` and
+`instance_lifecycle(state)`, mirrored in the web app with a parity test:
+
+| Allocation lifecycle | Instance states |
+| --- | --- |
+| `held` | `running`, `reported_running` |
+| `not_held` | `stopped`, `terminated`, `deleted`, `desired_stopped`, `desired_terminated` |
+| `unknown` | Everything else, including `desired_running`, `unknown`, `missing` and absent states |
+
+Held instances count their listed `gpu_count`; a missing count or stale source remains
+unknown. SSH checks do not replace a provider's allocation with a process count. Existing
+stored states are unchanged until the next collection. `PLUGIN_API` and `WEB_API` remain 1.
+
 ## Notification channels
 
 The Notifications tool sends to email and webhooks. A plugin can add a channel kind:
@@ -265,7 +295,7 @@ register({
   id: 'lab-alerts',
   requires: 'lab-alerts',            // hidden while this server plugin is off
   pages: [{ id: 'lab-alerts', label: { en: 'Lab alerts' }, icon: Icon, render: (props) => <Page {...props} /> }],
-  overview: OverviewCard,             // optional: beside the overview chart
+  overview: OverviewCard,             // optional: beside the 24-hour chart at the bottom of the Overview
   settings: SettingsPanel,            // optional: on the Settings page
   banner: Banner,                     // optional: above every page
 });
@@ -279,6 +309,124 @@ navigate }`. `computedeck plugin new --web` sets up the build: Vite in library m
 output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
 `ComputeDeck.jsxRuntime`. Build the bundle before building the wheel, and include the
 folder with `artifacts` (hatch) or package data.
+
+While example data is on, the host's `request` rejects every non-GET request before
+fetching, except the access-token check (`POST /session`). This includes requests
+from Notify, Chat and plugins. File uploads use the same guard. Reads still return
+each tool's own settings and data; the banner says so. Plugins must use the supplied
+`request` for API calls. This browser safeguard does not sandbox plugin code or
+pause the service's background collectors. Example resource IDs use the `example:`
+namespace; example data is never stored.
+
+`request(path, body?, method?)` defaults to GET without a body and POST with one.
+An explicit method is honored even without a body, normalized to uppercase, and
+every non-GET request includes `X-ComputeDeck: 1`. Turning example mode on adds
+`?demo=true` to the URL; turning it off removes that parameter. Either change closes
+open dialogs and drawers.
+
+## Instance observations
+
+Dashboard instance rows can carry `last_probe_attempt`, independently of the provider
+listing's `observed_at`. The last `ssh_status`, `ssh_error` and check time survive a
+listing with the same host, port and user, until the provider reports the instance
+released. Provider allocation fields are not overwritten by an SSH check.
+
+Hand-added rows carry `gpu_allocated` (GPUs with compute processes, or null) and
+`probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
+Their dashboard `state` is `running` while a successful check is less than twenty
+minutes old, otherwise `unknown`. Use `summary` for totals: typed-in GPU inventory
+is not evidence of use, and hand-added machines with monitoring off are excluded.
+
+## Dashboard summaries
+
+`GET /api/dashboard` (including example data) adds `summary`. Existing dashboard
+keys and `WEB_API = 1` remain unchanged. The summary contains fleet figures and the
+same figures under `groups[cluster_id]` (or `platform:<lowercase platform>` for
+hand-added machines) and `sources[source_id]`:
+
+- `allocated`, `requested`, `running`, `pending` are complete totals or `null`.
+  `known_allocated`, `known_requested`, `known_running`, `known_pending` are their
+  observed subtotals. A null total must never be displayed as zero.
+- `unmeasured` and `queued_unmeasured` name missing allocation and queue evidence as
+  `{subject: {kind: "source" | "instance", id, name}, reason: {code}}`. Reason codes
+  have English and Chinese translations. `unmonitored` counts excluded hand-added
+  machines with monitoring off.
+- `utilization` is GPU-weighted, with `covered` measured GPUs. `cpu_utilization` and
+  `memory_utilization` are means of available samples. Provider allocation and SSH
+  sample freshness are independent.
+- `nodes` gives `capacity`, `usable`, `known_usable`, `unavailable` GPU counts,
+  allocation and unallocated GPUs **on usable nodes**, node counts, and the oldest
+  observation. `usable` is null when node health is partly unknown; `known_usable`
+  preserves the subtotal on known usable nodes, displayed as a lower bound.
+  `observed_at` is the oldest contributing observation.
+  Only enabled, current inventories contribute.
+  Each dashboard node also gains `health: "usable" | "unavailable" | "unknown"`.
+- `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the
+  fleet-level `summary.jobs` includes `current_ids`, `listed_ids`, `running_ids` and
+  `pending_ids`; these lists are not repeated under groups or sources. The running
+  and pending IDs select the corresponding tabs from listed jobs using the server's
+  state rules. Listed and tab IDs include retained stale jobs; counts exclude those rows.
+
+`unknown_allocation_sources` retains the history coverage count: provider instances
+share their login's missing count; unmeasured hand-added machines count individually.
+The summary does not add cost accounting or failure-history coverage.
+
+## Dashboard freshness
+
+`GET /api/dashboard` also adds `as_of`, `behind` and `collecting`:
+
+- `as_of` is the oldest enabled source's `last_success`, or null if any enabled
+  source has never succeeded (also null when none are enabled). Disabled sources
+  and manual probes do not contribute. `updated_at` keeps its previous meaning.
+- `behind` lists enabled source IDs without current successful collection, using
+  the same freshness rule as the summary, without requiring a specific capability.
+- `collecting` lists pending source IDs, sorted. `refreshing` remains unchanged.
+  Refresh may still enqueue sources that are not already pending.
+
+Source rows also expose `next_due_at` and `failures` for retry scheduling. A pending
+source may still be queued; only `status: "syncing"` means collection has started.
+
+The optional health fields `background_errors` and `unreadable_rows` are now typed
+for web plugins. Collector scheduling errors use `collector:schedule`; commit
+errors use `collector:commit:<source_id>`. A clean scheduling pass or a successful
+commit for that same source clears its error. Commit errors are also cleared when
+the source is deleted or disabled. Unreadable rows are reported by table; consult
+the service log for details.
+
+## Dashboard attention
+
+`GET /api/dashboard` adds an `attention` list, also present in example data. It is
+computed on read, without stored inbox state or new events. Each item has `key`,
+`kind`, `subject: {kind, id, name}`, `severity` (`error` or `warn`), a translatable
+`message`, all relevant `details`, nullable `since`, `observed_at` and `next_attempt` times, and an
+`action` (`diagnose`, `instance`, `health` or `toolbox`). All attention counts use
+this list's length.
+
+`since` is the last success for `source_failed` and `source_stale` (no good data
+since that collection), otherwise null. `observed_at` is the latest observation,
+not the incident onset: the latest attempt for collection failures, the last
+success for stale data and source conditions, the SSH check time, or the recorded
+loop error time. Both fields are null for unreadable rows and plugin health errors.
+Capability regressions include the machine-readable `capability` and the driver's
+check `command` in the message; the UI displays the command.
+
+Kinds are `source_failed`, `source_stale`, `cluster_unavailable`,
+`cluster_degraded`, `capability_regressed`, `partial_data`, `instance_ssh_failed`,
+`service_loop_failed`, `unreadable_rows` and `plugin_error`. Plugin errors use the
+existing health report's `error` key; plugins do not raise attention items.
+A first collection failure produces a warning item; repeated failures or stale
+data escalate it to an error.
+Source rows gain `capabilities_seen`, the union of capabilities delivered by
+successful collections. Older rows need no migration: their current capabilities
+seed the union on the next successful collection. Connection changes through
+source edits or configuration import clear both current and seen capabilities;
+name, interval and enabled edits preserve them. Connection changes also clear
+warnings and cluster state from the old connection. `Batch.cluster_state` is honored
+as reported by the driver; retained node inventories do not override it. Built-in
+drivers classify availability over GPU-capable nodes (unknown or positive GPU counts).
+Enabled toggles clear the collection error and retry count, resetting status to
+`ready` or `unconfigured`, clearing last success to establish a silent event baseline
+on the next collection. Current and seen capabilities are preserved.
 
 ## Marketplaces
 
@@ -298,7 +446,7 @@ an https address, or in a folder. The format follows Claude Code's `marketplace.
       "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
                   "sha256": ["<sha256 of the wheel>"] },
       "permissions": [{ "en": "posts failed jobs to the lab chat" }],
-      "requires": ">=0.3,<0.4",
+      "requires": ">=0.3,<0.5",
       "license": "MIT",
       "homepage": "https://example.com/lab-alerts"
     }
@@ -387,3 +535,33 @@ trusted Python code: this storage separation is not an operating-system sandbox.
 
 Core database backups do not include the separate plugin directories. Include each plugin's
 files and SQLite database in your own backups while its database connections are closed.
+
+## Dashboard polling
+
+Every full `GET /api/dashboard` response includes `token`, a short SHA-256 of the serialized
+response before the token is added. Send it back as `?since=<token>` (alongside
+`demo=true` for example data). When the content matches, the service returns HTTP
+200 with `{"unchanged": true, "token": "..."}`; otherwise it returns the complete
+dashboard and its new token. Callers without `since` always receive the complete
+response, including `history`. Responses still use `Cache-Control: no-store`;
+there are no ETags or 304 responses. The token covers time-derived freshness,
+summaries, attention, the sliding history window and pending collections, so it
+can change without a database write. Live and example data have separate tokens;
+example timestamps advance once per minute.
+
+Keep health reports cheap and avoid changing error text on every call (for example,
+by embedding the current time). Plugin health errors feed attention and therefore
+the dashboard token; a changing error prevents unchanged responses.
+
+The web pauses polling while hidden and reloads on visibility or focus. Requests
+made through its request function while the page is hidden wait until it is
+visible again; this includes plugin requests and writes. Visible requests do
+not wait for visibility. Hidden GETs to the same path share one request on return,
+with a separate response body for each caller; writes remain separate.
+
+Visible dashboard polls run every ten seconds, or every second for up to sixty
+seconds after the viewer's Refresh, Probe or add action. Health, toolbox and
+collection-machine status keep their ten-second cadence; `/api/health` checks
+only the managed SSH include prefix, without building a dashboard. Activity
+polls every fifteen seconds and when the dashboard token changes. Relative ages
+continue to advance even when the dashboard is unchanged.

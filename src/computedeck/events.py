@@ -18,9 +18,8 @@ from typing import Any
 
 from .drivers import Batch
 from .store import now
+from .summary import PENDING, RUNNING
 
-RUNNING = {"RUNNING", "R", "CONFIGURING", "CF", "COMPLETING", "CG"}
-PENDING = {"PENDING", "PD", "Q", "PEND", "QUEUED"}
 TYPES = ("job.started", "job.ended", "job.failed", "source.failed", "source.recovered")
 
 

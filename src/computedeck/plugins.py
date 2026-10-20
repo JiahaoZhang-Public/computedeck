@@ -199,9 +199,14 @@ class PluginContext:
         if not (self.health and self.started and self.enabled):
             return {}
         try:
-            return self.health()
+            status = self.health()
+            if not isinstance(status, dict):
+                error_message = f"{type(status).__name__} is not a health dict"
+                logger.warning("Plugin %s: %s", self.id, error_message)
+                return {"error": error_message}
+            return status
         except Exception as error:
-            # Asked on every health poll: a warning, not a traceback each time.
+            # Asked on every health/dashboard poll: a warning, not a traceback each time.
             logger.warning("Plugin %s could not report its health: %s", self.id, failure(error))
             return {"error": failure(error)}
 

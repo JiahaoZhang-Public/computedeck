@@ -230,7 +230,9 @@ def parse_jobs(rows: list[dict[str, str]], source: dict[str, Any]) -> list[dict[
             continue
         state = STATES.get(stat, stat or "UNKNOWN")
         job = _job(row, state, source, "bjobs")
-        if state == "PENDING" and not _blank(row.get("PEND_REASON")):
+        if stat == "PSUSP":
+            job["reason"] = "Held"
+        elif state == "PENDING" and not _blank(row.get("PEND_REASON")):
             job["reason"] = row["PEND_REASON"]
         job["observed_at"] = observed_at
         jobs[job["id"]] = job

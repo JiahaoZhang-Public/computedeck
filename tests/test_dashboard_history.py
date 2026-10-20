@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from computedeck.store import Store, now
 
 AddSource = Callable[..., dict[str, Any]]
@@ -98,6 +100,59 @@ def test_unknown_cloud_does_not_erase_confirmed_cluster_gpu_subtotal(
     assert store.dashboard()["instances"][1]["state"] == "missing"
 
 
+@pytest.mark.parametrize(
+    ("state", "gpus", "expected"),
+    [
+        ("running", 2, 2),
+        ("reported_running", 2, 2),
+        ("reported_running", 0, 0),
+        ("reported_running", None, None),
+        ("desired_running", 2, None),
+        ("missing", 2, None),
+        ("unknown", 2, None),
+        (None, 2, None),
+        ("stopped", 2, 0),
+        ("terminated", 2, 0),
+        ("deleted", 2, 0),
+        ("desired_stopped", 2, 0),
+        ("desired_terminated", None, 0),
+    ],
+)
+def test_provider_allocation_follows_lifecycle(
+    store: Store, add_source: AddSource, state: str | None, gpus: int | None, expected: int | None
+) -> None:
+    cloud = add_source("RunPod", driver="runpod")
+    store.save_snapshot(
+        cloud["id"],
+        {"instances": [{"id": "pod", "source_id": cloud["id"], "state": state, "gpu_count": gpus}]},
+    )
+    point = latest_point(store)
+    assert point["allocated_gpus"] == expected
+    assert point["known_allocated_gpus"] == (expected or 0)
+    assert point["unknown_allocation_sources"] == int(expected is None)
+    assert point["gpu_utilization"] is None
+
+
+def test_reported_running_from_a_stale_source_is_still_unknown(
+    store: Store, add_source: AddSource
+) -> None:
+    cloud = add_source(
+        "RunPod", driver="runpod", last_success=(datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    )
+    store.save_snapshot(
+        cloud["id"],
+        {
+            "instances": [
+                {"id": "pod", "source_id": cloud["id"], "state": "reported_running", "gpu_count": 2}
+            ]
+        },
+    )
+    point = latest_point(store)
+    assert point["allocated_gpus"] is None
+    assert point["known_allocated_gpus"] is None
+    assert point["unknown_allocation_sources"] == 1
+
+
 def test_unknown_gpu_counts_and_stale_sources_are_counted_once_per_source(
     store: Store, add_source: AddSource
 ) -> None:
@@ -144,6 +199,7 @@ def test_disabled_source_is_ignored_but_manual_instance_remains_unknown(
             "id": "manual:lab-box1",
             "source_id": "manual",
             "manual": True,
+            "monitoring": True,
             "state": "unknown",
             "gpu_count": 2,
             "ssh_status": "reachable",
@@ -168,6 +224,7 @@ def test_unknown_allocation_stays_a_gap_while_cloud_metrics_remain_observable(
             "id": "manual:lab-box1",
             "source_id": "manual",
             "manual": True,
+            "monitoring": True,
             "state": "unknown",
             "gpu_count": 2,
             "gpu_observed_count": 1,
@@ -188,6 +245,7 @@ def test_old_probe_measurements_do_not_count_as_current(store: Store) -> None:
             "id": "manual:lab-box1",
             "source_id": "manual",
             "manual": True,
+            "monitoring": True,
             "state": "unknown",
             "gpu_observed_count": 1,
             "gpu_utilization": 75,
@@ -198,6 +256,82 @@ def test_old_probe_measurements_do_not_count_as_current(store: Store) -> None:
     point = latest_point(store)
     assert point["gpu_utilization"] is None
     assert point["coverage_count"] == 0
+
+
+def checked_machine(**changes: Any) -> dict[str, Any]:
+    """A machine added by hand, as a successful SSH check left it."""
+    return {
+        "id": "manual:lab-box1",
+        "source_id": "manual",
+        "manual": True,
+        "monitoring": True,
+        "state": "running",
+        "gpu_count": 2,
+        "gpu_allocated": 1,
+        "metrics_scope": "host_visible",
+        "ssh_status": "reachable",
+        "observed_at": now(),
+        **changes,
+    }
+
+
+def test_a_recently_checked_machine_added_by_hand_is_counted_exactly(
+    store: Store, add_source: AddSource
+) -> None:
+    store.save_instance(checked_machine())
+    point = latest_point(store)
+    assert point["allocated_gpus"] == point["known_allocated_gpus"] == 1
+    assert point["unknown_allocation_sources"] == 0
+    add_source()
+    store.save_snapshot("cluster-a-alice", {"jobs": [running_job()]})
+    point = latest_point(store)
+    assert point["allocated_gpus"] == point["known_allocated_gpus"] == 9
+    assert point["unknown_allocation_sources"] == 0
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"observed_at": (datetime.now(UTC) - timedelta(minutes=25)).isoformat()},
+        {"ssh_status": "error"},
+        {"ssh_status": "unverified", "observed_at": None},
+        # e.g. an AMD host, or nvidia-smi refused the process query
+        {"gpu_allocated": None},
+    ],
+)
+def test_an_unmeasured_machine_added_by_hand_is_unknown_never_zero(
+    store: Store, add_source: AddSource, changes: dict[str, Any]
+) -> None:
+    add_source()
+    store.save_snapshot("cluster-a-alice", {"jobs": [running_job()]})
+    store.save_instance(checked_machine(**changes))
+    point = latest_point(store)
+    assert point["known_allocated_gpus"] == 8
+    assert point["allocated_gpus"] is None
+    assert point["unknown_allocation_sources"] == 1
+
+
+def test_a_provider_listing_is_not_an_ssh_reading_of_its_instance(
+    store: Store, add_source: AddSource
+) -> None:
+    cloud = add_source("RunPod", driver="runpod")
+    pod = {
+        "id": "runpod:a",
+        "source_id": cloud["id"],
+        "state": "reported_running",
+        "gpu_count": 2,
+        "gpu_utilization": 90,
+        # Reached an hour ago and kept by each listing since; listed just now.
+        "ssh_status": "reachable",
+        "last_probe_attempt": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+        "observed_at": now(),
+    }
+    store.save_snapshot(cloud["id"], {"instances": [pod]})
+    assert latest_point(store)["coverage_count"] == 0
+    store.save_snapshot(cloud["id"], {"instances": [{**pod, "last_probe_attempt": now()}]})
+    point = latest_point(store)
+    assert point["coverage_count"] == 2
+    assert point["gpu_utilization"] == 90
 
 
 def test_utilization_is_weighted_by_observed_gpus(store: Store, add_source: AddSource) -> None:
@@ -269,15 +403,25 @@ def test_history_range_excludes_older_points(store: Store) -> None:
 
 def test_thinning_keeps_whole_points_and_gaps(store: Store) -> None:
     current = datetime.now(UTC)
+    boundary = current.replace(hour=current.hour // 2 * 2, minute=0, second=0, microsecond=0)
     # Two points per bucket when thinning 24 h to 12 points; the later one is kept as is.
     for index in range(24):
-        at = current - timedelta(hours=23.9 - index)
+        at = boundary - timedelta(hours=24 - index)
         insert_point(store, at, None if index % 2 else index)
     points = store.history(24, max_points=12)
-    assert 10 <= len(points) <= 13
+    assert 11 <= len(points) <= 12
     assert all(point["allocated_gpus"] is None for point in points)
     times = [point["at"] for point in points]
     assert times == sorted(times)
+
+
+def test_thinning_caps_buckets_when_the_window_is_not_aligned(store: Store) -> None:
+    current = datetime.now(UTC)
+    for index in range(1440):
+        insert_point(store, current - timedelta(minutes=index), index)
+    points = store.history(24)
+    assert len(points) == 600
+    assert points[-1]["at"] == current.isoformat()
 
 
 def test_ssh_process_use_matches_dashboard_history(store: Store, add_source: AddSource) -> None:

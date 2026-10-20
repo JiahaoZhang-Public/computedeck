@@ -28,9 +28,12 @@ export interface Source {
   status: string;
   last_success: string | null;
   last_attempt: string | null;
+  next_due_at?: string | null;
+  failures?: number;
   error: Message | string | null;
   interval_minutes: number;
   capabilities: string[];
+  capabilities_seen?: string[];
   qos: QosLimit[];
   warnings?: (Message | string)[];
   stale?: boolean;
@@ -143,8 +146,13 @@ export interface Instance {
   gpu_observed_count?: number | null;
   metrics_scope?: string;
   ssh_error?: Message | string | null;
+  /** When the last SSH check started; a provider listing keeps it while the endpoint holds. */
+  last_probe_attempt?: string | null;
+  /** Why a reading of the last check is unknown, e.g. `gpu_processes_unavailable`. */
+  probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
+  health?: 'usable' | 'unavailable' | 'unknown';
   id: string;
   source_id: string;
   cluster_id: string;
@@ -167,7 +175,73 @@ export interface HistoryPoint {
   known_allocated_gpus?: number | null;
   unknown_allocation_sources?: number;
 }
+export interface Unmeasured {
+  subject: { kind: 'source' | 'instance'; id: string; name: string };
+  reason: Message;
+}
+export interface NodeSummary {
+  nodes: number;
+  capacity: number | null;
+  usable: number | null;
+  known_usable: number | null;
+  unavailable: number | null;
+  allocated: number | null;
+  unallocated: number | null;
+  abnormal: number;
+  unknown: number;
+  observed_at: string | null;
+  ratio: number | null;
+}
+export interface Summary {
+  allocated: number | null;
+  known_allocated: number | null;
+  unknown_allocation_sources: number;
+  unmeasured: Unmeasured[];
+  unmonitored: number;
+  requested: number | null;
+  known_requested: number | null;
+  queued_unmeasured: Unmeasured[];
+  running: number | null;
+  known_running: number;
+  pending: number | null;
+  known_pending: number;
+  utilization: number | null;
+  covered: number;
+  cpu_utilization: number | null;
+  memory_utilization: number | null;
+  nodes: NodeSummary;
+  jobs: {
+    missing_source_ids: string[];
+    known: number;
+    total: number | null;
+  };
+}
+export interface FleetSummary extends Summary {
+  groups: Record<string, Summary>;
+  sources: Record<string, Summary>;
+  jobs: Summary['jobs'] & {
+    current_ids: string[];
+    listed_ids: string[];
+    running_ids: string[];
+    pending_ids: string[];
+  };
+}
+export interface Attention {
+  key: string;
+  kind: string;
+  subject: { kind: 'source' | 'instance' | 'service' | 'plugin'; id: string; name: string };
+  severity: 'error' | 'warn';
+  message: Message;
+  details: (Message | string)[];
+  since: string | null;
+  observed_at: string | null;
+  next_attempt: string | null;
+  action: 'diagnose' | 'instance' | 'health' | 'toolbox';
+}
 export interface Dashboard {
+  token?: string;
+  attention?: Attention[];
+  summary: FleetSummary;
   mode: string;
   sources: Source[];
   jobs: Job[];
@@ -175,6 +249,9 @@ export interface Dashboard {
   nodes: ComputeNode[];
   history: HistoryPoint[];
   updated_at: string | null;
+  as_of?: string | null;
+  behind?: string[];
+  collecting?: string[];
   refreshing: boolean;
   recent_failures?: FailedJob[];
   failure_history_sources?: string[];
@@ -186,6 +263,8 @@ export interface SSHConfig {
   installed: boolean;
 }
 export interface Health {
+  background_errors?: Record<string, { at: string; error: string }>;
+  unreadable_rows?: Record<string, number>;
   server_host?: string;
   server_name?: string | null;
   status: string;

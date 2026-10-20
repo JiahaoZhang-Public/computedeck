@@ -1,5 +1,5 @@
 import { ConnectionChecks } from './ConnectionChecks';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { CheckCircle2, Cloud, Loader2, MinusCircle, Server, Terminal, XCircle } from 'lucide-react';
 import type { CollectionNode, DriverField, DriverInfo, Instance, Kind, Source } from './types';
@@ -315,7 +315,6 @@ export function SourceForm({
   onSubmit,
   onDelete,
   onManual,
-  onPoll,
   onCancel,
 }: {
   source?: Source;
@@ -333,7 +332,6 @@ export function SourceForm({
   onSubmit: (body: unknown, id?: string) => Promise<Source>;
   onDelete: (source: Source) => Promise<void>;
   onManual: () => void;
-  onPoll: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [step, setStep] = useState<Step>(source || preset.driver ? 'details' : 'type');
@@ -348,12 +346,6 @@ export function SourceForm({
   );
   const saved = sources.find((item) => item.id === savedId);
   const checking = step === 'check' && (!saved || !checkFinished(saved));
-
-  useEffect(() => {
-    if (!checking) return;
-    const timer = window.setInterval(() => void onPoll(), 2000);
-    return () => clearInterval(timer);
-  }, [checking, onPoll]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventText, eventTone } from './events';
-import { setLocale } from './i18n';
+import { setLocale, t } from './i18n';
 import type { DeckEvent } from './types';
 
 const event = (type: string, data: DeckEvent['data']): DeckEvent => ({
@@ -21,7 +21,7 @@ describe('event wording', () => {
       eventText(
         event('job.failed', { job: { name: 'train', state: 'OUT_OF_MEMORY', exit_code: '0:125' } }),
       ),
-    ).toBe('train failed (OUT_OF_MEMORY, exit code 0:125)');
+    ).toBe(`train failed (${t('status.OUT_OF_MEMORY')}, exit code 0:125)`);
     expect(eventText(event('source.failed', { error: { code: 'timeout' } }))).toContain(
       'Cluster A',
     );

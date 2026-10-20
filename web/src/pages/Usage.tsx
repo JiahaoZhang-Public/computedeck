@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { money, runningPrice, summarize } from '../domain';
+import { money, runningPrice } from '../domain';
 import { Empty, Panel, Stat, Status } from '../ui';
 import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
@@ -7,7 +7,7 @@ import { where } from './util';
 
 export function UsagePage({ ctx }: { ctx: Ctx }) {
   const { data, demo } = ctx;
-  const summary = summarize(data);
+  const summary = data.summary;
   const pct = (value: number | null) => (value == null ? '—' : Math.round(value));
   return (
     <>
@@ -20,14 +20,14 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
         />
         <Stat
           label={t('usage.cpu')}
-          value={pct(summary.cpuUtilization)}
-          unit={summary.cpuUtilization == null ? undefined : '%'}
+          value={pct(summary.cpu_utilization)}
+          unit={summary.cpu_utilization == null ? undefined : '%'}
           hint={t('usage.hostHint')}
         />
         <Stat
           label={t('usage.memory')}
-          value={pct(summary.memoryUtilization)}
-          unit={summary.memoryUtilization == null ? undefined : '%'}
+          value={pct(summary.memory_utilization)}
+          unit={summary.memory_utilization == null ? undefined : '%'}
           hint={t('usage.hostHint')}
         />
       </div>

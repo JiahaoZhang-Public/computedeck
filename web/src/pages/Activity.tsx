@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useVisibleInterval } from '../useVisibleInterval';
 import type { DeckEvent } from '../types';
 import { api } from '../api';
 import { t } from '../i18n';
@@ -7,25 +8,33 @@ import { eventText, eventTone } from '../events';
 import { Panel } from '../ui';
 
 /** What changed between collections: jobs that started, ended or failed, sources that broke. */
-export function ActivityPanel({ demo, limit = 12 }: { demo: boolean; limit?: number }) {
+export function ActivityPanel({
+  demo,
+  limit = 12,
+  token,
+}: {
+  demo: boolean;
+  limit?: number;
+  token?: string;
+}) {
   const [events, setEvents] = useState<DeckEvent[] | null>(null);
-  useEffect(() => {
-    let active = true;
-    const load = () =>
-      api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}`)
-        .then((rows) => {
-          if (active) setEvents(rows);
-        })
-        .catch(() => {
-          if (active) setEvents((current) => current ?? []);
-        });
-    void load();
-    const timer = window.setInterval(() => void load(), 15000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
+  const loadId = useRef(0);
+  const load = useCallback(async () => {
+    const id = ++loadId.current;
+    try {
+      const rows = await api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}`);
+      if (id === loadId.current) setEvents(rows);
+    } catch {
+      if (id === loadId.current) setEvents((current) => current ?? []);
+    }
   }, [demo, limit]);
+  useEffect(
+    () => () => {
+      loadId.current += 1;
+    },
+    [load],
+  );
+  useVisibleInterval(load, 15000, token);
   return (
     <Panel title={t('activity.title')} count={events?.length}>
       {events?.length ? (

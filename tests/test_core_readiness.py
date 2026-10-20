@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from computedeck import app, sdk
+from computedeck import app, demo, sdk
 from computedeck.drivers.base import cluster_state
 from computedeck.logging_setup import BACKUPS, MAX_BYTES, ServiceLogHandler
 from computedeck.plugins import Runtime
@@ -28,7 +28,8 @@ from computedeck.store import Store
         (["idle"] + ["down"] * 9, "degraded"),
         (["idle"] + ["down"] * 4, "available"),
         (["idle+cloud+powered_down"], "available"),
-        (["unknown"], "unknown"),
+        (["unknown"], "unavailable"),
+        (["new_scheduler_state"], "unknown"),
     ],
 )
 def test_cluster_availability(states, expected):
@@ -139,6 +140,10 @@ def test_python_and_frontend_versions_match():
     package = json.loads((root / "web/package.json").read_text())
     lock = json.loads((root / "web/package-lock.json").read_text())
     assert python == package["version"] == lock["version"] == lock["packages"][""]["version"]
+    uv_lock = tomllib.loads((root / "uv.lock").read_text())
+    core = next(entry for entry in uv_lock["package"] if entry["name"] == "computedeck")
+    assert python == core["version"]
+    assert all(node["version"] == python for node in demo.nodes())
 
 
 def test_changelog_names_the_current_version():

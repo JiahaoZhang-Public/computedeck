@@ -1,7 +1,7 @@
-import type { Dashboard, Source } from '../types';
+import type { Dashboard, NodeSummary, Source } from '../types';
 import type { Group } from '../groups';
 import { instanceGroupKey } from '../groups';
-import { sourceHasData, summarize, summarizeNodes, uniqueJobs } from '../domain';
+import { partialCount, sourceHasData } from '../domain';
 import { t } from '../i18n';
 import { sourceState } from '../labels';
 import { recentlyReachable } from './util';
@@ -12,9 +12,8 @@ export function groupSummary(data: Dashboard, group: Group) {
   const instances = data.instances.filter(
     (item) => instanceGroupKey(item, data.sources) === group.key,
   );
-  const jobs = uniqueJobs(data.jobs.filter((job) => job.cluster_id === group.key));
-  const scoped = summarize({ ...data, sources: group.sources, jobs, instances });
-  const nodes = summarizeNodes(data.nodes.filter((node) => node.cluster_id === group.key));
+  const scoped = data.summary.groups[group.key];
+  const nodes = scoped.nodes;
   const order = [
     'error',
     'stale',
@@ -35,13 +34,13 @@ export function groupSummary(data: Dashboard, group: Group) {
         ? 'reachable'
         : 'unverified'
       : 'unconfigured';
-  const updated = [
-    ...group.sources.map((source) => source.last_success),
-    ...instances.map((item) => item.observed_at),
-  ]
-    .filter((at): at is string => !!at)
-    .sort()
-    .pop();
+  const times = enabledSources.length
+    ? enabledSources.map((source) => source.last_success)
+    : instances.map((item) => item.observed_at).filter(Boolean);
+  const updated =
+    times.length && times.every(Boolean)
+      ? (times as string[]).sort((a, b) => Date.parse(a) - Date.parse(b))[0]
+      : undefined;
   return { ids, instances, scoped, nodes, state, updated };
 }
 
@@ -50,4 +49,28 @@ export function instanceCount(sources: Source[], count: number) {
   if (sources.every((source) => sourceHasData(source, 'instances')))
     return t('overview.instances', { count });
   return count ? t('overview.instancesAtLeast', { count }) : t('overview.instancesUnknown');
+}
+
+/** Allocation and usable capacity share wording and severity on cards and overview rows. */
+export function capacityText(nodes: NodeSummary, state: string) {
+  const outage = nodes.nodes > 0 && (nodes.abnormal === nodes.nodes || state === 'unavailable');
+  const tone = state === 'unavailable' ? 'red-text' : state === 'degraded' ? 'amber-text' : '';
+  return {
+    outage,
+    tone,
+    text: outage
+      ? t('summary.capacity', { usable: 0, unavailable: nodes.unavailable ?? '—' })
+      : t('summary.allocation', {
+          allocated: nodes.allocated ?? '—',
+          usable: partialCount(nodes.usable, nodes.known_usable),
+        }),
+    detail:
+      (nodes.unknown ? `${t('summary.unknownNodes', { count: nodes.unknown })} · ` : '') +
+      ((nodes.unavailable ?? 0) > 0 || (nodes.usable == null && nodes.known_usable != null)
+        ? t('summary.capacityDetail', {
+            unavailable: nodes.unavailable ?? '—',
+            total: nodes.capacity ?? '—',
+          })
+        : t('summary.capacityTotal', { total: nodes.capacity ?? '—' })),
+  };
 }

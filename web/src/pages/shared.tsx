@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react';
 import { ArrowRight, Search, X } from 'lucide-react';
 import type {
+  Attention,
   CollectionNode,
   Dashboard,
   DriverInfo,
@@ -22,14 +23,6 @@ import type { PluginProps, WebPlugin } from '../plugins';
 import { dateTime, jobGpuResources, relativeTime } from '../domain';
 import { Chips, Empty, Status } from '../ui';
 
-export type Attention = {
-  id: string;
-  tone: 'red' | 'amber' | 'gray';
-  title: string;
-  text: string;
-  action: () => void;
-};
-
 export type Ctx = {
   data: Dashboard;
   groups: Group[];
@@ -44,6 +37,8 @@ export type Ctx = {
   setQuery: (query: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   attention: Attention[];
+  openAttention: (item: Attention) => void;
+  diagnose: (source: Source) => void;
   health: Health | null;
   locale: Locale;
   changeLocale: (locale: Locale) => void;
@@ -144,15 +139,20 @@ export function JobsMissingNote({
   groups,
   missing,
   staleRows,
+  staleCount = 0,
 }: {
   groups: Group[];
   missing: Source[];
   staleRows: boolean;
+  staleCount?: number;
 }) {
   return (
     <p className="panel-note">
       {t('jobs.missing.text', { sources: sourceList(groups, missing) })}
       {staleRows && ` ${t('jobs.missing.stale')}`}
+      {staleCount > 0 && (
+        <span className="sub">{t('jobs.lastKnownCount', { count: staleCount })}</span>
+      )}
     </p>
   );
 }
@@ -178,7 +178,7 @@ export function JobsTable({
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
-            <th>{t('jobs.col.clusterQos')}</th>
+            <th title={t('jobs.col.clusterQosHint')}>{t('jobs.col.clusterQos')}</th>
             <th className="num">GPU</th>
             <th className="num">CPU</th>
             <th>{t('jobs.col.state')}</th>
@@ -261,7 +261,7 @@ export function FailuresTable({ jobs, groups }: { jobs: FailedJob[]; groups: Gro
         <thead>
           <tr>
             <th>{t('jobs.col.job')}</th>
-            <th>{t('jobs.col.clusterQos')}</th>
+            <th title={t('jobs.col.clusterQosHint')}>{t('jobs.col.clusterQos')}</th>
             <th>{t('jobs.col.result')}</th>
             <th>{t('jobs.col.exitCode')}</th>
             <th>{t('jobs.col.ended')}</th>

@@ -1,8 +1,13 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from './api';
-import { ApiError } from './i18n';
+import { api, download, upload } from './api';
+import { ApiError, setLocale, t } from './i18n';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.history.replaceState(null, '', '/');
+  setLocale('en');
+});
 
 function stubFetch(response: Response) {
   const calls: RequestInit[] = [];
@@ -14,6 +19,17 @@ function stubFetch(response: Response) {
 }
 
 describe('api', () => {
+  it.each(['get', 'post', 'pAtCh', 'DELETE'])(
+    'normalises %s for fetch and write headers',
+    async (method) => {
+      const calls = stubFetch(new Response('{}'));
+      await api('/plugins/example/action', undefined, method);
+      expect(calls[0].method).toBe(method.toUpperCase());
+      expect(calls[0].headers).toEqual(
+        method === 'get' ? {} : { 'X-ComputeDeck': '1', 'Content-Type': 'application/json' },
+      );
+    },
+  );
   it('accepts empty replies', async () => {
     stubFetch(new Response(null, { status: 204 }));
     await expect(api('/session', { token: 'x' })).resolves.toBeUndefined();
@@ -28,4 +44,140 @@ describe('api', () => {
     expect((error as ApiError).detail).toEqual({ code: 'token_invalid' });
     expect(calls[0].credentials).toBe('omit');
   });
+});
+
+describe.each(['en', 'zh-CN'] as const)('example request isolation in %s', (locale) => {
+  it.each(['POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS', 'post'])(
+    'refuses %s with and without a body before fetch',
+    async (method) => {
+      setLocale(locale);
+      window.history.replaceState(null, '', '/?demo=true');
+      const calls = stubFetch(new Response('{}'));
+      for (const body of [undefined, {}, null])
+        await expect(api('/plugins/example/action', body, method)).rejects.toThrow(
+          t('toast.demoReadOnly'),
+        );
+      expect(calls).toEqual([]);
+    },
+  );
+  it.each(['POST', 'post'])(
+    'allows only the %s access-token check while other writes stay blocked',
+    async (method) => {
+      setLocale(locale);
+      window.history.replaceState(null, '', '/?demo=true');
+      const calls = stubFetch(new Response(JSON.stringify({ token: 'example-session' })));
+      await expect(api('/session', { token: 'example-access-token' }, method)).resolves.toEqual({
+        token: 'example-session',
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].method).toBe('POST');
+      expect(JSON.parse(calls[0].body as string)).toEqual({ token: 'example-access-token' });
+      for (const path of ['/refresh', '/session/', '/session?extra=1', '/session-extra'])
+        await expect(api(path, {})).rejects.toThrow(t('toast.demoReadOnly'));
+      await expect(api('/session', {}, 'DELETE')).rejects.toThrow(t('toast.demoReadOnly'));
+      expect(calls).toHaveLength(1);
+    },
+  );
+  it('refuses implicit POST and uploads, allows reads, and resumes writes when turned off', async () => {
+    setLocale(locale);
+    window.history.replaceState(null, '', '/?demo=true');
+    const fetch = vi.fn<(path: string, init: RequestInit) => Promise<Response>>(
+      async () => new Response('{}'),
+    );
+    vi.stubGlobal('fetch', fetch);
+    await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
+    await expect(upload('/plugins/chat/attachments', new Blob(['file']))).rejects.toThrow(
+      t('toast.demoReadOnly'),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    await api('/dashboard?demo=true');
+    await api('/health', undefined, 'get');
+    await download('/config');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    window.history.replaceState(null, '', '/');
+    await api('/plugins/chat/messages', {});
+    expect(fetch.mock.calls.at(-1)?.[1]?.method).toBe('POST');
+  });
+  it('blocks a write if example mode is enabled while authentication is pending', async () => {
+    const calls = stubFetch(new Response('{}'));
+    const pending = api('/refresh', {});
+    window.history.replaceState(null, '', '/?demo=true');
+    await expect(pending).rejects.toThrow(t('toast.demoReadOnly'));
+    expect(calls).toEqual([]);
+  });
+});
+
+it('defers initial and plugin requests while hidden, then rechecks example mode', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const calls = stubFetch(new Response('{}'));
+  const read = api('/dashboard');
+  const write = api('/plugins/example/action', {});
+  const blocked = expect(write).rejects.toThrow(t('toast.demoReadOnly'));
+  await Promise.resolve();
+  expect(calls).toEqual([]);
+  window.history.replaceState(null, '', '/?demo=true');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await read;
+  await blocked;
+  expect(calls).toHaveLength(1);
+  expect(calls[0].method).toBe('GET');
+  hidden.mockRestore();
+});
+
+it('coalesces hidden GETs by path with one visibility listener and readable bodies for all callers', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const listen = vi.spyOn(document, 'addEventListener');
+  const fetch = vi.fn(async (path: string) => new Response(JSON.stringify({ path })));
+  vi.stubGlobal('fetch', fetch);
+  const reads = Array.from({ length: 100 }, () => api('/plugins/example/status'));
+  const other = api('/plugins/example/status?detail=true');
+  const writes = [api('/plugins/example/action', {}), api('/plugins/example/action', {})];
+  await Promise.resolve();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(listen.mock.calls.filter(([event]) => event === 'visibilitychange')).toHaveLength(1);
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(await Promise.all(reads)).toEqual(
+    Array.from({ length: 100 }, () => ({ path: '/api/plugins/example/status' })),
+  );
+  await expect(other).resolves.toEqual({ path: '/api/plugins/example/status?detail=true' });
+  await Promise.all(writes);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+    '/api/plugins/example/status',
+    '/api/plugins/example/status?detail=true',
+    '/api/plugins/example/action',
+    '/api/plugins/example/action',
+  ]);
+  // A later hidden period must get a fresh response, not the previous held GET.
+  hidden.mockReturnValue(true);
+  const next = api('/plugins/example/status');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await expect(next).resolves.toEqual({ path: '/api/plugins/example/status' });
+  expect(fetch).toHaveBeenCalledTimes(5);
+  listen.mockRestore();
+  hidden.mockRestore();
+});
+
+it('releases failed held GETs so they can be retried', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  const fetch = vi.fn(async () => new Response('{}', { status: 503 }));
+  vi.stubGlobal('fetch', fetch);
+  const reads = Promise.allSettled([
+    api('/plugins/example/status'),
+    api('/plugins/example/status'),
+  ]);
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect((await reads).map((result) => result.status)).toEqual(['rejected', 'rejected']);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  hidden.mockReturnValue(true);
+  fetch.mockImplementation(async () => new Response('{}'));
+  const retry = api('/plugins/example/status');
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await expect(retry).resolves.toEqual({});
+  expect(fetch).toHaveBeenCalledTimes(2);
+  hidden.mockRestore();
 });

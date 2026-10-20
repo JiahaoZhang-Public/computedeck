@@ -1,3 +1,4 @@
+import { useVisibleInterval } from '../useVisibleInterval';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { Copy, Download, Paperclip, Send, Trash2, X } from 'lucide-react';
@@ -86,6 +87,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cursor = useRef({ channel: 'general', lastId: 0 });
   const pollId = useRef(0);
+  const firstLoad = useRef(true);
 
   useEffect(() => {
     api<{ channels: Channel[]; max_file_mb: number }>(BASE)
@@ -112,18 +114,21 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
     }
   }, [channel]);
 
-  useEffect(() => {
-    let active = true;
-    void poll().catch((reason) => {
-      if (active) setError(errorText(reason, 'error.service'));
+  const loadMessages = useCallback(() => {
+    const requestId = pollId.current;
+    const reportError = firstLoad.current;
+    firstLoad.current = false;
+    return poll().catch((reason) => {
+      if (reportError && requestId === pollId.current) setError(errorText(reason, 'error.service'));
     });
-    const timer = window.setInterval(() => void poll().catch(() => undefined), 4000);
+  }, [poll]);
+  useEffect(() => {
+    firstLoad.current = true;
     return () => {
-      active = false;
-      clearInterval(timer);
       pollId.current += 1;
     };
   }, [poll]);
+  useVisibleInterval(loadMessages, 4000);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });

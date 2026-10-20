@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { groupLabel } from '../groups';
 import { t } from '../i18n';
-import { holdsAllocation, jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
+import { jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
 import { routeHash } from '../routes';
 import { Chips, Empty, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -16,7 +16,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
   const clusters = groups.filter((item) => item.kind === 'cluster');
   const inView = (clusterId: string) => group === 'all' || clusterId === group;
   // Logins without a current job list: their jobs are unknown, so counts are lower bounds.
-  const missing = jobsMissing(data.sources).filter((source) => inView(source.cluster_id));
+  const missing = jobsMissing(data).filter((source) => inView(source.cluster_id));
   const collected = data.sources.some(
     (source) =>
       source.enabled &&
@@ -39,8 +39,10 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         groupLabel(groups, job.cluster_id),
       ),
   );
-  const running = scoped.filter(holdsAllocation);
-  const pending = scoped.filter((job) => job.state.toUpperCase() === 'PENDING');
+  const runningIds = new Set(data.summary.jobs.running_ids);
+  const pendingIds = new Set(data.summary.jobs.pending_ids);
+  const running = scoped.filter((job) => runningIds.has(job.id));
+  const pending = scoped.filter((job) => pendingIds.has(job.id));
   const covered = data.failure_history_sources ?? [];
   const failures = (data.recent_failures ?? []).filter(
     (job) =>
@@ -48,8 +50,19 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
       matches(query, job.name, job.id, job.user, job.qos),
   );
   const shown = tab === 'running' ? running : tab === 'pending' ? pending : scoped;
-  const count = (jobs: typeof scoped) =>
-    jobCount(jobs.filter((job) => !stale.has(job.source_id)).length, missing.length);
+  const summary = group === 'all' ? data.summary : data.summary.groups[group];
+  const count = (jobs: typeof scoped, state: 'all' | 'running' | 'pending') => {
+    if (!query && summary) {
+      const known =
+        state === 'all'
+          ? summary.jobs.known
+          : state === 'running'
+            ? summary.known_running
+            : summary.known_pending;
+      return jobCount(known, summary.jobs.missing_source_ids.length);
+    }
+    return jobCount(jobs.filter((job) => !stale.has(job.source_id)).length, missing.length);
+  };
   const hasClusters = data.sources.some((source) => source.kind === 'cluster' && source.enabled);
   const coverage = covered
     .map((id) => {
@@ -66,9 +79,9 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
             value={tab}
             onChange={setTab}
             options={[
-              { value: 'all', label: t('filter.all'), count: count(scoped) },
-              { value: 'running', label: t('status.RUNNING'), count: count(running) },
-              { value: 'pending', label: t('status.PENDING'), count: count(pending) },
+              { value: 'all', label: t('filter.all'), count: count(scoped, 'all') },
+              { value: 'running', label: t('status.RUNNING'), count: count(running, 'running') },
+              { value: 'pending', label: t('status.PENDING'), count: count(pending, 'pending') },
               {
                 value: 'failed',
                 label: t('jobs.failed24h'),
@@ -152,13 +165,14 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
                 groups={groups}
                 missing={missing}
                 staleRows={shown.some((job) => stale.has(job.source_id))}
+                staleCount={shown.filter((job) => stale.has(job.source_id)).length}
               />
             )}
             <p className="panel-note">{t('jobs.note')}</p>
           </>
         )}
       </Panel>
-      <ActivityPanel demo={ctx.demo} />
+      <ActivityPanel demo={ctx.demo} token={data.token} />
     </>
   );
 }

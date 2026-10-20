@@ -420,7 +420,6 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       {bar}
-      {ctx.demo && <p className="page-note amber-text">{t('toolbox.demo')}</p>}
       {!ctx.tools.length ? (
         <Panel>
           <Empty title={t('toolbox.empty')} text={t('toolbox.emptyHint')} />

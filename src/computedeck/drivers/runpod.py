@@ -31,12 +31,15 @@ def pod_instance(pod: dict[str, Any], user: str) -> CloudInstance:
     machine = pod.get("machine") or {}
     mappings = pod.get("portMappings")
     port = integer(mappings.get("22")) if isinstance(mappings, dict) else None
-    # REST exposes expected lifecycle, not measured readiness or utilization. A stop is
-    # trusted once its recorded change is old enough to have finished.
+    # RUNNING is RunPod's normal running report: count the assigned GPUs, not readiness
+    # or utilization. Image startup may still be in progress. A stop is labelled settled
+    # once its recorded change is old enough to have finished.
     # https://docs.runpod.io/api-reference/pods/GET/pods
+    # https://docs.runpod.io/pods/manage-pods
+    # https://docs.runpod.io/pods/pricing
     desired = str(pod.get("desiredStatus"))
     state: State = {
-        "RUNNING": "desired_running",
+        "RUNNING": "reported_running",
         "EXITED": "stopped" if _settled(pod) else "desired_stopped",
         "TERMINATED": "terminated" if _settled(pod) else "desired_terminated",
     }.get(desired, "unknown")  # type: ignore[assignment]

@@ -17,7 +17,7 @@ from computedeck.drivers.base import Batch, SourceError, message
 from computedeck.drivers.slurm import SlurmDriver
 from computedeck.plugins import Runtime
 from computedeck.records import InstanceInput, instance_record
-from computedeck.store import Store, now
+from computedeck.store import Store, gpu_allocation, now
 
 AddSource = Callable[..., dict[str, Any]]
 Collect = Callable[[dict[str, Any]], Any]
@@ -382,7 +382,7 @@ def manual_instance(store: Store, **changes: Any) -> dict[str, Any]:
 async def test_probe_merges_measurements_into_manual_instance(
     monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store
 ) -> None:
-    instance = manual_instance(store, gpu_count=2)
+    instance = manual_instance(store, gpu_count=2, monitoring=True)
     probed: list[dict[str, Any]] = []
 
     async def probe(row: dict[str, Any]) -> dict[str, Any]:
@@ -403,8 +403,13 @@ async def test_probe_merges_measurements_into_manual_instance(
     [saved] = store.manual_instances()
     assert saved["gpu_utilization"] == 50
     assert saved["gpu_count"] == 2
-    assert saved["state"] == "unknown"
+    # It answered just now: running, as the dashboard derives it from this check.
+    assert saved["state"] == instance["state"] == "unknown"
+    assert result["state"] == store.dashboard()["instances"][0]["state"] == "running"
     assert store.dashboard()["history"][-1]["gpu_utilization"] == 50
+    # A later probe must also read the stored row, not persist the dashboard's derived state.
+    await collector.probe(instance["id"])
+    assert store.manual_instances()[0]["state"] == "unknown"
     assert not collector.probes
 
 
@@ -475,6 +480,8 @@ async def test_probe_failure_is_recorded_and_raised(
     [saved] = store.manual_instances()
     assert saved["ssh_status"] == "error"
     assert saved["ssh_error"] == {"code": "ssh_failed", "detail": "Connection refused"}
+    # A failed check says nothing about whether the machine runs: unknown, never stopped.
+    assert saved["state"] == "unknown"
     assert not collector.probes
 
 
@@ -505,7 +512,7 @@ async def test_cloud_probe_updates_snapshot_without_changing_inventory(
     pod = {
         "id": "runpod:pod1",
         "source_id": "runpod-runpod",
-        "state": "desired_running",
+        "state": "reported_running",
         "host": "192.0.2.5",
         "port": 22005,
         "username": "root",
@@ -524,8 +531,72 @@ async def test_cloud_probe_updates_snapshot_without_changing_inventory(
     assert saved["gpu_utilization"] == 70
     assert saved["gpu_count"] == 2
     assert saved["gpu_type"] == "A100"
-    assert saved["state"] == "desired_running"
+    assert saved["state"] == "reported_running"
     assert store.manual_instances() == []
+
+
+@pytest.mark.parametrize("state", ["running", "reported_running"])
+async def test_a_check_never_changes_what_a_provider_listed(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    state: str,
+) -> None:
+    source = add_source("RunPod", driver="runpod")
+    listed_at = now()
+    pod = {
+        "id": "runpod:pod1",
+        "source_id": source["id"],
+        "state": state,
+        "host": "192.0.2.5",
+        "port": 22005,
+        "username": "root",
+        "identity_file": None,
+        "gpu_count": 2,
+        "gpu_type": "A100",
+        "gpu_utilization": None,
+        "cpu_utilization": None,
+        "observed_at": listed_at,
+        "ssh_status": "unverified",
+    }
+    store.save_snapshot(source["id"], {"instances": [pod]})
+
+    async def probe(row: dict[str, Any]) -> dict[str, Any]:
+        # An idle rented pod: no compute processes, and a container that sees one GPU.
+        return {
+            "ssh_status": "reachable",
+            "gpu_count": 1,
+            "gpu_type": "NVIDIA L4",
+            "gpu_allocated": 0,
+            "gpu_utilization": 0.0,
+            "gpu_observed_count": 1,
+            "cpu_utilization": 12.0,
+            "metrics_scope": "host_visible",
+            "observed_at": now(),
+            "probe_warnings": [],
+        }
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    result = await collector.probe("runpod:pod1")
+    [saved] = store.dashboard()["instances"]
+    assert saved == result
+    assert saved["ssh_status"] == "reachable"
+    assert saved["last_probe_attempt"]
+    assert (saved["gpu_utilization"], saved["cpu_utilization"]) == (0.0, 12.0)
+    # The provider stays the authority for its inventory, the GPUs held and its listing time.
+    assert (saved["gpu_count"], saved["gpu_type"]) == (2, "A100")
+    assert saved["observed_at"] == listed_at
+    for key in ("gpu_allocated", "metrics_scope", "probe_warnings"):
+        assert key not in saved
+    assert gpu_allocation(saved) == 2
+    assert store.dashboard()["history"][-1]["allocated_gpus"] == 2
+    # The next listing keeps the check, not its readings.
+    store.save_snapshot(source["id"], {"instances": [pod]})
+    [listed] = store.dashboard()["instances"]
+    assert listed["ssh_status"] == "reachable"
+    assert listed["last_probe_attempt"] == saved["last_probe_attempt"]
+    assert listed["cpu_utilization"] is None
 
 
 @pytest.mark.parametrize(
@@ -652,3 +723,97 @@ async def test_a_source_failing_before_a_restart_is_still_failing_after_it(
     use_driver(monkeypatch, collect)
     await collector.collect(source["id"])
     assert [row["type"] for row in store.events()] == expected
+
+
+async def test_commit_fault_is_exposed_until_that_source_recovers(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, add_source: AddSource
+) -> None:
+    first = add_source()
+    second = add_source("Cluster B")
+
+    async def fail(source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector, "_collect", fail)
+    await collector.collect(first["id"])
+    key = f"collector:commit:{first['id']}"
+    assert collector.runtime.loop_errors[key]["error"] == "OSError: database write failed"
+    assert collector.runtime.loop_errors[key]["at"]
+
+    async def succeed(source_id: str) -> None:
+        pass
+
+    monkeypatch.setattr(collector, "_collect", succeed)
+    await collector.collect(second["id"])
+    assert key in collector.runtime.loop_errors
+    await collector.collect(first["id"])
+    assert key not in collector.runtime.loop_errors
+
+
+async def test_schedule_fault_is_exposed_and_cleared_on_next_clean_pass(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector
+) -> None:
+    passes = 0
+
+    def schedule() -> None:
+        nonlocal passes
+        passes += 1
+        if passes == 1:
+            raise ValueError("invalid schedule")
+
+    async def sleep(seconds: int) -> None:
+        if passes == 1:
+            assert collector.runtime.loop_errors["collector:schedule"]["error"] == (
+                "ValueError: invalid schedule"
+            )
+        else:
+            assert "collector:schedule" not in collector.runtime.loop_errors
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(collector, "_schedule", schedule)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await collector.run()
+
+
+@pytest.mark.parametrize("action", ["delete", "disable"])
+async def test_collect_clears_a_commit_fault_for_an_inactive_source(
+    collector: Collector, store: Store, add_source: AddSource, action: str
+) -> None:
+    source = add_source()
+    key = f"collector:commit:{source['id']}"
+    collector.runtime.report(key, OSError("database write failed"))
+    collector.runtime.report("collector:schedule", ValueError("invalid schedule"))
+    if action == "delete":
+        store.delete_source(source["id"])
+    else:
+        store.save_source({**source, "enabled": False})
+    await collector.collect(source["id"])
+    assert key not in collector.runtime.loop_errors
+    assert "collector:schedule" in collector.runtime.loop_errors
+
+
+async def test_capabilities_seen_survive_regression_failure_and_recovery(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+) -> None:
+    # Upgrade from an existing source row, without capabilities_seen or a migration.
+    source = add_source(capabilities=["jobs", "nodes"])
+    batch = Batch(capabilities=["jobs"], warnings=[message("nodes_unavailable")])
+    failure = False
+
+    def collect(source: dict[str, Any]) -> Batch:
+        if failure:
+            raise SourceError("ssh_failed")
+        return batch
+
+    use_driver(monkeypatch, collect)
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["jobs", "nodes"]
+    failure = True
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["jobs", "nodes"]
+    failure = False
+    batch = Batch(capabilities=["jobs", "nodes", "history"])
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["capabilities_seen"] == ["history", "jobs", "nodes"]
+    assert store.source(source["id"])["warnings"] == []

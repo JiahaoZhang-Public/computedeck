@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from computedeck import app as api
 from computedeck import collector as collector_module
-from computedeck.drivers import ssh
+from computedeck.drivers import ssh, ssh_host
 from computedeck.drivers.base import Batch, SourceError
 from computedeck.drivers.slurm import SlurmDriver
 from computedeck.store import DatabaseVersionError, Store
@@ -511,8 +511,14 @@ def test_existing_alias_instance_probes_alias_without_cluster_source(
 
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, options))
-        output = {"cpu_utilization": 10, "gpu_csv": "NVIDIA L4, 24, 0, 1\n" * 8}
-        return json.dumps(output)
+        gpus = "".join(f"{index}, GPU-{index}, NVIDIA L4, 24, 0, 1\n" for index in range(8))
+        output = {
+            "cpu_utilization": 10,
+            "gpu_tool": "nvidia-smi",
+            "gpu": gpus,
+            "apps": "GPU-3, 4242, 90\n",
+        }
+        return ssh_host.MARKER + json.dumps(output)
 
     monkeypatch.setattr(ssh, "run", run)
     body = {
@@ -531,9 +537,13 @@ def test_existing_alias_instance_probes_alias_without_cluster_source(
     assert result.status_code == 200, result.text
     assert calls == [("gpu-box", [])]
     assert result.json()["gpu_count"] == 8
+    assert result.json()["gpu_allocated"] == 1
     assert result.json()["gpu_utilization"] == 24
-    assert result.json()["state"] == "unknown"
-    assert client.get("/api/dashboard").json()["sources"] == []
+    # It answered just now; there is no provider lifecycle behind a machine added by hand.
+    assert result.json()["state"] == "running"
+    dashboard = client.get("/api/dashboard").json()
+    assert dashboard["sources"] == []
+    assert dashboard["instances"][0]["state"] == "running"
     config = client.get("/api/ssh/config").json()["config"]
     assert "Host gpu-box" not in config
     assert "HostName gpu-box" not in config
@@ -774,7 +784,27 @@ def test_history_endpoint_bounds_and_demo(client: TestClient) -> None:
     week = client.get("/api/history?hours=168&demo=true").json()
     assert week["hours"] == 168
     assert len(week["points"]) == 337
-    assert all(point["known_allocated_gpus"] == point["allocated_gpus"] for point in week["points"])
+    data = client.get("/api/dashboard?demo=true").json()
+    summary = data["summary"]
+    early = week["points"][0]
+    assert early["unknown_allocation_sources"] == 0
+    assert early["allocated_gpus"] == early["known_allocated_gpus"]
+    for source in data["sources"]:
+        if source["stale"] or source["error"]:
+            assert all(
+                point["unknown_allocation_sources"] > 0 and point["allocated_gpus"] is None
+                for point in week["points"]
+                if point["at"] >= source["last_success"]
+            )
+    latest = week["points"][-1]
+    assert latest["allocated_gpus"] == summary["allocated"]
+    assert latest["known_allocated_gpus"] == summary["known_allocated"]
+    assert latest["unknown_allocation_sources"] == len(summary["unmeasured"])
+    assert all(
+        point["allocated_gpus"] is None
+        for point in week["points"]
+        if point["unknown_allocation_sources"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -853,3 +883,330 @@ def test_unreadable_rows_of_the_tools_do_not_break_their_pages(data_dir: Path) -
             assert client.get(path).status_code == 200, path
         unreadable = client.get("/api/health").json()["unreadable_rows"]
         assert {"chat_messages", "notify_rules", "notify_channels", "notify_log"} <= set(unreadable)
+
+
+def test_pending_collections_are_exposed_and_refresh_can_queue_other_sources(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = Event()
+    release = Event()
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        started.set()
+        await asyncio.to_thread(release.wait, 5)
+        return Batch(jobs=[], capabilities=["jobs"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    first = post(client, "/api/sources", CLUSTER).json()
+    second = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+    try:
+        post(client, "/api/refresh", {"source_id": first["id"]})
+        assert started.wait(2)
+        data = client.get("/api/dashboard").json()
+        assert data["collecting"] == [first["id"]]
+        assert data["refreshing"] is True
+        assert data["as_of"] is None
+        post(client, "/api/refresh")
+        assert client.get("/api/dashboard").json()["collecting"] == sorted(
+            [first["id"], second["id"]]
+        )
+    finally:
+        release.set()
+    assert wait_until_idle(client)["collecting"] == []
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_disabling_source_during_collection_resets_run_state(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    started = Event()
+    release = Event()
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        started.set()
+        await asyncio.to_thread(release.wait, 5)
+        if fails:
+            raise SourceError("ssh_timeout")
+        return Batch(jobs=[], capabilities=["jobs"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    source = post(client, "/api/sources", CLUSTER).json()
+    try:
+        post(client, "/api/refresh", {"source_id": source["id"]})
+        assert started.wait(2)
+        assert client.get("/api/dashboard").json()["sources"][0]["status"] == "syncing"
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": False}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "unconfigured"
+    finally:
+        release.set()
+    data = wait_until_idle(client)
+    [saved] = data["sources"]
+    assert saved["enabled"] is False
+    assert saved["status"] == "unconfigured"
+    assert saved["error"] is None
+    assert saved["failures"] == 0
+    assert saved["last_success"] is None
+    assert data["attention"] == []
+    assert data["collecting"] == []
+
+
+@pytest.mark.parametrize("previous_failure", [False, True])
+def test_enabling_configured_source_starts_ready_without_old_failures(
+    client: TestClient, data_dir: Path, previous_failure: bool
+) -> None:
+    source = post(client, "/api/sources", {**CLUSTER, "enabled": False}).json()
+    assert source["status"] == "unconfigured"
+    if previous_failure:
+        store = Store(data_dir / "computedeck.sqlite")
+        try:
+            store.save_source(
+                {**source, "status": "error", "error": {"code": "ssh_timeout"}, "failures": 5}
+            )
+        finally:
+            store.db.close()
+    response = client.put(f"/api/sources/{source['id']}", json={"enabled": True}, headers=HEADERS)
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["status"] == "ready"
+    assert saved["error"] is None
+    assert saved["failures"] == 0
+    assert saved["next_due_at"] is not None
+    assert client.get("/api/dashboard").json()["attention"] == []
+
+
+def test_collector_commit_fault_reaches_health_and_recovers(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    key = f"collector:commit:{source['id']}"
+    assert client.get("/api/health").json()["background_errors"][key]["error"] == (
+        "OSError: database write failed"
+    )
+
+    items = client.get("/api/dashboard").json()["attention"]
+    assert any(
+        item["kind"] == "service_loop_failed" and item["subject"]["id"] == key for item in items
+    )
+    assert not any(
+        item["kind"] == "service_loop_failed"
+        for item in client.get("/api/dashboard?demo=true").json()["attention"]
+    )
+
+    async def succeed(self: collector_module.Collector, source_id: str) -> None:
+        pass
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", succeed)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    assert key not in client.get("/api/health").json()["background_errors"]
+    assert client.get("/api/dashboard").json()["attention"] == []
+
+
+@pytest.mark.parametrize("action", ["delete", "disable"])
+def test_commit_fault_clears_when_source_is_removed_from_collection(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    other = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    key = f"collector:commit:{source['id']}"
+    other_key = f"collector:commit:{other['id']}"
+    assert {key, other_key} <= client.get("/api/health").json()["background_errors"].keys()
+    path = f"/api/sources/{source['id']}"
+    response = (
+        client.delete(path, headers=HEADERS)
+        if action == "delete"
+        else client.put(path, json={"enabled": False}, headers=HEADERS)
+    )
+    assert response.status_code == 200
+    errors = client.get("/api/health").json()["background_errors"]
+    assert key not in errors
+    assert other_key in errors
+
+
+def test_health_filters_inactive_commit_faults_without_mutating_runtime(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    other = post(client, "/api/sources", {**CLUSTER, "name": "Cluster B"}).json()
+    runtimes = []
+
+    async def fail(self: collector_module.Collector, source_id: str) -> None:
+        runtimes.append(self.runtime)
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(collector_module.Collector, "_collect", fail)
+    post(client, "/api/refresh")
+    wait_until_idle(client)
+    runtime = runtimes[0]
+    recorded = dict(runtime.loop_errors)
+    # A CLI edit can disable a source without going through the service's write routes.
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        store.save_source({**source, "enabled": False})
+    finally:
+        store.db.close()
+    errors = client.get("/api/health").json()["background_errors"]
+    assert f"collector:commit:{source['id']}" not in errors
+    assert f"collector:commit:{other['id']}" in errors
+    assert runtime.loop_errors == recorded
+
+
+def test_attention_reads_live_staleness_and_keeps_demo_isolated(
+    client: TestClient, data_dir: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    source = post(client, "/api/sources", CLUSTER).json()
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        source.update(last_success=(datetime.now(UTC) - timedelta(minutes=31)).isoformat())
+        store.save_source(source)
+    finally:
+        store.db.close()
+    data = client.get("/api/dashboard").json()
+    assert [(item["kind"], item["severity"]) for item in data["attention"]] == [
+        ("source_stale", "error")
+    ]
+    example = client.get("/api/dashboard?demo=true").json()
+    assert [item["kind"] for item in example["attention"]] == [
+        "source_stale",
+        "source_failed",
+        "source_failed",
+        "cluster_unavailable",
+        "instance_ssh_failed",
+    ]
+    assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
+    assert source["id"] not in {item["id"] for item in example["sources"]}
+    assert client.get("/api/dashboard").json()["attention"] == data["attention"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"ssh_alias": "cluster-b"},
+        {"interval_minutes": 20},
+        {"name": "Renamed cluster"},
+        {"enabled": False},
+    ],
+)
+def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, Any]
+) -> None:
+    source = post(client, "/api/sources", CLUSTER).json()
+    capabilities = ["jobs", "nodes", "history"]
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        store.save_source(
+            {
+                **source,
+                "capabilities": capabilities,
+                "capabilities_seen": capabilities,
+                "warnings": [{"code": "partitions_unavailable"}],
+                "cluster_state": "degraded",
+            }
+        )
+    finally:
+        store.db.close()
+
+    response = client.put(f"/api/sources/{source['id']}", json=changes, headers=HEADERS)
+    assert response.status_code == 200
+    changed_connection = "ssh_alias" in changes
+    expected = [] if changed_connection else capabilities
+    assert response.json()["capabilities"] == expected
+    assert response.json()["capabilities_seen"] == expected
+    assert response.json()["warnings"] == (
+        [] if changed_connection else [{"code": "partitions_unavailable"}]
+    )
+    assert response.json()["cluster_state"] == ("unknown" if changed_connection else "degraded")
+    if changes.get("enabled") is False:
+        assert client.get("/api/dashboard").json()["attention"] == []
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": True}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["capabilities_seen"] == capabilities
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        return Batch(jobs=[], capabilities=["jobs"], warnings=[{"code": "history_unavailable"}])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    post(client, "/api/refresh", {"source_id": source["id"]})
+    data = wait_until_idle(client)
+    assert data["sources"][0]["capabilities_seen"] == (
+        ["jobs"] if changed_connection else sorted(capabilities)
+    )
+    assert [item["kind"] for item in data["attention"]] == (
+        [] if changed_connection else ["capability_regressed"]
+    )
+
+
+@pytest.mark.parametrize("outcome", ["jobs_ended", "ongoing_failure"])
+def test_reenable_starts_a_silent_event_baseline(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    stage = "initial"
+
+    async def collect(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        if stage == "failure":
+            raise SourceError("ssh_timeout")
+        job = {
+            "id": "cluster-a:1",
+            "source_id": source["id"],
+            "cluster_id": "cluster-a",
+            "state": "RUNNING",
+            "gpu_count": 1,
+        }
+        if stage == "ended":
+            return Batch(
+                jobs=[],
+                failures=[{**job, "state": "FAILED", "end": "2026-01-01T12:00:00"}],
+                capabilities=["jobs", "history"],
+            )
+        return Batch(jobs=[job], capabilities=["jobs", "history"])
+
+    monkeypatch.setattr(SlurmDriver, "collect", collect)
+    source = post(client, "/api/sources", CLUSTER).json()
+
+    def refresh() -> None:
+        post(client, "/api/refresh", {"source_id": source["id"]})
+        wait_until_idle(client)
+
+    refresh()
+    if outcome == "ongoing_failure":
+        stage = "failure"
+        refresh()
+    for enabled in (False, True):
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"enabled": enabled}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["last_success"] is None
+        assert response.json()["capabilities_seen"] == ["history", "jobs"]
+    stage = "ended" if outcome == "jobs_ended" else "failure"
+    refresh()
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        rows = store.events()
+    finally:
+        store.db.close()
+    if outcome == "jobs_ended":
+        assert [(row["type"], row["silent"]) for row in rows] == [("job.failed", True)]
+    else:
+        assert [row["type"] for row in rows] == ["source.failed"]

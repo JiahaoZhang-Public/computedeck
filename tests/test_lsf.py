@@ -225,6 +225,13 @@ def test_jobs_read_without_gpu_fields_have_unknown_gpus() -> None:
     assert parse(row)[0]["gpu_count"] is None
 
 
+@pytest.mark.parametrize("reason", ["", "-", "The job was suspended by the user"])
+def test_pending_suspension_is_held_regardless_of_comment(reason: str) -> None:
+    row = parse(job(STAT="PSUSP", PEND_REASON=reason))[0]
+    assert row["state"] == "PENDING"
+    assert row["reason"] == "Held"
+
+
 def test_states_other_users_and_finished_jobs() -> None:
     jobs = parse(
         job(),
@@ -240,7 +247,7 @@ def test_states_other_users_and_finished_jobs() -> None:
         ("cluster-b:2003", "PENDING"),
         ("cluster-b:2004", "SUSPENDED"),
     ]
-    assert jobs[1]["reason"] == "The job was suspended by the user"
+    assert jobs[1]["reason"] == "Held"
 
 
 @pytest.mark.parametrize(

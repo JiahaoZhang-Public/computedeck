@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { setLocale, t } from './i18n';
+import { ClustersPage } from './pages/Clusters';
+import { PlanPage } from './pages/Plan';
+import { UsagePage } from './pages/Usage';
+import { serverDashboard, serverDemo } from './test-server';
+import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
+import { CloudPage } from './pages/Cloud';
+import { InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
-import type { Dashboard, Job, Source } from './types';
+import { FailuresTable, JobsTable } from './pages/shared';
+import type { Dashboard, Instance, Job, Source } from './types';
 
 const now = new Date().toISOString();
 const hourAgo = new Date(Date.now() - 3600_000).toISOString();
@@ -49,21 +57,22 @@ const job = (id: string, extra: Partial<Job> = {}): Job => ({
   observed_at: hourAgo,
   ...extra,
 });
-const dash = (extra: Partial<Dashboard>): Dashboard => ({
-  mode: 'live',
-  sources: [source()],
-  jobs: [],
-  instances: [],
-  nodes: [],
-  history: [],
-  updated_at: now,
-  refreshing: false,
-  ...extra,
-});
-const ctx = (data: Dashboard) =>
+const dash = (extra: Partial<Dashboard>): Dashboard =>
+  serverDashboard({
+    mode: 'live',
+    sources: [source()],
+    jobs: [],
+    instances: [],
+    nodes: [],
+    history: [],
+    updated_at: now,
+    refreshing: false,
+    ...extra,
+  });
+const ctx = (input: Dashboard) =>
   ({
-    data,
-    groups: groupsOf(data),
+    data: serverDashboard(input),
+    groups: groupsOf(input),
     demo: false,
     group: 'all',
     query: '',
@@ -80,6 +89,17 @@ const tabs = (html: string) =>
   [...html.matchAll(/role="tab"[^>]*>([^<]*)<span>([^<]*)<\/span>/g)].map(
     (match) => `${match[1]}=${match[2]}`,
   );
+
+function overviewGroupsTable(html: string) {
+  const heading = `<h2>${t('overview.sources').replaceAll('&', '&amp;')}</h2>`;
+  const start = html.indexOf(heading);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const end = html.indexOf('</table>', start);
+  expect(end).toBeGreaterThan(start);
+  const table = html.slice(start, end + '</table>'.length);
+  expect(table).toContain('<tbody><tr');
+  return table;
+}
 
 // The only cluster login is failing (SSH timeout); its last snapshot still lists 3 jobs.
 const failing = source({
@@ -167,17 +187,30 @@ describe('jobs of a cluster whose collection is not current', () => {
   });
 });
 
-it('shows a fully unavailable cluster instead of an idle load bar', () => {
-  const data = dash({
-    sources: [source({ cluster_state: 'unavailable' })],
-    nodes: Array.from({ length: 70 }, (_, i) => ({
+function clusterData(states: string[], state: Source['cluster_state'] = 'available') {
+  return dash({
+    sources: [
+      source({
+        cluster_state: state,
+        capabilities: ['jobs', 'nodes', 'qos_limits', 'qos_access'],
+        qos: [
+          {
+            name: 'normal',
+            access: 'verified',
+            limits: { MaxTRESPU: 'gres/gpu=8' },
+            origin: 'test',
+          },
+        ],
+      }),
+    ],
+    nodes: states.map((state, i) => ({
       id: `a:${i}`,
       source_id: 'a-alice',
       cluster_id: 'a',
       name: `node-${i}`,
-      state: 'down+not_responding',
+      state,
       gpu_count: 8,
-      gpu_allocated: 0,
+      gpu_allocated: state === 'mixed' ? 2 : 0,
       gpu_type: 'example',
       cpu_count: 32,
       cpu_allocated: 0,
@@ -185,7 +218,419 @@ it('shows a fully unavailable cluster instead of an idle load bar', () => {
       observed_at: now,
     })),
   });
+}
+
+describe('the last SSH check of a machine', () => {
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60_000).toISOString();
+  const machine: Instance = {
+    id: 'manual:lab-box1',
+    source_id: 'manual',
+    platform: 'Lab workstation',
+    name: 'dev-box',
+    state: 'running',
+    gpu_count: 2,
+    gpu_allocated: 1,
+    gpu_type: 'RTX 4090',
+    gpu_utilization: 40,
+    cpu_utilization: 10,
+    memory_utilization: 20,
+    host: '192.0.2.20',
+    port: 22,
+    username: 'alice',
+    ssh_alias: 'cd-lab-workstation-box1',
+    identity_file: null,
+    hourly_cost: null,
+    currency: 'USD',
+    observed_at: twoMinutesAgo,
+    ssh_status: 'reachable',
+    last_probe_attempt: twoMinutesAgo,
+    metrics_scope: 'host_visible',
+    manual: true,
+  };
+  const drawer = (item: Instance) =>
+    renderToStaticMarkup(
+      <InstanceDetail
+        item={item}
+        ctx={ctx(dash({ instances: [item] }))}
+        onProbe={async () => {}}
+        onEdit={() => {}}
+        onDelete={async () => {}}
+      />,
+    );
+
+  it('shows when it was checked and how many GPUs had processes', () => {
+    const html = drawer(machine);
+    expect(html).toContain('Reachable');
+    expect(html).toContain('checked 2 min ago');
+    expect(html).toMatch(/GPUs with processes<\/dt><dd>1</);
+    const page = renderToStaticMarkup(
+      <CloudPage ctx={ctx(dash({ sources: [], instances: [machine] }))} />,
+    );
+    expect(page).toContain('checked 2 min ago');
+  });
+
+  it('says why the GPUs in use are unknown instead of showing 0', () => {
+    const html = drawer({
+      ...machine,
+      gpu_allocated: null,
+      probe_warnings: [{ code: 'gpu_processes_unavailable', detail: 'rocm-smi' }],
+    });
+    expect(html).toMatch(/GPUs with processes<\/dt><dd>—/);
+    expect(html).toContain('GPU processes unavailable: rocm-smi');
+  });
+
+  it('leaves the busy count out for a provider instance, which holds what it rents', () => {
+    const html = drawer({ ...machine, manual: false, metrics_scope: undefined });
+    expect(html).not.toContain('GPUs with processes');
+  });
+});
+
+afterEach(() => setLocale('en'));
+describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
+  it('keeps the empty attention panel immediately before current jobs', () => {
+    setLocale(locale);
+    const html = renderToStaticMarkup(<OverviewPage ctx={ctx(dash({ jobs: [job('1')] }))} />);
+    expect(html).toContain('id="attention"');
+    expect(html).toContain(
+      `<p class="panel-note">${t('overview.attention.none')}</p></section><section class="panel "><header class="panel-header"><h2>${t('overview.jobs')}`,
+    );
+  });
+
+  it.each([false, true])('puts current information before history (example mode: %s)', (demo) => {
+    setLocale(locale);
+    const data = serverDemo();
+    const context = ctx(data);
+    context.demo = demo;
+    context.attention = data.attention ?? [];
+    context.webPlugins = [
+      { id: 'test-aside', overview: () => <aside data-testid="overview-aside" /> },
+    ];
+    const html = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    const headings = [...html.matchAll(/<h2>([^<]*)/g)].map((match) => match[1]);
+    expect(headings).toEqual(
+      [
+        t('overview.attention'),
+        t('overview.jobs'),
+        t('overview.failures'),
+        t('overview.sources'),
+        t('chart.heading'),
+      ].map((heading) => heading.replaceAll('&', '&amp;')),
+    );
+    expect(html.startsWith('<div class="stats">')).toBe(true);
+    expect(html).toContain('class="table jobs-table"');
+    expect(html).toContain('id="attention"');
+    expect(html.indexOf('id="attention"')).toBeLessThan(html.indexOf(`<h2>${t('overview.jobs')}`));
+    const groups = overviewGroupsTable(html);
+    expect(groups).toContain('<strong>Cluster A</strong>');
+    expect(html.indexOf('class="table jobs-table"')).toBeLessThan(html.indexOf(groups));
+    expect(html).toContain(`href="#/jobs">${t('overview.allJobs')}`);
+    if (demo) {
+      expect(html).not.toContain('data-testid="overview-aside"');
+    } else {
+      expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(
+        html.indexOf(t('chart.heading')),
+      );
+    }
+  });
+});
+
+describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (locale) => {
+  it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    // Isolate the machine hint; the scenario also has missing cluster logins.
+    const context = ctx(data);
+    context.data.summary.unmeasured = context.data.summary.unmeasured.filter(
+      (item) => item.subject.kind === 'instance',
+    );
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    expect(overview).toContain('≥ 21');
+    expect(overview).toContain('build-box');
+    expect(overview).toContain(t('msg.summary_not_probed_yet'));
+    expect(overview).toContain(t('summary.unmonitored.one'));
+    expect(t('summary.unmonitored', { count: 1 })).toBe(t('summary.unmonitored.one'));
+    expect(t('summary.unmonitored', { count: 2 })).not.toBe(t('summary.unmonitored.one'));
+    if (locale === 'en') expect(overview).not.toContain('1 machines');
+  });
+  it('shows the same all-down capacity on Overview, Clusters and Where to run', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(Array(70).fill('down+not_responding'), 'unavailable'));
+    const text = t('summary.capacity', { usable: 0, unavailable: 560 });
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
+    for (const html of [overview, clusters, plan]) {
+      expect(html).toContain(text);
+      expect(html).not.toContain('0 / 560');
+    }
+    expect(overview).toContain(`<span class="red-text">${text}</span>`);
+    expect(clusters).toContain(`<strong class="red-text">${text}</strong>`);
+    const groups = overviewGroupsTable(overview);
+    expect(groups).toContain('<strong>A</strong>');
+    expect(groups).not.toContain('meter-track');
+    expect(clusters.split('</section>')[0]).not.toContain('meter-track');
+    expect(plan).toContain(t('plan.verdict.unavailable'));
+  });
+
+  it.each(['error', 'stale'] as const)(
+    'keeps the outage wording when another login is %s',
+    (status) => {
+      setLocale(locale);
+      const data = clusterData(['down'], 'unavailable');
+      data.sources.push(
+        source({
+          id: 'a-bob',
+          username: 'bob',
+          status,
+          error: status === 'error' ? { code: 'ssh_timeout' } : null,
+          stale: status === 'stale',
+        }),
+      );
+      const context = ctx(data);
+      for (const html of [
+        renderToStaticMarkup(<OverviewPage ctx={context} />),
+        renderToStaticMarkup(<ClustersPage ctx={context} />),
+      ]) {
+        expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: 8 }));
+        expect(html).not.toContain(t('summary.allocation', { allocated: 0, usable: 0 }));
+      }
+    },
+  );
+
+  it.each(['empty', 'failed', 'stale', 'unsupported'])(
+    'uses a quiet placeholder for %s node data',
+    (condition) => {
+      setLocale(locale);
+      const data = clusterData(condition === 'empty' ? [] : ['mixed']);
+      if (condition === 'failed') data.sources[0].error = { code: 'ssh_timeout' };
+      if (condition === 'stale') data.sources[0].stale = true;
+      if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
+      const context = ctx(data);
+      const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+      expect(overview).toContain('<strong>A</strong>');
+      const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
+      expect(context.data.summary.nodes.nodes).toBe(0);
+      for (const html of [overview, clusters]) {
+        expect(html).toContain('<span class="muted">—</span>');
+        expect(html).not.toContain(t('summary.allocation', { allocated: '—', usable: '—' }));
+        expect(html).not.toContain(t('summary.capacityTotal', { total: '—' }));
+        expect(html).not.toContain('meter-track');
+      }
+    },
+  );
+
+  it.each(['FUTURE', 'ERROR'])('keeps the usable subtotal when a node is %s', (state) => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', state], 'unknown'));
+    const text = t('summary.allocation', { allocated: '—', usable: '≥ 8' });
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+    ]) {
+      expect(html).toContain(text);
+      expect(html).toContain('≥ 8');
+    }
+  });
+
+  it.each([
+    ['available', ['mixed', 'mixed', 'mixed', 'drained'], '', 24, 6],
+    ['degraded', ['mixed', ...Array(9).fill('drained')], 'amber-text', 8, 2],
+  ] as const)(
+    'shows allocation and the %s tone without escalating individual drained nodes',
+    (state, states, tone, usable, allocated) => {
+      setLocale(locale);
+      const context = ctx(clusterData([...states], state));
+      const text = t('summary.allocation', { allocated, usable });
+      const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+      const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+      expect(overview).toContain(`<span class="${tone}">${text}</span>`);
+      expect(clusters).toContain(`<strong class="${tone}">${text}</strong>`);
+      const detail = t('summary.capacityDetail', {
+        unavailable: states.length * 8 - usable,
+        total: states.length * 8,
+      });
+      expect(overview).toContain(detail);
+      expect(clusters).toContain(detail);
+    },
+  );
+
+  it('shows allocation over usable GPUs without a zero-unavailable line for a healthy cluster', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', 'mixed']));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.allocation', { allocated: 4, usable: 16 }));
+      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 0, total: 16 }));
+    }
+  });
+
+  it('renders server figures without deriving them again from rows', () => {
+    setLocale(locale);
+    const context = ctx(serverDemo());
+    context.data.summary.allocated = 123;
+    context.data.summary.utilization = 87;
+    context.data.summary.covered = 42;
+    expect(renderToStaticMarkup(<OverviewPage ctx={context} />)).toContain('>123<');
+    const usage = renderToStaticMarkup(<UsagePage ctx={context} />);
+    expect(usage).toContain('>87<');
+    expect(usage).toContain(t('usage.gpuHint', { count: 42 }));
+  });
+});
+
+describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) => {
+  it.each([
+    ['slurm', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['pbs', ['Account', 'Queue'], ['账户', '队列']],
+    ['lsf', ['Project', 'Queue'], ['项目', '队列']],
+    [
+      'kubernetes',
+      ['Namespace', 'Node pool', 'Priority class'],
+      ['命名空间', '节点池', '优先级类'],
+    ],
+    ['plugin-scheduler', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['constructor', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['toString', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['__proto__', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+    ['', ['Account', 'Partition', 'QoS'], ['账户', '分区', 'QoS']],
+  ])(
+    'uses the job source driver %s, with neutral labels for plugins and missing sources',
+    (driver, en, zh) => {
+      setLocale(locale);
+      const queued = driver === 'pbs' || driver === 'lsf';
+      const item = job('terms', {
+        account: 'research',
+        partition: 'gpu',
+        qos: queued ? 'gpu' : 'normal',
+      });
+      // A different login comes first: lookup must use source_id, not the first cluster login.
+      const data = dash({
+        sources: [source({ id: 'other-login' }), ...(driver ? [source({ driver })] : [])],
+      });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={ctx(data)} />);
+      const fields = [...html.matchAll(/<dt>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map((match) => [
+        match[1],
+        match[2],
+      ]);
+      const names = locale === 'en' ? en : zh;
+      expect(fields).toContainEqual([names[0], 'research']);
+      expect(fields).toContainEqual([names[1], 'gpu']);
+      if (queued) {
+        expect(fields.filter(([, value]) => value === 'gpu')).toHaveLength(1);
+        expect(html).not.toContain('<dt>QoS</dt>');
+      } else expect(fields).toContainEqual([names[2], 'normal']);
+      expect(html).not.toContain('Slurm Account');
+    },
+  );
+
+  it('keeps missing scheduler field values unknown', () => {
+    setLocale(locale);
+    const html = renderToStaticMarkup(
+      <JobDetail job={job('empty', { account: '', partition: '', qos: '' })} ctx={ctx(dash({}))} />,
+    );
+    for (const key of ['job.account', 'job.partition', 'job.qos'] as const)
+      expect(html).toContain(`<dt>${t(key)}</dt><dd>—</dd>`);
+  });
+
+  it('names groups and the generic partition column without calling them sources', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const context = ctx(data);
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    expect(overview).toContain(locale === 'en' ? 'Clusters &amp; clouds' : '集群与云平台');
+    expect(overview).toContain(t('overview.col.source'));
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(clusters).toContain(`<th>${t('clusters.col.partition')}</th>`);
+    expect(clusters).toContain(
+      `<th>${locale === 'en' ? 'QoS / queue / quota' : 'QoS / 队列 / 配额'}</th>`,
+    );
+    const headers = [...clusters.matchAll(/<th\b[^>]*>([^<]*)<\/th>/g)].map((match) => match[1]);
+    expect(headers.join(' ')).not.toMatch(/priority class|优先级类/i);
+    expect(clusters).toContain(t('filter.byGroup'));
+    expect(t('nav.cloud')).toBe(t('source.type.machines'));
+  });
+
+  it('explains scheduler-specific job fields in both table header tooltips', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const groups = groupsOf(data);
+    const label = locale === 'en' ? 'Cluster / queue or QoS' : '集群 / 队列或 QoS';
+    const hint =
+      locale === 'en'
+        ? 'Slurm QoS, PBS or LSF queue, Kubernetes priority class'
+        : 'Slurm 的 QoS、PBS 或 LSF 的队列、Kubernetes 的优先级类';
+    for (const table of [
+      <JobsTable jobs={[job('terms')]} groups={groups} onOpen={() => {}} empty={null} />,
+      <FailuresTable jobs={data.recent_failures ?? []} groups={groups} />,
+    ]) {
+      expect(renderToStaticMarkup(table)).toContain(`<th title="${hint}">${label}</th>`);
+    }
+  });
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains partial capacity and all-down unknown totals in %s',
+  (locale) => {
+    setLocale(locale);
+    const data = clusterData(['down', 'drained'], 'unavailable');
+    data.nodes[1].gpu_count = null;
+    const context = ctx(data);
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
+    }
+    const unknown = ctx(clusterData(['mixed', 'FUTURE'], 'unknown'));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={unknown} />),
+      renderToStaticMarkup(<ClustersPage ctx={unknown} />),
+    ])
+      expect(html).toContain(t('summary.unknownNodes', { count: 1 }));
+  },
+);
+
+it.each(['disabled', 'failed', 'stale', 'unsupported'])(
+  'excludes retained %s nodes from the node panel',
+  (condition) => {
+    const data = clusterData(['idle']);
+    if (condition === 'disabled') data.sources[0].enabled = false;
+    if (condition === 'failed') data.sources[0].error = { code: 'ssh_timeout' };
+    if (condition === 'stale') data.sources[0].stale = true;
+    if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
+    const context = ctx(data);
+    const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(html).toContain(`<h2>${t('clusters.nodes')}<span class="count">0</span>`);
+    expect(html).not.toContain(`<td class="mono">${data.nodes[0].name}</td>`);
+  },
+);
+
+it('names the missing login when current pending GPU counts are unknown and no jobs run', () => {
+  const data = dash({
+    sources: [source(), source({ id: 'a-bob', username: 'bob', stale: true })],
+    jobs: [job('queued', { state: 'PENDING', gpu_count: null })],
+  });
   const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
-  expect(html).toContain('70/70 nodes unavailable');
-  expect(html).toContain('Unavailable');
+  const running = html.split(t('overview.running'))[1].split('</article>')[0];
+  expect(running).not.toContain(t('overview.running.none'));
+  expect(running).toContain('A · bob');
+});
+
+it('counts hand-added machines by normalized manual group and names secondary cloud logins', async () => {
+  const { SourcesPage } = await import('./pages/Sources');
+  const data = serverDemo();
+  data.instances = [
+    data.instances[0],
+    ...data.instances
+      .slice(1, 3)
+      .map((instance, index) => ({ ...instance, platform: index ? ' runpod ' : 'RunPod' })),
+  ];
+  const context = { ...ctx(data), nodes: [], serverName: t('where.local') };
+  const html = renderToStaticMarkup(<SourcesPage ctx={context} />);
+  const manual = html.split(t('sources.manual'))[1];
+  expect(manual).toContain(t('overview.instances', { count: 2 }));
+  expect(manual).not.toContain(t('overview.instances', { count: 3 }));
+  expect(html).toContain('RunPod secondary');
 });

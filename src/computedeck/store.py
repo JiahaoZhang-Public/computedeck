@@ -11,11 +11,18 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import validate_row
+from .drivers.base import node_health, validate_row
+from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
+from .summary import PROBE_INTERVAL as PROBE_INTERVAL
+from .summary import fresh, freshness, summarize, timestamp
+from .summary import gpu_allocation as gpu_allocation
+from .summary import manual_state as manual_state
 
 SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
+# What an SSH check of a provider-listed instance leaves for the next listing to keep.
+PROBE_RESULT = ("ssh_status", "ssh_error", "last_probe_attempt")
 logger = logging.getLogger("computedeck")
 # Fields every reader of a stored record relies on; a record without them is skipped.
 _SOURCE_FIELDS: dict[str, type] = {
@@ -42,15 +49,6 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def gpu_allocation(row: dict[str, Any]) -> int | None:
-    """SSH hosts count GPUs with compute processes; cloud instances count allocations."""
-    return (
-        row.get("gpu_allocated")
-        if row.get("metrics_scope") == "host_visible"
-        else row.get("gpu_count")
-    )
-
-
 def driver_kind(source: dict[str, Any]) -> str:
     try:
         return drivers.get(source.get("driver", "")).kind
@@ -72,14 +70,20 @@ def _decode(data: Any, fields: dict[str, type] | None = None) -> Any:
     return value
 
 
-def _timestamp(value: Any) -> str | None:
-    """A stored time the readers can compare, or None."""
-    try:
-        if isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None:
-            return value
-    except ValueError:
-        pass
-    return None
+def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
+    """A listed instance with the last SSH check of its unchanged endpoint. A listing cannot
+    check SSH, so a failed connection stays failed until checked again or no longer held."""
+    if (
+        old is None
+        or instance_lifecycle(row.get("state")) == "not_held"
+        or instance_lifecycle(old.get("state")) == "not_held"
+        or not old.get("last_probe_attempt")
+        or row.get("ssh_status", "unverified") != "unverified"
+        or not row.get("host")
+        or any(row.get(key) != old.get(key) for key in ("host", "port", "username"))
+    ):
+        return row
+    return {**row, **{key: old[key] for key in PROBE_RESULT if key in old}}
 
 
 def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
@@ -342,7 +346,7 @@ class Store:
             for name in ("ssh_alias", "command"):
                 if not isinstance(node.get(name), str):
                     node[name] = ""
-            node["checked_at"] = _timestamp(node.get("checked_at"))
+            node["checked_at"] = timestamp(node.get("checked_at"))
             # What a node reported before replies were checked: never shown as is.
             node["version"] = nodes.reported_version(node.get("version"))
             node["drivers"] = nodes.reported_drivers(node.get("drivers")) or []
@@ -391,11 +395,15 @@ class Store:
                 continue
             for key in ("last_success", "last_attempt", "next_due_at"):
                 if key in source:
-                    source[key] = _timestamp(source[key])
+                    source[key] = timestamp(source[key])
             if not isinstance(source.get("options", {}), dict):
                 source["options"] = {}
-            for key in ("account", "qos", "warnings", "capabilities", "error"):
-                kind = list if key in ("qos", "warnings", "capabilities") else dict
+            for key in ("account", "qos", "warnings", "capabilities", "capabilities_seen", "error"):
+                kind = (
+                    list
+                    if key in ("qos", "warnings", "capabilities", "capabilities_seen")
+                    else dict
+                )
                 try:
                     if not isinstance(source.get(key), kind | None):
                         raise ValueError(f"Stored {key} is not a {kind.__name__}")
@@ -447,16 +455,18 @@ class Store:
         ).fetchone()
         merged = _read_snapshot(old[0])[0] if old else {}
         if "instances" in snapshot and merged.get("instances"):
+            previous = {row["id"]: row for row in merged["instances"]}
+            listed = [_keep_probe(row, previous.get(row["id"])) for row in snapshot["instances"]]
             # Keep an unexplained disappearance for one successful listing. A second
             # complete listing confirms absence; partial failures never reach here.
-            seen = {row["id"] for row in snapshot["instances"]}
+            seen = {row["id"] for row in listed}
             missing = [
                 {**row, "state": "missing"}
                 for row in merged["instances"]
                 if row["id"] not in seen
                 and row.get("state") not in {"missing", "terminated", "deleted"}
             ]
-            snapshot = {**snapshot, "instances": [*snapshot["instances"], *missing]}
+            snapshot = {**snapshot, "instances": [*listed, *missing]}
         merged.update(snapshot)
         with self.db:
             self.db.execute(
@@ -471,7 +481,7 @@ class Store:
             if instance is not None:
                 for name in ("observed_at", "last_probe_attempt"):
                     if name in instance:
-                        instance[name] = _timestamp(instance[name])
+                        instance[name] = timestamp(instance[name])
                 result.append(instance)
         return result
 
@@ -517,16 +527,7 @@ class Store:
         self._repaired("instances", instance_id)
         return deleted == 1
 
-    @staticmethod
-    def fresh(source: dict[str, Any], capability: str) -> bool:
-        return bool(
-            source["enabled"]
-            and source.get("last_success")
-            and not source.get("stale")
-            and not source.get("error")
-            and source.get("status") in ("ready", "syncing")
-            and capability in source.get("capabilities", [])
-        )
+    fresh = staticmethod(fresh)
 
     def dashboard(self) -> dict[str, Any]:
         sources = self.sources()
@@ -549,6 +550,17 @@ class Store:
         nodes: dict[str, Any] = {}
         instances: dict[str, Any] = {}
         failures: dict[str, Any] = {}
+        observations: dict[str, list[dict[str, Any]]] = {"jobs": [], "nodes": [], "instances": []}
+        source_by_id = {s["id"]: s for s in sources}
+
+        def observation_rank(item: dict[str, Any], capability: str) -> tuple[bool, bool, str]:
+            source = source_by_id.get(item.get("source_id", ""), {})
+            return (
+                bool(source and fresh(source, capability)),
+                bool(source.get("enabled")),
+                item.get("observed_at") or "",
+            )
+
         for source_id, encoded in self.db.execute("SELECT source_id, data FROM snapshots"):
             snapshot, invalid = self._snapshot(source_id, encoded)
             if invalid:
@@ -563,10 +575,12 @@ class Store:
                         )
                 history_ids.discard(source_id)
             for key, target in (("jobs", jobs), ("nodes", nodes), ("instances", instances)):
-                for item in snapshot.get(key, []):
+                rows = [{"source_id": source_id, **item} for item in snapshot.get(key, [])]
+                observations[key].extend(rows)
+                for item in rows:
                     previous = target.get(item["id"])
-                    if not previous or (item.get("observed_at") or "") >= (
-                        previous.get("observed_at") or ""
+                    if not previous or observation_rank(item, key) >= observation_rank(
+                        previous, key
                     ):
                         target[item["id"]] = item
             # Failures are a 24-hour window as of the last collection; only a fresh
@@ -575,10 +589,19 @@ class Store:
                 for item in snapshot.get("failures", []):
                     failures.setdefault(item["id"], item)
         history_sources = [source for source in history_sources if source["id"] in history_ids]
-        instances.update({item["id"]: item for item in self.manual_instances()})
+        manual = [
+            {"source_id": "manual", "manual": True, **item, "state": manual_state(item)}
+            for item in self.manual_instances()
+        ]
+        instances.update({item["id"]: item for item in manual})
+        observations["instances"].extend(manual)
         history = self.history(24)
-        return {
+        for node in nodes.values():
+            node["health"] = node_health(node.get("state", ""))
+        data = {
             "mode": "live",
+            **freshness(sources),
+            "collecting": [],
             "sources": sources,
             "jobs": list(jobs.values()),
             "nodes": list(nodes.values()),
@@ -599,6 +622,9 @@ class Store:
             ),
         }
 
+        data["summary"] = summarize({**data, **observations})
+        return data
+
     def history(self, hours: int, max_points: int = 600) -> list[dict[str, Any]]:
         """Points of the last ``hours``, thinned to at most ``max_points``.
 
@@ -611,93 +637,30 @@ class Store:
             "SELECT at, data FROM history WHERE at >= ? ORDER BY at", (since,)
         ):
             row = self._read("history", at, data, {"at": str})
-            if row is not None and _timestamp(row["at"]) is None:
+            if row is not None and timestamp(row["at"]) is None:
                 self._skip("history", at, "no valid at")
             elif row is not None:
                 rows.append(row)
         if len(rows) <= max_points:
             return rows
         bucket = hours * 3600 / max_points
-        start = datetime.fromisoformat(since)
         kept: dict[int, dict[str, Any]] = {}
         for row in rows:
-            index = int((datetime.fromisoformat(row["at"]) - start).total_seconds() // bucket)
+            index = int(datetime.fromisoformat(row["at"]).timestamp() // bucket)
             kept[index] = row
-        return [kept[index] for index in sorted(kept)]
+        # A sliding window can overlap an extra absolute bucket; keep the newest ones.
+        return [kept[index] for index in sorted(kept)[-max_points:]]
 
     def record_history(self) -> None:
         dashboard = self.dashboard()
-        # History includes only fresh source observations. Unknown intervals remain gaps.
-        fresh = {
-            s["id"]
-            for s in dashboard["sources"]
-            if self.fresh(s, "jobs" if s["kind"] == "cluster" else "instances")
-        }
-        disabled = {source["id"] for source in dashboard["sources"] if not source["enabled"]}
-        instances = [
-            row
-            for row in dashboard["instances"]
-            if row.get("manual") or row.get("source_id") not in disabled
-        ]
-        running = [
-            row
-            for row in dashboard["jobs"] + instances
-            if row.get("source_id") in fresh
-            and str(row.get("state", "unknown")).lower()
-            in ("running", "r", "completing", "cg", "configuring", "cf")
-        ]
-        unknown_sources = {
-            source["id"]
-            for source in dashboard["sources"]
-            if source["enabled"] and source["id"] not in fresh
-        }
-        unknown_sources.update(
-            row.get("source_id", "unknown") for row in running if gpu_allocation(row) is None
-        )
-        unknown_sources.update(
-            row.get("source_id", "unknown")
-            for row in instances
-            if str(row.get("state", "unknown")).lower()
-            not in ("running", "stopped", "terminated", "deleted")
-            or (
-                str(row.get("state", "unknown")).lower() == "running"
-                and row.get("source_id") not in fresh
-            )
-        )
-        known_allocated = sum(gpu_allocation(row) or 0 for row in running) if fresh else None
-        # Actual cloud observations remain useful even when the provider has not
-        # confirmed lifecycle state. They never increase allocated GPU counts.
-        sampled_cloud = [
-            row
-            for row in instances
-            if row.get("ssh_status") == "reachable"
-            and row.get("observed_at")
-            and (datetime.now(UTC) - datetime.fromisoformat(row["observed_at"])).total_seconds()
-            < 720
-        ]
-        measured_by_id = {
-            row["id"]: row
-            for row in [*running, *sampled_cloud]
-            if row.get("gpu_utilization") is not None
-        }
-        measured = list(measured_by_id.values())
-        covered = sum(row.get("gpu_observed_count", row.get("gpu_count")) or 0 for row in measured)
+        summary = dashboard["summary"]
         point = {
             "at": now(),
-            "allocated_gpus": None if unknown_sources else known_allocated,
-            "known_allocated_gpus": known_allocated,
-            "unknown_allocation_sources": len(unknown_sources),
-            "gpu_utilization": (
-                sum(
-                    row["gpu_utilization"]
-                    * (row.get("gpu_observed_count", row.get("gpu_count")) or 0)
-                    for row in measured
-                )
-                / covered
-                if covered
-                else None
-            ),
-            "coverage_count": covered,
+            "allocated_gpus": summary["allocated"],
+            "known_allocated_gpus": summary["known_allocated"],
+            "unknown_allocation_sources": summary["unknown_allocation_sources"],
+            "gpu_utilization": summary["utilization"],
+            "coverage_count": summary["covered"],
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))

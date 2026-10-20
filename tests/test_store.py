@@ -193,6 +193,115 @@ def test_cloud_metrics_update_only_the_probed_endpoint(store: Store) -> None:
     assert "gpu_utilization" not in rows["runpod:b"]
 
 
+def test_a_listing_keeps_the_last_check_of_an_unchanged_endpoint(store: Store) -> None:
+    pod = {
+        "id": "runpod:a",
+        "source_id": "runpod-runpod",
+        "state": "desired_running",
+        "host": "192.0.2.1",
+        "port": 22001,
+        "username": "root",
+        "cpu_utilization": None,
+        "ssh_status": "unverified",
+    }
+    other = {**pod, "id": "runpod:b"}
+    store.save_snapshot("runpod-runpod", {"instances": [pod, other]})
+    endpoint = {"host": "192.0.2.1", "port": 22001, "username": "root"}
+    failed = {
+        "ssh_status": "error",
+        "ssh_error": {"code": "ssh_failed", "detail": "Connection refused"},
+        "last_probe_attempt": now(),
+    }
+    store.update_cloud_metrics("runpod:a", endpoint, failed)
+    reached = {"ssh_status": "reachable", "ssh_error": None, "last_probe_attempt": now()}
+    store.update_cloud_metrics("runpod:b", endpoint, {**reached, "cpu_utilization": 20.0})
+    # A listing cannot check SSH: a failed connection stays failed until checked again.
+    store.save_snapshot("runpod-runpod", {"instances": [pod, other]})
+    rows = {row["id"]: row for row in store.dashboard()["instances"]}
+    assert {key: rows["runpod:a"][key] for key in failed} == failed
+    assert {key: rows["runpod:b"][key] for key in reached} == reached
+    # What the check measured belongs to that moment, not to this listing.
+    assert rows["runpod:b"]["cpu_utilization"] is None
+    # A pod that comes back on another port has not been checked there.
+    store.save_snapshot("runpod-runpod", {"instances": [{**pod, "port": 22002}, other]})
+    rows = {row["id"]: row for row in store.dashboard()["instances"]}
+    assert rows["runpod:a"]["ssh_status"] == "unverified"
+    assert "ssh_error" not in rows["runpod:a"]
+    assert "last_probe_attempt" not in rows["runpod:a"]
+    assert rows["runpod:b"]["ssh_status"] == "reachable"
+
+
+def test_a_source_that_reaches_the_machine_itself_is_not_overruled(store: Store) -> None:
+    machine = {"id": "gpu-box:gpu-box", "host": "gpu-box", "port": None, "username": "alice"}
+    failed = {"ssh_status": "error", "ssh_error": "timeout", "last_probe_attempt": now()}
+    store.save_snapshot("gpu-box-ssh", {"instances": [{**machine, **failed}]})
+    store.save_snapshot("gpu-box-ssh", {"instances": [{**machine, "ssh_status": "reachable"}]})
+    [row] = store.dashboard()["instances"]
+    assert row["ssh_status"] == "reachable"
+    assert "ssh_error" not in row
+
+
+@pytest.mark.parametrize(
+    "state", ["stopped", "terminated", "deleted", "desired_stopped", "desired_terminated"]
+)
+@pytest.mark.parametrize("ssh_status", ["reachable", "error"])
+def test_a_released_instance_drops_its_old_check_even_with_the_same_endpoint(
+    store: Store, state: str, ssh_status: str
+) -> None:
+    pod = {
+        "id": "runpod:a",
+        "state": "reported_running",
+        "host": "192.0.2.1",
+        "port": 22001,
+        "username": "root",
+        "ssh_status": "unverified",
+    }
+    store.save_snapshot("runpod-runpod", {"instances": [pod]})
+    store.update_cloud_metrics(
+        pod["id"],
+        {"host": pod["host"], "port": pod["port"], "username": pod["username"]},
+        {"ssh_status": ssh_status, "ssh_error": None, "last_probe_attempt": now()},
+    )
+    store.save_snapshot("runpod-runpod", {"instances": [{**pod, "state": state}]})
+    [stopped] = store.dashboard()["instances"]
+    assert stopped["ssh_status"] == "unverified"
+    assert "last_probe_attempt" not in stopped
+    assert "ssh_error" not in stopped
+    store.save_snapshot("runpod-runpod", {"instances": [pod]})
+    [restarted] = store.dashboard()["instances"]
+    assert restarted["ssh_status"] == "unverified"
+    assert "last_probe_attempt" not in restarted
+
+
+@pytest.mark.parametrize(
+    ("ssh_status", "minutes", "state"),
+    [
+        ("reachable", 1, "running"),
+        ("reachable", 19, "running"),
+        ("reachable", 21, "unknown"),
+        ("error", 1, "unknown"),
+        ("unverified", None, "unknown"),
+    ],
+)
+def test_a_machine_added_by_hand_runs_only_while_a_recent_check_reached_it(
+    store: Store, ssh_status: str, minutes: int | None, state: str
+) -> None:
+    observed = None if minutes is None else datetime.now(UTC) - timedelta(minutes=minutes)
+    store.save_instance(
+        {
+            "id": "manual:lab-box1",
+            "source_id": "manual",
+            "manual": True,
+            # Stored by an earlier check; what counts is when that check was.
+            "state": "running",
+            "ssh_status": ssh_status,
+            "observed_at": observed and observed.isoformat(),
+        }
+    )
+    [row] = store.dashboard()["instances"]
+    assert row["state"] == state
+
+
 def test_stale_sources_are_flagged(store: Store, add_source: AddSource) -> None:
     hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     add_source(last_success=hour_ago)
@@ -484,3 +593,68 @@ def test_bad_stored_times_are_unknown_not_a_failure(store: Store, add_source: Ad
     store.save_instance({"id": "manual:lab-box", "state": "running", "observed_at": "soon"})
     assert store.dashboard()["instances"][0]["observed_at"] is None
     store.record_history()
+
+
+def test_fleet_freshness_uses_oldest_enabled_success(store: Store, add_source: AddSource) -> None:
+    current = datetime.now(UTC)
+    old = (current - timedelta(hours=3)).isoformat()
+    recent = (current - timedelta(minutes=1)).isoformat()
+    first = add_source(last_success=old)
+    add_source("Cluster B", last_success=recent)
+    add_source("Disabled", last_success=None, enabled=False)
+    store.save_instance({"id": "manual:box", "observed_at": now()})
+    data = store.dashboard()
+    assert data["as_of"] == old
+    assert data["behind"] == [first["id"]]
+    assert data["updated_at"] > recent  # The legacy newest-observation contract is unchanged.
+    missing = add_source("New", fresh=False)
+    data = store.dashboard()
+    assert data["as_of"] is None
+    assert data["behind"] == sorted([first["id"], missing["id"]])
+
+
+def test_fleet_freshness_failure_and_recovery(store: Store, add_source: AddSource) -> None:
+    source = add_source(error={"code": "ssh_failed"}, status="syncing")
+    data = store.dashboard()
+    assert data["as_of"] == source["last_success"]
+    assert data["behind"] == [source["id"]]
+    store.save_source({**source, "error": None})
+    assert store.dashboard()["behind"] == []
+    store.save_source({**source, "enabled": False})
+    data = store.dashboard()
+    assert data["as_of"] is None and data["behind"] == []
+
+
+def test_retained_nodes_do_not_override_collection_state(
+    store: Store, add_source: AddSource
+) -> None:
+    from computedeck.drivers.base import Batch
+
+    source = add_source(capabilities=["jobs", "nodes"], cluster_state="unavailable")
+    node = {
+        "id": "cluster-a:g1",
+        "source_id": source["id"],
+        "cluster_id": "cluster-a",
+        "name": "g1",
+        "state": "down",
+        "gpu_count": 8,
+    }
+    store.save_snapshot(source["id"], {"nodes": [node], "jobs": []})
+    assert store.dashboard()["sources"][0]["cluster_state"] == "unavailable"
+    batch = Batch(jobs=[], capabilities=["jobs"])
+    store.save_snapshot(source["id"], batch.snapshot())
+    store.save_source(
+        {**source, "capabilities": batch.capabilities, "cluster_state": batch.cluster_state}
+    )
+    data = store.dashboard()
+    assert data["nodes"]
+    assert data["sources"][0]["cluster_state"] == "unknown"
+    assert data["summary"]["groups"]["cluster-a"]["nodes"]["nodes"] == 0
+    # A driver-defined state is authoritative, even with unfamiliar node states.
+    store.save_source({**source, "cluster_state": "available"})
+    assert store.dashboard()["sources"][0]["cluster_state"] == "available"
+    # Connection edits reset state despite retained inventory.
+    store.save_source(
+        {**source, "last_success": None, "capabilities": [], "cluster_state": "unknown"}
+    )
+    assert store.dashboard()["sources"][0]["cluster_state"] == "unknown"

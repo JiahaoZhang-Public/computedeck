@@ -327,7 +327,7 @@ kbd,
   transition: transform 0.15s;
 }
 .demo-toggle input:checked + i {
-  background: var(--amber);
+  background: var(--text-3);
 }
 .demo-toggle input:checked + i::after {
   transform: translateX(10px);
@@ -373,11 +373,145 @@ kbd,
   align-items: center;
   gap: 8px;
 }
-.sync-time {
-  color: var(--text-3);
+.health-status {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.health-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  max-width: 360px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-2);
   font-size: 12px;
-  margin: 0 2px 0 6px;
+}
+.health-label,
+.health-age {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.health-label {
+  flex-shrink: 1;
+}
+.health-age {
+  display: none;
+}
+.health-bad {
+  color: var(--red);
+}
+.health-warn {
+  color: var(--amber);
+}
+.health-unknown {
+  color: var(--text-3);
+}
+.collecting-count {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.overlay.health-overlay {
+  place-items: start end;
+  padding-top: 60px;
+}
+.modal.health-panel {
+  padding: 20px;
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 84px);
+  overflow-wrap: anywhere;
+}
+.health-panel h2 {
+  padding-right: 28px;
+  font-size: 16px;
+}
+.health-panel p {
+  color: var(--text-2);
+  font-size: 12px;
+  margin: 6px 0;
+}
+.health-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.health-row-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.health-row details {
+  font-size: 12px;
+  margin: 6px 0;
+}
+.health-row summary {
+  cursor: pointer;
+}
+.health-row a {
+  font-size: 12px;
+}
+@media (max-width: 1280px) {
+  .health-pill {
+    max-width: 240px;
+  }
+  .topbar-actions .label,
+  .collecting-count {
+    display: none;
+  }
+}
+@media (max-width: 560px) {
+  .health-label {
+    display: none;
+  }
+  .health-age {
+    display: block;
+  }
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding-block: 4px;
+  }
+  .topbar h1 {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: normal;
+  }
+  .topbar-actions {
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .health-pill {
+    max-width: 120px;
+  }
+  .overlay.health-overlay {
+    padding: 0;
+    place-items: end stretch;
+  }
+  .health-panel .modal-close {
+    width: 44px;
+    height: 44px;
+  }
+  .health-row .link,
+  .health-row summary {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .modal.health-panel {
+    width: 100%;
+    max-height: 80dvh;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
 }
 .banner {
   display: flex;
@@ -386,6 +520,11 @@ kbd,
   padding: 8px 24px;
   font-size: 12.5px;
   border-bottom: 1px solid var(--border);
+}
+.demo-banner {
+  background: var(--surface);
+  color: var(--text-3);
+  flex-wrap: wrap;
 }
 .banner.amber {
   background: var(--amber-soft);
@@ -785,6 +924,12 @@ form > .form-error {
   font-size: 12px;
 }
 
+.stat-hint .link {
+  display: inline;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Tables ---------- */
 
 .table-wrap {
@@ -1060,6 +1205,18 @@ form > .form-error {
 }
 
 /* ---------- Overview ---------- */
+
+.source-diagnosis {
+  overflow-wrap: anywhere;
+}
+.source-diagnosis-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+}
+.source-diagnosis-body > .button {
+  justify-self: start;
+}
 
 .attention li + li {
   border-top: 1px solid var(--border);
@@ -1701,6 +1858,23 @@ form > .form-error {
 
 /* ---------- Where to run ---------- */
 
+.plan-best {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 18px;
+  overflow-wrap: anywhere;
+}
+.plan-best strong {
+  flex-basis: 100%;
+}
+.plan-table .status.wait {
+  color: var(--accent-text);
+}
+.plan-table .tag {
+  white-space: normal;
+}
 .plan-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 220px));
@@ -1737,8 +1911,11 @@ form > .form-error {
   min-width: 180px;
 }
 
-/* On a phone each option becomes a card: where, then the estimate, then the numbers. */
-@media (max-width: 640px) {
+/* Keep the estimate visible when the main column cannot fit the full table. */
+.plan-options {
+  container-type: inline-size;
+}
+@container (max-width: 1000px) {
   .plan-table thead {
     display: none;
   }
@@ -2433,9 +2610,6 @@ td.wrap {
   .banner {
     padding: 8px 16px;
   }
-  .sync-time {
-    display: none;
-  }
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2571,4 +2745,16 @@ td.wrap {
     padding-top: 6px;
     text-align: right;
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

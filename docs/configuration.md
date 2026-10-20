@@ -9,6 +9,20 @@ computedeck export > config.toml   # current sources, instances and settings
 
 Import keeps the collected data and state of sources that already exist. Run it while the service is stopped, or refresh in the app afterwards. A complete example is in [examples/config.toml](../examples/config.toml).
 
+## Terms / 术语
+
+The interface uses the [English glossary](../README.md#terms-in-the-interface) and
+[中文术语表](../README.zh-CN.md#界面术语). Configuration keys keep their existing names:
+
+| UI term / 界面术语 | Configuration meaning / 配置含义 |
+|---|---|
+| Source / 来源 | One login (`[[cluster.identity]]` or `[[cluster]]` with inline `username` / `ssh_alias`), or one `[[cloud]]` API account or SSH host / 一个登录身份（`[[cluster.identity]]` 或直接填写 `username` / `ssh_alias` 的 `[[cluster]]`），或一个 `[[cloud]]` 云 API 账号或 SSH 主机。 |
+| Cluster or platform / 集群或平台 | A resource group: a `[[cluster]]` or a cloud platform name / 资源分组，由 `[[cluster]]` 或云平台名称表示。 |
+| Instance / machine / 实例 / 机器 | A collected machine or hand-added `[[instance]]` / 采集到的机器或手动添加的机器。 |
+| Collection machine / 采集机器 | `[[node]]`, selected by a source's `node` field / 通过来源的 `node` 字段选择的采集电脑。 |
+| Node / 节点 | A scheduler's compute node, not `[[node]]` / 调度器的计算节点，不是配置中的采集机器。 |
+| Needs attention / 待处理 | Derived faults and warnings, not a configuration table / 根据当前状态生成的故障和警告列表，不是配置表。 |
+
 ## Top level
 
 | Key | Meaning |
@@ -76,7 +90,7 @@ A machine you reach over SSH and add by hand.
 | `existing_alias` | `true` when `host` is an alias already in your SSH configuration; no Host block is generated. |
 | `gpu_count`, `gpu_type` | Shown until a hardware snapshot reports the real values. |
 | `hourly_cost`, `currency` | For cost estimates; `currency` is an ISO code such as `USD`. |
-| `monitoring` | Read GPU, CPU and memory over SSH every 10 minutes. |
+| `monitoring` | Read GPUs, their processes, CPU and memory over SSH every 10 minutes. The machine counts in GPUs in use while its last check is under 20 minutes old. |
 
 ## Credentials
 

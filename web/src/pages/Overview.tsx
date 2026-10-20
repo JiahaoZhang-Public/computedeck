@@ -1,5 +1,8 @@
+import type { Summary } from '../types';
+import { UnmeasuredLinks } from './UnmeasuredLinks';
+import { attentionText, nextAttemptText } from '../health';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
-import { localized, t } from '../i18n';
+import { formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
 import {
   jobCount,
@@ -8,7 +11,7 @@ import {
   money,
   partialCount,
   relativeTime,
-  summarize,
+  dateTime,
 } from '../domain';
 import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
@@ -17,23 +20,24 @@ import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
 import { FailuresTable, JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
 import { recentlyReachable } from './util';
-import { groupSummary, instanceCount } from './summary';
+import { capacityText, groupSummary, instanceCount } from './summary';
 
 export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const { data, demo } = ctx;
-  const summary = summarize(data);
+  const summary = data.summary;
   // Current jobs first, then the last-known jobs of logins whose job list is not current.
   const { jobs: allJobs, stale } = listedJobs(data);
-  const missingJobs = jobsMissing(data.sources);
+  const missingJobs = jobsMissing(data);
   const failures = data.recent_failures ?? [];
-  const setupNeeded = !demo && !data.sources.length && !data.instances.length;
-  const issues = ctx.attention.filter((item) => item.tone !== 'gray').length;
+  const setupNeeded =
+    !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
+  const issues = ctx.attention.length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
-  const jobsKnown = summary.knownRequested != null || summary.knownRunning > 0;
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
   ).length;
   const hasClusters = clusterLogins > 0;
+  const jobsKnown = summary.jobs.missing_source_ids.length < clusterLogins;
   const asides = demo ? [] : ctx.webPlugins.filter((plugin) => plugin.overview);
   // Before anything is connected the dashboard has nothing to say; show how to start.
   if (setupNeeded) return <SetupGuide ctx={ctx} />;
@@ -52,98 +56,136 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       <div className="stats">
         <Stat
           label={t('overview.allocated')}
-          value={partialCount(summary.allocated, summary.knownAllocated)}
+          value={partialCount(summary.allocated, summary.known_allocated)}
           hint={
-            summary.knownAllocated == null
-              ? t('overview.allocated.none')
-              : summary.allocated == null
-                ? t('overview.allocated.partial', { count: summary.unknownAllocationSources })
-                : t('overview.allocated.complete')
+            <>
+              {summary.unmeasured.length ? (
+                <UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />
+              ) : summary.known_allocated == null ? (
+                t('overview.allocated.none')
+              ) : (
+                t('overview.allocated.complete')
+              )}
+              {summary.unmonitored > 0 && (
+                <span className="sub">
+                  {t('summary.unmonitored', { count: summary.unmonitored })}
+                </span>
+              )}
+            </>
           }
         />
         <Stat
           label={t('overview.queued')}
-          value={partialCount(summary.requested, summary.knownRequested)}
+          value={partialCount(summary.requested, summary.known_requested)}
           hint={
-            !hasClusters
-              ? t('overview.running.none')
-              : summary.requested == null
-                ? t('overview.queued.partial')
-                : t('overview.queued.jobs', { count: summary.pending })
+            !hasClusters ? (
+              t('overview.running.none')
+            ) : summary.requested == null ? (
+              <UnmeasuredLinks items={summary.queued_unmeasured} ctx={ctx} />
+            ) : (
+              t('overview.queued.jobs', { count: summary.pending })
+            )
           }
         />
         <Stat
           label={t('overview.running')}
-          value={summary.running ?? (jobsKnown ? summary.knownRunning : '—')}
+          value={partialCount(summary.running, jobsKnown ? summary.known_running : null)}
           hint={
-            summary.running != null
-              ? t('overview.running.complete')
-              : jobsKnown
-                ? t('overview.running.partial')
-                : t('overview.running.none')
+            summary.running != null ? (
+              t('overview.running.complete')
+            ) : hasClusters ? (
+              <UnmeasuredLinks
+                items={summary.queued_unmeasured.filter((item) =>
+                  summary.jobs.missing_source_ids.includes(item.subject.id),
+                )}
+                ctx={ctx}
+              />
+            ) : (
+              t('overview.running.none')
+            )
           }
         />
         <Stat
           label={t('overview.issues')}
           value={issues}
           hint={
-            issues
-              ? t('overview.issues.some')
-              : connected
-                ? t('overview.issues.none')
-                : t('overview.issues.unconfigured')
+            issues ? (
+              <a
+                className="link"
+                href="#attention"
+                onClick={(event) => {
+                  event.preventDefault();
+                  document.getElementById('attention')?.focus();
+                }}
+              >
+                {t('overview.issues.some')}
+              </a>
+            ) : connected ? (
+              t('overview.issues.none')
+            ) : (
+              t('overview.issues.unconfigured')
+            )
           }
         />
       </div>
-      <div className="grid wide-narrow">
-        <Panel
-          title={t('overview.sources')}
-          actions={
-            <a className="link" href={routeHash('sources')}>
-              {t('overview.manageSources')} <ArrowRight size={13} />
-            </a>
-          }
-        >
-          <GroupsTable ctx={ctx} />
-        </Panel>
-        <Panel title={t('overview.attention')} count={ctx.attention.length} id="attention">
-          {ctx.attention.length ? (
-            <ul className="attention">
-              {ctx.attention.map((item) => (
-                <li key={item.id}>
-                  <button onClick={item.action}>
-                    <span className={`dot ${item.tone}`} />
-                    <span>
-                      <strong>{item.title}</strong>
-                      <small>{item.text}</small>
-                    </span>
-                    <ChevronRight size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="panel-note">{t('overview.attention.none')}</p>
-          )}
-        </Panel>
-      </div>
-      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
-        <HistoryPanel day={data.history} demo={demo} />
-        {asides.length > 0 && (
-          <div className="stack">
-            {asides.map((plugin) => {
-              const Aside = plugin.overview!;
-              return <Aside key={plugin.id} {...ctx.plugin} />;
-            })}
-          </div>
+      <Panel
+        title={t('overview.attention')}
+        count={ctx.attention.length}
+        id="attention"
+        tabIndex={-1}
+      >
+        {ctx.attention.length ? (
+          <ul className="attention">
+            {ctx.attention.map((item) => (
+              <li key={item.key}>
+                <button onClick={() => ctx.openAttention(item)}>
+                  <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
+                  <span>
+                    <strong>{attentionText(item, ctx.tools)}</strong>
+                    {item.details.map((detail, index) => (
+                      <small key={index}>{formatMessage(detail)}</small>
+                    ))}
+                    <small>
+                      {item.since
+                        ? t('attention.since', {
+                            time: dateTime(item.since),
+                            age: relativeTime(item.since),
+                          })
+                        : item.observed_at
+                          ? t(
+                              item.kind === 'instance_ssh_failed'
+                                ? 'attention.checked'
+                                : 'attention.lastSeen',
+                              {
+                                time: dateTime(item.observed_at),
+                                age: relativeTime(item.observed_at),
+                              },
+                            )
+                          : t('attention.sinceUnknown')}
+                      {item.next_attempt &&
+                        ` · ${nextAttemptText(
+                          item.next_attempt,
+                          item.subject.kind === 'source' &&
+                            (data.collecting?.includes(item.subject.id) ||
+                              data.sources.some(
+                                (source) =>
+                                  source.id === item.subject.id && source.status === 'syncing',
+                              )),
+                        )}`}
+                    </small>
+                  </span>
+                  <ChevronRight size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="panel-note">{t('overview.attention.none')}</p>
         )}
-      </div>
+      </Panel>
       <Panel
         title={t('overview.jobs')}
-        count={jobCount(
-          allJobs.filter((job) => !stale.has(job.source_id)).length,
-          missingJobs.length,
-        )}
+        count={jobCount(summary.jobs.known, summary.jobs.missing_source_ids.length)}
         actions={
           <a className="link" href={routeHash('jobs')}>
             {t('overview.allJobs')} <ArrowRight size={13} />
@@ -175,6 +217,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
             groups={ctx.groups}
             missing={missingJobs}
             staleRows={allJobs.slice(0, 8).some((job) => stale.has(job.source_id))}
+            staleCount={allJobs.slice(0, 8).filter((job) => stale.has(job.source_id)).length}
           />
         )}
       </Panel>
@@ -183,6 +226,27 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} />
         </Panel>
       )}
+      <Panel
+        title={t('overview.sources')}
+        actions={
+          <a className="link" href={routeHash('sources')}>
+            {t('overview.manageSources')} <ArrowRight size={13} />
+          </a>
+        }
+      >
+        <GroupsTable ctx={ctx} />
+      </Panel>
+      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
+        <HistoryPanel day={data.history} demo={demo} />
+        {asides.length > 0 && (
+          <div className="stack">
+            {asides.map((plugin) => {
+              const Aside = plugin.overview!;
+              return <Aside key={plugin.id} {...ctx.plugin} />;
+            })}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -248,14 +312,15 @@ function SetupGuide({ ctx }: { ctx: Ctx }) {
 }
 
 /** GPUs in use for one row: "≥ n" when part of the use is unknown, never a false 0. */
-function allocatedCell(summary: ReturnType<typeof summarize>) {
+function allocatedCell(summary: Summary, ctx: Ctx) {
   if (summary.allocated != null) return summary.allocated;
   return (
     <span
-      className={summary.knownAllocated ? '' : 'muted'}
+      className={summary.known_allocated ? '' : 'muted'}
       title={t('overview.allocated.unknownCell')}
     >
-      {summary.knownAllocated ? `≥ ${summary.knownAllocated}` : '—'}
+      {summary.known_allocated ? `≥ ${summary.known_allocated}` : '—'}
+      <UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />
     </span>
   );
 }
@@ -291,6 +356,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
         <tbody>
           {groups.map((group) => {
             const row = groupSummary(data, group);
+            const capacity = capacityText(row.nodes, row.state);
             const cluster = group.kind === 'cluster';
             const open = () => ctx.navigate(cluster ? 'resources' : 'cloud', group.key);
             return (
@@ -300,7 +366,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                 tabIndex={0}
                 onClick={open}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') open();
+                  if (event.key === 'Enter' && event.target === event.currentTarget) open();
                 }}
               >
                 <td>
@@ -326,26 +392,21 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                           ),
                       ].join(' · ')}
                 </td>
-                <td className="num">{allocatedCell(row.scoped)}</td>
+                <td className="num">{allocatedCell(row.scoped, ctx)}</td>
                 <td>
                   {cluster ? (
-                    ['unavailable', 'degraded'].includes(row.state) ? (
-                      <span className={row.state === 'unavailable' ? 'red-text' : 'amber-text'}>
-                        {t('clusters.unavailableNodes', {
-                          count: row.nodes.abnormal,
-                          total: row.nodes.nodes,
-                        })}
-                      </span>
-                    ) : row.nodes.capacity != null ? (
-                      <Meter
-                        value={row.nodes.ratio}
-                        text={t('overview.load.allocated', {
-                          allocated: row.nodes.allocated ?? '?',
-                          capacity: row.nodes.capacity,
-                        })}
-                      />
-                    ) : (
+                    row.nodes.nodes === 0 ? (
                       <span className="muted">—</span>
+                    ) : capacity.outage ? (
+                      <span className={capacity.tone}>{capacity.text}</span>
+                    ) : (
+                      <span>
+                        <Meter
+                          value={row.nodes.ratio}
+                          text={<span className={capacity.tone}>{capacity.text}</span>}
+                        />
+                        <span className="sub muted">{capacity.detail}</span>
+                      </span>
                     )
                   ) : row.scoped.utilization != null ? (
                     <Meter

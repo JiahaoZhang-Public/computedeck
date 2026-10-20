@@ -215,10 +215,26 @@ def apply(store: Store, text: str) -> dict[str, int]:
         if existing:
             if any(
                 existing.get(key) != record[key]
-                for key in ("ssh_alias", "credential", "username", "options", "node", "enabled")
+                for key in ("ssh_alias", "credential", "username", "options", "node")
             ):
                 # Same as an edit in the app: earlier results belong to the old connection.
-                existing.update(last_success=None, error=None, status=record["status"], failures=0)
+                existing.update(
+                    last_success=None,
+                    error=None,
+                    status=record["status"],
+                    failures=0,
+                    capabilities=[],
+                    capabilities_seen=[],
+                    warnings=[],
+                    cluster_state="unknown",
+                )
+            if existing["enabled"] != record["enabled"]:
+                existing.update(
+                    status="ready" if record["enabled"] else "unconfigured",
+                    error=None,
+                    failures=0,
+                    last_success=None,
+                )
             existing.update({key: record[key] for key in ("name", *_SOURCE_KEYS)})
             record = existing
         record["next_due_at"] = now()

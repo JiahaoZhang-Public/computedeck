@@ -1,5 +1,30 @@
 import { hasKey, t } from './i18n';
-import type { Source } from './types';
+import type { MessageKey } from './i18n';
+import type { ComputeNode, Source } from './types';
+
+const NEUTRAL = {
+  account: 'job.account',
+  partition: 'job.partition',
+  qos: 'job.qos',
+} as const;
+
+const JOB_TERMS: Record<
+  string,
+  { account: MessageKey; partition: MessageKey; qos: MessageKey | null }
+> = {
+  slurm: NEUTRAL,
+  pbs: { account: 'job.account', partition: 'job.queue', qos: null },
+  lsf: { account: 'job.project', partition: 'job.queue', qos: null },
+  kubernetes: {
+    account: 'job.namespace',
+    partition: 'job.nodePool',
+    qos: 'job.priorityClass',
+  },
+};
+
+export function jobTerms(driver: string) {
+  return Object.hasOwn(JOB_TERMS, driver) ? JOB_TERMS[driver] : NEUTRAL;
+}
 
 export function statusLabel(state: string) {
   const key = `status.${state}`;
@@ -7,7 +32,8 @@ export function statusLabel(state: string) {
 }
 export type Tone = 'green' | 'amber' | 'red' | 'gray';
 export function statusTone(state: string): Tone {
-  if (['RUNNING', 'running', 'ready', 'reachable', 'COMPLETED'].includes(state)) return 'green';
+  if (['RUNNING', 'running', 'reported_running', 'ready', 'reachable', 'COMPLETED'].includes(state))
+    return 'green';
   if (
     [
       'PENDING',
@@ -36,20 +62,13 @@ export function statusTone(state: string): Tone {
     return 'red';
   return 'gray';
 }
-/**
- * Slurm power saving (POWER_DOWN, POWERING_DOWN, POWERED_DOWN, POWER_UP, POWERING_UP) is a
- * normal state of an idle node, not an outage; a node that is also down says so separately.
- */
-const POWER_SAVING = /power(?:ed|ing)?_(?:down|up)/gi;
-const ABNORMAL =
-  /down|drain|fail|maint|not_resp|not_ready|cordon|offline|unavail|unreach|unknown|inval|reserved|\*/i;
-/** A node that cannot take work now: down, draining, failing, INVAL (bad configuration), … */
-export function nodeAbnormal(state: string) {
-  return ABNORMAL.test(state.replace(POWER_SAVING, ''));
+/** Availability is classified on the server, including reservations and power saving. */
+export function nodeAbnormal(node: Pick<ComputeNode, 'health'>) {
+  return node.health === 'unavailable';
 }
-export function nodeTone(state: string): Tone {
-  if (nodeAbnormal(state)) return 'red';
-  if (/idle/i.test(state)) return 'green';
+export function nodeTone(node: Pick<ComputeNode, 'health' | 'state'>): Tone {
+  if (nodeAbnormal(node)) return 'red';
+  if (node.health === 'usable' && /idle/i.test(node.state)) return 'green';
   return 'gray';
 }
 
@@ -57,6 +76,7 @@ export function sourceState(source: Source) {
   // A disabled login is never "stale", whatever an older version left in its status.
   if (!source.enabled)
     return source.status === 'unconfigured' && !source.last_success ? 'unconfigured' : 'disabled';
+  if (source.error || source.status === 'error') return 'error';
   if (source.stale) return 'stale';
   if (source.status === 'ready' && !source.last_success) return 'configured';
   if (
@@ -73,11 +93,4 @@ export function connectedSource(source: Source) {
     !!source.last_success &&
     !source.stale
   );
-}
-
-/** Missing optional capabilities are informational; failures and outages need attention. */
-export function sourceAttentionTone(source: Source): 'red' | 'amber' | 'gray' {
-  if (source.error || source.cluster_state === 'unavailable') return 'red';
-  if (source.stale || source.cluster_state === 'degraded') return 'amber';
-  return 'gray';
 }

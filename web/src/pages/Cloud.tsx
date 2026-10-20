@@ -118,6 +118,14 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                         )}
                         <span className="sub">
                           <Status state={item.ssh_status} />
+                          {item.last_probe_attempt && (
+                            <span className="muted">
+                              {' · '}
+                              {t('instance.checked', {
+                                time: relativeTime(item.last_probe_attempt),
+                              })}
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="num">

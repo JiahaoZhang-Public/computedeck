@@ -1,4 +1,7 @@
-import { sourceAttentionTone } from './labels';
+import { computeHealth } from './health';
+import { HealthPanel } from './HealthPanel';
+import { SourceDiagnosis } from './SourceDiagnosis';
+import { useVisibleInterval } from './useVisibleInterval';
 import { useDialogFocus } from './useDialogFocus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -22,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  Attention,
   CollectionNode,
   Dashboard,
   DriverInfo,
@@ -33,20 +37,11 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { relativeTime, uniqueJobs } from './domain';
+import { dateTime, partialCount } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
-import { groupsOf, sourceLabel } from './groups';
-import {
-  ApiError,
-  errorText,
-  formatMessage,
-  isLocale,
-  setLocale,
-  storeLocale,
-  storedLocale,
-  t,
-} from './i18n';
+import { groupsOf } from './groups';
+import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
 import type { Locale, MessageKey } from './i18n';
 import { corePages, readRoute, routeHash } from './routes';
 import type { CorePage, Filter, Page } from './routes';
@@ -64,7 +59,7 @@ import type { SourcePreset } from './forms';
 import { TokenGate } from './TokenGate';
 import { sessionRejected, setToken } from './token';
 import { BrandMark, Status } from './ui';
-import type { Attention, Ctx } from './pages/shared';
+import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
 import { OverviewPage } from './pages/Overview';
 import { JobsPage } from './pages/Jobs';
@@ -84,6 +79,7 @@ import { InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
 type Modal =
   | { kind: 'instance'; item?: Instance }
   | { kind: 'source'; source?: Source; preset?: SourcePreset }
+  | { kind: 'diagnosis'; sourceId: string }
   | { kind: 'ssh'; data: SSHConfig }
   | null;
 type Detail = { kind: 'job'; item: Job } | { kind: 'instance'; item: Instance } | null;
@@ -117,17 +113,7 @@ const navGroups: {
     ],
   },
 ];
-const dataPages: Page[] = [
-  'overview',
-  'plan',
-  'jobs',
-  'resources',
-  'cloud',
-  'usage',
-  'sources',
-  'toolbox',
-  'settings',
-];
+const dataPages: Page[] = ['overview', 'plan', 'jobs', 'resources', 'cloud', 'usage', 'sources'];
 const pageTitles: Record<CorePage, MessageKey> = {
   overview: 'nav.overview',
   plan: 'nav.plan',
@@ -163,6 +149,7 @@ export default function App() {
   const [needsToken, setNeedsToken] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [detail, setDetail] = useState<Detail>(null);
   const modalRef = useDialogFocus(undefined, !!modal);
@@ -189,11 +176,17 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const loadId = useRef(0);
   const driversLoaded = useRef(false);
+  const dashboardToken = useRef<string | undefined>(undefined);
+  const lastAuxLoad = useRef(-Infinity);
+  const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
+  const [followUntil, setFollowUntil] = useState(0);
   const notify = useCallback(
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
     [],
   );
-  const serverName = health?.server_name || health?.server_host || t('where.server');
+  const serverName = demo
+    ? t('where.local')
+    : health?.server_name || health?.server_host || t('where.server');
 
   const changeLocale = useCallback((next: Locale) => {
     setLocale(next);
@@ -237,51 +230,82 @@ export default function App() {
     window.history.replaceState(null, '', routeHash(page, filter));
   };
 
-  const load = useCallback(() => {
-    loadId.current += 1;
-    const requestId = loadId.current;
-    return Promise.all([
-      api<Dashboard>(`/dashboard?demo=${demo}`),
-      // Health also carries plugin state; a failure here must not hide the dashboard.
-      api<Health>('/health').catch(() => null),
-      api<Tool[]>('/toolbox').catch(() => null),
-      api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
-    ])
-      .then(([next, status, toolbox, machines]) => {
-        if (requestId !== loadId.current) return;
-        setData(next);
-        setHealth(status);
-        if (toolbox) setTools(toolbox);
-        if (machines) setNodes(machines);
-        // Driver descriptions do not change while the service runs; fetch them once.
-        if (!driversLoaded.current) {
-          driversLoaded.current = true;
-          api<DriverInfo[]>('/drivers')
-            .then(setDrivers)
-            .catch(() => {
-              driversLoaded.current = false;
-            });
-        }
-        setError(null);
-        setNeedsToken(false);
-      })
-      .catch((reason) => {
-        if (requestId !== loadId.current) return;
-        setNeedsToken(reason instanceof ApiError && reason.status === 401);
-        setError(errorText(reason, 'error.service'));
-      })
-      .finally(() => {
-        if (requestId === loadId.current) setLoading(false);
-      });
-  }, [demo]);
-  useEffect(() => {
-    void load();
-    const interval = window.setInterval(() => void load(), 10000);
-    return () => {
-      clearInterval(interval);
+  const load = useCallback(
+    (dashboardOnly = false) => {
+      if (document.hidden) return Promise.resolve();
       loadId.current += 1;
-    };
-  }, [load]);
+      const requestId = loadId.current;
+      const requestedAt = Date.now();
+      return Promise.all([
+        api<Dashboard | { unchanged: true; token: string }>(
+          `/dashboard?demo=${demo}${dashboardToken.current ? `&since=${dashboardToken.current}` : ''}`,
+        ),
+        // Health also carries plugin state; a failure here must not hide the dashboard.
+        dashboardOnly ? null : api<Health>('/health').catch(() => null),
+        dashboardOnly ? null : api<Tool[]>('/toolbox').catch(() => null),
+        dashboardOnly ? null : api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
+      ])
+        .then(([next, status, toolbox, machines]) => {
+          if (requestId !== loadId.current) return;
+          if (!('unchanged' in next)) {
+            dashboardToken.current = next.token;
+            setData(next);
+          }
+          if (!dashboardOnly) {
+            lastAuxLoad.current = requestedAt;
+            setHealth(status);
+          }
+          if (toolbox) setTools(toolbox);
+          if (machines) setNodes(machines);
+          // Driver descriptions do not change while the service runs; fetch them once.
+          if (!document.hidden && !driversLoaded.current) {
+            driversLoaded.current = true;
+            api<DriverInfo[]>('/drivers')
+              .then(setDrivers)
+              .catch(() => {
+                driversLoaded.current = false;
+              });
+          }
+          setError(null);
+          setNeedsToken(false);
+        })
+        .catch((reason) => {
+          if (requestId !== loadId.current) return;
+          setNeedsToken(reason instanceof ApiError && reason.status === 401);
+          setError(errorText(reason, 'error.service'));
+        })
+        .finally(() => {
+          if (requestId === loadId.current) setLoading(false);
+        });
+    },
+    [demo],
+  );
+  useEffect(
+    () => () => {
+      loadId.current += 1;
+      activePoll.current = null;
+    },
+    [load],
+  );
+  const poll = useCallback(() => {
+    if (followUntil && Date.now() >= followUntil) {
+      setFollowUntil(0);
+      return;
+    }
+    // Give slow replies time to finish, but let polling recover from a stalled tunnel.
+    const startedAt = Date.now();
+    if (activePoll.current && startedAt - activePoll.current.startedAt < 10000) return;
+    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < 10000);
+    activePoll.current = { startedAt, promise: pending };
+    return pending.finally(() => {
+      if (activePoll.current?.promise === pending) activePoll.current = null;
+    });
+  }, [load, followUntil]);
+  useVisibleInterval(poll, followUntil ? 1000 : 10000);
+  const followCollection = useCallback(() => setFollowUntil(Date.now() + 60000), []);
+  const [, setClock] = useState(Date.now);
+  const tickClock = useCallback(() => setClock(Date.now()), []);
+  useVisibleInterval(tickClock, 30000);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), toast.tone === 'error' ? 12000 : 4500);
@@ -304,15 +328,20 @@ export default function App() {
     return () => window.removeEventListener('keydown', keydown);
   }, [modal, detail]);
 
-  async function refresh() {
+  async function refresh(sourceId?: string) {
     setRefreshing(true);
     try {
-      if (demo) notify(t('toast.demoReloaded'));
-      else {
-        const result = await api<{ status: string }>('/refresh', {});
+      if (demo) {
+        notify(t('toast.demoReloaded'));
+        await load();
+      } else {
+        const result = await api<{ status: string }>(
+          '/refresh',
+          sourceId ? { source_id: sourceId } : {},
+        );
+        followCollection();
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
-      await load();
     } catch (reason) {
       notify(errorText(reason, 'error.refresh'), 'error');
     } finally {
@@ -322,15 +351,18 @@ export default function App() {
   async function mutate<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
     setBusy(true);
     try {
+      const followsCollection =
+        path.endsWith('/probe') ||
+        (method === 'POST' && (path === '/sources' || path === '/instances'));
       const result = await api<T>(path, body, method);
-      await load();
+      if (followsCollection) followCollection();
+      else await load();
       return result;
     } finally {
       setBusy(false);
     }
   }
   async function updateTool(id: string, body: unknown): Promise<Tool> {
-    if (blockedInDemo()) throw new Error(t('toast.demoReadOnly'));
     const saved = await api<Tool>(`/toolbox/${encodeURIComponent(id)}`, body, 'PUT');
     setTools((current) => current.map((tool) => (tool.id === id ? saved : tool)));
     return saved;
@@ -362,10 +394,10 @@ export default function App() {
   async function collect(source: Source) {
     try {
       await api('/refresh', { source_id: source.id });
+      followCollection();
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
       );
-      await load();
     } catch (reason) {
       notify(errorText(reason, 'error.refresh'), 'error');
     }
@@ -391,9 +423,20 @@ export default function App() {
   }
   const toggleDemo = () => {
     loadId.current += 1;
+    dashboardToken.current = undefined;
+    lastAuxLoad.current = -Infinity;
+    setFollowUntil(0);
     setData(null);
     setLoading(true);
-    setDemo((value) => !value);
+    const next = !demo;
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set('demo', 'true');
+    else url.searchParams.delete('demo');
+    window.history.replaceState(null, '', url);
+    setDemo(next);
+    setModal(null);
+    setDetail(null);
+    setHealthOpen(false);
     setGroupState('all');
     setQuery('');
   };
@@ -403,67 +446,30 @@ export default function App() {
     // Labels are recomputed with the data; the locale does not affect them.
     [data],
   );
-  const attention: Attention[] = data
-    ? [
-        ...data.sources
-          // A disabled login is not collected, so its old error or age needs no attention.
-          .filter(
-            (source) =>
-              source.enabled &&
-              (source.error ||
-                source.stale ||
-                source.warnings?.length ||
-                ['unavailable', 'degraded'].includes(source.cluster_state ?? '')),
-          )
-          .map((source) => ({
-            id: `source:${source.id}`,
-            tone: sourceAttentionTone(source),
-            title: t(
-              source.error
-                ? 'attention.failed'
-                : source.stale
-                  ? 'attention.stale'
-                  : ['unavailable', 'degraded'].includes(source.cluster_state ?? '')
-                    ? 'attention.cluster'
-                    : 'attention.partial',
-              { name: sourceLabel(groups, source) },
-            ),
-            text:
-              formatMessage(source.error) ||
-              (['unavailable', 'degraded'].includes(source.cluster_state ?? '')
-                ? t(
-                    source.cluster_state === 'unavailable'
-                      ? 'status.unavailable'
-                      : 'status.degraded',
-                  )
-                : '') ||
-              formatMessage(source.warnings?.[0]) ||
-              t('attention.lastSuccess', { time: relativeTime(source.last_success) }),
-            action: () => configure(source),
-          })),
-        ...data.instances
-          .filter((item) => item.ssh_status === 'error')
-          .map((item) => ({
-            id: `instance:${item.id}`,
-            tone: 'red' as const,
-            title: t('attention.sshFailed', { name: item.name }),
-            text: formatMessage(item.ssh_error) || t('attention.sshFailedHint'),
-            action: () => setDetail({ kind: 'instance', item }),
-          })),
-        ...data.instances
-          .filter((item) => item.ssh_status === 'unverified' && item.host && item.port)
-          .map((item) => ({
-            id: `instance:${item.id}`,
-            tone: 'gray' as const,
-            title: t('attention.unverified', { name: item.name }),
-            text: t('attention.unverifiedHint'),
-            action: () => setDetail({ kind: 'instance', item }),
-          })),
-      ]
-    : [];
-  const problems = attention.filter((item) => item.tone !== 'gray').length;
-  const jobCount = data ? uniqueJobs(data.jobs).length : 0;
+  const attention = data?.attention ?? [];
+  const problems = attention.length;
+  const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
+  const diagnosisSource =
+    modal?.kind === 'diagnosis'
+      ? data?.sources.find((source) => source.id === modal.sourceId)
+      : undefined;
+  const openAttention = (item: Attention) => {
+    if (item.action === 'diagnose') {
+      const source = data?.sources.find((source) => source.id === item.subject.id);
+      if (source) diagnose(source);
+    } else if (item.action === 'instance') {
+      const instance = data?.instances.find((instance) => instance.id === item.subject.id);
+      if (instance) setDetail({ kind: 'instance', item: instance });
+    } else if (item.action === 'toolbox') navigate('toolbox');
+    else setHealthOpen(true);
+  };
+  const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
+  const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
+  const healthDescription =
+    healthState.label === healthState.age
+      ? healthState.label
+      : t('health.withAge', { label: healthState.label, age: healthState.age });
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
   const toolNav = enabledToolPages(tools);
@@ -482,6 +488,8 @@ export default function App() {
         setQuery,
         searchRef,
         attention,
+        openAttention,
+        diagnose,
         health,
         locale,
         changeLocale,
@@ -576,7 +584,7 @@ export default function App() {
                       {problems}
                     </b>
                   )}
-                  {id === 'jobs' && jobCount > 0 && <b className="badge">{jobCount}</b>}
+                  {id === 'jobs' && jobCount !== 0 && <b className="badge">{jobCount}</b>}
                 </a>
               ))}
             </div>
@@ -653,20 +661,46 @@ export default function App() {
           </button>
           <h1>{title}</h1>
           <div className="topbar-actions">
+            <div className="health-status">
+              <span className="sr-only" role="status">
+                {healthState.label}
+              </span>
+              <button
+                className={`health-pill health-${healthState.level}`}
+                onClick={() => setHealthOpen(true)}
+                aria-label={t('health.accessible', {
+                  title: t('health.title'),
+                  status: healthDescription,
+                })}
+                aria-haspopup="dialog"
+                aria-expanded={healthOpen}
+                title={
+                  !needsToken && data?.as_of
+                    ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
+                    : healthDescription
+                }
+              >
+                <span aria-hidden="true">
+                  {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
+                </span>
+                <span className="health-label">{healthDescription}</span>
+                <span className="health-age" aria-hidden="true">
+                  {healthState.age}
+                </span>
+              </button>
+            </div>
+            {!!data?.collecting?.length && !needsToken && (
+              <span className="collecting-count">
+                {t('health.collecting', { count: data.collecting.length })}
+              </span>
+            )}
             {!demo && pageActions[page]}
             {isDataPage && (
               <>
-                <span className="sync-time" title={data?.updated_at ?? ''}>
-                  {data?.refreshing
-                    ? t('topbar.collecting')
-                    : data?.updated_at
-                      ? t('common.updated', { time: relativeTime(data.updated_at) })
-                      : t('time.never')}
-                </span>
                 <button
                   className="button"
                   onClick={() => void refresh()}
-                  disabled={refreshing || !!data?.refreshing}
+                  disabled={refreshing || needsToken}
                   title={t('topbar.refreshHint')}
                   aria-label={t('topbar.refresh')}
                 >
@@ -677,9 +711,18 @@ export default function App() {
             )}
           </div>
         </header>
-        {demo && isDataPage && (
-          <div className="banner amber">
-            <span>{t('banner.demo')}</span>
+        {healthState.collectorFault && isDataPage && (
+          <div className="banner red" role="alert">
+            <TriangleAlert size={15} />
+            <span>{t('health.collectorFault')}</span>
+            <button className="link" onClick={() => setHealthOpen(true)}>
+              {t('health.details')}
+            </button>
+          </div>
+        )}
+        {demo && (
+          <div className="banner demo-banner">
+            <span>{t(isDataPage ? 'banner.demo' : 'banner.demoTool')}</span>
             <button className="link" onClick={toggleDemo}>
               {t('banner.demoOff')}
             </button>
@@ -766,6 +809,15 @@ export default function App() {
           </button>
         </div>
       )}
+      {healthOpen && (
+        <HealthPanel
+          state={healthState}
+          data={data}
+          busy={refreshing || needsToken}
+          refresh={refresh}
+          close={() => setHealthOpen(false)}
+        />
+      )}
       {modal && (
         <div className="overlay" onMouseDown={() => setModal(null)}>
           <section
@@ -784,6 +836,18 @@ export default function App() {
             >
               <X size={16} />
             </button>
+            {modal.kind === 'diagnosis' &&
+              (diagnosisSource ? (
+                <SourceDiagnosis
+                  key={diagnosisSource.id}
+                  source={diagnosisSource}
+                  collecting={data?.collecting?.includes(diagnosisSource.id)}
+                  demo={demo}
+                  drivers={drivers}
+                />
+              ) : (
+                <h2 id="modal-title">{t('msg.source_not_found')}</h2>
+              ))}
             {modal.kind === 'instance' && (
               <InstanceForm
                 item={modal.item}
@@ -824,7 +888,6 @@ export default function App() {
                 busy={busy}
                 onCancel={() => setModal(null)}
                 onManual={() => setModal({ kind: 'instance' })}
-                onPoll={load}
                 onDelete={async (source) => {
                   await mutate(`/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE');
                   setModal(null);
@@ -836,7 +899,10 @@ export default function App() {
                     body,
                     id ? 'PUT' : 'POST',
                   );
-                  if (saved.enabled) await api('/refresh', { source_id: saved.id });
+                  if (saved.enabled) {
+                    await api('/refresh', { source_id: saved.id });
+                    followCollection();
+                  }
                   await load();
                   if (modal.source) notify(t('toast.sourceSaved'));
                   return saved;
@@ -898,10 +964,11 @@ export default function App() {
                 ctx={ctx}
                 onProbe={async () => {
                   try {
-                    await mutate(`/instances/${encodeURIComponent(detail.item.id)}/probe`, {});
-                    const latest = await api<Dashboard>('/dashboard?demo=false');
-                    const item = latest.instances.find((each) => each.id === detail.item.id);
-                    if (item) setDetail({ kind: 'instance', item });
+                    const item = await mutate<Instance>(
+                      `/instances/${encodeURIComponent(detail.item.id)}/probe`,
+                      {},
+                    );
+                    setDetail({ kind: 'instance', item });
                     notify(t('toast.probed'));
                   } catch (reason) {
                     notify(errorText(reason, 'error.probe'), 'error');
