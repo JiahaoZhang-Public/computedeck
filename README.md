@@ -34,6 +34,14 @@ Overview puts Needs attention and current jobs before the chart. Hidden tabs pau
 browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
 for upgrade details, including possible steps in the history chart.
 
+## Version preview
+
+Planned work; scope and priorities may change.
+
+- [ ] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
+- [ ] **v0.6 — Know what changed:** a searchable activity page, deduplicated job and array notifications, attention acknowledgement and snoozing, delivery status, and visible collection gaps.
+- [ ] **v0.7 — Choose resources with confidence:** explainable resource comparisons, cost estimates and usage trends, sustained low-utilization hints, and wait estimates only where history supports them.
+
 ## Terms in the interface
 
 | Term | Meaning |
