@@ -76,7 +76,7 @@ def gpu_count(tres: str | None) -> int | None:
     total: int | None = None
     typed: dict[str, int] = {}
     for part in text.split(","):
-        match = re.fullmatch(r"(?:gres/)?gpu(?::([^:=]+))?[:=](\d+)", part.strip())
+        match = re.fullmatch(r"(?:gres[/:])?gpu(?::([^:=]+))?[:=](\d+)", part.strip())
         if match:
             kind, count = match.groups()
             if kind:
