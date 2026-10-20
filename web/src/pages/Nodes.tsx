@@ -143,7 +143,7 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
       )}
       {ctx.nodes.length > 0 && (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table stack-on-phone">
             <thead>
               <tr>
                 <th>{t('nodes.name')}</th>
@@ -163,8 +163,10 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
                       {node.command}
                     </span>
                   </td>
-                  <td className="mono">{node.ssh_alias}</td>
-                  <td>
+                  <td className="mono" data-label={t('source.form.sshAliasLabel')}>
+                    {node.ssh_alias}
+                  </td>
+                  <td data-label={t('nodes.version')}>
                     {node.version ?? '—'}
                     <span className="sub">
                       {node.checked_at
@@ -172,8 +174,10 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
                         : t('nodes.notChecked')}
                     </span>
                   </td>
-                  <td className="num">{used(node)}</td>
-                  <td className="wrap">
+                  <td className="num" data-label={t('nodes.sources')}>
+                    {used(node)}
+                  </td>
+                  <td className="wrap" data-label={t('clusters.col.state')}>
                     <Status state={STATUS[node.status] ?? 'configured'} />
                     {node.error && (
                       <span className="sub red-text">{formatMessage(node.error)}</span>

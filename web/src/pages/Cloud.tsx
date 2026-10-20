@@ -33,7 +33,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
       <Panel title={t('cloud.instances')} count={instances.length}>
         {instances.length ? (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table stack-on-phone">
               <thead>
                 <tr>
                   <th>{t('cloud.col.instance')}</th>
@@ -80,7 +80,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           </span>
                         </span>
                       </td>
-                      <td>
+                      <td data-label={'GPU'}>
                         {item.gpu_count ?? '?'} × {item.gpu_type || 'GPU'}
                         {item.gpu_observed_count != null &&
                           item.gpu_count != null &&
@@ -90,7 +90,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                             </span>
                           )}
                       </td>
-                      <td>
+                      <td data-label={t('cloud.col.utilization')}>
                         <span className="util-pair">
                           <small>GPU</small>
                           <Meter value={item.gpu_utilization} />
@@ -98,7 +98,11 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           <Meter value={item.cpu_utilization} />
                         </span>
                       </td>
-                      <td>
+                      <td
+                        data-label={
+                          remote ? t('cloud.col.sshRemote', { server: ctx.serverName }) : 'SSH'
+                        }
+                      >
                         {item.ssh_alias ? (
                           <span className="copyable">
                             <code title={item.ssh_alias}>{item.ssh_alias}</code>
@@ -128,14 +132,16 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           )}
                         </span>
                       </td>
-                      <td className="num">
+                      <td className="num" data-label={t('cloud.col.price')}>
                         {price == null ? (
                           <span className="muted">—</span>
                         ) : (
                           `${money(price, item.currency)}/h`
                         )}
                       </td>
-                      <td className="num muted">{relativeTime(item.observed_at)}</td>
+                      <td className="num muted" data-label={t('cloud.col.sampled')}>
+                        {relativeTime(item.observed_at)}
+                      </td>
                     </tr>
                   );
                 })}

@@ -10,7 +10,7 @@ import platform
 import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
@@ -369,15 +369,64 @@ def create_app(
     async def driver_list() -> list[dict[str, Any]]:
         return [drivers.describe(name) for name in drivers.names()]
 
-    @app.post("/api/sources/{source_id}/check")
-    async def check_source_now(source_id: str) -> list[dict[str, Any]]:
-        from .doctor import source_checks
+    @app.post("/api/sources/{source_id}/check", response_model=None)
+    async def check_source_now(source_id: str, request: Request) -> Any:
+        from .doctor import check, source_checks
 
         source = store().source(source_id)
         if source is None:
             raise HTTPException(404, message("source_not_found"))
-        async with runtime.semaphore:
-            return await source_checks(source, store().node(source.get("node", "")))
+        node = store().node(source.get("node", ""))
+        if "application/x-ndjson" not in request.headers.get("accept", ""):
+            async with runtime.semaphore:
+                return await source_checks(source, node)
+
+        async def stream() -> AsyncIterator[str]:
+            events: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            rows: dict[str, dict[str, Any]] = {}
+
+            async def run_checks() -> None:
+                try:
+                    async with runtime.semaphore:
+                        result = await source_checks(source, node, report=events.put_nowait)
+                    for row in result:
+                        events.put_nowait(row)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Remote exceptions can include credentials; expose only a fixed message.
+                    events.put_nowait(
+                        check(
+                            "diagnostics",
+                            False,
+                            "Connection check interrupted",
+                            "连接检查中断",
+                            "Retry the check; no successful collection has been confirmed.",
+                            "请重试检查；尚未确认采集成功。",
+                        )
+                    )
+                finally:
+                    events.put_nowait(None)
+
+            task = asyncio.create_task(run_checks())
+            try:
+                while (row := await events.get()) is not None:
+                    rows[row["id"]] = row
+                    yield json.dumps({"rows": list(rows.values())}) + "\n"
+                for row in rows.values():
+                    if row["state"] == "checking":
+                        row["state"] = "failed"
+                        row["detail"] = {
+                            "en": "This step did not finish. Retry the check.",
+                            "zh-CN": "此步骤未完成，请重试检查。",
+                        }
+                yield json.dumps({"rows": list(rows.values()), "done": True}) + "\n"
+            finally:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
 
     @app.post("/api/sources", status_code=201)
     async def add_source(body: SourceInput) -> dict[str, Any]:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+- Show connection-check progress as each step runs, with specific guidance for authentication, host identity, network and port failures. Closing the check cancels its request. Existing JSON diagnostics remain available.
+- Keep connection and credential-reference edits open until a fresh collection result arrives; saving settings and resolving a credential are not treated as proof of successful collection.
+- Explain common Slurm wait reasons and terminal job failures while retaining the original scheduler reason. Show submitted and started times where available; unknown scheduler timezones stay explicit, and pending start estimates are not shown as actual starts.
+- Show observed waiting time without extending stale samples to the present. Normal queued and starting states use an informational tone.
+- Turn resource, job, failure, source and usage tables into labeled cards when space is limited, keeping status, prices and connection details visible.
+- Preserve group/search/state filters, chart ranges, tool tabs and planner inputs in the URL. Job, failed-attempt and machine details support direct links, browser navigation and live updates; missing items are explained.
+- Keep plugin API, web API and database versions unchanged. Existing rows without the new job times continue to display unknown values.
+
 ## 0.4.0 (unreleased)
 
 - Use the same GPU, job and utilization figures across Overview, Usage, cluster views and history. Partial totals name the machines or logins that could not be measured; machines with monitoring off are excluded.

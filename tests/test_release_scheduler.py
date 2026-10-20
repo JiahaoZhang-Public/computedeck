@@ -16,7 +16,7 @@ async def test_lost_qos_queries_cannot_reuse_a_previous_verified_grant(
     queries_available = True
 
     async def run(alias, command, options=None):
-        if command.startswith("squeue"):
+        if command.startswith("env SLURM_TIME_FORMAT="):
             return ""
         if command == "scontrol -d show nodes -o":
             return "NodeName=g1 State=IDLE CfgTRES=cpu=64,gres/gpu=8 AllocTRES= Partitions=gpu\n"

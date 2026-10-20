@@ -209,6 +209,8 @@ def test_jobs_map_gpu_pods_to_the_job_shape() -> None:
         "gpu_utilization": None,
         "cpu_utilization": None,
         "memory_utilization": None,
+        "submitted_at": None,
+        "started_at": "2026-01-05T10:30:00+00:00",
         "observed_at": job["observed_at"],
     }
     assert job["observed_at"]

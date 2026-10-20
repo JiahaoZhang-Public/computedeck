@@ -1,5 +1,6 @@
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { Instance, Job, SSHConfig } from '../types';
+import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import { instanceAllocation, jobGpuResources, money, relativeTime, runningPrice } from '../domain';
@@ -87,15 +88,34 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
     ctx.data.sources.find((source) => source.id === job.source_id)?.driver ?? '',
   );
   const pending = job.state.toUpperCase() === 'PENDING';
+  const explanation = jobReason(
+    job,
+    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ?? '',
+  );
   return (
     <div className="drawer-body">
-      {pending && job.reason && (
-        <div className="callout amber">
-          <strong>{t('job.reason')}</strong>
-          <span>{job.reason}</span>
+      {explanation && (
+        <div className="callout">
+          <strong>{t(pending ? 'job.reason' : 'job.failureReason')}</strong>
+          <p>{explanation.summary}</p>
+          {job.reason && <code>{job.reason}</code>}
+          <strong>{t('job.nextStep')}</strong>
+          <p>{explanation.next}</p>
         </div>
       )}
       <dl className="kv">
+        {job.end && (
+          <div>
+            <dt>{t('jobs.col.ended')}</dt>
+            <dd>{jobTime(job.end)}</dd>
+          </div>
+        )}
+        {job.exit_code != null && (
+          <div>
+            <dt>{t('jobs.col.exitCode')}</dt>
+            <dd>{job.exit_code}</dd>
+          </div>
+        )}
         <div>
           <dt>{t('job.id')}</dt>
           <dd className="mono">{job.id}</dd>
@@ -137,12 +157,24 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
           <dd className="mono">{job.node || '—'}</dd>
         </div>
         <div>
+          <dt>{t('job.submitted')}</dt>
+          <dd>{jobTime(job.submitted_at)}</dd>
+        </div>
+        <div>
+          <dt>{t('job.started')}</dt>
+          <dd>{jobTime(job.started_at)}</dd>
+        </div>
+        <div>
+          <dt>{t('job.waiting')}</dt>
+          <dd>{jobWaiting(job)}</dd>
+        </div>
+        <div>
           <dt>{t('jobs.col.elapsed')}</dt>
-          <dd className="mono">{job.elapsed || '—'}</dd>
+          <dd className="mono">{pending ? '—' : job.elapsed || '—'}</dd>
         </div>
         <div>
           <dt>{t('common.sampledAt')}</dt>
-          <dd>{relativeTime(job.observed_at)}</dd>
+          <dd title={jobTime(job.observed_at)}>{relativeTime(job.observed_at)}</dd>
         </div>
       </dl>
       <Metrics

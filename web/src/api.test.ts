@@ -181,3 +181,42 @@ it('releases failed held GETs so they can be retried', async () => {
   expect(fetch).toHaveBeenCalledTimes(2);
   hidden.mockRestore();
 });
+
+it('reports streaming checks across chunk boundaries and requires completion', async () => {
+  const events = [
+    { rows: [{ id: 'login', state: 'checking' }] },
+    { rows: [{ id: 'login', state: 'ok' }], done: true },
+  ];
+  const bytes = new TextEncoder().encode(
+    events.map((event) => JSON.stringify(event) + '\n').join(''),
+  );
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.slice(0, 17));
+      controller.enqueue(bytes.slice(17));
+      controller.close();
+    },
+  });
+  const calls = stubFetch(
+    new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson' } }),
+  );
+  const onRows = vi.fn();
+  const controller = new AbortController();
+  const rows = await api('/sources/example/check', {}, 'POST', {
+    onRows,
+    signal: controller.signal,
+  });
+  expect(rows).toEqual(events[1].rows);
+  expect(onRows).toHaveBeenNthCalledWith(1, events[0].rows);
+  expect(calls[0].signal).toBe(controller.signal);
+  expect(calls[0].headers).toMatchObject({ 'X-ComputeDeck': '1', Accept: 'application/x-ndjson' });
+
+  stubFetch(
+    new Response(JSON.stringify(events[0]) + '\n', {
+      headers: { 'Content-Type': 'application/x-ndjson' },
+    }),
+  );
+  await expect(
+    api('/sources/example/check', {}, 'POST', { onRows, signal: controller.signal }),
+  ).rejects.toThrow(t('sources.checkInterrupted'));
+});

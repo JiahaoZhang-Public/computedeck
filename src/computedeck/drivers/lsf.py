@@ -52,6 +52,8 @@ JOB_FIELDS = (
     "queue",
     "stat",
     "pend_reason",
+    "submit_time",
+    "start_time",
     "exec_host",
     "slots",
     "run_time",
@@ -213,6 +215,12 @@ def _job(row: dict[str, str], state: str, source: dict[str, Any], command: str) 
         "cpu_count": integer(row.get("SLOTS")),
         "node": _hosts(row.get("EXEC_HOST", "")),
         "elapsed": duration(elapsed) if elapsed is not None else "",
+        "submitted_at": None if _blank(row.get("SUBMIT_TIME")) else row["SUBMIT_TIME"],
+        "started_at": (
+            row.get("START_TIME")
+            if state != "PENDING" and not _blank(row.get("START_TIME"))
+            else None
+        ),
         "reason": None,
         "gpu_utilization": None,
         "cpu_utilization": None,

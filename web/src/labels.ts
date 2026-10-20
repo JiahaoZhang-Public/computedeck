@@ -34,19 +34,7 @@ export type Tone = 'green' | 'amber' | 'red' | 'gray';
 export function statusTone(state: string): Tone {
   if (['RUNNING', 'running', 'reported_running', 'ready', 'reachable', 'COMPLETED'].includes(state))
     return 'green';
-  if (
-    [
-      'PENDING',
-      'CONFIGURING',
-      'syncing',
-      'desired_running',
-      'COMPLETING',
-      'stale',
-      'partial',
-      'degraded',
-    ].includes(state)
-  )
-    return 'amber';
+  if (['desired_running', 'stale', 'partial', 'degraded'].includes(state)) return 'amber';
   if (
     [
       'error',

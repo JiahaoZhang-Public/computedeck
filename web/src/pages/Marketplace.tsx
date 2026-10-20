@@ -1,5 +1,6 @@
 import { useDialogFocus } from '../useDialogFocus';
 import { useEffect, useState } from 'react';
+import { useRouteParam } from '../useRouteParam';
 import { Copy, Puzzle, X } from 'lucide-react';
 import type { MarketPlugin, Marketplaces } from '../types';
 import { api } from '../api';
@@ -139,7 +140,7 @@ function PluginDrawer({
 export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
   const [data, setData] = useState<Marketplaces | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useRouteParam('market-q');
   const [open, setOpen] = useState<MarketPlugin | null>(null);
   useEffect(() => {
     api<Marketplaces>('/marketplace')

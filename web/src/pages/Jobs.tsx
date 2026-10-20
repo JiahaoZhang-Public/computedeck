@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRouteParam } from '../useRouteParam';
 import { ArrowRight } from 'lucide-react';
 import { groupLabel } from '../groups';
 import { t } from '../i18n';
@@ -12,7 +12,8 @@ import { matches } from './util';
 
 export function JobsPage({ ctx }: { ctx: Ctx }) {
   const { data, group, query, groups } = ctx;
-  const [tab, setTab] = useState<'all' | 'running' | 'pending' | 'failed'>('all');
+  const [requestedTab, setTab] = useRouteParam('state', 'all');
+  const tab = ['all', 'running', 'pending', 'failed'].includes(requestedTab) ? requestedTab : 'all';
   const clusters = groups.filter((item) => item.kind === 'cluster');
   const inView = (clusterId: string) => group === 'all' || clusterId === group;
   // Logins without a current job list: their jobs are unknown, so counts are lower bounds.
@@ -112,7 +113,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         {tab === 'failed' ? (
           <>
             {failures.length ? (
-              <FailuresTable jobs={failures} groups={groups} />
+              <FailuresTable jobs={failures} groups={groups} onOpen={ctx.openJob} />
             ) : (
               <Empty
                 title={covered.length ? t('jobs.failures.none') : t('jobs.failures.unavailable')}

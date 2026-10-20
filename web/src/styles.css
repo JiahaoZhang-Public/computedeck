@@ -933,6 +933,7 @@ form > .form-error {
 /* ---------- Tables ---------- */
 
 .table-wrap {
+  container-type: inline-size;
   overflow-x: auto;
 }
 .table {
@@ -2703,8 +2704,8 @@ td.wrap {
   font-size: 11px;
 }
 
-/* On a phone, rows of a .stack-on-phone table become cards of "label  value" lines. */
-@media (max-width: 640px) {
+/* Keep important columns visible whenever a table has less than 900px of room. */
+@container (max-width: 900px) {
   .table.stack-on-phone thead {
     display: none;
   }
@@ -2714,6 +2715,9 @@ td.wrap {
   .table.stack-on-phone td {
     display: block;
     width: 100%;
+  }
+  .table.stack-on-phone {
+    min-width: 0;
   }
   .table.stack-on-phone tr {
     padding: 8px 0;
@@ -2726,18 +2730,33 @@ td.wrap {
     padding: 3px 16px;
     border: 0;
     text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .table.stack-on-phone .with-mark {
+    min-width: 0;
+  }
+  .table.stack-on-phone .with-mark strong,
+  .table.stack-on-phone .with-mark .sub {
+    white-space: normal;
   }
   .table.stack-on-phone tr:not(.note-row) td:first-child {
     font-weight: 600;
   }
   .table.stack-on-phone td[data-label] {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+    gap: 2px 12px;
+  }
+  .table.stack-on-phone td[data-label] > * {
+    grid-column: 2;
+    min-width: 0;
+    max-width: 100%;
   }
   .table.stack-on-phone td[data-label]::before {
     content: attr(data-label);
-    flex-shrink: 0;
+    grid-column: 1;
+    grid-row: 1;
     color: var(--text-3);
     font-weight: 400;
   }
@@ -2757,4 +2776,61 @@ td.wrap {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+@media (max-width: 560px) {
+  .search kbd {
+    display: none;
+  }
+  .table.stack-on-phone .button,
+  .table.stack-on-phone .icon-button {
+    min-height: 44px;
+  }
+}
+
+.source-diagnosis-body > .button {
+  margin: 0 8px 8px 0;
+}
+.diagnostic-command {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+  user-select: all;
+}
+
+@media (max-width: 560px) {
+  .page-jobs .toolbar .chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+  }
+  .page-jobs .toolbar .chips button {
+    min-height: 44px;
+  }
+}
+.table.stack-on-phone td[data-label]::before {
+  font-family: var(--font);
+}
+
+.checklist .check-state {
+  display: inline;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Explanations and scheduler-local dates must also fit a desktop table. */
+.table.stack-on-phone th,
+.table.stack-on-phone td,
+.table.stack-on-phone .with-mark strong,
+.table.stack-on-phone .with-mark .sub {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.table.stack-on-phone .meter-text {
+  min-width: 0;
+  white-space: normal;
 }

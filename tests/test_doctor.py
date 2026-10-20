@@ -1,5 +1,6 @@
 """Diagnostics use read-only commands and never return credential values."""
 
+import asyncio
 import json
 import socket
 
@@ -179,3 +180,139 @@ async def test_incompatible_plugin_and_missing_source_are_reported(tmp_path, mon
     rows = await doctor.diagnose(tmp_path, 8710, "absent")
     assert [row["state"] for row in rows] == ["failed", "failed"]
     assert [row["id"] for row in rows] == ["plugin:example", "source"]
+
+
+async def test_reports_the_current_step_before_ssh_completes(monkeypatch, connected):
+    pending = asyncio.Event()
+    observed = []
+
+    async def run(*args):
+        await pending.wait()
+        return ""
+
+    monkeypatch.setattr(ssh, "run", run)
+    task = asyncio.create_task(doctor.source_checks(source(), report=observed.append))
+    await asyncio.sleep(0)
+    assert observed[-1]["id"] == "ssh_login"
+    assert observed[-1]["state"] == "checking"
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize(
+    ("error", "hint"),
+    [
+        ("Permission denied (publickey).", "Authentication was rejected"),
+        ("Host key verification failed.", "Verify the host key"),
+        ("Connection timed out", "required VPN"),
+        ("Connection refused", "SSH port"),
+    ],
+)
+async def test_ssh_failure_has_specific_safe_repair_guidance(monkeypatch, connected, error, hint):
+    async def run(*args):
+        raise ssh.SSHError(error + " private-secret-example")
+
+    monkeypatch.setattr(ssh, "run", run)
+    result = await doctor.source_checks(source())
+    assert hint in result[-1]["detail"]["en"]
+    assert "private-secret-example" not in json.dumps(result)
+    assert (
+        result[-1]["command"]
+        == "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -l alice -- cluster-a true"
+    )
+
+
+def test_web_stream_sends_progress_and_a_complete_result(tmp_path, connected):
+    stored = source_record(
+        SourceInput(name="Example", driver="slurm", username="alice", ssh_alias="cluster-a")
+    )
+    database = Store(tmp_path / "computedeck.sqlite")
+    database.save_source(stored)
+    database.db.close()
+    with TestClient(app.create_app(tmp_path, polling=False, plugins=[])) as client:
+        response = client.post(
+            f"/api/sources/{stored['id']}/check",
+            json={},
+            headers={
+                "Origin": "http://127.0.0.1:8710",
+                "X-ComputeDeck": "1",
+                "Accept": "application/x-ndjson",
+            },
+        )
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert any(row["state"] == "checking" for event in events for row in event["rows"])
+    assert events[-1]["done"] is True
+    assert all(row["state"] == "ok" for row in events[-1]["rows"])
+
+
+def test_interrupted_stream_redacts_errors_and_finishes_pending_steps(tmp_path, monkeypatch):
+    stored = source_record(
+        SourceInput(name="Example", driver="slurm", username="alice", ssh_alias="cluster-a")
+    )
+    database = Store(tmp_path / "computedeck.sqlite")
+    database.save_source(stored)
+    database.db.close()
+
+    async def interrupted(source, node=None, *, report=None):
+        report({"id": "login", "state": "checking", "label": {"en": "Login"}, "detail": {}})
+        raise RuntimeError("private-secret-example")
+
+    monkeypatch.setattr(doctor, "source_checks", interrupted)
+    with TestClient(app.create_app(tmp_path, polling=False, plugins=[])) as client:
+        response = client.post(
+            f"/api/sources/{stored['id']}/check",
+            json={},
+            headers={
+                "Origin": "http://127.0.0.1:8710",
+                "X-ComputeDeck": "1",
+                "Accept": "application/x-ndjson",
+            },
+        )
+    assert "private-secret-example" not in response.text
+    final = json.loads(response.text.splitlines()[-1])
+    assert final["done"] is True
+    assert all(row["state"] == "failed" for row in final["rows"])
+
+
+async def test_closing_stream_cancels_its_check_task(tmp_path, monkeypatch):
+    from starlette.requests import Request
+
+    stored = source_record(
+        SourceInput(name="Example", driver="slurm", username="alice", ssh_alias="cluster-a")
+    )
+    database = Store(tmp_path / "computedeck.sqlite")
+    database.save_source(stored)
+    database.db.close()
+    cancelled = asyncio.Event()
+
+    async def waiting(source, node=None, *, report=None):
+        report({"id": "login", "state": "checking", "label": {"en": "Login"}, "detail": {}})
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(doctor, "source_checks", waiting)
+    application = app.create_app(tmp_path, polling=False, plugins=[])
+    async with application.router.lifespan_context(application):
+        endpoint = next(
+            route.endpoint for route in application.routes if route.name == "check_source_now"
+        )
+        request = Request({"type": "http", "headers": [(b"accept", b"application/x-ndjson")]})
+        response = await endpoint(stored["id"], request)
+        await anext(response.body_iterator)
+        await response.body_iterator.aclose()
+        assert cancelled.is_set()
+
+
+async def test_a_check_timeout_does_not_claim_the_host_is_unreachable(monkeypatch, connected):
+    async def run(*args):
+        raise TimeoutError()
+
+    monkeypatch.setattr(ssh, "run", run)
+    rows = await doctor.source_checks(source())
+    assert "active collection" in rows[-1]["detail"]["en"]
+    assert "host is unreachable" not in rows[-1]["detail"]["en"]

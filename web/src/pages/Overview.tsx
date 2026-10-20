@@ -223,7 +223,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       </Panel>
       {failures.length > 0 && (
         <Panel title={t('overview.failures')} count={failures.length}>
-          <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} />
+          <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} onOpen={ctx.openJob} />
         </Panel>
       )}
       <Panel
@@ -342,7 +342,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
     );
   return (
     <div className="table-wrap">
-      <table className="table">
+      <table className="table stack-on-phone">
         <thead>
           <tr>
             <th>{t('overview.col.source')}</th>
@@ -375,7 +375,7 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                     <strong>{group.label}</strong>
                   </span>
                 </td>
-                <td className="muted">
+                <td className="muted" data-label={t('overview.col.accounts')}>
                   {cluster
                     ? group.sources
                         .map((source) => source.username)
@@ -392,8 +392,10 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                           ),
                       ].join(' · ')}
                 </td>
-                <td className="num">{allocatedCell(row.scoped, ctx)}</td>
-                <td>
+                <td className="num" data-label={t('overview.col.allocated')}>
+                  {allocatedCell(row.scoped, ctx)}
+                </td>
+                <td data-label={t('overview.col.load')}>
                   {cluster ? (
                     row.nodes.nodes === 0 ? (
                       <span className="muted">—</span>
@@ -419,10 +421,12 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                     <span className="muted">—</span>
                   )}
                 </td>
-                <td>
+                <td data-label={t('overview.col.state')}>
                   <Status state={row.state} />
                 </td>
-                <td className="num muted">{row.updated ? relativeTime(row.updated) : '—'}</td>
+                <td className="num muted" data-label={t('overview.col.updated')}>
+                  {row.updated ? relativeTime(row.updated) : '—'}
+                </td>
               </tr>
             );
           })}

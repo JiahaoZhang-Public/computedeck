@@ -337,6 +337,7 @@ export function SourceForm({
   const [step, setStep] = useState<Step>(source || preset.driver ? 'details' : 'type');
   const [selected, setSelected] = useState(source?.driver ?? preset.driver ?? '');
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [previousAttempt, setPreviousAttempt] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const info = driverInfo(drivers, selected);
   const cluster = info.kind === 'cluster';
@@ -345,14 +346,15 @@ export function SourceForm({
     (group) => group.kind === 'cluster' && group.sources.some((item) => item.driver === selected),
   );
   const saved = sources.find((item) => item.id === savedId);
-  const checking = step === 'check' && (!saved || !checkFinished(saved));
+  const checking =
+    step === 'check' && (!saved || saved.last_attempt === previousAttempt || !checkFinished(saved));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const enabled = form.get('enabled') === 'on';
     // After a failed check the new source exists; further saves update it.
-    const target = source ?? saved;
+    const target = saved ?? source;
     const values: Record<string, string> = {};
     const options: Record<string, string> = { ...(target?.options ?? {}) };
     for (const field of info.fields) {
@@ -383,8 +385,9 @@ export function SourceForm({
     }
     try {
       setFormError(null);
+      setPreviousAttempt(sources.find((item) => item.id === target?.id)?.last_attempt ?? null);
       const result = await onSubmit(body, target?.id);
-      if (!source && enabled) {
+      if (enabled) {
         setSavedId(result.id);
         setStep('check');
       } else onCancel();
@@ -451,9 +454,10 @@ export function SourceForm({
                 : t('source.check.done')}
           </p>
         </header>
+        <p>{t('source.check.savedPending')}</p>
         {savedId && <ConnectionChecks key={savedId} sourceId={savedId} />}
         <ul className="checklist">
-          {checklist(saved, info).map((row) => (
+          {checklist(checking ? undefined : saved, info).map((row) => (
             <li key={row.label} className={row.state}>
               {row.state === 'ok' ? (
                 <CheckCircle2 size={16} />
