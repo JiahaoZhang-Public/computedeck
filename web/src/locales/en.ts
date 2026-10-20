@@ -332,9 +332,9 @@ const en = {
   'job.next.nodes': 'Review node constraints and availability before changing the request.',
   'job.explain.access': 'The scheduler rejected the account or QoS selection.',
   'job.next.access': 'Verify the selected account and its allowed QoS with the administrator.',
-  'job.explain.unknown': 'The scheduler reports a wait; the original reason is shown below.',
+  'job.explain.unknown': 'The job is waiting; a specific explanation is not available.',
   'job.next.unknown':
-    'Use the original reason and job ID to check the scheduler or ask the administrator.',
+    'Check the job ID and any original reason in the scheduler, or ask the administrator.',
   'job.explain.memory': 'The job exceeded its memory allocation.',
   'job.next.memory':
     'Inspect memory usage and logs; reduce the workload or request more memory before retrying.',
