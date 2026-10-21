@@ -31,6 +31,8 @@ export function failureExplanation(job: Job, driver: string) {
       evidence: null,
     };
   if (job.state.toUpperCase() !== 'FAILED') return null;
+  if (job.exit_status != null && job.exit_status >= 1 && job.exit_status <= 125)
+    return { summary: t('failure.program', { status: job.exit_status }), evidence: null };
   if (job.reason) return { summary: null, evidence: null };
   if (job.exit_signal === 9)
     return { summary: t('failure.sigkill'), evidence: t('failure.signalEvidence', { signal: 9 }) };
@@ -39,8 +41,6 @@ export function failureExplanation(job: Job, driver: string) {
       summary: t('failure.command'),
       evidence: t('failure.statusEvidence', { status: 127 }),
     };
-  if (job.exit_status != null && job.exit_status >= 1 && job.exit_status <= 125)
-    return { summary: t('failure.program', { status: job.exit_status }), evidence: null };
   if (driver === 'pbs' && /^-\d+$/.test(job.exit_code ?? ''))
     return { summary: t('failure.schedulerCode', { code: job.exit_code! }), evidence: null };
   return { summary: t('failure.rawCode', { code: job.exit_code ?? '—' }), evidence: null };

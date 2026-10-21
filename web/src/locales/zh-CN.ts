@@ -371,7 +371,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'failure.copyInspection': '复制检查命令',
   'failure.copyOnly': '仅复制；请在对应集群或 Kubernetes 上下文中运行。',
   'event.lastSeenEnded': '最后观测于 {time}；作业在两次采集之间结束。',
-  'event.observedAt': '观测时间',
+  'event.observedAt': '事件观测时间',
   'event.loadError': '无法加载此事件。请重新打开链接重试。',
   'event.unknownUnavailable': '结果未知：此集群不报告作业结果。',
   'event.unknownNotReported': '结果未知：调度器尚未报告作业结果。',

@@ -181,7 +181,7 @@ export function eventJob(event: DeckEvent): Job | null {
     account: '',
     partition: null,
     qos: null,
-    state: 'UNKNOWN',
+    state: 'unknown',
     gpu_count: null,
     gpu_type: null,
     cpu_count: null,
@@ -197,7 +197,7 @@ export function eventJob(event: DeckEvent): Job | null {
   };
   if (event.type === 'job.finished') {
     job.state =
-      event.data.state ?? (event.data.outcome === 'unknown' ? 'UNKNOWN' : (row.state ?? 'UNKNOWN'));
+      event.data.state ?? (event.data.outcome === 'unknown' ? 'unknown' : (row.state ?? 'unknown'));
     job.exit_code = event.data.exit_code === undefined ? row.exit_code : event.data.exit_code;
     job.ended_at = event.data.ended_at;
     if (event.data.outcome === 'unknown') {
@@ -206,7 +206,7 @@ export function eventJob(event: DeckEvent): Job | null {
     }
   }
   if (event.type === 'job.ended') {
-    job.state = 'UNKNOWN';
+    job.state = 'unknown';
     job.end = null;
     job.ended_at = null;
   }

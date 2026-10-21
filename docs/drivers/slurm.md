@@ -43,8 +43,7 @@ stay stable. `exit_status` and `exit_signal` split the raw `ExitCode` (`status:s
 which is preserved. Missing or unrecognized values stay null. Both accounting queries
 read the long-standing `Timelimit` field into `time_limit`; `UNLIMITED`, `Partition_Limit`,
 empty and unknown values become null. No `StdOut` or `StdErr` fields are requested.
-A second,
-terminal-state `sacct` query runs in the same SSH call, separated by a marker. It includes
+A second, terminal-state `sacct` query runs in the same SSH call, separated by a marker. It includes
 COMPLETED, CANCELLED and all failure states, and reads Submit, Start and End under
 `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z`. Its window starts five minutes before the
 previous successful collection, rounded up to minutes and capped at 24 hours. If the

@@ -2041,7 +2041,7 @@ form > .form-error {
 }
 .activity-job {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
   width: 100%;
   min-width: 0;

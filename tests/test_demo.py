@@ -399,3 +399,7 @@ def test_demo_failure_details_include_normalized_exits_and_known_limits() -> Non
     assert timeout["time_limit"] == timeout["elapsed"]
     assert timeout["log_path"]
     assert any(row["data"].get("job", {}).get("exit_signal") == 9 for row in events())
+    unknown = next(row["data"] for row in events() if row["data"].get("outcome") == "unknown")
+    assert datetime.fromisoformat(unknown["job"]["observed_at"]) < datetime.fromisoformat(
+        unknown["observed_at"]
+    )

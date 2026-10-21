@@ -395,7 +395,7 @@ const en = {
   'failure.copyInspection': 'Copy inspection command',
   'failure.copyOnly': 'Copy only; run this on the matching cluster or Kubernetes context.',
   'event.lastSeenEnded': 'Last seen {time}; ended between collections.',
-  'event.observedAt': 'Observed',
+  'event.observedAt': 'Event observed',
   'event.loadError': 'Could not load this event. Reopen the link to try again.',
   'event.unknownUnavailable': 'Outcome unknown: this cluster does not report outcomes.',
   'event.unknownNotReported': 'Outcome unknown: the scheduler has not reported an outcome.',

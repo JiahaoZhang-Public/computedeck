@@ -497,6 +497,7 @@ def events() -> list[dict[str, Any]]:
                     "id": "example:cluster-a:48000",
                     "name": "data / prepare",
                     "state": "UNKNOWN",
+                    "observed_at": (at - timedelta(minutes=120)).isoformat(),
                 },
                 "outcome": "unknown",
                 "outcome_reason": "outcomes_unavailable",

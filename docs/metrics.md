@@ -109,7 +109,8 @@ Ended is relative, with the absolute time on hover, only when its timezone is kn
 Old records without an offset keep their labelled scheduler time. The drawer distinguishes
 "What happened" (a scheduler-reported cause and its verbatim reason) from "Likely" hints.
 Signal 9 supports the SIGKILL hint; status 127 supports command not found. Each hint shows
-its evidence. Statuses 1–125 are program exits, PBS negative codes are scheduler codes,
+its evidence; hints are suppressed when a scheduler reason is present. Statuses 1–125
+remain factual program exits even with a reason, PBS negative codes are scheduler codes,
 and other raw codes remain unexplained. Exit 137 alone is never treated as proof of OOM.
 
 The drawer shows ran-for versus time limit and the log path when supplied; missing values
@@ -124,21 +125,22 @@ command. History freshness is labelled "Failure history updated".
 
 Job rows in Activity, including expanded group children, open an event snapshot addressed
 by `?event=<id>`. Links remain usable after the attempt leaves the 24-hour failure list,
-within event retention. Event snapshots hide utilization meters. Legacy `job.ended`
-records say "Last seen …; ended between collections"; unknown `job.finished` outcomes
-keep their reason for being unknown. Missing or expired events show an unavailable drawer.
+within event retention. Event snapshots hide utilization meters. Legacy `job.ended` records
+and unknown `job.finished` outcomes say "Last seen …; ended between collections", using
+the job snapshot's observation time separately from "Event observed". Unknown outcomes
+also keep their reason for being unknown. Missing or expired events show an unavailable drawer.
 
 中文：失败记录可打开作业详情；结果列显示运行时长。只有已知时区的结束时间才显示相对时间，
 悬停显示绝对时间；旧记录仍标注为调度器时间。“发生了什么”区分调度器报告的原因、原始原因文本
-和附有依据的“可能原因”。只有信号 9 才提示 SIGKILL，状态 127 提示找不到命令；1–125 是程序
-退出状态，PBS 负值属于调度器代码，其余退出码不作解释。仅凭 137 不推断内存不足。
+和附有依据的“可能原因”。只有信号 9 才提示 SIGKILL，状态 127 提示找不到命令；已有调度器原因时不显示推测。
+1–125 是程序退出状态，即使有原因文本也保留该事实；PBS 负值属于调度器代码，其余退出码不作解释。仅凭 137 不推断内存不足。
 已提供时才显示运行时长与时间限制、日志路径：Slurm 读取记账时间限制，PBS 读取申请的运行时限
 及输出路径（保留主机前缀），Kubernetes 读取 Pod 截止时长。LSF 暂不读取限制与日志路径；
 Slurm 不查询依赖版本的标准输出或错误路径字段。失败解释下方保留“下一步”建议。
 检查命令只复制、不执行，请在对应集群或 Kubernetes 上下文中运行。没有历史能力的集群，其未知结果不提供检查命令。历史新鲜度标为“失败历史更新于”。
 动态中的作业记录（含展开的分组子项）通过 `?event=<id>` 打开事件快照，在事件保留期内不受
-24 小时失败列表限制。快照不显示利用率仪表；旧的结束事件标注最后观测时间与“在两次采集之间结束”，
-未知结果保留其原因。已过期或不存在的事件显示不可用提示。
+24 小时失败列表限制。快照不显示利用率仪表；旧的结束事件和未知结果均标注作业快照的最后观测时间与
+“在两次采集之间结束”，与“事件观测时间”分开显示。未知结果还保留其原因。已过期或不存在的事件显示不可用提示。
 
 ## Job arrays
 

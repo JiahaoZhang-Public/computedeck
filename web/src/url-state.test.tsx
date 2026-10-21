@@ -428,6 +428,50 @@ it('opens failure rows with no end time and only copies the inspection command',
   expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
 });
 
+it.each(['en', 'zh-CN'] as const)(
+  'translates unknown event status and separates last seen from event observation in %s',
+  async (locale) => {
+    const lastSeen = new Date(Date.now() - 6 * 3600_000).toISOString();
+    const observed = new Date().toISOString();
+    const event = {
+      id: 78,
+      type: 'job.finished',
+      at: observed,
+      source_id: data.jobs[0].source_id,
+      data: {
+        outcome: 'unknown',
+        outcome_reason: 'outcomes_unavailable',
+        observed_at: observed,
+        job: { ...data.jobs[0], observed_at: lastSeen },
+      },
+    };
+    const original = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, ...args) => {
+      if (path === '/settings') return { language: locale };
+      return path.startsWith('/events') ? [event] : original(path, ...args);
+    });
+    for (const type of ['job.finished', 'job.ended']) {
+      event.type = type;
+      await render('/?demo=true#/jobs?event=78');
+      const drawer = container.querySelector('[role="dialog"]')!;
+      expect(drawer.querySelector('.drawer-header .status')?.textContent).toBe(
+        locale === 'zh-CN' ? '未知' : 'Unknown',
+      );
+      expect(drawer.querySelector('.drawer-header .status')?.classList.contains('gray')).toBe(true);
+      expect(drawer.textContent).toContain(
+        t('event.lastSeenEnded', { time: relativeTime(lastSeen) }),
+      );
+      const observedRow = [...drawer.querySelectorAll('.kv > div')].find(
+        (row) => row.querySelector('dt')?.textContent === t('event.observedAt'),
+      )!;
+      expect(observedRow.querySelector('dd')?.textContent).toBe(relativeTime(observed));
+      expect(drawer.querySelector('.drawer-metrics')).toBeNull();
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+  },
+);
+
 it('shows an unavailable event without accidentally opening a different attempt', async () => {
   await render('/?demo=true#/jobs?event=999');
   expect(container.querySelector('#detail-title')?.textContent).toBe(t('drawer.unavailable'));

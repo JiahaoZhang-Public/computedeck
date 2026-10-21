@@ -9,6 +9,7 @@ import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
 import { jobReason } from './jobFacts';
 import { eventJob } from './events';
+import { relativeTime } from './domain';
 import { ArrayDetail, InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
@@ -847,7 +848,13 @@ it.each(['en', 'zh-CN'] as const)(
         type: 'job.finished',
         at: hourAgo,
         source_id: 'a-alice',
-        data: { driver: 'slurm', outcome: 'unknown', outcome_reason: reason, job: job('ended') },
+        data: {
+          driver: 'slurm',
+          outcome: 'unknown',
+          outcome_reason: reason,
+          observed_at: now,
+          job: job('ended'),
+        },
       };
       const html = renderToStaticMarkup(
         <JobDetail job={eventJob(event)!} event={event} ctx={ctx(dash({}))} />,
@@ -862,6 +869,9 @@ it.each(['en', 'zh-CN'] as const)(
       expect(html.includes(t('failure.copyInspection'))).toBe(reason !== 'outcomes_unavailable');
       expect(html.includes('sacct -j')).toBe(reason !== 'outcomes_unavailable');
       expect(html).not.toContain(t('job.nextStep'));
+      expect(html).toContain(t('event.lastSeenEnded', { time: relativeTime(hourAgo) }));
+      expect(html).toContain(`<dt>${t('event.observedAt')}</dt>`);
+      expect(html).toContain(`>${relativeTime(now)}</dd>`);
     }
   },
 );

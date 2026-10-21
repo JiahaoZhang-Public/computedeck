@@ -43,6 +43,18 @@ describe.each(['en', 'zh-CN'] as const)('failure facts in %s', (locale) => {
       summary: null,
       evidence: null,
     });
+    expect(failureExplanation(job({ reason: 'Error', exit_status: 127 }), 'kubernetes')).toEqual({
+      summary: null,
+      evidence: null,
+    });
+  });
+  it('keeps program exits factual even when the scheduler supplies a reason', () => {
+    setLocale(locale);
+    for (const status of [1, 125]) {
+      expect(
+        failureExplanation(job({ reason: 'Error', exit_status: status }), 'kubernetes'),
+      ).toEqual({ summary: t('failure.program', { status }), evidence: null });
+    }
   });
   it('keeps program statuses factual, PBS negatives scheduler-owned and unknowns raw', () => {
     setLocale(locale);
@@ -106,7 +118,7 @@ it('preserves partial event snapshots without fabricating resources or an unknow
     },
   } as DeckEvent;
   expect(eventJob(event)).toMatchObject({
-    state: 'UNKNOWN',
+    state: 'unknown',
     exit_code: null,
     gpu_count: null,
     ended_at: undefined,

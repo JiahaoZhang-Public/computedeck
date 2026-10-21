@@ -180,13 +180,17 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">
-          {event?.type === 'job.ended'
-            ? t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })
-            : t(
-                event?.data.outcome_reason === 'outcomes_unavailable'
+          {t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })}
+          {event?.type === 'job.finished' && (
+            <>
+              {' '}
+              {t(
+                event.data.outcome_reason === 'outcomes_unavailable'
                   ? 'event.unknownUnavailable'
                   : 'event.unknownNotReported',
               )}
+            </>
+          )}
         </p>
       )}
       {failure && (
