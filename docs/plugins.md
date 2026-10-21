@@ -16,14 +16,26 @@ surface; other modules may change between releases.
 A plugin runs inside the service with the permissions of the user who runs it. Install
 only plugins you trust, and say plainly in your plugin what it does.
 
-## Compatibility with 0.4.0
+## Compatibility with 0.6.0
 
-`PLUGIN_API = 1`, `WEB_API = 1`, the database schema version, route IDs and documented
-event types are unchanged. Dashboard additions are described below; callers that do
-not opt into conditional polling still receive a full response. Plugins supporting
-both 0.3 and 0.4 should declare `requires=">=0.3,<0.5"` and widen matching package
-dependencies and marketplace entries. A plugin that requires the new dashboard fields
-should require `>=0.4,<0.5`, or handle their absence on 0.3.
+`PLUGIN_API = 1`, `WEB_API = 1`, `SCHEMA_VERSION = 2` and existing route IDs stay
+unchanged. The additive `attention_state` table is created with `CREATE TABLE IF NOT
+EXISTS`; a 0.5 build can still open the database. Existing API keys keep their meaning.
+Event filters, grouping, change history and delivery status are opt-in; the default
+`GET /api/events` response remains a plain list.
+
+Plugins tested across 0.3–0.6 can declare `requires=">=0.3,<0.7"`; widen matching pip
+dependencies and marketplace entries too. Features introduced in 0.4 require at least
+0.4, and plugins relying on 0.6 fields should require `>=0.6,<0.7` or handle their absence
+on older cores. A plugin's existing `<0.6` bound still excludes 0.6 even though its API
+version is unchanged.
+
+New event types reach only handlers that name them. A handler that does not subscribe
+to `job.finished` continues to receive one legacy `job.failed` or `job.ended` per ending;
+wildcard handlers retain the five 0.5 types. Gap events also require named subscriptions.
+`change.*` events are never delivered to plugins. See [Events](#events) for the full
+contract and [Notification delivery status](#notification-delivery-status) for the
+optional delivery fields.
 
 ## Quick start
 
@@ -54,7 +66,7 @@ plugin = Plugin(
     permissions=({"en": "posts failed jobs to the lab chat"},),
     settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
     default_enabled=False,  # start off until the owner turns it on
-    requires=">=0.3,<0.5",  # ComputeDeck versions it supports
+    requires=">=0.3,<0.7",  # ComputeDeck versions it supports
     api=1,  # the plugin API it was written for
     page="lab-alerts",  # the page its web bundle adds, if any
     web=Path(__file__).parent / "web",  # the built web bundle, if any
@@ -357,6 +369,11 @@ Rules that keep the numbers honest:
 - Ids are `<cluster_id>:<id>`, so two logins on one cluster count a job once.
 - Fields shown as text (`name`, `user`, `qos`, `node`, `elapsed`, ...) are strings or
   `None`; numbers are stored as text, and a list or object rejects the whole batch.
+- Jobs may add `submitted_at` and `started_at` as text or `None`. Offset-bearing
+  timestamps identify an instant; scheduler timestamps without an offset remain text
+  and must not be interpreted in the viewer's timezone. Missing fields on older rows
+  mean unknown. A pending Slurm `StartTime` is an estimate, not an actual start, and is
+  not stored as `started_at`.
 - Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
   `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
   heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,
@@ -424,8 +441,8 @@ Override `account(api, source)` to return `Account(balance=...)` when the provid
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
 
-Drivers emitting `reported_running` or other 0.4-only SDK values must declare
-`requires=">=0.4,<0.5"`, or use `desired_running` on 0.3.
+Drivers emitting `reported_running` or other SDK values introduced in 0.4 must declare
+`requires=">=0.4,<0.7"`, or use `desired_running` on 0.3.
 
 `CloudInstance.state` also accepts `reported_running`: the provider's normal running
 report without an observation of readiness, as with RunPod REST. It can still be starting
@@ -590,6 +607,17 @@ commit for that same source clears its error. Commit errors are also cleared whe
 the source is deleted or disabled. Unreadable rows are reported by table; consult
 the service log for details.
 
+## Connection-check progress
+
+`POST /api/sources/{source_id}/check` keeps its existing JSON list response by default.
+With `Accept: application/x-ndjson`, it streams newline-delimited objects containing
+`rows`, a list of the accumulated checks identified by `id`; the final object also has
+`done: true`. Each check reports a `state` of `checking`, `ok`, `failed` or `missing`
+(for an unavailable optional capability).
+Use these updates to replace prior rows with the same ID. Closing the request cancels
+the check. It uses the existing authentication and write checks and does not establish
+a successful collection or replace the source snapshot.
+
 ## Dashboard attention
 
 `GET /api/dashboard` adds an `attention` list, also present in example data. It is
@@ -706,7 +734,7 @@ an https address, or in a folder. The format follows Claude Code's `marketplace.
       "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
                   "sha256": ["<sha256 of the wheel>"] },
       "permissions": [{ "en": "posts failed jobs to the lab chat" }],
-      "requires": ">=0.3,<0.5",
+      "requires": ">=0.3,<0.7",
       "license": "MIT",
       "homepage": "https://example.com/lab-alerts"
     }

@@ -92,6 +92,15 @@ A machine you reach over SSH and add by hand.
 | `hourly_cost`, `currency` | For cost estimates; `currency` is an ISO code such as `USD`. |
 | `monitoring` | Read GPUs, their processes, CPU and memory over SSH every 10 minutes. The machine counts in GPUs in use while its last check is under 20 minutes old. |
 
+An edit or import keeps the last SSH check and measurements when `host`, `port`,
+`username`, `identity_file` and `existing_alias` are unchanged. Renaming a machine,
+changing its price or switching monitoring preserves the check's original age; changing
+its connection clears the check until it is run again.
+
+中文：编辑或导入时，如果主机、端口、用户名、密钥文件和 `existing_alias` 均未改变，
+会保留上次 SSH 检查结果和测量数据。重命名、修改价格或切换监控不会重置检查时间；
+连接改变后会清除检查，需要重新检查。
+
 ## Credentials
 
 Sources hold references, never secrets:
@@ -104,24 +113,28 @@ A source collected on a collection machine resolves its reference there.
 
 Plugins can add further schemes.
 
-
 ## Links and view state
 
 The URL preserves view choices without storing credentials:
 
 - Jobs: `#/jobs?state=pending&q=train`; add `group=<cluster-id>` to filter a cluster.
+- Activity: `#/activity?type=failed&range=7d&q=train`; `group` scopes a cluster or platform,
+  and `job_filter` selects one job's history.
 - Planner: `#/plan?gpus=4&model=A100&hours=12`.
 - Cluster nodes: `#/resources?nodes=abnormal`; history uses `range=24`, `72` or `168`.
 - Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
 
 Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back
 closes the detail while keeping the prior filters. Reloading a link restores the view, and
-open details follow newly collected data. A link to an item no longer present says so.
+live details follow newly collected data. Arrays use `array=<cluster>:<array_id>`;
+recorded jobs use `event=<id>` and keep the immutable facts saved with that event.
+A link to an item no longer present, or to an expired event, says so.
 These are links within your own dashboard; they do not grant access to its service.
 
 中文：筛选、搜索、“去哪跑”输入和详情保存在地址栏中，刷新和浏览器返回会恢复对应状态。
 链接不会包含凭据，也不会授予他人访问服务的权限。调度器未提供时区的作业时间会明确标注；
-无法可靠计算的等待时长保持未知。
+无法可靠计算的等待时长保持未知。动态页保存类型、时间范围及搜索条件，`job_filter` 用于
+单个作业的历史；`array` 打开当前数组，`event` 打开事件记录时的作业快照，后者不随采集变化。
 
 ## Notify job outcomes
 
@@ -161,3 +174,23 @@ zero sends nothing.
 记录，大数组不会挤走此前的投递记录。
 每条合并消息只占一个每小时额度；最后一条允许发送的消息提醒已达上限，后续事件保留在
 动态中并记为已抑制。上限为零时不发送任何消息。
+
+## Notification delivery and attention
+
+The Notifications page refreshes its delivery log while visible and enabled. Activity
+shows recorded delivery outcomes, and a channel's recent failed attempt appears in Needs
+attention. Acknowledge or snooze quiets that attention item; it does not disable its rule,
+stop retries or mute the service health indicator. A later success clears the channel
+warning. Missing delivery records mean unknown, not successful delivery.
+
+Acknowledgements and snoozes are saved on the service and shared by viewers. “Until
+tomorrow” expires at the next midnight in the service host's timezone. Overview's **Mark
+seen** is separate: it stays in this browser and does not acknowledge faults or affect
+notification delivery. See [Needs attention](metrics.md#needs-attention).
+
+中文：任务提醒开启且页面可见时会自动刷新发送日志。动态显示已记录的发送结果，近期发送失败的
+渠道会出现在待处理列表。确认或暂缓只让该待处理项静默，不会停用规则、停止重试或隐藏服务健康状态。
+之后发送成功会清除渠道警告；缺少发送记录表示未知，不表示成功。
+
+确认和暂缓保存在服务端，所有查看者共享。“直到明天”在服务主机时区的次日零点到期。
+总览的“标为已读”独立保存在当前浏览器，不会确认故障或影响通知发送。

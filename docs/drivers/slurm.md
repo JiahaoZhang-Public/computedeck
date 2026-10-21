@@ -21,9 +21,18 @@ or other cluster can prove an association grant.
 An explicit grant is `verified`; a successfully read effective list that omits a QoS is
 `not_associated`. Verification means at least one association grants the QoS. Account,
 partition and other scheduling constraints can still prevent a particular job from starting.
-The planner shows verified choices by default. Unverified and unassociated choices are in
-separate closed sections; unverified access can never produce “Likely to start.” PBS, LSF
-and Kubernetes report `unknown` access until their own permission checks are implemented.
+The planner shows verified and unknown-access choices together in the main table, with
+one unchecked-access note per login. Only `not_associated` choices are collapsed.
+Unknown access keeps a fitting option at “Possible”; it cannot produce “Likely to start.”
+PBS, LSF and Kubernetes report `unknown` access until their own permission checks are
+implemented.
+
+Estimates account for the login's eligible queued GPU demand in the same QoS. Held,
+dependency, begin-time and array-throttled jobs are left out; unknown demand that could
+consume the remaining room prevents a “Likely” estimate. Within each verdict, choices
+rank by whether the request fits one node, room after your queue, free GPUs and verified
+access. The best-estimate card uses the first row only when it is likely or possible.
+These are estimates, not a queue position or a guarantee that Slurm will start the job.
 
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.
@@ -33,6 +42,26 @@ an outage even if no GPUs are allocated, rather than looking idle.
 References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 [sacctmgr](https://slurm.schedmd.com/sacctmgr.html),
 [association text formatter](https://github.com/SchedMD/slurm/blob/master/src/scontrol/info_assoc_mgr.c).
+
+## Job requests and times
+
+GPU requests accept both `gres:gpu` and `gres/gpu` forms, including model-specific
+counts. The parser uses job-wide GPU TRES first, then per-job requests, then per-node
+requests multiplied by the requested node count when GPU accounting is unavailable.
+An untyped GPU total takes precedence over its typed breakdown to avoid double counting.
+Missing or unrecognised resource information stays unknown; it is not treated as zero.
+
+The `squeue` command runs under `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z` and reads
+SubmitTime and StartTime. Offset-bearing times can be shown in the viewer's timezone;
+older or offset-free output remains explicitly labelled scheduler time. A pending job's
+StartTime is an estimate and is never stored as its actual `started_at`. Observed waiting
+time stops at the job's last collection, even when that sample becomes stale.
+
+Array elements such as `1234_7` carry `array_id=1234` and `array_index=7` in queue and
+accounting rows. Ranges, heterogeneous jobs and job steps are not inferred as elements.
+Known limit: a cancellation reported only as an accounting range such as `1234_[5-10]`
+is not matched back to individually listed pending elements. Those elements can be
+reported as unknown alongside the cancelled range.
 
 ## Terminal job history
 
@@ -53,6 +82,11 @@ so a later accounting recovery cannot announce pre-upgrade endings again. Both q
 remain read-only.
 
 Terminal records feed lifecycle events without enlarging the retained failure list.
+If `sacct` is missing, denied or unavailable, current jobs and nodes can still be collected,
+but that collection supplies no failure history. This is an optional capability gap, not
+proof that no jobs failed. A source that has never reported accounting resolves departed
+jobs as unknown immediately. If accounting worked before, departures wait for a successful
+history collection, up to 24 hours during an outage; see [job lifecycle](../metrics.md#job-lifecycle-and-activity).
 PBS and LSF use the offset from their existing remote clock for terminal timestamps;
 that current offset may differ across a daylight-saving transition. Their legacy
 failure-row `end` strings also remain unchanged, with `ended_at` carrying the offset. No extra SSH connection is added.

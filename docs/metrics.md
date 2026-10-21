@@ -1,6 +1,6 @@
 # Reading the numbers
 
-In 0.4.0, the service computes the headline figures once for the fleet, each cluster
+The service computes the headline figures once for the fleet, each cluster
 or platform, and each source. Overview, Usage, cluster views and new history points
 read those figures. `—` means unknown or no measurement; `≥ n` is a known subtotal,
 with named missing evidence. Neither means zero.
@@ -142,6 +142,21 @@ shows acknowledged and snoozed items, but its controls cannot change saved state
 Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
 `instances_skipped` as driver capability checks or coverage-only conditions.
 They currently count as partial data, including when the gap is permanent.
+
+## Job times / 作业时间
+
+Submitted and started times are shown when the scheduler reports them. Times with an
+explicit offset are displayed in the viewer's timezone; times without an offset stay
+labelled as scheduler time. A pending Slurm start estimate is not an actual start.
+For pending jobs, waiting time runs from submission to the last observation, not the
+current clock, so an old sample never implies that the job is still waiting. Missing or
+unreliable times stay unknown. Historical job drawers hide unknown submitted, started
+and waiting values rather than inventing them.
+
+调度器报告提交或开始时间时，界面会显示这些时间。带时区偏移的时间转换为查看者所在时区；
+没有偏移的时间保留“调度器时间”标注。Slurm 排队作业的预计开始时间不视为实际开始时间。
+排队作业的等待时长从提交时间计算到最后一次观测，不延伸到当前时刻，因此旧数据不会暗示作业仍在等待。
+缺失或不可靠的时间保持未知；历史作业详情隐藏未知的提交、开始及等待时间，不进行推测。
 
 ## Job lifecycle and Activity
 

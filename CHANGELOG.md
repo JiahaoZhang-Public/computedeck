@@ -1,8 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (unreleased)
 
 - Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.
+- Browse a searchable Activity page with failed, job, source, gap, your-change and plugin filters, cluster or platform scope, and 24-hour, 7-day or 30-day history. Load older rows, expand recorded facts and open job snapshots; new arrivals wait behind a button instead of moving the list.
+- See recent activity on Overview and mark it seen in this browser. This summary replaces the "Failed in the last 24 hours" table; failed attempts remain under Jobs › Failed. Failures and connection problems come first; read state stays separate for each viewer.
+- Report one ending per job attempt, using the scheduler's outcome and end time when available. Include short jobs found only in accounting, label unknown outcomes and observation times, and recover failures after accounting outages without duplicate notifications. The first collection after upgrading establishes a silent baseline.
+- Group Slurm, PBS and LSF job arrays into one row with state counts and GPU totals. Open an array to inspect its elements; job totals still count individual elements.
+- Combine matching array and catch-up notifications into one digest per rule and event type, while unrelated failures keep their own messages. Filter notifications by job outcome, preserve existing rules, show grouped or suppressed deliveries and avoid resending them after a restart.
+- Explain job failures with scheduler-reported causes, clearly labelled likely causes and their evidence. Show run time against the limit and log paths when known, and offer inspection commands to copy without running them.
+- Show gaps in source observations and periods when ComputeDeck was stopped or the computer was asleep. Record source, machine, tool and import changes in Activity using changed field names, never setting values.
+- Acknowledge Needs attention items until they change, or snooze them for an hour or until the service host's next midnight. Muted items remain available to unmute; changed causes and severity reopen them, and service health stays visible.
+- Show recorded notification delivery outcomes beside Activity rows and warn about failing channels in Needs attention. Refresh the Notifications log automatically while its page is visible.
+- Preserve hand-added machines' SSH checks across edits and imports when the connection is unchanged. Give specific connection-failure guidance, retry transient timeouts and closed connections once, and keep machine checks separate from collection concurrency.
+- Avoid duplicate refreshes when returning to the app and stop fast polling when the requested collections finish. Offer Add source in the health panel once an authenticated, loaded dashboard confirms there are no sources.
+- Keep plugin API, web API and database schema versions unchanged. New event types require explicit subscriptions; existing plugin handlers keep receiving legacy job endings. Event filters, grouped reads, change history and notification delivery status are opt-in API additions.
 
 ## 0.5.1 (2026-10-20)
 
