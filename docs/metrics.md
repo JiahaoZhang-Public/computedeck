@@ -60,7 +60,7 @@ listing time. A missing check time is unknown. SSH sources record this time when
 successfully check the machine during collection.
 
 Machine checks have two concurrent slots separate from source collections. A timeout or
-closed SSH connection is retried once after two seconds. Authentication, host-key,
+closed or reset SSH connection is retried once after two seconds. Authentication, host-key,
 unreachable-network and refused-connection failures have specific guidance and are not
 retried automatically. Remote command failures (SSH exit status other than 255) retain
 their detail as a generic error, without connection guidance or retries. Unknown errors
@@ -74,7 +74,7 @@ saved as a failed check while its retry is pending.
 “最近可连接”使用 SSH 检查时间（`last_probe_attempt`），不使用云平台的列表更新时间。
 缺少检查时间表示未知。SSH 数据源在采集时成功检查机器后也会记录该时间。
 
-机器检查使用独立于数据源采集的两个并发名额。SSH 超时或连接关闭后，等待两秒重试一次。
+机器检查使用独立于数据源采集的两个并发名额。SSH 超时、连接关闭或重置后，等待两秒重试一次。
 认证失败、主机密钥验证失败、网络不可达及连接被拒绝都有具体指引，不会自动重试。
 未知错误保留通用说明。在重试期间，不会将第一次瞬时故障保存为检查失败。
 远程命令失败（SSH 退出码不是 255）保留原始详情并使用通用错误说明，不提供连接指引或重试。

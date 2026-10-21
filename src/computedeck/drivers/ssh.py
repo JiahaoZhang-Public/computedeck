@@ -50,7 +50,7 @@ def failure_cause(error: BaseException) -> str:
         return "network"
     if "connection refused" in text:
         return "refused"
-    if "connection closed" in text:
+    if "connection closed" in text or "connection reset" in text:
         return "closed"
     return "unknown"
 

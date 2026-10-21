@@ -233,6 +233,14 @@ async def test_probe_rejects_endpoint_injection_before_ssh(
         (ssh.SSHError("Permission denied: /opt/probe.py", returncode=1), "ssh_failed"),
         (ssh.SSHError("Probe timed out", returncode=1), "ssh_failed"),
         (ssh.SSHError("Connection closed by probe", returncode=1), "ssh_failed"),
+        (
+            ssh.SSHError(
+                "kex_exchange_identification: read: Connection reset by peer", returncode=255
+            ),
+            "ssh_closed",
+        ),
+        (ssh.SSHError("Connection reset by peer", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Connection reset by peer"), "ssh_failed"),
         (ssh.SSHError("Permission denied"), "ssh_failed"),
     ],
 )

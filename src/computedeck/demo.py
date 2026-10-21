@@ -299,7 +299,10 @@ def dashboard() -> dict[str, Any]:
             "observed_at": observed,
             # A failed check survives provider listings without changing held GPUs.
             "ssh_status": "error",
-            "ssh_error": {"code": "ssh_authentication"},
+            "ssh_error": {
+                "code": "ssh_authentication",
+                "detail": "Permission denied (publickey).",
+            },
             "last_probe_attempt": probed,
         },
         {

@@ -822,12 +822,12 @@ const en = {
   'msg.ssh_failed': 'SSH failed',
   'msg.ssh_install_failed': 'Could not install the Include',
   'msg.ssh_authentication':
-    'SSH authentication was rejected. Check the login name and key on the collecting machine.',
+    'SSH authentication rejected (check the login name and key on the collecting machine)',
   'msg.ssh_host_key':
-    'SSH host identity verification failed. Verify the host key with its administrator before updating known_hosts.',
-  'msg.ssh_network': 'SSH could not reach the host. Check the network, VPN and jump-host route.',
-  'msg.ssh_refused': 'The host refused SSH. Check the port and whether its SSH service is running.',
-  'msg.ssh_closed': 'The SSH connection closed before the check completed. Retry the check.',
+    'SSH host identity verification failed (verify the host key with its administrator before updating known_hosts)',
+  'msg.ssh_network': 'SSH could not reach the host (check the network, VPN and jump-host route)',
+  'msg.ssh_refused': 'The host refused SSH (check the port and whether its SSH service is running)',
+  'msg.ssh_closed': 'The SSH connection closed before the check completed (retry the check)',
   'msg.ssh_timeout': 'SSH timed out',
   'msg.timeout': 'Timed out',
   'msg.unexpected_output': 'Unexpected output from {command}; the previous data was kept',

@@ -54,6 +54,43 @@ describe('translations', () => {
     expect(errorText(new ApiError(500, null), 'error.save')).toBe('Request failed (HTTP 500)');
     expect(errorText('nonsense', 'error.save')).toBe('Could not save');
   });
+  it.each([
+    {
+      code: 'ssh_authentication',
+      detail: 'Permission denied (publickey).',
+      en: 'SSH authentication rejected (check the login name and key on the collecting machine): Permission denied (publickey).',
+      zh: 'SSH 认证被拒绝（检查采集机器上的登录用户名和密钥）: Permission denied (publickey).',
+    },
+    {
+      code: 'ssh_host_key',
+      detail: 'Host key verification failed.',
+      en: 'SSH host identity verification failed (verify the host key with its administrator before updating known_hosts): Host key verification failed.',
+      zh: 'SSH 主机身份验证失败（更新 known_hosts 前，请向管理员核实主机密钥）: Host key verification failed.',
+    },
+    {
+      code: 'ssh_network',
+      detail: 'No route to host',
+      en: 'SSH could not reach the host (check the network, VPN and jump-host route): No route to host',
+      zh: 'SSH 无法到达主机（检查网络、VPN 和跳板路由）: No route to host',
+    },
+    {
+      code: 'ssh_refused',
+      detail: 'Connection refused',
+      en: 'The host refused SSH (check the port and whether its SSH service is running): Connection refused',
+      zh: '主机拒绝了 SSH 连接（检查端口及远端 SSH 服务是否运行）: Connection refused',
+    },
+    {
+      code: 'ssh_closed',
+      detail: 'kex_exchange_identification: Connection closed by remote host',
+      en: 'The SSH connection closed before the check completed (retry the check): kex_exchange_identification: Connection closed by remote host',
+      zh: 'SSH 连接在检查完成前关闭（请重试检查）: kex_exchange_identification: Connection closed by remote host',
+    },
+  ])('renders $code with remote detail in both languages', ({ code, detail, en, zh }) => {
+    const ssh_error = { code, detail };
+    expect(formatMessage(ssh_error)).toBe(en);
+    setLocale('zh-CN');
+    expect(formatMessage(ssh_error)).toBe(zh);
+  });
 });
 
 it.each(['en', 'zh-CN'] as const)('renders unreadable-row counts in %s', (locale) => {

@@ -806,9 +806,10 @@ use it, rather than `observed_at`, to decide whether an SSH check is recent.
 
 Machine check failures return HTTP 502 and store a structured `ssh_error`. Known causes
 use `ssh_authentication`, `ssh_host_key`, `ssh_network`, `ssh_refused`, `ssh_timeout` or
-`ssh_closed`; unclassified SSH failures use `ssh_failed`. The optional `detail` remains
-the remote diagnostic. Checks use two slots independent of source collection and retry
-only `ssh_timeout` and `ssh_closed` once after two seconds. Only the final result is saved.
+`ssh_closed` (including connection resets); unclassified SSH failures use `ssh_failed`.
+The optional `detail` remains the remote diagnostic. Checks use two slots independent of
+source collection and retry only `ssh_timeout` and `ssh_closed` once after two seconds.
+Only the final result is saved.
 No API or database version changes are required.
 
 ## Dashboard polling

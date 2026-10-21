@@ -255,7 +255,6 @@ class Collector:
         if instance_id in self.probes:
             raise ProbeConflict("probe_in_progress")
         self.probes.add(instance_id)
-        attempt = now()
         endpoint = {
             key: instance.get(key)
             for key in ("host", "port", "username", "identity_file", "existing_alias")
