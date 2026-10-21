@@ -631,7 +631,12 @@ def digest_tail(event: dict[str, Any], language: str) -> str:
 
 
 async def compose(
-    store: Store, settings: dict[str, Any], rule: dict[str, Any], event: dict[str, Any]
+    store: Store,
+    settings: dict[str, Any],
+    rule: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    limit_reached: bool = False,
 ) -> tuple[Message, list[str]]:
     """The message for one event under one rule, and notes about anything left out."""
     language = store.settings().get("language") or "en"
@@ -663,9 +668,6 @@ async def compose(
             body = await agent_text(settings, rule, event, log, language)
         except SourceError as error:
             notes.append(f"agent_failed:{error.code}")
-    if log:
-        heading = "作业日志最后几行" if language == "zh-CN" else "Last lines of the job log"
-        body = f"{body}\n\n--- {heading} ---\n{log}"
     since = (event.get("data") or {}).get("since")
     if since:
         observed = event["data"].get("observed_at") or event["at"]
@@ -678,6 +680,16 @@ async def compose(
     tail = digest_tail(event, language)
     if tail:
         body += f"\n\n{tail}"
+    if limit_reached:
+        notice = (
+            "已达到通知上限；后续事件列在动态中。"
+            if language == "zh-CN"
+            else "Limit reached; further events are listed in Activity."
+        )
+        body += f"\n\n{notice}"
+    if log:
+        heading = "作业日志最后几行" if language == "zh-CN" else "Last lines of the job log"
+        body = f"{body}\n\n--- {heading} ---\n{log}"
     return Message(subject=subject, body=body, event=event), notes
 
 
@@ -691,7 +703,7 @@ class Notifier:
     def __init__(self, ctx: PluginContext) -> None:
         self.ctx = ctx
         self.sent: dict[str, deque[float]] = {}
-        # Recent per-rule collections; keep both array and catch-up digests from one read.
+        # Current collection only; share one read across its array and catch-up digests.
         self.digests: dict[
             tuple[str, str | None, str, str],
             tuple[dict[str, Any], dict[str, dict[str, Any]]],
@@ -722,6 +734,13 @@ class Notifier:
         # The runtime advances its persistent event cursor after this returns; by then each
         # delivery is stored, and sent, being sent or waiting for its retry. Cancellation
         # leaves the event pending for delivery after restart. Rules run side by side.
+        source = event.get("source_id")
+        observed = (event.get("data") or {}).get("observed_at") or event["at"]
+        self.digests = {
+            key: value
+            for key, value in self.digests.items()
+            if key[1] == source and key[3] == observed
+        }
         await asyncio.gather(
             *(self.deliver(rule, event) for rule in self.rules() if matches(rule, event))
         )
@@ -785,8 +804,6 @@ class Notifier:
                 name: {**rows[0], **({"digest": rows[1:]} if len(rows) > 1 else {})}
                 for name, rows in groups.items()
             }
-            if key not in self.digests and len(self.digests) >= 64:
-                del self.digests[next(iter(self.digests))]
             self.digests[key] = (dict(rule), digests)
         return self.digests[key][1].get(scope, event)
 
@@ -822,18 +839,14 @@ class Notifier:
             return
         reservation = self.sent[rule["id"]][-1]
         try:
-            mail, notes = await compose(self.store, self.settings(), rule, event)
-            if len(self.sent[rule["id"]]) == self.settings()["max_per_hour"]:
-                # Put the notice in the last allowed message: never exceed the user's cap.
-                language = self.store.settings().get("language")
-                notice = (
-                    "已达到通知上限；后续事件列在动态中。"
-                    if language == "zh-CN"
-                    else "Limit reached; further events are listed in Activity."
-                )
-                mail = Message(
-                    subject=mail.subject, body=f"{mail.body}\n\n{notice}", event=mail.event
-                )
+            # Put the notice in the last allowed message: never exceed the user's cap.
+            mail, notes = await compose(
+                self.store,
+                self.settings(),
+                rule,
+                event,
+                limit_reached=len(self.sent[rule["id"]]) == self.settings()["max_per_hour"],
+            )
             entry["subject"] = mail.subject
             await self._first_attempts(self._queue(rule, event, mail, notes, entry))
         except asyncio.CancelledError:

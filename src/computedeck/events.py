@@ -283,14 +283,16 @@ def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if (job := event["data"].get("job"))
         )
         stamps = [event["at"] for event in siblings]
+        last_at = max(stamps, key=datetime.fromisoformat)
         result.append(
             {
                 **siblings[0],
+                "at": last_at,
                 "group": {
                     "count": len(siblings),
                     "ids": [event["id"] for event in siblings],
                     "first_at": min(stamps, key=datetime.fromisoformat),
-                    "last_at": max(stamps, key=datetime.fromisoformat),
+                    "last_at": last_at,
                     "names": [
                         {"name": name, "count": count} for name, count in names.most_common(10)
                     ],

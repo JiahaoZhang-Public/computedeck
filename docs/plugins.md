@@ -193,9 +193,17 @@ collapses three or more non-silent events sharing source, type and observation t
 Each group is an event-shaped row with an additional `group` object: `count`, `ids`,
 `first_at`, `last_at`, `names` (up to ten `{name, count}` entries), `outcomes` (outcome
 to count for `job.finished`, empty for other types), and complete child `events`.
+The group row's `at` is `last_at`, so Activity sorts it by its latest child time.
 `limit` then counts display rows, so it never cuts a group in half. The Activity panel
 expands groups in place. No event types, database columns or contract versions were
 added.
+
+Performance follow-ups: grouped reads currently scan the event history and return all
+children, and JSON webhook digests carry all sibling records. Bound collection lookup
+using contiguous collection IDs or a guarded expression index, load children on expand
+or cap them, and cap or trim webhook digest payloads. These limits are not implemented
+in this release slice.
+
 ## Drivers
 
 A driver turns one configured source into one `Batch`. Built-in drivers are in

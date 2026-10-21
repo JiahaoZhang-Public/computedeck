@@ -596,9 +596,12 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                     <td className="nowrap">{relativeTime(row.at)}</td>
                     <td className="wrap">
                       {row.subject ?? '—'}
-                      {row.count && row.status !== 'grouped' && row.status !== 'suppressed' && (
+                      {row.count &&
+                      row.channel &&
+                      row.status !== 'grouped' &&
+                      row.status !== 'suppressed' ? (
                         <span className="sub">{t('notify.groupCount', { count: row.count })}</span>
-                      )}
+                      ) : null}
                       <span className="sub">
                         {row.test ? t('notify.testRow') : (row.rule_name ?? row.rule ?? '')}
                         {row.notes?.length ? ` · ${row.notes.join(', ')}` : ''}

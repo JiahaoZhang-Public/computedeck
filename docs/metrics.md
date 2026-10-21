@@ -160,11 +160,13 @@ always take precedence: children retain their own end/start times, and a group w
 children all have known times shows their first-to-last range. Only children without a
 known time use the previous-success-to-observation window after a gap; a group containing
 such children also shows that window. Equal range endpoints display a single time.
-Unknown times keep their observation-time labels. Grouping does not change job or failure totals.
+Unknown times keep their observation-time labels, including on group rows when any
+child lacks its own time, even without a collection gap. Grouping does not change job or failure totals.
 
 动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看各作业
 及结果。合并行显示名称、各结果的数量（失败优先）及时间范围，含失败事件时显示红点。
 已知作业时间优先：子事件显示自身结束或开始时间；全部子事件时间已知时，合并行显示
 最早至最晚时间。只有时间未知的补收事件及包含这些事件的合并行，才显示上次成功采集
-至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注。
+至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注；
+只要任一子事件自身时间未知，合并行也显示该标注，即使没有采集中断。
 合并展示不改变作业数或失败总数。

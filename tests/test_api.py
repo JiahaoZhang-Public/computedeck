@@ -1228,6 +1228,7 @@ def test_event_grouping_is_opt_in_and_limits_groups_not_children(client: TestCli
     assert set(digest["group"]["ids"]) == {row["id"] for row in digest["group"]["events"]}
     assert len(grouped) == len(plain) - 3
     assert digest["group"]["first_at"] < digest["group"]["last_at"]
+    assert digest["at"] == digest["group"]["last_at"]
 
 
 def test_live_event_grouping_retains_whole_burst(client: TestClient, data_dir: Path) -> None:

@@ -139,14 +139,14 @@ terminal history is silent; after a gap, non-failure catch-up endings are also s
 失败结果筛选，原离开队列规则迁移为全部结果；渠道、自定义模板和其他筛选条件保持不变。
 `{outcome}` 会按界面语言显示结果。首次采集及升级后的首次历史记录不会发送通知。
 
-
 ## Notify digests
 
 Matching array elements in one collection share one notification per rule and event
 type. An unrelated failure keeps its own message. Catch-up events after a collection gap
 are also grouped; their messages show the collection window. The leader keeps your
 template, and only its log is read if requested. A translated summary names the
-remaining jobs. The delivery log uses one **Grouped · N events** row for the siblings,
+remaining jobs. The collection window, summary and limit notice appear before the log
+section. The delivery log uses one **Grouped · N events** row for the siblings,
 retaining their IDs. Channel results show the total count including the leader. A
 suppressed digest likewise uses one row, so a large array does not crowd out earlier
 deliveries. Grouping spends one hourly slot. The last allowed message says the limit was
@@ -155,7 +155,7 @@ zero sends nothing.
 
 中文：同一轮采集中的数组元素按规则和事件类型合并通知，无关作业的失败单独发送。
 采集中断后的补收事件也会合并，并注明采集时间区间。首个事件使用已有模板；启用日志时
-只读取该事件的日志，随后附上其他作业的摘要。每组合并事件只占一条“已合并 · N 个事件”
+只读取该事件的日志。采集时间区间、其他作业摘要及额度提醒均显示在日志段落之前。每组合并事件只占一条“已合并 · N 个事件”
 记录，并保留各事件 ID；渠道结果显示含首个事件在内的总数。被抑制的合并消息也只占一条
 记录，大数组不会挤走此前的投递记录。
 每条合并消息只占一个每小时额度；最后一条允许发送的消息提醒已达上限，后续事件保留在

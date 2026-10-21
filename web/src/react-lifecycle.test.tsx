@@ -1423,3 +1423,30 @@ it.each(['en', 'zh-CN'] as const)(
     expect(container.textContent).not.toContain(t('notify.groupCount', { count: 600 }));
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows message counts only for channel deliveries in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockResolvedValue({
+      channels: [],
+      rules: [],
+      kinds: [],
+      event_types: [],
+      placeholders: [],
+      ai_ready: false,
+      log: [
+        { id: 1, at: now.toISOString(), status: 'failed', count: 3 },
+        { id: 2, at: now.toISOString(), status: 'sent', channel: 'team', count: 0 },
+        { id: 3, at: now.toISOString(), status: 'sent', channel: 'team', count: 4 },
+        { id: 4, at: now.toISOString(), status: 'failed', channel: 'team', count: 5 },
+      ],
+    });
+    await render(<NotifyPage ctx={{ ...context('notify'), groups: [] }} />);
+    expect(container.textContent).not.toContain(t('notify.groupCount', { count: 3 }));
+    expect(container.textContent).toContain(t('notify.groupCount', { count: 4 }));
+    expect(container.textContent).toContain(t('notify.groupCount', { count: 5 }));
+    const zeroMessage = container.querySelectorAll('tbody tr')[1].querySelectorAll('td')[1];
+    expect(zeroMessage.textContent).toBe('—');
+  },
+);

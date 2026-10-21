@@ -935,10 +935,10 @@ async def test_a_rule_that_raises_is_logged_and_other_rules_still_send(
     sent: list[Message] = []
     compose = notify.compose
 
-    async def flaky(store: Store, settings: Any, rule: Any, event: Any) -> Any:
+    async def flaky(store: Store, settings: Any, rule: Any, event: Any, **kwargs: Any) -> Any:
         if rule["id"] == "broken":
             raise RuntimeError("unexpected")
-        return await compose(store, settings, rule, event)
+        return await compose(store, settings, rule, event, **kwargs)
 
     async def send(config: dict[str, Any], mail: Message) -> None:
         sent.append(mail)
@@ -1366,9 +1366,17 @@ async def test_suppressed_digest_logs_all_siblings_and_does_not_replay(
     assert len(notify._recent_log(store)) == 1 and queue(store) == []
 
 
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize("agent_enabled", [False, True])
 async def test_digest_reads_only_leader_log_and_passes_siblings_to_agent(
-    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+    monkeypatch: pytest.MonkeyPatch,
+    notifier: notify.Notifier,
+    store: Store,
+    language: str,
+    agent_enabled: bool,
 ) -> None:
+    store.save_settings({"language": language})
+    store.save_plugin_settings("notify", {"max_per_hour": 1})
     add_channel(store)
     add_rule(
         store,
@@ -1377,7 +1385,8 @@ async def test_digest_reads_only_leader_log_and_passes_siblings_to_agent(
         events=["job.finished"],
         outcomes=["failed"],
         include_log=True,
-        agent=True,
+        agent=agent_enabled,
+        body="Template body",
         subject="Custom {job}",
     )
     logs: list[int] = []
@@ -1398,12 +1407,31 @@ async def test_digest_reads_only_leader_log_and_passes_siblings_to_agent(
     monkeypatch.setattr(notify, "job_log", job_log)
     monkeypatch.setattr(notify, "agent_text", agent)
     use_sender(monkeypatch, send)
-    store.add_events(digest_events(3)[:3])
+    rows = digest_events(3)[:3]
+    for row in rows:
+        row["data"]["since"] = "2026-01-01T00:00:00Z"
+    store.add_events(rows)
     for row in store.events():
         await notifier.on_event(row)
-    assert logs == [1] and len(agents) == 1 and len(agents[0]["digest"]) == 2
+    assert logs == [1]
+    assert len(agents) == int(agent_enabled)
+    if agent_enabled:
+        assert len(agents[0]["digest"]) == 2
     assert sent[0].subject == "Custom train-sweep"
-    assert "Summary" in sent[0].body and "and 2 more" in sent[0].body
+    body = sent[0].body
+    window, tail, notice, heading = (
+        ("采集窗口", "另有 2 个事件", "已达到通知上限", "--- 作业日志最后几行 ---")
+        if language == "zh-CN"
+        else (
+            "Collection window",
+            "and 2 more",
+            "Limit reached",
+            "--- Last lines of the job log ---",
+        )
+    )
+    assert body.startswith("Summary" if agent_enabled else "Template body")
+    assert body.index(window) < body.index(tail) < body.index(notice) < body.index(heading)
+    assert body.endswith(f"{heading}\nlog tail")
 
 
 async def test_interrupted_digest_resumes_queue_without_recomposing_or_resending_children(
@@ -1445,7 +1473,7 @@ async def test_broken_digest_rule_is_logged_once(
     add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
     store.add_events(digest_events(3)[:3])
 
-    async def broken(*args: Any) -> Any:
+    async def broken(*args: Any, **kwargs: Any) -> Any:
         raise ValueError("invalid template")
 
     monkeypatch.setattr(notify, "compose", broken)
@@ -1476,6 +1504,15 @@ async def test_digest_reads_collection_once_per_rule(
     for row in store.events():
         await notifier.on_event(row)
     assert len(calls) == 1
+    assert [row["status"] for row in notify._recent_log(store)] == ["sent", "grouped"]
+    assert notifier.digests
+    next_event = event("source.recovered")
+    next_event["at"] = "2027-01-01T00:00:00Z"
+    await notifier.on_event(next_event)
+    assert not notifier.digests
+    # Replaying an old collection reads it again and still sends nothing twice.
+    await notifier.on_event(store.events()[0])
+    assert len(calls) == 2
     assert [row["status"] for row in notify._recent_log(store)] == ["sent", "grouped"]
 
 

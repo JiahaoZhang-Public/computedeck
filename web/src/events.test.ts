@@ -192,17 +192,57 @@ describe('catch-up time precedence and group outcomes', () => {
           t('event.between', { start: dateTime(first), end: dateTime(last) }),
         );
         expect(eventTimeText(group([child(kind, first, true), child(kind, observed, false)]))).toBe(
-          t('event.between', { start: dateTime(since), end: dateTime(observed) }),
+          `${t('event.between', { start: dateTime(since), end: dateTime(observed) })} · ${t(kind === 'job.started' ? 'event.observedStartTime' : 'event.observedTime')}`,
         );
         expect(eventTimeText(group([child(kind, first, true), child(kind, first, true)]))).toBe(
           dateTime(first),
         );
         const unknown = child(kind, observed, false);
         unknown.data.since = observed;
-        expect(eventTimeText(group([unknown, unknown]))).toBe(dateTime(observed));
+        expect(eventTimeText(group([unknown, unknown]))).toBe(
+          `${dateTime(observed)} · ${t(kind === 'job.started' ? 'event.observedStartTime' : 'event.observedTime')}`,
+        );
       }
     },
   );
+  it.each(['en', 'zh-CN'] as const)(
+    'labels unknown and mixed groups without a gap in %s',
+    (language) => {
+      setLocale(language);
+      for (const kind of ['job.finished', 'job.started']) {
+        for (const mixed of [false, true]) {
+          const children = [
+            child(kind, mixed ? first : observed, mixed),
+            child(kind, observed, false),
+            child(kind, observed, false),
+          ];
+          for (const row of children) {
+            delete row.data.since;
+            if (kind === 'job.finished')
+              row.data.outcome = row.data.ended_at ? 'failed' : 'unknown';
+          }
+          const row = group(children);
+          const stamp = mixed
+            ? t('event.between', { start: dateTime(first), end: dateTime(observed) })
+            : dateTime(observed);
+          const label = t(
+            kind === 'job.started' ? 'event.observedStartTime' : 'event.observedTime',
+          );
+          expect(eventTimeText(row)).toBe(`${stamp} · ${label}`);
+          expect(eventTimeTitle(row)).toBe(`${stamp} · ${label}`);
+        }
+      }
+    },
+  );
+  it.each(['en', 'zh-CN'] as const)('omits empty names for source groups in %s', (language) => {
+    setLocale(language);
+    const row = group([child('source.failed', first, true)]);
+    row.group!.names = [];
+    row.group!.outcomes = {};
+    expect(eventText(row)).toBe(
+      t('event.group', { count: 1, type: t('notify.event.sourceFailed') }),
+    );
+  });
   it.each(['en', 'zh-CN'] as const)(
     'names outcome counts with failures first in %s',
     (language) => {
@@ -247,7 +287,7 @@ describe('short Activity ranges', () => {
       };
       expect(eventTimeText(group)).toBe(expected);
       group.group!.events = [child]; // unknown child uses the observation window
-      expect(eventTimeText(group)).toBe(expected);
+      expect(eventTimeText(group)).toBe(`${expected} · ${t('event.observedTime')}`);
     }
   });
 });

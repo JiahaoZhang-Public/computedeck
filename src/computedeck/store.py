@@ -366,7 +366,7 @@ class Store:
     def recent_event_collections(self, limit: int) -> list[dict[str, Any]]:
         """Complete collections for display, so a burst does not consume the row limit."""
         rows = self.db.execute(
-            "WITH collections AS MATERIALIZED ("
+            "WITH collections AS ("
             "SELECT id, source_id, type, COALESCE(json_extract(data, '$.observed_at'), at) "
             "AS observed FROM events WHERE silent = 0 AND json_valid(data)), "
             "latest AS (SELECT source_id, type, observed FROM collections "

@@ -617,3 +617,23 @@ def test_collection_lookup_uses_observation_time_and_legacy_fallback(store: Stor
     )
     assert [r["key"] for r in store.events_in_collection("a", at, "job.failed")] == ["legacy"]
     assert [r["key"] for r in store.events_in_collection("a", "later", "job.failed")] == ["new"]
+
+
+def test_group_time_uses_latest_child_time_not_highest_id() -> None:
+    rows = [
+        {
+            "id": index,
+            "type": "job.finished",
+            "source_id": "cluster-a",
+            "at": at,
+            "data": {"observed_at": "2026-01-01T12:00:00Z", "ended_at": at},
+        }
+        for index, at in enumerate(
+            ["2026-01-01T11:00:00Z", "2026-01-01T10:00:00Z", "2026-01-01T09:00:00Z"],
+            start=1,
+        )
+    ]
+    [group] = events.group_events(rows)
+    assert group["id"] == 3
+    assert group["at"] == group["group"]["last_at"] == rows[0]["at"]
+    assert group["group"]["first_at"] == rows[-1]["at"]
