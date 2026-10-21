@@ -1216,3 +1216,85 @@ def test_reenable_starts_a_silent_event_baseline(
             ("job.started", True),
             ("source.failed", False),
         ]
+
+
+def test_event_grouping_is_opt_in_and_limits_groups_not_children(client: TestClient) -> None:
+    plain = client.get("/api/events?demo=true&limit=200").json()
+    assert all("group" not in row for row in plain)
+    grouped = client.get("/api/events?demo=true&group=1&limit=200").json()
+    [digest] = [row for row in grouped if "group" in row]
+    assert digest["group"]["count"] == 4
+    assert digest["group"]["names"] == [{"name": "train-sweep", "count": 4}]
+    assert set(digest["group"]["ids"]) == {row["id"] for row in digest["group"]["events"]}
+    assert len(grouped) == len(plain) - 3
+    assert digest["group"]["first_at"] < digest["group"]["last_at"]
+
+
+def test_live_event_grouping_retains_whole_burst(client: TestClient, data_dir: Path) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    at = now()
+    rows = [
+        {
+            "key": str(i),
+            "type": "job.finished",
+            "at": at,
+            "source_id": "cluster-a",
+            "data": {"observed_at": at, "job": {"name": "sweep"}},
+        }
+        for i in range(250)
+    ]
+    store.add_events(rows)
+    store.db.close()
+    result = client.get("/api/events?group=1&limit=1").json()
+    assert len(result) == 1 and result[0]["group"]["count"] == 250
+    assert len(result[0]["group"]["events"]) == 250
+    assert len(client.get("/api/events?limit=1").json()) == 1
+
+
+def test_grouped_events_keep_interleaved_sources_types_and_collections(
+    client: TestClient, data_dir: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    clock = datetime.now(UTC)
+    at = clock.isoformat()
+    earlier = (clock - timedelta(minutes=10)).isoformat()
+    keys = [
+        ("a", "job.finished", earlier),
+        ("b", "job.finished", at),
+        ("a", "job.started", at),
+        ("a", "job.finished", at),
+        (None, "source.failed", at),
+    ]
+    rows = []
+    for index in range(3):
+        for source, kind, observed in keys:
+            rows.append(
+                {
+                    "key": str(len(rows)),
+                    "type": kind,
+                    "source_id": source,
+                    "at": at,
+                    "data": {
+                        "observed_at": observed,
+                        "outcome": "completed" if index else "failed",
+                    },
+                }
+            )
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events([*rows, {**rows[-1], "key": "silent", "silent": True}])
+    statements: list[str] = []
+    store.db.set_trace_callback(statements.append)
+    assert len(store.recent_event_collections(3)) == 9
+    assert len(statements) == 1
+    store.db.close()
+    result = client.get("/api/events?group=1&limit=3").json()
+    assert [(row["source_id"], row["type"], row["data"]["observed_at"]) for row in result] == keys[
+        :1:-1
+    ]
+    assert all(row["group"]["count"] == 3 for row in result)
+    assert result[0]["group"]["ids"] == [15, 10, 5]
+    assert result[1]["group"]["outcomes"] == {"completed": 2, "failed": 1}
+    assert result[2]["group"]["outcomes"] == {}

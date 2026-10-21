@@ -519,6 +519,32 @@ def events() -> list[dict[str, Any]]:
                 if extra["outcome"] == "completed"
                 else extra["job"].get("exit_code"),
             )
+    for index in range(4):
+        ended = (at - timedelta(minutes=45 + index)).isoformat()
+        rows.append(
+            (
+                "job.finished",
+                "example:cluster-b-alice",
+                45 + index,
+                {
+                    "job": {
+                        "id": f"example:cluster-b:48200_{index}",
+                        "name": "train-sweep",
+                        "array_id": "48200",
+                        "array_index": str(index),
+                        "state": "FAILED",
+                        "end": ended,
+                        "exit_code": "1:0",
+                    },
+                    "outcome": "failed",
+                    "state": "FAILED",
+                    "exit_code": "1:0",
+                    "ended_at": ended,
+                    "observed_at": (at - timedelta(minutes=40)).isoformat(),
+                    "since": (at - timedelta(hours=3)).isoformat(),
+                },
+            )
+        )
     rows.sort(key=lambda row: row[2])
     return [
         {

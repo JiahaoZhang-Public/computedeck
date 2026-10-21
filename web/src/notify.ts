@@ -33,7 +33,10 @@ export type RuleInput = Omit<Rule, 'id'>;
 export interface Delivery {
   id: number;
   at: string;
-  status: 'sent' | 'failed' | 'suppressed' | 'dropped';
+  status: 'sent' | 'failed' | 'suppressed' | 'dropped' | 'grouped';
+  count?: number;
+  digest?: number;
+  events?: number[];
   rule?: string;
   rule_name?: string;
   channel?: string;

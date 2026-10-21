@@ -299,14 +299,15 @@ def _delete(store: Store, table: str, row_id: str) -> bool:
         return store.db.execute(f"DELETE FROM {table} WHERE id=?", (row_id,)).rowcount == 1
 
 
+def _write_log(store: Store, entry: dict[str, Any]) -> None:
+    # The caller owns the transaction, including when reserving a whole digest.
+    store.db.execute("INSERT INTO notify_log (at, data) VALUES (?, ?)", (now(), json.dumps(entry)))
+    store.db.execute("DELETE FROM notify_log WHERE id <= (SELECT MAX(id) - 500 FROM notify_log)")
+
+
 def _log(store: Store, entry: dict[str, Any]) -> None:
     with store.db:
-        store.db.execute(
-            "INSERT INTO notify_log (at, data) VALUES (?, ?)", (now(), json.dumps(entry))
-        )
-        store.db.execute(
-            "DELETE FROM notify_log WHERE id <= (SELECT MAX(id) - 500 FROM notify_log)"
-        )
+        _write_log(store, entry)
 
 
 def _recent_log(store: Store, limit: int = 50) -> list[dict[str, Any]]:
@@ -524,6 +525,18 @@ async def agent_text(
             {**facts(event), "job": (event.get("data") or {}).get("job")}, ensure_ascii=False
         ),
     ]
+    if event.get("digest"):
+        parts += [
+            "Other events in this digest (JSON):",
+            json.dumps(
+                {
+                    "count": len(event["digest"]) + 1,
+                    "summary": digest_tail(event, language),
+                    "sample": [facts(sibling) for sibling in event["digest"][:20]],
+                },
+                ensure_ascii=False,
+            ),
+        ]
     if log:
         parts += ["Last lines of the job log:", log]
     if rule.get("instructions"):
@@ -562,6 +575,61 @@ async def agent_text(
     return text.strip()
 
 
+def digest_scope(event: dict[str, Any]) -> str | None:
+    """Normal standalone jobs keep their own message, even alongside an array burst."""
+    if not event["type"].startswith("job."):
+        return None
+    data = event.get("data") or {}
+    if (data.get("job") or {}).get("array_id"):
+        return "arrays"
+    return "catchup" if data.get("since") else None
+
+
+def digest_tail(event: dict[str, Any], language: str) -> str:
+    siblings = event.get("digest") or []
+    if not siblings:
+        return ""
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for sibling in siblings:
+        data = sibling["data"]
+        job = data.get("job") or {}
+        key = (
+            str(job.get("array_id") or ""),
+            str(job.get("name") or job.get("id") or "—"),
+            str(data.get("outcome") or ""),
+        )
+        groups.setdefault(key, []).append(str(job.get("id") or "—"))
+    parts = []
+    remaining = 10
+    comma, semicolon, left, right = (
+        ("，", "；", "（", "）") if language == "zh-CN" else (", ", "; ", " (", ")")
+    )
+    for (array, name, outcome), ids in list(groups.items())[:10]:
+        label = OUTCOME_TEXT.get(language, OUTCOME_TEXT["en"]).get(outcome, outcome)
+        shown = ids[:remaining]
+        remaining -= len(shown)
+        detail = comma.join(shown) + (f"{comma}…" if len(shown) < len(ids) else "")
+        parts.append(
+            f"{name}"
+            + (f" [{array}]" if array else "")
+            + f" ×{len(ids)}"
+            + (f"{left}{label}{right}" if label else "")
+            + (f"{left}{detail}{right}" if shown else "")
+        )
+    cluster = facts(event)["cluster"]
+    omitted = sum(len(ids) for ids in list(groups.values())[10:])
+    if omitted:
+        parts.append(
+            f"另有 {omitted} 个事件" if language == "zh-CN" else f"and {omitted} more events"
+        )
+    summary = semicolon.join(parts)
+    return (
+        f"另有 {len(siblings)} 个事件（{cluster}）：{summary}"
+        if language == "zh-CN"
+        else f"and {len(siblings)} more on {cluster}: {summary}"
+    )
+
+
 async def compose(
     store: Store, settings: dict[str, Any], rule: dict[str, Any], event: dict[str, Any]
 ) -> tuple[Message, list[str]]:
@@ -598,6 +666,18 @@ async def compose(
     if log:
         heading = "作业日志最后几行" if language == "zh-CN" else "Last lines of the job log"
         body = f"{body}\n\n--- {heading} ---\n{log}"
+    since = (event.get("data") or {}).get("since")
+    if since:
+        observed = event["data"].get("observed_at") or event["at"]
+        window = (
+            f"采集窗口：{since} 至 {observed}"
+            if language == "zh-CN"
+            else f"Collection window: between {since} and {observed}"
+        )
+        body += f"\n\n{window}"
+    tail = digest_tail(event, language)
+    if tail:
+        body += f"\n\n{tail}"
     return Message(subject=subject, body=body, event=event), notes
 
 
@@ -611,6 +691,11 @@ class Notifier:
     def __init__(self, ctx: PluginContext) -> None:
         self.ctx = ctx
         self.sent: dict[str, deque[float]] = {}
+        # Recent per-rule collections; keep both array and catch-up digests from one read.
+        self.digests: dict[
+            tuple[str, str | None, str, str],
+            tuple[dict[str, Any], dict[str, dict[str, Any]]],
+        ] = {}
         # Deliveries being attempted right now, each in its own task.
         self.sending: dict[Key, asyncio.Task[None]] = {}
         # Channels whose last attempt failed but may work later, and until when (Unix
@@ -652,24 +737,103 @@ class Notifier:
         window.append(time.monotonic())
         return True
 
+    def _handled(self, rule: dict[str, Any], event: dict[str, Any]) -> bool:
+        rows = self.store.db.execute(
+            "SELECT data FROM notify_log WHERE CASE WHEN json_valid(data) THEN "
+            "json_extract(data, '$.rule')=? AND json_extract(data, '$.event')=? END",
+            (rule["id"], event["id"]),
+        )
+        entries = [json.loads(row[0]) for row in rows]
+        if any(
+            row.get("status") in {"grouped", "suppressed"}
+            or (row.get("status") == "failed" and not row.get("channel"))
+            for row in entries
+        ):
+            return True
+        finished = {
+            row.get("channel")
+            for row in entries
+            if row.get("status") in {"sent", "failed", "dropped"}
+        }
+        queued = {
+            row[0]
+            for row in self.store.db.execute(
+                "SELECT channel FROM notify_queue WHERE rule=? AND event=?",
+                (rule["id"], event["id"]),
+            )
+        }
+        return bool(rule.get("channels")) and set(rule["channels"]) <= finished | queued
+
+    def _digest(self, rule: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+        scope = digest_scope(event)
+        if scope is None:
+            return event
+        key = (
+            rule["id"],
+            event.get("source_id"),
+            event["type"],
+            event["data"].get("observed_at") or event["at"],
+        )
+        cached = self.digests.get(key)
+        if cached is None or cached[0] != rule:
+            groups: dict[str, list[dict[str, Any]]] = {}
+            for row in self.store.events_in_collection(key[1], key[3], key[2]):
+                row_scope = digest_scope(row)
+                if row_scope and matches(rule, row):
+                    groups.setdefault(row_scope, []).append(row)
+            digests = {
+                name: {**rows[0], **({"digest": rows[1:]} if len(rows) > 1 else {})}
+                for name, rows in groups.items()
+            }
+            if key not in self.digests and len(self.digests) >= 64:
+                del self.digests[next(iter(self.digests))]
+            self.digests[key] = (dict(rule), digests)
+        return self.digests[key][1].get(scope, event)
+
     async def deliver(self, rule: dict[str, Any], event: dict[str, Any]) -> None:
         """Send one event under one rule to each of the rule's channels.
 
         Every delivery is queued first, then attempted at once, all channels together. A
         channel whose last attempt failed is not tried again before its retry is due.
         """
+        event = self._digest(rule, event)
+        if self._handled(rule, event):
+            keys = self.store.db.execute(
+                "SELECT rule, event, channel FROM notify_queue WHERE rule=? AND event=? AND due<=?",
+                (rule["id"], event["id"], time.time()),
+            ).fetchall()
+            await self._first_attempts([tuple(key) for key in keys])
+            return
         entry: dict[str, Any] = {
             "rule": rule["id"],
             "rule_name": rule.get("name"),
             "event": event.get("id"),
             "event_type": event.get("type"),
         }
+        siblings = event.get("digest") or []
+        if siblings:
+            entry.update(
+                count=len(siblings) + 1,
+                digest=event["id"],
+                events=[sibling["id"] for sibling in siblings],
+            )
         if not self._allowed(rule):
             _log(self.store, {**entry, "status": "suppressed"})
             return
         reservation = self.sent[rule["id"]][-1]
         try:
             mail, notes = await compose(self.store, self.settings(), rule, event)
+            if len(self.sent[rule["id"]]) == self.settings()["max_per_hour"]:
+                # Put the notice in the last allowed message: never exceed the user's cap.
+                language = self.store.settings().get("language")
+                notice = (
+                    "已达到通知上限；后续事件列在动态中。"
+                    if language == "zh-CN"
+                    else "Limit reached; further events are listed in Activity."
+                )
+                mail = Message(
+                    subject=mail.subject, body=f"{mail.body}\n\n{notice}", event=mail.event
+                )
             entry["subject"] = mail.subject
             await self._first_attempts(self._queue(rule, event, mail, notes, entry))
         except asyncio.CancelledError:
@@ -706,7 +870,8 @@ class Notifier:
                     "SELECT 1 FROM notify_log WHERE json_valid(data) AND "
                     "CASE WHEN json_valid(data) THEN json_extract(data, '$.rule')=? "
                     "AND json_extract(data, '$.event')=? AND json_extract(data, '$.channel')=? "
-                    "AND json_extract(data, '$.status')='sent' END LIMIT 1",
+                    "AND json_extract(data, '$.status') IN ('sent', 'failed', 'dropped') "
+                    "END LIMIT 1",
                     key,
                 ).fetchone():
                     continue
@@ -722,6 +887,10 @@ class Notifier:
                     (*key, max(clock, self.resting.get(key[2], 0)), clock, json.dumps(data)),
                 )
                 keys.append(key)
+            if event.get("digest"):
+                _write_log(
+                    self.store, {**entry, "status": "grouped", "count": len(event["digest"])}
+                )
         return keys
 
     async def _first_attempts(self, keys: list[Key]) -> None:

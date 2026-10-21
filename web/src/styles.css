@@ -2057,6 +2057,41 @@ form > .form-error {
   white-space: nowrap;
 }
 
+.activity .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.activity .activity-group {
+  display: block;
+  padding: 0;
+}
+.activity-group details {
+  width: 100%;
+}
+.activity-group details > .activity {
+  margin: 0 0 6px 18px;
+  border-left: 1px solid var(--border);
+}
+.activity-group summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.activity-group summary::before {
+  content: '▸';
+}
+.activity-group details[open] > summary::before {
+  content: '▾';
+}
+.activity time {
+  max-width: 45%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 /* ---------- Toolbox ---------- */
 
 .switch {

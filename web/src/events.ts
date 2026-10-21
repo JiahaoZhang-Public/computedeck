@@ -21,8 +21,36 @@ export type EventTone = 'green' | 'amber' | 'red' | 'gray';
 
 /** One line describing an event, in the current language. */
 export function eventText(event: DeckEvent): string {
+  if (event.group) {
+    const names = event.group.names.map(({ name, count }) => `${name} ×${count}`).join(', ');
+    const labels: Record<string, MessageKey> = {
+      'job.started': 'notify.event.started',
+      'job.finished': 'notify.event.finished',
+      'job.failed': 'notify.event.failed',
+      'job.ended': 'notify.event.ended',
+      'source.failed': 'notify.event.sourceFailed',
+      'source.recovered': 'notify.event.sourceRecovered',
+    };
+    const text = t('event.group', {
+      count: event.group.count,
+      type: labels[event.type] ? t(labels[event.type]) : event.type,
+      names,
+    });
+    const outcomes = Object.entries(event.group.outcomes ?? {})
+      .sort(
+        ([a], [b]) =>
+          Number(['completed', 'cancelled', 'unknown'].includes(a)) -
+          Number(['completed', 'cancelled', 'unknown'].includes(b)),
+      )
+      .map(
+        ([outcome, count]) => `${count} ${t(OUTCOME_LABELS[outcome] ?? 'event.outcome.unknown')}`,
+      )
+      .join(' · ');
+    return outcomes ? `${text} · ${outcomes}` : text;
+  }
   const job = event.data.job;
-  const name = job?.name || job?.id || '';
+  const element = job?.array_id ? (job.id?.split(':').at(-1) ?? job.array_index) : null;
+  const name = (job?.name || job?.id || '') + (job?.name && element ? ` [${element}]` : '');
   const source = event.data.source_name ?? event.source_id ?? '';
   switch (event.type) {
     case 'job.started':
@@ -54,6 +82,10 @@ export function eventText(event: DeckEvent): string {
 }
 
 export function eventTone(event: DeckEvent): EventTone {
+  if (event.group) {
+    const tones = event.group.events.map(eventTone);
+    return tones.includes('red') ? 'red' : tones.includes('green') ? 'green' : 'gray';
+  }
   if (event.type === 'job.finished') {
     if (event.data.outcome === 'completed') return 'green';
     if (event.data.outcome === 'cancelled' || event.data.outcome === 'unknown') return 'gray';
@@ -78,6 +110,7 @@ export function activityEvents(events: DeckEvent[]): DeckEvent[] {
 }
 
 export function eventTimeTitle(event: DeckEvent): string {
+  if (event.group) return eventTimeText(event) ?? dateTime(event.at);
   const delay = event.data.observed_at
     ? Math.floor((Date.parse(event.data.observed_at) - Date.parse(event.at)) / 60000)
     : 0;
@@ -89,13 +122,35 @@ export function eventTimeTitle(event: DeckEvent): string {
   return delay > 0 ? `${stamp} · ${t('event.seenLater', { minutes: delay })}` : stamp;
 }
 
+function ownTime(event: DeckEvent): string | null {
+  if (event.type === 'job.finished') return event.data.ended_at ?? null;
+  if (event.type === 'job.started') return event.data.started_at ?? null;
+  return event.at;
+}
+
+function eventClock(at: string): string {
+  const date = new Date(at);
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString(locale(), { hour12: false, hour: '2-digit', minute: '2-digit' })
+    : dateTime(at);
+}
+
+function timeRange(start: string, end: string): string {
+  return Date.parse(start) === Date.parse(end)
+    ? eventClock(start)
+    : t('event.between', { start: eventClock(start), end: eventClock(end) });
+}
+
 export function eventTimeText(event: DeckEvent): string | null {
-  if (event.type !== 'job.finished' || !event.data.ended_at) return null;
-  const ended = new Date(event.at);
-  const today = ended.toDateString() === new Date().toDateString();
-  return t('event.endedAt', {
-    time: today
-      ? ended.toLocaleTimeString(locale(), { hour12: false, hour: '2-digit', minute: '2-digit' })
-      : dateTime(event.at),
-  });
+  if (event.group) {
+    const unknown = event.group.events.find((child) => !ownTime(child) && child.data.since);
+    return unknown
+      ? timeRange(unknown.data.since!, unknown.data.observed_at ?? unknown.at)
+      : timeRange(event.group.first_at, event.group.last_at);
+  }
+  const own = ownTime(event);
+  if (own && event.type === 'job.finished') return t('event.endedAt', { time: eventClock(own) });
+  if (!own && event.data.since)
+    return timeRange(event.data.since, event.data.observed_at ?? event.at);
+  return null;
 }

@@ -577,3 +577,43 @@ def test_previous_failure_before_start_cannot_resolve_departure(held: bool) -> N
 def test_previous_container_failure_does_not_end_an_uncollected_job_list() -> None:
     old = {"jobs": [job("1", "RUNNING")], "failures": [failure("1")], "lifecycle_pending": []}
     assert events.collected(SOURCE, old, Batch(jobs=None, finished=[]), first=False) == []
+
+
+@pytest.mark.parametrize("minutes,gap", [(10, False), (23, False), (25, True), (180, True)])
+def test_since_marks_only_job_events_observed_after_gap(
+    monkeypatch: pytest.MonkeyPatch, minutes: int, gap: bool
+) -> None:
+    at = datetime.fromisoformat("2026-10-21T12:00:00+00:00")
+    monkeypatch.setattr(events, "now", lambda: at.isoformat())
+    since = (at - timedelta(minutes=minutes)).isoformat()
+    source = {**SOURCE, "last_success": since, "interval_minutes": 10, "status_before": "error"}
+    batch = Batch(jobs=[job("1", "RUNNING")], finished=[failure("2")])
+    rows = events.collected(source, {"lifecycle_pending": []}, batch, first=False)
+    for row in rows:
+        assert ("since" in row["data"]) == (gap and row["type"].startswith("job."))
+        if "since" in row["data"]:
+            assert row["data"]["since"] == since
+            assert row["data"]["observed_at"] == at.isoformat()
+
+
+def test_collection_lookup_uses_observation_time_and_legacy_fallback(store: Store) -> None:
+    from computedeck.store import now
+
+    at = now()
+    store.add_events(
+        [
+            {"key": "legacy", "source_id": "a", "type": "job.failed", "at": at},
+            {
+                "key": "new",
+                "source_id": "a",
+                "type": "job.failed",
+                "at": at,
+                "data": {"observed_at": "later"},
+            },
+            {"key": "silent", "source_id": "a", "type": "job.failed", "at": at, "silent": True},
+            {"key": "source", "source_id": "b", "type": "job.failed", "at": at},
+            {"key": "type", "source_id": "a", "type": "job.started", "at": at},
+        ]
+    )
+    assert [r["key"] for r in store.events_in_collection("a", at, "job.failed")] == ["legacy"]
+    assert [r["key"] for r in store.events_in_collection("a", "later", "job.failed")] == ["new"]

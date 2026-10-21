@@ -30,6 +30,7 @@ from . import attention, auth, credentials, demo, drivers, marketplace, nodes, p
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .errors import SourceError, message
+from .events import group_events
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -728,8 +729,11 @@ def create_app(
 
     @app.get("/api/events")
     async def recent_events(
-        limit: int = Query(default=50, ge=1, le=200), demo: bool = False
+        limit: int = Query(default=50, ge=1, le=200), demo: bool = False, group: bool = False
     ) -> list[dict[str, Any]]:
+        if group:
+            rows = demo_events() if demo else store().recent_event_collections(limit)
+            return group_events(rows)[:limit]
         return demo_events()[:limit] if demo else store().recent_events(limit)
 
     @app.post("/api/backup")

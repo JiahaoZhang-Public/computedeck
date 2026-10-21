@@ -27,6 +27,7 @@ const STATUS: Record<string, string> = {
   sent: 'ready',
   failed: 'error',
   suppressed: 'stale',
+  grouped: 'unknown',
   dropped: 'stale',
 };
 
@@ -595,6 +596,9 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                     <td className="nowrap">{relativeTime(row.at)}</td>
                     <td className="wrap">
                       {row.subject ?? '—'}
+                      {row.count && row.status !== 'grouped' && row.status !== 'suppressed' && (
+                        <span className="sub">{t('notify.groupCount', { count: row.count })}</span>
+                      )}
                       <span className="sub">
                         {row.test ? t('notify.testRow') : (row.rule_name ?? row.rule ?? '')}
                         {row.notes?.length ? ` · ${row.notes.join(', ')}` : ''}
@@ -604,7 +608,16 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                     <td className="wrap">
                       <Status
                         state={STATUS[row.status] ?? 'unknown'}
-                        label={t(`notify.status.${row.status}`)}
+                        label={
+                          (row.status === 'grouped' || row.status === 'suppressed') && row.count
+                            ? t(
+                                row.status === 'grouped'
+                                  ? 'notify.groupedCount'
+                                  : 'notify.suppressedCount',
+                                { count: row.count },
+                              )
+                            : t(`notify.status.${row.status}`)
+                        }
                       />
                       {row.error && (
                         <span className="sub red-text">{formatMessage(row.error)}</span>

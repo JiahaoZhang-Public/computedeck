@@ -149,3 +149,22 @@ Slurm 显示“分区”和“QoS”，PBS 和 LSF 仅显示一个“队列”�
 先显示 50 个，可“再显示 50 个”
 或“显示全部”。打开元素进入原有作业抽屉，返回可回到数组。每次轮询更新成员，数组不再列出时
 明确提示；不执行调度器命令。失败历史仍逐作业显示。
+
+
+## Activity collection groups / 动态采集合并
+
+Activity collapses three or more events of the same type and source collected together.
+Expand a row to see every job and outcome. The group shows names and outcome counts with
+failures first, a red dot if any child failed, and the event time range. Known job times
+always take precedence: children retain their own end/start times, and a group whose
+children all have known times shows their first-to-last range. Only children without a
+known time use the previous-success-to-observation window after a gap; a group containing
+such children also shows that window. Equal range endpoints display a single time.
+Unknown times keep their observation-time labels. Grouping does not change job or failure totals.
+
+动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看各作业
+及结果。合并行显示名称、各结果的数量（失败优先）及时间范围，含失败事件时显示红点。
+已知作业时间优先：子事件显示自身结束或开始时间；全部子事件时间已知时，合并行显示
+最早至最晚时间。只有时间未知的补收事件及包含这些事件的合并行，才显示上次成功采集
+至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注。
+合并展示不改变作业数或失败总数。

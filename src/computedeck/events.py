@@ -14,6 +14,7 @@ Types:
 - ``source.recovered``: a failing source was collected again.
 """
 
+from collections import Counter
 from datetime import datetime
 from typing import Any
 
@@ -226,6 +227,9 @@ def collected(
             }
         )
         ended[job_id] = {"id": job_id, "end": raw_end, "observed_at": at}
+    if gap:
+        for event in events:
+            event["data"]["since"] = source["last_success"]
     batch.lifecycle_pending = waiting
     batch.lifecycle_ended = list(ended.values())
     if source.get("status_before") == "error":
@@ -255,3 +259,50 @@ def failed(source: dict[str, Any], error: dict[str, Any]) -> list[dict[str, Any]
             "data": {**_context(source), "error": error},
         }
     ]
+
+
+def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Opt-in Activity presentation only. Stored events and plugin delivery stay individual."""
+    collections: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for event in rows:
+        key = (
+            event.get("source_id"),
+            event["type"],
+            event["data"].get("observed_at") or event["at"],
+        )
+        collections.setdefault(key, []).append(event)
+    result = []
+    for siblings in collections.values():
+        siblings.sort(key=lambda event: event["id"], reverse=True)
+        if len(siblings) < 3:
+            result.extend(siblings)
+            continue
+        names = Counter(
+            str(job.get("name") or job.get("id") or "—")
+            for event in siblings
+            if (job := event["data"].get("job"))
+        )
+        stamps = [event["at"] for event in siblings]
+        result.append(
+            {
+                **siblings[0],
+                "group": {
+                    "count": len(siblings),
+                    "ids": [event["id"] for event in siblings],
+                    "first_at": min(stamps, key=datetime.fromisoformat),
+                    "last_at": max(stamps, key=datetime.fromisoformat),
+                    "names": [
+                        {"name": name, "count": count} for name, count in names.most_common(10)
+                    ],
+                    "outcomes": dict(
+                        Counter(
+                            event["data"].get("outcome") or "unknown"
+                            for event in siblings
+                            if event["type"] == "job.finished"
+                        )
+                    ),
+                    "events": siblings,
+                },
+            }
+        )
+    return sorted(result, key=lambda event: event["id"], reverse=True)

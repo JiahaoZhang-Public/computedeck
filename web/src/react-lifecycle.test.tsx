@@ -21,10 +21,11 @@ import { driverInfo } from './drivers';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
+import { ActivityPanel } from './pages/Activity';
 import { EMPTY_RULE } from './notify';
 import { OUTCOME_LABELS } from './events';
 import type { Ctx } from './pages/shared';
-import type { Dashboard, HistoryPoint, Tool } from './types';
+import type { Dashboard, DeckEvent, HistoryPoint, Tool } from './types';
 
 vi.mock('./api', () => ({ api: vi.fn(), upload: vi.fn(), download: vi.fn() }));
 const request = vi.mocked(api);
@@ -983,7 +984,7 @@ describe('visible dashboard polling', () => {
     hidden.mockReturnValue(false);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false');
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
     request.mockClear();
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
@@ -1143,7 +1144,7 @@ describe('visible dashboard polling', () => {
     request.mockClear();
     data = { ...data, token: 'next-token' };
     await act(async () => vi.advanceTimersByTimeAsync(10000));
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false');
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
     request.mockClear();
     await click('[role="switch"]');
     expect(request).toHaveBeenCalledWith('/dashboard?demo=true');
@@ -1320,3 +1321,105 @@ it.each(['en', 'zh-CN'] as const)('shows saved Notify outcome filters in %s', as
   );
   expect(summaries).toContain(`${label} → Team`);
 });
+
+it.each(['en', 'zh-CN'] as const)('expands a collection in Activity in %s', async (language) => {
+  setLocale(language);
+  const children: DeckEvent[] = ['completed', 'failed', 'unknown'].map((outcome, index) => ({
+    id: index + 1,
+    type: 'job.finished',
+    source_id: 'cluster-a',
+    at: now.toISOString(),
+    data: {
+      outcome,
+      observed_at: now.toISOString(),
+      since: '2026-10-13T08:00:00Z',
+      job: {
+        id: `cluster-a:100_${index}`,
+        name: 'sweep',
+        array_id: '100',
+        array_index: String(index),
+      },
+    },
+  }));
+  request.mockResolvedValue([
+    {
+      ...children[2],
+      group: {
+        count: 3,
+        ids: [1, 2, 3],
+        first_at: now.toISOString(),
+        last_at: now.toISOString(),
+        names: [{ name: 'sweep', count: 3 }],
+        events: children,
+      },
+    },
+  ]);
+  await render(<ActivityPanel demo={false} />);
+  expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
+  const summary = container.querySelector('summary')!;
+  expect(summary.textContent).toContain('sweep ×3');
+  expect(summary.textContent).toContain(t('notify.event.finished'));
+  expect(summary.querySelector('.dot.red')).not.toBeNull();
+  expect(container.querySelector('details')!.open).toBe(false);
+  await click('summary');
+  expect(container.querySelector('details')!.open).toBe(true);
+  expect(container.querySelectorAll('details li')).toHaveLength(3);
+  for (let index = 0; index < 3; index++) {
+    expect(container.querySelectorAll('details li')[index].textContent).toContain(
+      `sweep [100_${index}]`,
+    );
+  }
+  for (const outcome of ['completed', 'failed', 'unknown']) {
+    expect(container.querySelector('details')!.textContent).toContain(t(OUTCOME_LABELS[outcome]));
+  }
+  expect(summary.textContent).toContain(
+    t('event.between', {
+      start: new Date('2026-10-13T08:00:00Z').toLocaleTimeString(language, {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      end: now.toLocaleTimeString(language, { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    }),
+  );
+  await click('summary');
+  expect(container.querySelector('details')!.open).toBe(false);
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows grouped Notify delivery counts in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockResolvedValue({
+      channels: [],
+      rules: [],
+      kinds: [],
+      event_types: [],
+      placeholders: [],
+      ai_ready: false,
+      log: [{ id: 1, at: now.toISOString(), status: 'grouped', count: 50, digest: 1 }],
+    });
+    await render(<NotifyPage ctx={{ ...context('notify'), groups: [] }} />);
+    expect(container.textContent).toContain(t('notify.status.grouped'));
+    expect(container.textContent).toContain(t('notify.groupedCount', { count: 50 }));
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'labels suppressed digests without claiming a message in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockResolvedValue({
+      channels: [],
+      rules: [],
+      kinds: [],
+      event_types: [],
+      placeholders: [],
+      ai_ready: false,
+      log: [{ id: 1, at: now.toISOString(), status: 'suppressed', count: 600, digest: 1 }],
+    });
+    await render(<NotifyPage ctx={{ ...context('notify'), groups: [] }} />);
+    expect(container.textContent).toContain(t('notify.suppressedCount', { count: 600 }));
+    expect(container.textContent).not.toContain(t('notify.groupCount', { count: 600 }));
+  },
+);

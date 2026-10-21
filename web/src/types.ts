@@ -334,6 +334,15 @@ export interface Tool {
 /** Something that changed between two collections, from `GET /api/events`. */
 export interface DeckEvent {
   id: number;
+  group?: {
+    count: number;
+    ids: number[];
+    first_at: string;
+    last_at: string;
+    names: { name: string; count: number }[];
+    outcomes?: Record<string, number>;
+    events: DeckEvent[];
+  };
   type:
     | 'job.finished'
     | 'job.started'
@@ -353,6 +362,7 @@ export interface DeckEvent {
     started_at?: string | null;
     ended_at?: string | null;
     observed_at?: string;
+    since?: string;
     source_name?: string;
     cluster_id?: string;
     username?: string;

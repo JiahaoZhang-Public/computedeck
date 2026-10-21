@@ -336,6 +336,64 @@ class Store:
         events = self.events(oldest - 1, limit, include_silent=False)
         return [event for event in reversed(events) if not event["silent"]]
 
+    def events_in_collection(
+        self, source_id: str | None, observed_at: str, kind: str
+    ) -> list[dict[str, Any]]:
+        """Non-silent siblings, in delivery order; pre-0.6 rows use their event time."""
+        rows = self.db.execute(
+            "SELECT id, key, type, at, source_id, data FROM events WHERE silent = 0 "
+            "AND source_id IS ? AND type = ? AND CASE WHEN json_valid(data) THEN "
+            "COALESCE(json_extract(data, '$.observed_at'), at) END = ? ORDER BY id",
+            (source_id, kind, observed_at),
+        )
+        result = []
+        for key, event_key, event_type, at, source, raw in rows:
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    {
+                        "id": key,
+                        "key": event_key,
+                        "type": event_type,
+                        "at": at,
+                        "source_id": source,
+                        "silent": False,
+                        "data": data,
+                    }
+                )
+        return result
+
+    def recent_event_collections(self, limit: int) -> list[dict[str, Any]]:
+        """Complete collections for display, so a burst does not consume the row limit."""
+        rows = self.db.execute(
+            "WITH collections AS MATERIALIZED ("
+            "SELECT id, source_id, type, COALESCE(json_extract(data, '$.observed_at'), at) "
+            "AS observed FROM events WHERE silent = 0 AND json_valid(data)), "
+            "latest AS (SELECT source_id, type, observed FROM collections "
+            "GROUP BY source_id, type, observed ORDER BY MAX(id) DESC LIMIT ?) "
+            "SELECT e.id, e.key, e.type, e.at, e.source_id, e.data FROM latest "
+            "JOIN collections c ON c.source_id IS latest.source_id "
+            "AND c.type = latest.type AND c.observed = latest.observed "
+            "JOIN events e ON e.id = c.id ORDER BY e.id DESC",
+            (limit,),
+        )
+        result = []
+        for key, event_key, kind, at, source, raw in rows:
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    {
+                        "id": key,
+                        "key": event_key,
+                        "type": kind,
+                        "at": at,
+                        "source_id": source,
+                        "silent": False,
+                        "data": data,
+                    }
+                )
+        return result
+
     def last_event_id(self) -> int:
         row = self.db.execute("SELECT MAX(id) FROM events").fetchone()
         return int(row[0] or 0)

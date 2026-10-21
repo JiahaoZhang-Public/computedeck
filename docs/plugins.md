@@ -117,8 +117,8 @@ receives the backlog of an earlier installation.
 
 | Type | When | `data` |
 |---|---|---|
-| `job.started` | a job is first seen running or changes to running | `job`, `started_at`, `observed_at` |
-| `job.finished` | one reconciled ending, including jobs seen only in history | `job`, `outcome`, `state`, `exit_code`, `submitted_at`, `started_at`, `ended_at`, `observed_at`, `outcome_reason` |
+| `job.started` | a job is first seen running or changes to running | `job`, `started_at`, `observed_at`, optional `since` |
+| `job.finished` | one reconciled ending, including jobs seen only in history | `job`, `outcome`, `state`, `exit_code`, `submitted_at`, `started_at`, `ended_at`, `observed_at`, `outcome_reason`, optional `since` |
 | `job.ended` | legacy delivery of a non-failure ending | `job` (as last seen for unknown departures) |
 | `job.failed` | legacy delivery of a failure ending | `job` with `exit_code`, `end` |
 | `source.failed` | a source that worked could not be collected | `error` |
@@ -143,7 +143,9 @@ otherwise it is the observation time. `data.observed_at` always records collecti
 Unknown job times are null. After a gap longer than two collection intervals plus 240 seconds
 (allowing for a failed attempt and recovery, each bounded by the 120-second collection timeout), non-failure
 endings are recorded silently, including departures resolved in a later collection; failures
-remain eligible for delivery. Unknown departures preserve `data.job` as last seen;
+remain eligible for delivery. Job events found after that gap also carry `data.since`, the
+previous successful collection time; the collection window is `since` to `observed_at`,
+not a claim that every job ended or started at recovery. Unknown departures preserve `data.job` as last seen;
 `data.outcome` is `unknown`, and top-level `data.state` and `data.exit_code` are null.
 
 **Named-type delivery:** new event types reach only handlers that explicitly name them
@@ -159,6 +161,41 @@ Drivers may supply `Batch.finished` as terminal history, separate from `Batch.fa
 are not copied into snapshots. Reconciliation retains only pending departures and recent
 ending IDs/times in snapshot lists.
 
+### Collection digests
+
+Individual events remain stored and delivered to third-party handlers unchanged. Notify
+combines matching array events of the same type and source in one collection into a
+message per rule. Ordinary non-array jobs keep their own messages, including a failure
+alongside a large array burst. Non-array catch-up events with `data.since` are combined
+separately. Rules filter every child before grouping; silent events are excluded.
+Collection identity uses `data.observed_at`, falling back to `at` for legacy rows, never
+the job's end time.
+
+The lowest event ID leads. Its template and optional log are used; a translated tail
+names the other jobs, grouped by array, name and outcome, with at most ten groups and
+ten additional job IDs; omitted events are counted. Opt-in AI composition receives the
+total count, this summary, and template facts for at most twenty siblings, rather than
+full sibling records. The queued webhook message's `event` may include an additive
+`digest` list of sibling events; this does not alter stored events.
+
+Notify records one `grouped` row per digest and rule, with `digest` and `event` (the
+leader ID), `events` (the sibling IDs), and `count` (the number of grouped siblings).
+This row is reserved with the queued message in one transaction. Channel `sent`/`failed`
+records retain the total count including the leader. A suppressed digest gets one
+`suppressed` row with the total count, leader ID and sibling IDs. These compact records
+preserve the earlier delivery history; replay resolves each sibling to its recorded
+leader. A digest spends one rate-limit slot. The last allowed message includes a limit
+notice, without exceeding the cap. A zero limit sends no message or notice. Retries use
+the existing delivery queue.
+
+`GET /api/events` still returns the plain event list by default. Opt-in `group=1`
+collapses three or more non-silent events sharing source, type and observation time.
+Each group is an event-shaped row with an additional `group` object: `count`, `ids`,
+`first_at`, `last_at`, `names` (up to ten `{name, count}` entries), `outcomes` (outcome
+to count for `job.finished`, empty for other types), and complete child `events`.
+`limit` then counts display rows, so it never cuts a group in half. The Activity panel
+expands groups in place. No event types, database columns or contract versions were
+added.
 ## Drivers
 
 A driver turns one configured source into one `Batch`. Built-in drivers are in

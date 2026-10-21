@@ -352,6 +352,7 @@ def test_demo_shows_completed_and_unavailable_outcomes() -> None:
         "timeout",
         "out_of_memory",
         "unknown",
+        "failed",
     }
     unknown = next(row for row in rows if row["data"]["outcome"] == "unknown")
     source = next(

@@ -22,7 +22,7 @@ export function ActivityPanel({
   const load = useCallback(async () => {
     const id = ++loadId.current;
     try {
-      const rows = await api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}`);
+      const rows = await api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}&group=1`);
       if (id === loadId.current) setEvents(activityEvents(rows));
     } catch {
       if (id === loadId.current) setEvents((current) => current ?? []);
@@ -40,23 +40,40 @@ export function ActivityPanel({
       {events?.length ? (
         <ul className="activity">
           {events.map((event) => (
-            <li key={event.id}>
-              <span className={`dot ${eventTone(event)}`} />
-              <span className="grow">
-                {eventText(event)}
-                <small>
-                  {[event.data.source_name, event.data.username].filter(Boolean).join(' · ')}
-                </small>
-              </span>
-              <time dateTime={event.at} title={eventTimeTitle(event)}>
-                {eventTimeText(event) ?? relativeTime(event.at)}
-              </time>
-            </li>
+            <ActivityRow key={event.id} event={event} />
           ))}
         </ul>
       ) : (
         <p className="panel-note">{events ? t('activity.empty') : t('chart.loading')}</p>
       )}
     </Panel>
+  );
+}
+
+function ActivityRow({ event }: { event: DeckEvent }) {
+  const content = (
+    <>
+      <span className={`dot ${eventTone(event)}`} />
+      <span className="grow">
+        {eventText(event)}
+        <small>{[event.data.source_name, event.data.username].filter(Boolean).join(' · ')}</small>
+      </span>
+      <time dateTime={event.at} title={eventTimeTitle(event)}>
+        {eventTimeText(event) ?? relativeTime(event.at)}
+      </time>
+    </>
+  );
+  if (!event.group) return <li>{content}</li>;
+  return (
+    <li className="activity-group">
+      <details>
+        <summary>{content}</summary>
+        <ul className="activity">
+          {event.group.events.map((child) => (
+            <ActivityRow key={child.id} event={child} />
+          ))}
+        </ul>
+      </details>
+    </li>
   );
 }

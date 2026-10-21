@@ -1219,3 +1219,332 @@ def test_finished_notification_facts_prefer_reconciled_fields() -> None:
     sample = notify.facts(notify.sample_event())
     assert sample["state"] == "FAILED"
     assert sample["exit_code"] == "1:0"
+
+
+def digest_events(count: int = 50) -> list[dict[str, Any]]:
+    from datetime import UTC, datetime, timedelta
+
+    observed = datetime.now(UTC)
+    rows = []
+    for outcome in ("failed", "completed"):
+        for index in range(count):
+            row = event(
+                "job.finished",
+                id=f"cluster-a:100_{outcome}_{index}",
+                name="train-sweep",
+                array_id="100",
+                array_index=str(index),
+            )
+            row.pop("id")
+            row["key"] = row["data"]["job"]["id"]
+            row["at"] = (observed - timedelta(seconds=index)).isoformat()
+            row["data"].update(
+                outcome=outcome,
+                observed_at=observed.isoformat(),
+                ended_at=row["at"],
+                state=outcome.upper(),
+            )
+            rows.append(row)
+    unrelated = event("job.finished", id="cluster-a:200", name="eval-b")
+    unrelated.pop("id")
+    unrelated.update(key="unrelated", at=observed.isoformat())
+    unrelated["data"].update(outcome="failed", observed_at=observed.isoformat())
+    return [*rows, unrelated]
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+async def test_array_digests_leave_budget_for_unrelated_failure_and_replay_nothing(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store, language: str
+) -> None:
+    store.save_settings({"language": language})
+    store.save_plugin_settings("notify", {"max_per_hour": 3})
+    add_channel(store)
+    for outcome in ("failed", "completed"):
+        add_rule(store, outcome, "team", events=["job.finished"], outcomes=[outcome])
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    store.add_events(digest_events())
+    rows = store.events(limit=200)
+    for row in rows:
+        await notifier.on_event(row)
+    assert len(sent) == 3
+    assert [len(mail.event.get("digest", [])) for mail in sent] == [49, 49, 0]
+    assert "eval-b" in sent[-1].body
+    assert "train-sweep [100] ×49" in sent[0].body
+    assert sum(f"cluster-a:100_failed_{i}" in sent[0].body for i in range(50)) == 11
+    entries = notify._recent_log(store, 200)
+    assert sum(row["status"] == "grouped" for row in entries) == 2
+    assert sum(row["status"] == "sent" for row in entries) == 3
+    assert all(
+        len(row["events"]) == row["count"] == 49 for row in entries if row["status"] == "grouped"
+    )
+    assert all(
+        row["digest"] in {rows[0]["id"], rows[50]["id"]}
+        for row in entries
+        if row["status"] == "grouped"
+    )
+    # API-1 plugins still receive every job, with the appropriate legacy type.
+    assert [events.for_handler(row, None)["type"] for row in rows].count("job.failed") == 51
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == 3 and len(notify._recent_log(store, 200)) == 5
+    next_row = digest_events(1)[-1]
+    next_row["key"] = "next-failure"
+    store.add_events([next_row])
+    await notifier.on_event(store.recent_events(1)[0])
+    assert len(sent) == 4 and "eval-b" in sent[-1].body
+    notice = "已达到通知上限" if language == "zh-CN" else "Limit reached"
+    assert notice in sent[-1].body
+    assert sum(notice in mail.body for mail in sent) == 1
+    next_row["key"] = "over-limit"
+    store.add_events([next_row])
+    await notifier.on_event(store.recent_events(1)[0])
+    assert len(sent) == 4
+    assert notify._recent_log(store)[0]["status"] == "suppressed"
+
+
+async def test_digest_filters_silent_siblings_and_groups_catchup_by_type(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(
+        store,
+        "r",
+        "team",
+        events=["job.finished", "job.started"],
+        outcomes=["failed"],
+        users=["alice"],
+        clusters=["cluster-a"],
+        name_pattern="train*",
+    )
+    rows = digest_events(4)[:4]
+    for row in rows:
+        row["data"]["job"].pop("array_id")
+        row["data"]["since"] = row["at"]
+    rows[0]["silent"] = True
+    filtered = {
+        **rows[1],
+        "key": "filtered",
+        "data": {**rows[1]["data"], "job": {**rows[1]["data"]["job"], "name": "other"}},
+    }
+    started = {**rows[1], "key": "started", "type": "job.started"}
+    store.add_events([*rows, filtered, started])
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    for row in store.events(include_silent=False):
+        await notifier.on_event(row)
+    assert len(sent) == 2
+    assert len(sent[0].event["digest"]) == 2
+    assert "between" in sent[0].body
+    assert "other" not in sent[0].body
+    assert sent[1].event["type"] == "job.started" and "digest" not in sent[1].event
+
+
+async def test_suppressed_digest_logs_all_siblings_and_does_not_replay(
+    notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.save_plugin_settings("notify", {"max_per_hour": 0})
+    store.add_events(digest_events(3)[:3])
+    for row in store.events():
+        await notifier.on_event(row)
+    assert [row["status"] for row in notify._recent_log(store)] == ["suppressed"]
+    store.save_plugin_settings("notify", {"max_per_hour": 20})
+    restarted = notify.Notifier(notifier.ctx)
+    for row in store.events():
+        await restarted.on_event(row)
+    assert len(notify._recent_log(store)) == 1 and queue(store) == []
+
+
+async def test_digest_reads_only_leader_log_and_passes_siblings_to_agent(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(
+        store,
+        "r",
+        "team",
+        events=["job.finished"],
+        outcomes=["failed"],
+        include_log=True,
+        agent=True,
+        subject="Custom {job}",
+    )
+    logs: list[int] = []
+    agents: list[dict[str, Any]] = []
+    sent: list[Message] = []
+
+    async def job_log(store: Store, row: dict[str, Any]) -> str:
+        logs.append(row["id"])
+        return "log tail"
+
+    async def agent(settings: Any, rule: Any, row: Any, log: Any, language: Any) -> str:
+        agents.append(row)
+        return "Summary"
+
+    async def send(config: Any, mail: Message) -> None:
+        sent.append(mail)
+
+    monkeypatch.setattr(notify, "job_log", job_log)
+    monkeypatch.setattr(notify, "agent_text", agent)
+    use_sender(monkeypatch, send)
+    store.add_events(digest_events(3)[:3])
+    for row in store.events():
+        await notifier.on_event(row)
+    assert logs == [1] and len(agents) == 1 and len(agents[0]["digest"]) == 2
+    assert sent[0].subject == "Custom train-sweep"
+    assert "Summary" in sent[0].body and "and 2 more" in sent[0].body
+
+
+async def test_interrupted_digest_resumes_queue_without_recomposing_or_resending_children(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(3)[:3])
+    started, finish = asyncio.Event(), asyncio.Event()
+    sent: list[Message] = []
+
+    async def send(config: Any, mail: Message) -> None:
+        # The complete reservation exists before any network delivery.
+        assert len(queue(store)) == 1
+        assert [row["status"] for row in notify._recent_log(store)] == ["grouped"]
+        started.set()
+        await finish.wait()
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    rows = store.events()
+    task = asyncio.create_task(notifier.on_event(rows[0]))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    finish.set()
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == 1 and len(sent[0].event["digest"]) == 2
+    assert len(notify._recent_log(store)) == 2
+
+
+async def test_broken_digest_rule_is_logged_once(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(3)[:3])
+
+    async def broken(*args: Any) -> Any:
+        raise ValueError("invalid template")
+
+    monkeypatch.setattr(notify, "compose", broken)
+    for row in store.events():
+        await notifier.on_event(row)
+    [entry] = notify._recent_log(store)
+    assert entry["status"] == "failed" and entry["count"] == 3
+
+
+async def test_digest_reads_collection_once_per_rule(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(50)[:50])
+    calls = []
+    lookup = store.events_in_collection
+
+    def counted(*args: Any) -> Any:
+        calls.append(args)
+        return lookup(*args)
+
+    async def send(config: Any, mail: Message) -> None:
+        pass
+
+    monkeypatch.setattr(store, "events_in_collection", counted)
+    use_sender(monkeypatch, send)
+    for row in store.events():
+        await notifier.on_event(row)
+    assert len(calls) == 1
+    assert [row["status"] for row in notify._recent_log(store)] == ["sent", "grouped"]
+
+
+@pytest.mark.parametrize("limit", [0, 20])
+async def test_large_digest_preserves_log_history_and_replays_nothing(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store, limit: int
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.save_plugin_settings("notify", {"max_per_hour": limit})
+    notify._log(store, {"status": "sent", "event": -1, "rule": "earlier"})
+    store.add_events(digest_events(600)[:600])
+    sent = []
+
+    async def send(config: Any, mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    rows = store.events(limit=1000)
+    for row in rows:
+        await notifier.on_event(row)
+    log = notify._recent_log(store)
+    assert log[-1]["rule"] == "earlier"
+    assert len(log) == (3 if limit else 2)
+    grouped = next(row for row in log if row["status"] == ("grouped" if limit else "suppressed"))
+    assert grouped["digest"] == rows[0]["id"]
+    assert grouped["count"] == (599 if limit else 600)
+    assert grouped["events"] == [row["id"] for row in rows[1:]]
+    if limit:
+        assert log[0]["count"] == 600  # channel result includes the leader too
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == (1 if limit else 0)
+    assert notify._recent_log(store) == log
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+async def test_agent_digest_prompt_has_count_summary_and_at_most_twenty_facts(
+    monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    monkeypatch.setenv("AI_KEY", "test-key")
+    row = event("job.finished")
+    row["digest"] = digest_events(200)[:200]
+    for index, sibling in enumerate(row["digest"]):
+        sibling["data"]["job"].update(name=f"train-{index}", unused="x" * 10000)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][0]["content"]
+        digest = json.loads(prompt.split("Other events in this digest (JSON):\n\n")[1])
+        assert digest["count"] == 201
+        assert digest["summary"] == notify.digest_tail(row, language)
+        assert len(digest["sample"]) == 20
+        assert digest["sample"] == [notify.facts(sibling) for sibling in row["digest"][:20]]
+        assert "unused" not in prompt and len(prompt) < 16000
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "Summary"}]})
+
+    mock_http(monkeypatch, handler)
+    assert await notify.agent_text({"ai_key": "env:AI_KEY"}, {}, row, None, language) == "Summary"
+
+
+async def test_chinese_digest_punctuation_and_observation_window(store: Store) -> None:
+    store.save_settings({"language": "zh-CN"})
+    row = event("job.finished")
+    row["data"].update(since="08:10", observed_at="11:20")
+    row["digest"] = digest_events(3)[:3]
+    row["digest"][-1]["data"]["job"]["name"] = "eval-b"
+    mail, _ = await notify.compose(store, {}, {}, row)
+    assert "采集窗口：08:10 至 11:20" in mail.body
+    tail = notify.digest_tail(row, "zh-CN")
+    assert "（失败）" in tail and "，" in tail and "；eval-b" in tail
+    assert "(" not in tail and ", " not in tail and "; " not in tail
