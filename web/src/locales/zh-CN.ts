@@ -857,6 +857,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'msg.channel_in_use': '仍有规则在使用这个渠道，请先修改规则',
   'msg.rule_not_found': '找不到这条规则',
   'msg.event_type_unknown': '未知的事件类型',
+  'msg.event_since_invalid': '动态起始时间超出支持的 UTC 日期范围',
   'msg.email_address_invalid': '请检查邮件地址',
   'msg.webhook_url_invalid': '地址必须使用 https（仅本机地址可用 http）',
   'msg.send_failed': '发送失败',

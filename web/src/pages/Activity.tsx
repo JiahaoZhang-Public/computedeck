@@ -84,9 +84,9 @@ export function ActivityPanel({
             />
           ))}
         </ul>
-      ) : (
-        <p className="panel-note">{events ? t('activity.empty') : !error && t('chart.loading')}</p>
-      )}
+      ) : events || !error ? (
+        <p className="panel-note">{events ? t('activity.empty') : t('chart.loading')}</p>
+      ) : null}
     </Panel>
   );
 }
@@ -277,7 +277,7 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
     : '';
   const [requestedRange, setRange] = useRouteParam('range', '24h');
   const range = ['24h', '7d', '30d'].includes(requestedRange) ? requestedRange : '24h';
-  const [query, setQuery] = useRouteParam('q');
+  const { query } = ctx;
   const [job] = useRouteParam('job_filter');
   const [search, setSearch] = useState(query);
   useEffect(() => {
@@ -332,12 +332,8 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
               )}
             </select>
           </label>
-          <SearchBox
-            ctx={{ ...ctx, query, setQuery }}
-            placeholder={t('activity.search')}
-            maxLength={64}
-          />
-          {job && <p>{t('activity.forJob', { job })}</p>}
+          <SearchBox ctx={ctx} placeholder={t('activity.search')} maxLength={64} />
+          {job && <p>{t('activity.forJob', { job: job.split(':').at(-1) })}</p>}
           {(category || query || job || ctx.group !== 'all' || range !== '24h') && (
             <button className="link" onClick={clear}>
               {t('activity.clear')}
@@ -429,7 +425,7 @@ function ActivityFeed({
   );
   useVisibleInterval(load, 15000, ctx.data.token);
   const days = new Map<string, DeckEvent[]>();
-  for (const event of rows ?? []) {
+  for (const event of activityEvents(rows ?? [])) {
     const day = new Date(event.at).toLocaleDateString(locale(), {
       year: 'numeric',
       month: 'long',
@@ -485,7 +481,7 @@ function ActivityFeed({
           <section key={day}>
             <h3 className="activity-day">{day}</h3>
             <ul className="activity">
-              {activityEvents(events).map((event) => (
+              {events.map((event) => (
                 <ActivityRow
                   key={event.id}
                   event={event}
@@ -560,7 +556,7 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
       setSeen(null);
     }
   };
-  const shown = [...(rows ?? [])]
+  const shown = activityEvents(rows ?? [])
     .sort((a, b) => {
       const priority = (event: DeckEvent) =>
         eventTone(event) === 'red'
@@ -573,7 +569,7 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
     .slice(0, 5);
   return (
     <Panel
-      title={t(seen !== null ? 'activity.sinceSeen' : 'activity.title')}
+      title={t(seen != null ? 'activity.sinceSeen' : 'activity.title')}
       actions={
         <div className="activity-actions">
           {seen !== null && !ctx.demo && Boolean(rows?.length) && (
@@ -600,13 +596,11 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
             />
           ))}
         </ul>
-      ) : (
+      ) : rows || !error ? (
         <p className="panel-note">
-          {rows
-            ? t(seen != null ? 'activity.seenEmpty' : 'activity.empty')
-            : !error && t('common.loading')}
+          {rows ? t(seen != null ? 'activity.seenEmpty' : 'activity.empty') : t('common.loading')}
         </p>
-      )}
+      ) : null}
     </Panel>
   );
 }

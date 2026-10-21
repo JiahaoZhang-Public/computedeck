@@ -823,7 +823,10 @@ def create_app(
                 and (include_changes or not row["type"].startswith("change."))
             ]
         if since is not None:
-            since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
+            try:
+                since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
+            except OverflowError:
+                raise HTTPException(422, message("event_since_invalid")) from None
         if range:
             cutoff = datetime.now(UTC) - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
             since = max(since, cutoff) if since else cutoff
@@ -838,7 +841,9 @@ def create_app(
             include_changes=include_changes,
         )
         if demo:
-            rows = filter_events(demo_events(), **filters, dashboard=demo_dashboard())
+            rows = filter_events(
+                demo_events(), **filters, dashboard=demo_dashboard() if cluster_id else None
+            )
             rows = group_events(rows) if group else rows
             return [
                 row

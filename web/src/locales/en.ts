@@ -921,6 +921,7 @@ const en = {
   'msg.channel_in_use': 'A rule still uses this channel; change the rule first',
   'msg.rule_not_found': 'Rule not found',
   'msg.event_type_unknown': 'Unknown event type',
+  'msg.event_since_invalid': 'The activity start time is outside the supported UTC date range',
   'msg.email_address_invalid': 'Check the email addresses',
   'msg.webhook_url_invalid': 'The address must use https (http only for this computer)',
   'msg.send_failed': 'Could not send',

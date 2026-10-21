@@ -1529,11 +1529,63 @@ def test_activity_paging_never_loses_interleaved_rows(
         "category=invalid",
         "range=3d",
         "since=not-a-date",
+        "since=0001-01-01T00:00:00%2B05:00",
+        "since=9999-12-31T23:59:59-05:00",
         "q=" + "x" * 65,
     ],
 )
-def test_activity_rejects_invalid_filters(client: TestClient, query: str) -> None:
-    assert client.get("/api/events?" + query).status_code == 422
+@pytest.mark.parametrize("demo", [False, True])
+def test_activity_rejects_invalid_filters(client: TestClient, query: str, demo: bool) -> None:
+    assert client.get(f"/api/events?demo={str(demo).lower()}&{query}").status_code == 422
+
+
+@pytest.mark.parametrize(
+    "query, matches", [("É", True), ("é", False), ("POCH", True), ("训练", True)]
+)
+def test_activity_search_matches_sqlite_case_rules(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, query: str, matches: bool
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": "unicode-name",
+                "type": "job.started",
+                "at": now(),
+                "source_id": "source-a",
+                "data": {"job": {"id": "source-a:1", "name": "Époch 训练"}},
+            }
+        ]
+    )
+    rows = store.recent_events()
+    store.db.close()
+    monkeypatch.setattr(api, "demo_events", lambda: rows)
+    live = client.get("/api/events", params={"q": query})
+    example = client.get("/api/events", params={"q": query, "demo": "true"})
+    assert live.status_code == example.status_code == 200
+    assert live.json() == example.json() == (rows if matches else [])
+
+
+def test_activity_example_only_builds_scope_dashboard_when_needed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from computedeck import demo
+
+    calls = []
+
+    def dashboard() -> dict[str, Any]:
+        calls.append(True)
+        return demo.dashboard()
+
+    monkeypatch.setattr(api, "demo_dashboard", dashboard)
+    assert client.get("/api/events?demo=true").status_code == 200
+    assert calls == []
+    response = client.get("/api/events?demo=true&cluster_id=example:cluster-b")
+    assert response.status_code == 200
+    assert response.json()
+    assert calls == [True]
 
 
 def test_activity_since_compares_instants_and_search_is_literal(

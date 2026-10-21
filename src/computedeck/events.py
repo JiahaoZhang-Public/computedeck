@@ -334,14 +334,22 @@ def filter_events(
     since: str | None = None,
     q: str | None = None,
     include_changes: bool = False,
-    dashboard: dict[str, Any],
+    dashboard: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Example-mode counterpart of Store.query_events; apply before grouping and paging."""
-    sources = {source["id"]: source["cluster_id"] for source in dashboard["sources"]}
-    instances = {
-        item["id"]: "platform:" + item["platform"].strip().lower()
-        for item in dashboard["instances"]
-    }
+    sources = (
+        {source["id"]: source["cluster_id"] for source in dashboard["sources"]} if dashboard else {}
+    )
+    instances = (
+        {
+            item["id"]: "platform:" + item["platform"].strip().lower()
+            for item in dashboard["instances"]
+        }
+        if dashboard
+        else {}
+    )
+    # Match SQLite LIKE: case-insensitive for ASCII letters only.
+    ascii_lower = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
     result = []
     for row in rows:
         kind, data = row["type"], row["data"]
@@ -372,7 +380,7 @@ def filter_events(
         if since and datetime.fromisoformat(row["at"]) < datetime.fromisoformat(since):
             continue
         if q and not any(
-            q.lower() in str(value or "").lower()
+            q.translate(ascii_lower) in str(value or "").translate(ascii_lower)
             for value in (
                 data.get("cluster_id"),
                 task.get("id"),

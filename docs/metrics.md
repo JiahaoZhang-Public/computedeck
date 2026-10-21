@@ -109,22 +109,25 @@ Failed, Jobs, Sources, Gaps, My changes or Plugins; Plugins currently shows chan
 tool switches and settings. Scope by cluster/platform, search names and job IDs, and choose
 24 hours, 7 days or 30 days. Filters are kept in the URL. A job's **All activity for this
 job** link uses `job_filter` on the page (the existing `job` URL parameter still opens a
-live-job drawer).
+live-job drawer). Search ignores case for ASCII letters; other characters match exactly.
 
 Rows are grouped by day, with absolute times on hover. Expand a row for recorded state,
 exit code, nodes, elapsed time and translated errors. End times use your local timezone
 when an offset is known; otherwise they are labelled as scheduler time. Open the live job
-if still listed, otherwise its immutable event snapshot; connections and existing machines have their own
-links. **Load older** pages back without splitting collection groups. New arrivals appear
-behind an **N new** button until you choose to refresh. Loading, fetch errors with Retry,
-an empty history and filters with no matches are shown separately; errors retain the last
-successfully loaded rows. If there is no activity in the selected 24-hour or 7-day range,
-**Show 30 days** widens the range. **Clear filters** removes type, search, job and scope
-filters and returns to the default 24 hours, wherever you click it.
+if still listed, otherwise its immutable event snapshot; connections and existing machines
+have their own links. **Load older** pages back without splitting collection groups. New
+arrivals appear behind an **N new** button until you choose to refresh. Loading, fetch
+errors with Retry, an empty history and filters with no matches are shown separately;
+errors retain the last successfully loaded rows. If there is no activity in the selected
+24-hour or 7-day range, **Show 30 days** widens the range. **Clear filters** removes type,
+search, job and scope filters and returns to the default 24 hours, wherever you click it.
+Time ranges use the event's own time: a late-observed job ending outside the range will not
+appear in that view or its **N new** button. Overview's teaser has no time-range filter.
 
 Overview shows up to five recent changes, with failures and connection problems or
 recoveries first. **Mark seen** marks the current activity as read; the teaser then shows
-changes that arrive afterward. Opening Activity does not mark anything seen. Read state
+changes that arrive afterward, under **Since you last looked**. Before the first mark,
+the heading is **Activity**. Opening Activity does not mark anything seen. Read state
 stays in this browser and is not shared with other viewers. Without browser storage,
 the teaser shows recent activity and hides the read controls. Example mode also shows
 recent activity without reading or changing your read state. The Jobs Failed tab still
@@ -133,7 +136,7 @@ includes failures found during the first collection, which do not appear in Acti
 中文：从侧栏进入**动态**，或点击概览及作业页的**全部动态**。可按失败、作业、来源、观测空档、
 我的更改、插件筛选；插件目前显示工具开关和设置的更改。支持集群或平台范围、名称及作业 ID 搜索，
 以及 24 小时、7 天、30 天范围，筛选保存在 URL 中。作业动态链接使用 `job_filter`，
-原有 `job` 参数仍用于打开实时作业抽屉。
+原有 `job` 参数仍用于打开实时作业抽屉。搜索忽略 ASCII 字母的大小写，其他字符按原样匹配。
 
 动态按日期分组，悬停可查看绝对时间。展开后显示已记录的状态、退出码、节点、运行时长及翻译后的错误。
 已知时区的结束时间显示为本地时间，否则标注为调度器时间。
@@ -141,9 +144,12 @@ includes failures found during the first collection, which do not appear in Acti
 不会拆分采集合并组，新动态通过按钮提示，点击后才刷新列表。加载中、加载失败并重试、历史为空及筛选无匹配
 分别显示，失败时保留上次成功加载的内容。所选的 24 小时或 7 天内没有动态时，点击**查看 30 天**可扩大范围。
 两处**清除筛选**都会移除类型、搜索、作业和集群或平台筛选，并恢复默认的 24 小时。
+时间范围按事件自身的时间筛选：延迟观测到的作业结束若不在范围内，不会出现在该视图或新动态按钮中。
+概览摘要不按时间范围筛选。
 
 概览最多显示五条最近动态，优先显示失败及连接故障和恢复。**标为已读**将当前动态标记为已读，
-此后摘要显示新到达的动态；打开动态页不会自动标记。已读状态仅保留在当前浏览器，不与其他查看者共享。
+此后摘要显示新到达的动态，并使用“自上次查看以来”标题；首次标记前标题为“动态”。
+打开动态页不会自动标记。已读状态仅保留在当前浏览器，不与其他查看者共享。
 浏览器存储不可用时，摘要显示最近动态并隐藏已读控件。示例模式同样显示最近动态，不读取或更改你的已读状态。
 作业页的失败标签仍包括首次采集发现的失败，这些记录不会出现在动态中。
 

@@ -10,16 +10,22 @@ import { dateTime } from './domain';
 import { jobTime } from './jobFacts';
 import { groupsOf } from './groups';
 import { serverDemo } from './test-server';
-import { ActivityPage, ActivityPanel, ActivityTeaser } from './pages/Activity';
+import { ActivityPage as ActivityPageView, ActivityPanel, ActivityTeaser } from './pages/Activity';
 import type { Ctx } from './pages/shared';
 import type { DeckEvent } from './types';
-import { setRouteParams } from './useRouteParam';
+import { setRouteParams, useRouteParam } from './useRouteParam';
 
 vi.mock('./api', () => ({ api: vi.fn() }));
 const request = vi.mocked(api);
 let container: HTMLDivElement;
 let root: Root;
 const clock = new Date('2026-10-21T12:00:00Z');
+
+// Supply the URL-backed search context that App owns in production.
+function ActivityPage({ ctx }: { ctx: Ctx }) {
+  const [query, setQuery] = useRouteParam('q');
+  return <ActivityPageView ctx={{ ...ctx, query, setQuery }} />;
+}
 
 function event(id: number): DeckEvent {
   return {
@@ -97,6 +103,7 @@ it.each(['en', 'zh-CN'] as const)(
     await render(<ActivityPanel demo={false} />);
     expect(container.textContent).toContain(t('activity.error'));
     expect(container.textContent).not.toContain(t('activity.empty'));
+    expect(container.querySelector('.panel-note:not([role="alert"])')).toBeNull();
     request.mockResolvedValue([event(1)]);
     await click(t('common.retry'));
     expect(container.textContent).toContain('train-1');
@@ -290,13 +297,14 @@ it('keeps per-viewer seen state only after an explicit mark and adds no timer po
   request.mockImplementation(async (path) => (path.includes('after_id=5') ? [] : [event(5)]));
   const ctx = context();
   await render(<ActivityTeaser ctx={ctx} />);
-  expect(container.textContent).toContain(t('activity.sinceSeen'));
+  expect(container.querySelector('h2')?.textContent).toBe(t('activity.title'));
   expect(localStorage.getItem('computedeck.activity.seen')).toBeNull();
   const count = request.mock.calls.length;
   await act(async () => vi.advanceTimersByTime(60000));
   expect(request.mock.calls.length).toBe(count);
   await click(t('activity.markSeen'));
   expect(localStorage.getItem('computedeck.activity.seen')).toBe('5');
+  expect(container.querySelector('h2')?.textContent).toBe(t('activity.sinceSeen'));
   expect(container.textContent).toContain(t('activity.seenEmpty'));
 });
 
@@ -310,6 +318,93 @@ it('hides seen state when browser storage is unavailable', async () => {
   expect(container.textContent).not.toContain(t('activity.markSeen'));
   expect(container.textContent).toContain('train-1');
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows five teaser rows in severity order, newest id first within each priority in %s',
+  async (language) => {
+    setLocale(language);
+    const rows: DeckEvent[] = [
+      { ...event(10), type: 'job.started', at: '2026-10-20T13:00:00Z' },
+      { ...event(9), type: 'change.source', data: { action: 'edited', name: 'Cluster C' } },
+      { ...event(8), type: 'source.recovered', data: { source_name: 'Cluster B' } },
+      {
+        ...event(7),
+        type: 'source.failed',
+        at: '2026-10-19T12:00:00Z',
+        data: { source_name: 'Cluster A' },
+      },
+      // Failure priority wins over newer recoveries, starts and changes.
+      { ...event(3), at: '2026-10-20T12:00:00Z' },
+      { ...event(2), type: 'job.started' },
+      { ...event(1), type: 'job.started' },
+    ];
+    request.mockResolvedValue(rows);
+    await render(<ActivityTeaser ctx={context()} />);
+    const rendered = [...container.querySelectorAll('.activity > li')];
+    expect(rendered).toHaveLength(5);
+    const labels = ['Cluster A', 'train-3', 'Cluster B', 'train-10', 'Cluster C'];
+    for (const [index, label] of labels.entries()) {
+      expect(rendered[index].textContent).toContain(label);
+    }
+    expect(rendered.map((row) => row.querySelector('.dot')?.className)).toEqual([
+      'dot red',
+      'dot red',
+      'dot green',
+      'dot green',
+      'dot gray',
+    ]);
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'omits the teaser loading note after an initial error in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockRejectedValue(new Error('offline'));
+    await render(<ActivityTeaser ctx={context()} />);
+    expect(container.textContent).toContain(t('activity.error'));
+    expect(container.querySelector('.panel-note:not([role="alert"])')).toBeNull();
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'hides legacy endings across days and in the teaser while preserving other sources in %s',
+  async (language) => {
+    setLocale(language);
+    const rows: DeckEvent[] = [
+      event(4),
+      { ...event(3), type: 'job.failed', at: new Date(2026, 9, 20, 12).toISOString() },
+      { ...event(2), type: 'job.ended', at: new Date(2026, 9, 19, 12).toISOString() },
+      { ...event(1), type: 'job.failed', source_id: 'other-source' },
+    ];
+    request.mockResolvedValue(rows);
+    await render(<ActivityPage ctx={context()} />);
+    expect(container.querySelectorAll('.activity-day')).toHaveLength(1);
+    for (const view of [<ActivityPage ctx={context()} />, <ActivityTeaser ctx={context()} />]) {
+      await render(view);
+      expect(container.querySelectorAll('.activity > li')).toHaveLength(2);
+      expect(container.textContent).toContain('train-4');
+      expect(container.textContent).toContain('train-1');
+      expect(container.textContent).not.toContain('train-3');
+      expect(container.textContent).not.toContain('train-2');
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'labels job history with the local id while keeping its full address in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockResolvedValue([]);
+    const job = 'example:cluster-b:48217';
+    await act(async () => setRouteParams({ job_filter: job }));
+    await render(<ActivityPage ctx={context()} />);
+    expect(container.textContent).toContain(t('activity.forJob', { job: '48217' }));
+    expect(container.textContent).not.toContain(job);
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('job_filter')).toBe(job);
+    expect(new URLSearchParams(request.mock.calls.at(-1)![0].split('?')[1]).get('job')).toBe(job);
+  },
+);
 
 it('hides seen controls after a failed storage write and never reads or writes them in example mode', async () => {
   request.mockResolvedValue([event(1)]);
@@ -404,12 +499,14 @@ it.each(['en', 'zh-CN'] as const)(
     request.mockResolvedValue([]);
     const ctx = context();
     await render(<ActivityTeaser ctx={ctx} />);
+    expect(container.querySelector('h2')?.textContent).toBe(t('activity.title'));
     expect(container.textContent).toContain(t('activity.empty'));
     expect(container.textContent).not.toContain(t('activity.seenEmpty'));
     request.mockImplementation(async (path) => (path.includes('after_id=5') ? [] : [event(5)]));
     await render(<ActivityTeaser ctx={{ ...ctx, data: { ...ctx.data, token: 'changed' } }} />);
     await click(t('activity.markSeen'));
     expect(container.textContent).toContain(t('activity.seenEmpty'));
+    expect(container.querySelector('h2')?.textContent).toBe(t('activity.sinceSeen'));
     expect(localStorage.getItem('computedeck.activity.seen')).toBe('5');
     // A fresh mount restores the same wording from the stored cursor.
     await render(<ActivityTeaser key="reopened" ctx={ctx} />);
