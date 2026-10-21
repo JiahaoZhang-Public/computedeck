@@ -495,7 +495,10 @@ def create_app(
             )
         store().save_source(source)
         action = ("enabled" if source["enabled"] else "disabled") if enabled_changed else "edited"
-        store().add_change("change.source", source_id, source["name"], action, fields, source_id)
+        if fields:
+            store().add_change(
+                "change.source", source_id, source["name"], action, fields, source_id
+            )
         collector.clear_inactive_commit_errors()
         return store().source(source_id) or source
 
@@ -517,7 +520,11 @@ def create_app(
             raise HTTPException(409, message("node_exists"))
         store().save_node(node)
         store().add_change(
-            "change.node", node["id"], node["name"], "added", list(body.model_dump())
+            "change.node",
+            node["id"],
+            node["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
         )
         return node
 
@@ -532,7 +539,8 @@ def create_app(
             raise HTTPException(422, message(str(error))) from None
         store().save_node(node)
         fields = [key for key in body.model_dump() if node.get(key) != current.get(key)]
-        store().add_change("change.node", node_id, node["name"], "edited", fields)
+        if fields:
+            store().add_change("change.node", node_id, node["name"], "edited", fields)
         for source in store().sources():
             if source.get("node") == node_id:
                 # A different machine or command is a different connection.
@@ -574,8 +582,6 @@ def create_app(
         source = store().source(source_id)
         if not store().delete_source(source_id):
             raise HTTPException(404, message("source_not_found"))
-        collector.clear_inactive_commit_errors()
-        write_config(store().dashboard()["instances"], data_dir)
         store().add_change(
             "change.source",
             source_id,
@@ -584,6 +590,8 @@ def create_app(
             [],
             source_id,
         )
+        collector.clear_inactive_commit_errors()
+        write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
     def save_manual(body: InstanceInput, existing: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -618,7 +626,11 @@ def create_app(
             raise HTTPException(409, message("instance_exists"))
         instance = save_manual(body)
         store().add_change(
-            "change.instance", instance["id"], instance["name"], "added", list(body.model_dump())
+            "change.instance",
+            instance["id"],
+            instance["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
         )
         return instance
 
@@ -627,15 +639,16 @@ def create_app(
         current = manual(instance_id)
         instance = save_manual(body, current)
         fields = [key for key in body.model_dump() if instance.get(key) != current.get(key)]
-        store().add_change("change.instance", instance_id, instance["name"], "edited", fields)
+        if fields:
+            store().add_change("change.instance", instance_id, instance["name"], "edited", fields)
         return instance
 
     @app.delete("/api/instances/{instance_id}")
     async def delete_instance(instance_id: str) -> dict[str, bool]:
         instance = manual(instance_id)
         store().delete_instance(instance_id)
-        write_config(store().dashboard()["instances"], data_dir)
         store().add_change("change.instance", instance_id, instance["name"], "removed", [])
+        write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
     @app.post("/api/instances/{instance_id}/probe")
@@ -732,16 +745,24 @@ def create_app(
     async def toolbox_update(plugin_id: str, body: toolbox.ToolboxUpdate) -> dict[str, Any]:
         context = plugin_context(plugin_id)
         was_enabled = context.enabled
+        previous_settings = context.settings()
         try:
             toolbox.update(context, body)
         except toolbox.SettingsError as error:
             raise HTTPException(422, message(str(error), **error.params)) from None
-        action = "settings"
-        if body.enabled is not None and (body.enabled != was_enabled or body.settings is None):
+        action = None
+        if body.enabled is not None and body.enabled != was_enabled:
             action = "on" if body.enabled else "off"
-        store().add_change(
-            "change.tool", plugin_id, (context.plugin.name or {}).get("en", plugin_id), action, []
-        )
+        elif body.settings is not None and context.settings() != previous_settings:
+            action = "settings"
+        if action:
+            store().add_change(
+                "change.tool",
+                plugin_id,
+                (context.plugin.name or {}).get("en", plugin_id),
+                action,
+                [],
+            )
         return toolbox.entry(context, runtime)
 
     @app.get("/api/marketplace")

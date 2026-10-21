@@ -256,7 +256,8 @@ and hand-added machines; switching tools on/off or saving their settings; and im
 configuration. These are grey rows, separate from job outcomes and collection gaps. A
 source change scrolls its Sources group into view while that source still exists, keeping
 all groups visible; removed sources have no link. The recorded name is the name at the
-time of the action.
+time of the action. Installed tools use their current localized name; removed tools keep
+the recorded name. Saving unchanged source, machine or tool settings produces no row.
 
 Records contain changed field names, never their values; tool settings omit even the
 field names. Edited rows show raw changed field names, never values; pause/resume rows
@@ -270,6 +271,7 @@ requests `include=changes`; API event lists omit them unless requested explicitl
 添加、编辑或移除采集机器和手动添加的机器；开启、关闭工具或保存工具设置；以及导入配置。
 这些灰色记录与作业结果、采集空白分开显示。数据源仍存在时，更改记录会滚动到对应的数据源分组，同时保留其他分组；
 已移除的数据源不再显示链接。名称保留为操作发生时的名称。
+已安装的工具使用当前语言的名称；已卸载的工具保留记录时的名称。保存未更改的数据源、机器或工具设置不会产生记录。
 
 记录只包含更改的字段名，不包含字段值；工具设置连字段名也不记录。
 编辑记录显示更改的原始字段名，不显示字段值；暂停或恢复记录只显示 `enabled` 之外的更改字段，

@@ -21,7 +21,7 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 SOURCE = {"name": "Cluster A", "driver": "slurm", "ssh_alias": "cluster-a", "username": "alice"}
-NODE = {"name": "Gateway", "ssh_alias": "gateway", "command": "computedeck"}
+NODE = {"name": "Gateway", "ssh_alias": "gateway"}
 INSTANCE = {"name": "Box", "platform": "Lab", "external_id": "box", "host": "192.0.2.1"}
 
 
@@ -68,7 +68,6 @@ def test_source_actions_and_unchanged_fields(client: TestClient) -> None:
             "edited",
             ["credential", "interval_minutes", "options"],
         ),
-        ({"interval_minutes": 15}, "edited", []),
     ]:
         before = len(changes(client))
         assert client.put(f"/api/sources/{key}", json=body, headers=HEADERS).status_code == 200
@@ -76,9 +75,13 @@ def test_source_actions_and_unchanged_fields(client: TestClient) -> None:
         assert len(rows) == before + 1
         assert rows[0]["data"]["action"] == action
         assert rows[0]["data"]["fields"] == fields
+        assert client.put(f"/api/sources/{key}", json=body, headers=HEADERS).status_code == 200
+        assert changes(client) == rows
+    assert client.put(f"/api/sources/{key}", json={}, headers=HEADERS).status_code == 200
+    assert changes(client) == rows
     assert client.delete(f"/api/sources/{key}", headers=HEADERS).status_code == 200
     rows = changes(client)
-    assert len(rows) == 6
+    assert len(rows) == 5
     assert rows[0]["data"] == {
         "subject_id": key,
         "name": "Cluster A",
@@ -117,12 +120,19 @@ def test_machine_actions(
     key = response.json()["id"]
     [added] = changes(client)
     assert added["type"] == kind and added["data"]["action"] == "added"
+    assert added["data"]["fields"] == sorted(body)
+    assert client.put(f"/api/{path}/{key}", json=body, headers=HEADERS).status_code == 200
+    assert changes(client) == [added]
     assert (
         client.put(f"/api/{path}/{key}", json={**body, **edit}, headers=HEADERS).status_code == 200
     )
     rows = changes(client)
     assert len(rows) == 2
     assert rows[0]["data"]["fields"] == fields
+    assert (
+        client.put(f"/api/{path}/{key}", json={**body, **edit}, headers=HEADERS).status_code == 200
+    )
+    assert changes(client) == rows
     assert client.delete(f"/api/{path}/{key}", headers=HEADERS).status_code == 200
     rows = changes(client)
     assert len(rows) == 3
@@ -175,7 +185,7 @@ def test_tool_changes_omit_settings_names_and_values(client: TestClient) -> None
     for index, (body, action) in enumerate(
         [
             ({"enabled": True, "settings": {"address": "private@example.com"}}, "on"),
-            ({"settings": {"address": "different@example.com"}}, "settings"),
+            ({"enabled": True, "settings": {"address": "different@example.com"}}, "settings"),
             ({"enabled": False}, "off"),
         ],
         1,
@@ -190,6 +200,8 @@ def test_tool_changes_omit_settings_names_and_values(client: TestClient) -> None
             "action": action,
             "fields": [],
         }
+        assert client.put("/api/toolbox/example", json=body, headers=HEADERS).status_code == 200
+        assert changes(client) == rows
     saved = changes(client)
     for path, body, status in [
         ("example", {"settings": {"unknown": "secret"}}, 422),
@@ -203,6 +215,68 @@ def test_tool_changes_omit_settings_names_and_values(client: TestClient) -> None
         client.put("/api/settings", json={"language": "zh-CN"}, headers=HEADERS).status_code == 200
     )
     assert changes(client) == saved
+
+
+def test_tool_no_op_saves_record_nothing(client: TestClient) -> None:
+    for body in [{}, {"settings": {}}, {"enabled": False}]:
+        assert client.put("/api/toolbox/example", json=body, headers=HEADERS).status_code == 200
+        assert changes(client) == []
+    for _ in range(2):
+        assert (
+            client.put("/api/toolbox/example", json={"enabled": True}, headers=HEADERS).status_code
+            == 200
+        )
+        [row] = changes(client)
+        assert row["data"]["action"] == "on"
+    for value in ["example", " example "]:
+        assert (
+            client.put(
+                "/api/toolbox/example", json={"settings": {"address": value}}, headers=HEADERS
+            ).status_code
+            == 200
+        )
+        rows = changes(client)
+        assert len(rows) == 2
+        assert rows[0]["data"]["action"] == "settings"
+
+
+@pytest.mark.parametrize("path,body", [("sources", SOURCE), ("instances", INSTANCE)])
+def test_removed_change_survives_ssh_config_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any]
+) -> None:
+    key = client.post(f"/api/{path}", json=body, headers=HEADERS).json()["id"]
+
+    def fail_write(*args: Any) -> None:
+        raise OSError("cannot write SSH include")
+
+    monkeypatch.setattr(app, "write_config", fail_write)
+    with pytest.raises(OSError, match="cannot write SSH include"):
+        client.delete(f"/api/{path}/{key}", headers=HEADERS)
+    rows = changes(client)
+    assert [row["data"]["action"] for row in rows] == ["removed", "added"]
+    assert client.delete(f"/api/{path}/{key}", headers=HEADERS).status_code == 404
+    assert changes(client) == rows
+
+
+def test_instance_save_ssh_config_failure_commits_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = client.post("/api/instances", json=INSTANCE, headers=HEADERS).json()["id"]
+    saved = changes(client)
+    before = client.get("/api/dashboard").json()["instances"]
+
+    def fail_write(*args: Any) -> None:
+        raise OSError("cannot write SSH include")
+
+    monkeypatch.setattr(app, "write_config", fail_write)
+    for method, path, body in [
+        ("POST", "/api/instances", {**INSTANCE, "external_id": "other"}),
+        ("PUT", f"/api/instances/{key}", {**INSTANCE, "name": "New name"}),
+    ]:
+        with pytest.raises(OSError, match="cannot write SSH include"):
+            client.request(method, path, json=body, headers=HEADERS)
+        assert changes(client) == saved
+        assert client.get("/api/dashboard").json()["instances"] == before
 
 
 def test_import_records_one_summary_and_no_configuration_values(store: Store) -> None:

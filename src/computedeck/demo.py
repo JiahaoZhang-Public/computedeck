@@ -480,7 +480,7 @@ def events() -> list[dict[str, Any]]:
                 "subject_id": "example:manual:lab-workstation-buildbox",
                 "name": "build-box",
                 "action": "added",
-                "fields": ["host", "name", "platform"],
+                "fields": ["external_id", "host", "name", "platform"],
             },
         ),
         ("source.recovered", "example:cluster-d-alice", 10, {}),

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVisibleInterval } from '../useVisibleInterval';
-import type { DeckEvent, Source } from '../types';
+import type { DeckEvent, Source, Tool } from '../types';
 import { api } from '../api';
-import { locale, t } from '../i18n';
+import { localized, t } from '../i18n';
 import { relativeTime } from '../domain';
 import {
   activityEvents,
@@ -22,8 +22,10 @@ export function ActivityPanel({
   token,
   onOpen,
   sources = [],
+  tools = [],
 }: {
   sources?: Source[];
+  tools?: Tool[];
   demo: boolean;
   limit?: number;
   token?: string;
@@ -54,7 +56,13 @@ export function ActivityPanel({
       {events?.length ? (
         <ul className="activity">
           {events.map((event) => (
-            <ActivityRow key={event.id} event={event} onOpen={onOpen} sources={sources} />
+            <ActivityRow
+              key={event.id}
+              event={event}
+              onOpen={onOpen}
+              sources={sources}
+              tools={tools}
+            />
           ))}
         </ul>
       ) : (
@@ -68,11 +76,17 @@ function ActivityRow({
   event,
   onOpen,
   sources,
+  tools,
 }: {
   event: DeckEvent;
   onOpen?: (event: DeckEvent) => void;
   sources: Source[];
+  tools: Tool[];
 }) {
+  const tool =
+    event.type === 'change.tool'
+      ? tools.find((tool) => tool.id === event.data.subject_id)
+      : undefined;
   const source =
     event.type === 'change.source' && event.data.action !== 'removed'
       ? sources.find((source) => source.id === event.data.subject_id)
@@ -89,11 +103,13 @@ function ActivityRow({
     <>
       <span className={`dot ${eventTone(event)}`} />
       <span className="grow">
-        {eventText(event)}
+        {eventText(
+          tool ? { ...event, data: { ...event.data, name: localized(tool.name) } } : event,
+        )}
         {sourceLine && <small>{sourceLine}</small>}
         {fields.length > 0 && (
           <small>
-            {t('event.change.fields', { fields: fields.join(locale() === 'zh-CN' ? '、' : ', ') })}
+            {t('event.change.fields', { fields: fields.join(t('common.listSeparator')) })}
           </small>
         )}
       </span>
@@ -124,7 +140,13 @@ function ActivityRow({
         <summary>{content}</summary>
         <ul className="activity">
           {event.group.events.map((child) => (
-            <ActivityRow key={child.id} event={child} onOpen={onOpen} sources={sources} />
+            <ActivityRow
+              key={child.id}
+              event={child}
+              onOpen={onOpen}
+              sources={sources}
+              tools={tools}
+            />
           ))}
           {event.group.count > event.group.events.length && (
             <li>{t('event.more', { count: event.group.count - event.group.events.length })}</li>

@@ -1552,6 +1552,49 @@ it.each(['en', 'zh-CN'] as const)(
   },
 );
 
+it.each(['en', 'zh-CN'] as const)(
+  'uses localized tool names and stored names for removed tools in %s',
+  async (language) => {
+    setLocale(language);
+    const tools = [
+      { ...context('notify').tools[0], name: { en: 'Notifications', 'zh-CN': '任务提醒' } },
+      { ...context('chat').tools[0], name: { en: 'Team messages', 'zh-CN': '团队留言' } },
+    ];
+    const rows: DeckEvent[] = [...tools, { id: 'removed', name: { en: 'Old tool' } }].map(
+      (tool, id) => ({
+        id,
+        type: 'change.tool',
+        at: now.toISOString(),
+        source_id: null,
+        data: { subject_id: tool.id, name: tool.name.en, action: 'on', fields: [] },
+      }),
+    );
+    request.mockResolvedValue(rows);
+    const data = dashboard('Cluster A');
+    const ctx = {
+      ...context('jobs'),
+      data,
+      groups: groupsOf(data),
+      group: 'all',
+      query: '',
+      tools,
+    };
+    await render(<JobsPage ctx={ctx} />);
+    for (const name of language === 'en'
+      ? ['Notifications', 'Team messages', 'Old tool']
+      : ['任务提醒', '团队留言', 'Old tool']) {
+      expect(container.querySelector('.activity')?.textContent).toContain(
+        t('event.change.tool.on', { name }),
+      );
+    }
+    // A removed tool keeps its recorded name without needing a new Activity poll.
+    await render(<JobsPage ctx={{ ...ctx, tools: [] }} />);
+    expect(container.querySelector('.activity')?.textContent).toContain(
+      t('event.change.tool.on', { name: 'Notifications' }),
+    );
+  },
+);
+
 it('scrolls only the selected Sources group without hiding other groups', async () => {
   const data = serverDemo();
   const ctx = {

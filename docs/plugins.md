@@ -140,16 +140,22 @@ by name, and are not Notify rule types. `Store.recent_events()` excludes them by
 `GET /api/events` returns them only with `include=changes`, including grouped and ID
 lookups; filtering happens before `limit`. Changes remain individual rows under `group=1`.
 
-Each successful source, collection-machine, hand-added-machine or Toolbox save/removal
+Each source, collection-machine, hand-added-machine or Toolbox save/removal that changes data
 records one event after saving. `data` contains `subject_id`, the subject's display `name`,
 `action`, and `fields`: top-level field names only, never old/new values, credentials,
-connection details or nested option keys. Edits list only fields whose values changed;
-saving unchanged data can produce an empty list. A source enable/disable takes precedence
-over edited when one save changes both. Tool settings always have an empty field list;
-when a save also switches the tool on/off, that switch is the action. Tool names use the
-plugin's English display name, falling back to its ID. Other changes have `source_id` null;
+connection details or nested option keys. Adds list only explicitly supplied, non-null fields;
+removals have an empty field list. Edits list only fields whose values changed;
+saving unchanged data records nothing. A source enable/disable takes precedence
+over edited when one save changes both. Tool settings always have an empty field list and
+are recorded only when the saved settings differ; when a save also switches the tool on/off,
+that switch is the action. Stored tool names use the plugin's English display name, falling
+back to its ID; Activity uses the current localized name while the tool is installed.
+Other changes have `source_id` null;
 `change.source` retains its source ID after removal. These rows do not carry the collection
 source context described above.
+
+Removal events are recorded immediately after deleting the saved record, before updating
+the SSH include file, so a file-write failure does not hide a completed deletion.
 
 `config.apply` (also used by CLI import) records one `change.import` after a successful
 import, with `data.counts = {sources, nodes, instances}` instead of individual records.

@@ -453,3 +453,4 @@ def test_demo_changes_match_existing_subjects_and_contain_no_setting_values() ->
             )
         else:
             assert row["data"]["action"] == "added"
+            assert row["data"]["fields"] == ["external_id", "host", "name", "platform"]
