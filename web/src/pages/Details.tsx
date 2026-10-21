@@ -95,6 +95,9 @@ function Metrics({ values }: { values: { label: string; value: number | null | u
 /** The drawer follows the full listed array on each poll, independently of page filters. */
 export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
   const [limit, setLimit] = useState(50);
+  const terms = jobTerms(
+    ctx.data.sources.find((source) => source.id === jobs[0].source_id)?.driver ?? '',
+  );
   const user = arrayField(jobs, 'user');
   const qos = arrayField(jobs, 'qos');
   const partition = arrayField(jobs, 'partition');
@@ -112,16 +115,16 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
           <dt>{t('job.user')}</dt>
           <dd>{fact(user)}</dd>
         </div>
-        <div>
-          <dt>{t('jobs.array.qos')}</dt>
-          <dd>{fact(qos)}</dd>
-        </div>
-        {(partition.mixed || qos.mixed || partition.value !== qos.value) && (
+        {terms.qos && (
           <div>
-            <dt>{t('jobs.array.partitionLabel')}</dt>
-            <dd>{fact(partition)}</dd>
+            <dt>{t(terms.qos)}</dt>
+            <dd>{fact(qos)}</dd>
           </div>
         )}
+        <div>
+          <dt>{t(terms.partition)}</dt>
+          <dd>{fact(partition)}</dd>
+        </div>
       </dl>
       <JobsTable
         compact

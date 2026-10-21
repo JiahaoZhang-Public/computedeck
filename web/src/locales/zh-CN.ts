@@ -253,8 +253,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'jobs.allClusters': '全部集群',
   'jobs.search': '作业名、ID、用户、队列或 QoS、节点',
   'jobs.array.count': '{count} 个作业',
-  'jobs.array.partitionLabel': '分区 / 队列',
-  'jobs.array.qos': '队列 / QoS',
   'jobs.array.element': '元素',
   'jobs.array.open': '查看数组元素',
   'jobs.array.mixed': '混合',
@@ -269,6 +267,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'jobs.array.otherReasons.one': '另有 1 种等待原因',
   'jobs.array.elements':
     '共 {count} 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
+  'jobs.array.elements.one':
+    '共 1 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
   'jobs.array.showMore': '再显示 50 个',
   'jobs.array.showAll': '显示全部',
   'jobs.col.job': '作业',

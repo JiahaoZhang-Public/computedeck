@@ -237,6 +237,33 @@ it.each(['en', 'zh-CN'] as const)(
   },
 );
 
+it.each([
+  ['slurm', '1010', '[1010]'],
+  ['pbs', '1010[]', '1010[]'],
+  ['lsf', '1010', '[1010]'],
+])('formats %s array IDs consistently in rows and drawer titles', async (driver, id, label) => {
+  const example = data.jobs.find((item) => item.array_id)!;
+  data = serverDashboard({
+    ...data,
+    sources: data.sources.map((source) =>
+      source.id === example.source_id ? { ...source, driver } : source,
+    ),
+    jobs: [0, 1].map((index) => ({
+      ...example,
+      id: `${example.cluster_id}:${id}:${index}`,
+      array_id: id,
+      array_index: String(index),
+    })),
+  });
+  await render('/?demo=true#/jobs');
+  expect(container.querySelector('.array-row .sub.mono')?.textContent).toBe(
+    `${label} · ${t('jobs.array.count', { count: 2 })}`,
+  );
+  await act(async () => container.querySelector<HTMLElement>('.array-row')!.click());
+  expect(routeParams().get('array')).toBe(`${example.cluster_id}:${id}`);
+  expect(container.querySelector('#detail-title')?.textContent).toBe(`${example.name} ${label}`);
+});
+
 it('restores the array drawer, follows live membership, and explains a missing array', async () => {
   const example = data.jobs.find((item) => item.array_id)!;
   const arrayId = `${example.cluster_id}:${example.array_id}`;
@@ -245,6 +272,9 @@ it('restores the array drawer, follows live membership, and explains a missing a
   data = serverDashboard({ ...data, jobs: [{ ...example, name: 'Updated sweep' }] });
   await act(async () => vi.advanceTimersByTimeAsync(10000));
   expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(1);
+  expect(container.querySelector('.array-detail > p')?.textContent).toBe(
+    t('jobs.array.elements', { count: 1 }),
+  );
   expect(container.querySelector('#detail-title')?.textContent).toContain('Updated sweep');
   data = serverDashboard({ ...data, jobs: [] });
   await act(async () => vi.advanceTimersByTimeAsync(10000));

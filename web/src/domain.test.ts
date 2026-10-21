@@ -703,6 +703,21 @@ describe('job arrays', () => {
     });
   });
 
+  it('ranks only reported pending reasons, even when most elements have none', () => {
+    const unreported = [1, 2, 3].map((index) => element(index, { state: 'PENDING', reason: null }));
+    const priority = element(4, { state: 'PENDING', reason: 'Priority' });
+    const resources = element(5, { state: 'PENDING', reason: 'Resources' });
+    expect(
+      groupArrays([
+        ...unreported,
+        priority,
+        resources,
+        element(6, { state: 'PENDING', reason: 'Resources' }),
+      ])[0],
+    ).toMatchObject({ pending: 6, pendingReasons: [resources, priority] });
+    expect(groupArrays(unreported)[0]).toMatchObject({ pending: 3, pendingReasons: [] });
+  });
+
   it('distinguishes unknown allocation, known zero, and pending requests', () => {
     expect(
       groupArrays([element(1, { gpu_count: null }), element(2, { gpu_count: null })])[0],

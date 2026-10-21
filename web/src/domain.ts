@@ -192,6 +192,10 @@ export type JobArray = {
   pendingReasons: Job[];
 };
 
+export function arrayLabel(id: string): string {
+  return id.endsWith('[]') ? id : `[${id}]`;
+}
+
 /** A shared array fact; unknown values are distinct from differing values. */
 export function arrayField(jobs: Job[], field: 'user' | 'qos' | 'partition') {
   const value = jobs[0]?.[field] ?? null;
@@ -220,8 +224,9 @@ export function groupArrays(jobs: Job[]): (Job | JobArray)[] {
     const pending = elements.filter((item) => PENDING_STATES.includes(item.state.toUpperCase()));
     const known = held.reduce((sum, item) => sum + (item.gpu_count ?? 0), 0);
     const unknown = held.filter((item) => item.gpu_count == null).length;
-    const reasons = new Map<string | null, Job[]>();
+    const reasons = new Map<string, Job[]>();
     for (const item of pending) {
+      if (item.reason == null) continue;
       const same = reasons.get(item.reason) ?? [];
       same.push(item);
       reasons.set(item.reason, same);

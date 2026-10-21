@@ -84,8 +84,18 @@ it.each(['en', 'zh-CN'] as const)('uses singular count hints in %s', (locale) =>
   }
 });
 
-it.each(['en', 'zh-CN'] as const)('pluralizes array reason and GPU hints in %s', (locale) => {
+it.each(['en', 'zh-CN'] as const)('pluralizes array hints in %s', (locale) => {
   setLocale(locale);
+  expect(t('jobs.array.elements', { count: 1 })).toBe(
+    locale === 'en'
+      ? 'The 1 listed element, including any last-known job. Open it for details.'
+      : '共 1 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
+  );
+  expect(t('jobs.array.elements', { count: 2 })).toBe(
+    locale === 'en'
+      ? 'All 2 listed elements, including any last-known jobs. Open an element for details.'
+      : '共 2 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
+  );
   expect(t('jobs.array.otherReasons', { count: 1 })).toBe(
     locale === 'en' ? '+1 other reason' : '另有 1 种等待原因',
   );

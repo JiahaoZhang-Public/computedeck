@@ -110,10 +110,11 @@ the matching elements; a single matching element remains an ordinary job row. Se
 matches the array id as well as element ids. Overview takes its first eight rows after grouping.
 Tiles, navigation badges, tabs and panel counts still count elements using the server summary.
 
-The array row shows running (including configuring and completing), pending and other counts,
-queue or QoS and partition (`mixed` when they differ), and the most common pending reason plus
-the number of other reasons. GPUs held sum only elements holding an allocation: a missing GPU
-count makes the result `≥ N`, or `—` if no positive subtotal is known. Pending requests are not
+The array row shows nonzero running (including configuring and completing), pending and other
+counts, queue or QoS and partition (`mixed` when they differ), and the most common reported pending
+reason plus the number of other reported reasons. Missing reasons are not counted. GPUs held sum
+only elements holding an allocation: a missing GPU count makes the result `≥ N`, or `—` if no
+positive subtotal is known. Pending requests are not
 held GPUs. Any stale element marks the array as last-known, and the row shows its oldest
 observation time. CPU and elapsed totals are not inferred; inspect the individual elements.
 
@@ -121,6 +122,7 @@ Click or press Enter on an array row to open its `?array=<cluster>:<array_id>` d
 It lists all currently listed members of that array, independently of the page filters,
 including retained last-known jobs. Shared cluster, user, queue or QoS and partition facts
 appear once above a compact element table (`mixed` for differing values, `—` for unknowns).
+The drawer uses the scheduler's terms: Partition and QoS for Slurm, or a single Queue for PBS and LSF.
 Each row shows the element index and full job id, state, allocated or requested GPUs,
 node or pending reason, run or wait time, and a stale tag when needed.
 The first 50 are shown, with **Show next 50** and
@@ -133,15 +135,16 @@ listed. It does not run scheduler commands. Failure-history rows remain individu
 搜索同时匹配数组 ID 和元素 ID。总览在分组后取前八行。卡片、导航徽标、标签和面板的
 计数仍按元素计算，使用服务端汇总。
 
-数组摘要显示运行中（含配置和收尾）、等待中及其他状态的数量、队列或 QoS、分区
-（不同则显示“混合”），以及最常见的等待原因和其他原因的种类数。GPU 占用仅汇总已占用
-资源的元素；部分数量未知时显示 `≥ N`，没有已知的正数小计时显示 `—`，不会把等待请求当成
+数组摘要显示数量非零的运行中（含配置和收尾）、等待中及其他状态、队列或 QoS、分区
+（不同则显示“混合”），以及最常见的已报告等待原因和其他已报告原因的种类数，不计入缺失原因。
+GPU 占用仅汇总已占用资源的元素；部分数量未知时显示 `≥ N`，没有已知的正数小计时显示 `—`，不会把等待请求当成
 占用。任一元素过期时整组标记为上次已知状态，观测时间取最早值。CPU 和运行时长不推算总数，
 可查看单个元素。
 
 点击数组行或按 Enter 可打开独立的 `?array=<cluster>:<array_id>` 抽屉。抽屉不受页面筛选
 条件限制，列出当前已列出的全部成员（含保留的上次观测作业）。集群、用户、队列或 QoS 和分区
-只在紧凑元素表上方显示一次，值不同时显示“混合”，未知时显示 `—`。每行显示元素索引及完整作业 ID、
+只在紧凑元素表上方显示一次，值不同时显示“混合”，未知时显示 `—`。抽屉使用调度器自身的术语：
+Slurm 显示“分区”和“QoS”，PBS 和 LSF 仅显示一个“队列”。每行显示元素索引及完整作业 ID、
 状态、占用或请求的 GPU、节点或等待原因、运行或等待时长，以及必要的过期标记。
 先显示 50 个，可“再显示 50 个”
 或“显示全部”。打开元素进入原有作业抽屉，返回可回到数组。每次轮询更新成员，数组不再列出时

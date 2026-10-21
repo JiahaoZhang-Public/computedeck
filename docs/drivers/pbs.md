@@ -45,6 +45,7 @@ When an optional command fails, its data is left as it was and the source shows 
 | ComputeDeck | PBS |
 |---|---|
 | `id` | `<cluster id>:<job id without the server suffix>`, e.g. `cluster-c:1234[5]` |
+| `array_id`, `array_index` | `qstat`'s `array_id` / `array_index` attributes or the short subjob id: `1234[7].server` gives `1234[]` / `7`; null for ordinary jobs |
 | `state` | `job_state`: Q, H, W, T → `PENDING`; R → `RUNNING`; E → `COMPLETING`; S, U → `SUSPENDED` |
 | `reason` | `Held` for held (`H`) jobs and `BeginTime` for waiting (`W`, begin time) jobs, regardless of any comment; other pending jobs carry `comment` without the `Not Running:` prefix |
 | `gpu_count` | `Resource_List.ngpus`; otherwise the sum of `ngpus` over `exec_vnode` (running) or `select` chunks; `0` when the request names no GPU resource; unknown when it names another GPU-like resource |

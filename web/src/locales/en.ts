@@ -263,8 +263,6 @@ const en = {
   'jobs.allClusters': 'All clusters',
   'jobs.search': 'Job name, ID, user, queue or QoS, node',
   'jobs.array.count': '{count} jobs',
-  'jobs.array.partitionLabel': 'Partition / queue',
-  'jobs.array.qos': 'Queue / QoS',
   'jobs.array.element': 'Element',
   'jobs.array.open': 'View elements',
   'jobs.array.mixed': 'mixed',
@@ -279,6 +277,8 @@ const en = {
   'jobs.array.otherReasons.one': '+1 other reason',
   'jobs.array.elements':
     'All {count} listed elements, including any last-known jobs. Open an element for details.',
+  'jobs.array.elements.one':
+    'The 1 listed element, including any last-known job. Open it for details.',
   'jobs.array.showMore': 'Show next 50',
   'jobs.array.showAll': 'Show all',
   'jobs.col.job': 'Job',

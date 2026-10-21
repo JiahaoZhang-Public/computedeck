@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
-import { InstanceDetail, JobDetail } from './pages/Details';
+import { ArrayDetail, InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
@@ -636,6 +636,43 @@ it('counts hand-added machines by normalized manual group and names secondary cl
 });
 
 describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
+  it.each(['slurm', 'pbs', 'lsf'])(
+    'uses %s terms for shared drawer facts, including equal partition and QoS values',
+    (driver) => {
+      setLocale(locale);
+      const jobs = [0, 1].map((index) =>
+        job(String(index), { array_id: '1234', qos: 'long', partition: 'long' }),
+      );
+      const context = ctx(dash({ sources: [source({ driver })], jobs }));
+      const html = renderToStaticMarkup(<ArrayDetail jobs={jobs} ctx={context} />);
+      const labels = [...html.matchAll(/<dt>(.*?)<\/dt>/g)].map((match) => match[1]);
+      expect(labels).toEqual([
+        t('job.cluster'),
+        t('job.user'),
+        ...(driver === 'slurm' ? [t('job.qos'), t('job.partition')] : [t('job.queue')]),
+      ]);
+      expect(html.match(/<dd>long<\/dd>/g)).toHaveLength(driver === 'slurm' ? 2 : 1);
+    },
+  );
+
+  it.each(['RUNNING', 'PENDING', 'SUSPENDED'])(
+    'shows only nonzero array state tags for %s elements',
+    (state) => {
+      setLocale(locale);
+      const jobs = [0, 1].map((index) => job(String(index), { array_id: '1234', state }));
+      const html = renderToStaticMarkup(<JobsPage ctx={ctx(dash({ jobs }))} />);
+      const key =
+        state === 'RUNNING'
+          ? 'jobs.array.running'
+          : state === 'PENDING'
+            ? 'jobs.array.pending'
+            : 'jobs.array.other';
+      expect(html).toContain(`<span class="tag">${t(key, { count: 2 })}</span>`);
+      for (const key of ['jobs.array.running', 'jobs.array.pending', 'jobs.array.other'] as const)
+        expect(html).not.toContain(t(key, { count: 0 }));
+    },
+  );
+
   it('groups after search, counts elements in chips, and translates summaries', () => {
     setLocale(locale);
     const elements = Array.from({ length: 3 }, (_, index) =>

@@ -20,7 +20,7 @@ import { routeHash } from '../routes';
 import type { Locale } from '../i18n';
 import { t } from '../i18n';
 import type { PluginProps, WebPlugin } from '../plugins';
-import { jobGpuResources, relativeTime } from '../domain';
+import { arrayLabel, jobGpuResources, relativeTime } from '../domain';
 import type { JobArray } from '../domain';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { Chips, Empty, Status } from '../ui';
@@ -329,7 +329,7 @@ function ArrayRow({
           {array.name}
         </strong>
         <span className="sub mono">
-          [{array.array_id}] · {t('jobs.array.count', { count: array.jobs.length })}
+          {arrayLabel(array.array_id)} · {t('jobs.array.count', { count: array.jobs.length })}
         </span>
         <span className="sub">{t('jobs.array.open')}</span>
         {old && (
@@ -363,8 +363,12 @@ function ArrayRow({
       </td>
       <td data-label={t('jobs.col.state')}>
         <span className="tags">
-          <span className="tag">{t('jobs.array.running', { count: array.running })}</span>
-          <span className="tag">{t('jobs.array.pending', { count: array.pending })}</span>
+          {array.running > 0 && (
+            <span className="tag">{t('jobs.array.running', { count: array.running })}</span>
+          )}
+          {array.pending > 0 && (
+            <span className="tag">{t('jobs.array.pending', { count: array.pending })}</span>
+          )}
           {array.other > 0 && (
             <span className="tag">{t('jobs.array.other', { count: array.other })}</span>
           )}

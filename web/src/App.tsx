@@ -38,7 +38,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
+import { arrayLabel, dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf } from './groups';
@@ -183,7 +183,7 @@ export default function App() {
             kind: 'array',
             item: {
               id: params.get('array')!,
-              name: `${arrayJobs[0].name} [${arrayJobs[0].array_id}]`,
+              name: `${arrayJobs[0].name} ${arrayLabel(arrayJobs[0].array_id!)}`,
               jobs: arrayJobs,
             },
           }
