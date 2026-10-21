@@ -2944,7 +2944,7 @@ td.wrap {
   align-items: center;
   gap: 12px;
 }
-.activity-filters > input {
+.activity-filters > .search {
   flex: 1 1 240px;
   min-width: 0;
 }
@@ -2974,7 +2974,4 @@ td.wrap {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
-}
-.page-activity .activity-group summary {
-  cursor: pointer;
 }

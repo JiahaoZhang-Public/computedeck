@@ -1391,6 +1391,7 @@ def test_gap_events_are_visible_in_plain_grouped_and_id_reads(
         "category=plugins",
         "source_id=example:cluster-b-alice",
         "cluster_id=example:cluster-b",
+        "cluster_id=platform:lab%20workstation",
         "job=example:cluster-b:48211",
         "q=train-sweep",
         "q=CLUSTER",
@@ -1431,6 +1432,46 @@ def test_activity_filters_match_example_mode(
     example = client.get(url + "&demo=true")
     assert live.status_code == example.status_code == 200
     assert live.json() == example.json()
+
+
+def test_activity_scope_skips_corrupt_sources_and_instances(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.save_source({"id": "source-a", "cluster_id": "cluster-a"})
+    store.save_instance({"id": "machine-a", "platform": "  AWS  "})
+    with store.db:
+        store.db.execute("INSERT INTO sources VALUES ('bad', 'not json')")
+        store.db.execute("INSERT INTO instances VALUES ('bad', 'not json')")
+    store.add_events(
+        [
+            {
+                "key": "source-change",
+                "type": "change.source",
+                "source_id": "source-a",
+                "at": now(),
+                "data": {"subject_id": "source-a", "action": "edited"},
+            },
+            {
+                "key": "machine-change",
+                "type": "change.instance",
+                "at": now(),
+                "data": {"subject_id": "machine-a", "action": "edited"},
+            },
+        ]
+    )
+    store.db.close()
+    for scope, kind, subject in (
+        ("cluster-a", "change.source", "source-a"),
+        ("platform:aws", "change.instance", "machine-a"),
+    ):
+        response = client.get("/api/events", params={"cluster_id": scope, "include": "changes"})
+        assert response.status_code == 200
+        [row] = response.json()
+        assert row["type"] == kind
+        assert row["data"]["subject_id"] == subject
 
 
 @pytest.mark.parametrize("group", [False, True])

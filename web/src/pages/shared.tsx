@@ -76,13 +76,22 @@ export type Ctx = {
   toggleDemo: () => void;
 };
 
-export function SearchBox({ ctx, placeholder }: { ctx: Ctx; placeholder: string }) {
+export function SearchBox({
+  ctx,
+  placeholder,
+  maxLength,
+}: {
+  ctx: Ctx;
+  placeholder: string;
+  maxLength?: number;
+}) {
   const { searchRef, query, setQuery } = ctx;
   return (
     <label className="search">
       <Search size={14} />
       <input
         ref={searchRef}
+        maxLength={maxLength}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder={placeholder}

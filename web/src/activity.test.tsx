@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act, createRef, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
@@ -51,6 +51,7 @@ function context(): Ctx {
     groups: groupsOf(data),
     tools: [],
     nodes: [],
+    searchRef: createRef<HTMLInputElement>(),
     setGroup: (group: string) => setRouteParams({ group }),
     openJob: vi.fn(),
     openEvent: vi.fn(),
@@ -151,18 +152,107 @@ it('restores URL filters, debounces search, and ignores obsolete requests', asyn
   expect(container.textContent).not.toContain('train-1');
 });
 
+it.each(['older', 'reload'] as const)(
+  'keeps controls usable during a poll and honors a concurrent %s action',
+  async (mode) => {
+    const initial = Array.from({ length: 30 }, (_, i) => event(100 - i));
+    request.mockResolvedValue(initial);
+    await render(<ActivityPage ctx={context()} />);
+    request.mockResolvedValue([event(101)]);
+    await act(async () => vi.advanceTimersByTime(15000));
+    let resolvePoll!: (rows: DeckEvent[]) => void;
+    request.mockImplementationOnce(
+      () =>
+        new Promise<DeckEvent[]>((resolve) => {
+          resolvePoll = resolve;
+        }),
+    );
+    await act(async () => vi.advanceTimersByTime(15000));
+    const label = mode === 'older' ? t('activity.older') : t('activity.new', { count: '1' });
+    for (const text of [t('activity.older'), t('activity.new', { count: '1' })]) {
+      const button = [...container.querySelectorAll('button')].find(
+        (item) => item.textContent === text,
+      );
+      expect(button?.disabled).toBe(false);
+    }
+    let resolveAction!: (rows: DeckEvent[]) => void;
+    request.mockImplementationOnce(
+      () =>
+        new Promise<DeckEvent[]>((resolve) => {
+          resolveAction = resolve;
+        }),
+    );
+    await click(label);
+    expect(request.mock.calls.at(-1)![0]).not.toContain('after_id=');
+    if (mode === 'older') expect(request.mock.calls.at(-1)![0]).toContain('before_id=71');
+    await act(async () => resolvePoll([event(102)]));
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (item) => item.textContent === t('common.loading'),
+      )?.disabled,
+    ).toBe(true);
+    await act(async () => resolveAction([event(mode === 'older' ? 70 : 101)]));
+    expect(container.textContent).toContain(mode === 'older' ? 'train-70' : 'train-101');
+    expect(container.textContent).not.toContain('train-102');
+    expect(container.textContent).not.toContain(t('activity.new', { count: '1' }));
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)('orders day headings by event date in %s', async (language) => {
+  setLocale(language);
+  const older = { ...event(11), at: new Date(2026, 9, 20, 23, 58).toISOString() };
+  const newer = { ...event(10), at: new Date(2026, 9, 21, 0, 2).toISOString() };
+  request.mockResolvedValue([older, newer]);
+  await render(<ActivityPage ctx={context()} />);
+  const sections = [...container.querySelectorAll('.activity-day')].map(
+    (item) => item.parentElement!,
+  );
+  expect(sections).toHaveLength(2);
+  expect(sections[0].textContent).toContain('train-10');
+  expect(sections[1].textContent).toContain('train-11');
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'shares search focus, clear and the length cap in %s',
+  async (language) => {
+    setLocale(language);
+    await act(async () => setRouteParams({ q: 'train' }));
+    request.mockResolvedValue([]);
+    const ctx = context();
+    await render(<ActivityPage ctx={ctx} />);
+    const input = container.querySelector('input')!;
+    expect(ctx.searchRef.current).toBe(input);
+    expect(input.maxLength).toBe(64);
+    expect(input.value).toBe('train');
+    ctx.searchRef.current!.focus();
+    expect(document.activeElement).toBe(input);
+    const clear = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${t('search.clear')}"]`,
+    )!;
+    await act(async () => clear.click());
+    expect(input.value).toBe('');
+    expect(window.location.hash).toBe('#/activity');
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(request.mock.calls.at(-1)![0]).not.toContain('q=');
+  },
+);
+
 it.each(['en', 'zh-CN'] as const)(
   'expands recorded facts and opens live or historical jobs in %s',
   async (language) => {
     setLocale(language);
     const ctx = context();
     const row = event(1);
+    delete row.data.job!.elapsed;
     request.mockResolvedValue([row]);
     await render(<ActivityPage ctx={ctx} />);
     const summary = container.querySelector('summary')!;
     await act(async () => summary.click());
     expect(container.textContent).toContain('1:0');
     expect(container.textContent).toContain('gpu-1');
+    expect([...container.querySelectorAll('dt')].map((item) => item.textContent)).not.toContain(
+      t('jobs.col.elapsed'),
+    );
     expect(container.querySelector('time')?.title).toBeTruthy();
     expect(container.querySelector('a')?.getAttribute('href')).toContain(
       'job_filter=example%3Acluster-b%3A1',

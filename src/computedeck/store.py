@@ -472,9 +472,10 @@ class Store:
         if cluster_id is not None:
             where.append(
                 "(json_extract(data, '$.cluster_id') = ? OR source_id IN "
-                "(SELECT id FROM sources WHERE json_extract(data, '$.cluster_id') = ?) OR "
+                "(SELECT id FROM sources WHERE json_valid(data) "
+                "AND json_extract(data, '$.cluster_id') = ?) OR "
                 "(type = 'change.instance' AND json_extract(data, '$.subject_id') IN "
-                "(SELECT id FROM instances WHERE 'platform:' || "
+                "(SELECT id FROM instances WHERE json_valid(data) AND 'platform:' || "
                 "lower(trim(json_extract(data, '$.platform'))) = ?)))"
             )
             args.extend([cluster_id] * 3)

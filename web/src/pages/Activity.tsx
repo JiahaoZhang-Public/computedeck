@@ -16,6 +16,7 @@ import { Chips, Panel } from '../ui';
 import { routeHash } from '../routes';
 import { setRouteParams, useRouteParam } from '../useRouteParam';
 import type { Ctx } from './shared';
+import { SearchBox } from './shared';
 import { statusLabel } from '../labels';
 import { jobTime } from '../jobFacts';
 import type { MessageKey } from '../i18n';
@@ -221,7 +222,7 @@ function EventDetails({ event, ctx }: { event: DeckEvent; ctx: Ctx }) {
     <div className="activity-details">
       <dl className="kv">
         {facts
-          .filter(([, value]) => value != null)
+          .filter(([, value]) => value != null && value !== '')
           .map(([key, value]) => (
             <div key={key}>
               <dt>{t(key)}</dt>
@@ -331,13 +332,10 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
               )}
             </select>
           </label>
-          <input
-            type="search"
-            aria-label={t('activity.search')}
+          <SearchBox
+            ctx={{ ...ctx, query, setQuery }}
             placeholder={t('activity.search')}
             maxLength={64}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
           />
           {job && <p>{t('activity.forJob', { job })}</p>}
           {(category || query || job || ctx.group !== 'all' || range !== '24h') && (
@@ -379,7 +377,8 @@ function ActivityFeed({
   const [more, setMore] = useState(false);
   const current = useRef<DeckEvent[] | null>(null);
   const active = useRef(true);
-  const inFlight = useRef(false);
+  const inFlight = useRef<'poll' | 'older' | 'reload' | null>(null);
+  const loadId = useRef(0);
   const retry = useRef<'poll' | 'older' | 'reload'>('poll');
   useEffect(() => {
     active.current = true;
@@ -389,9 +388,11 @@ function ActivityFeed({
   }, []);
   const load = useCallback(
     async (mode: 'poll' | 'older' | 'reload' = 'poll') => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      setBusy(true);
+      // User actions can supersede a poll; a late poll must not overwrite their result.
+      if (inFlight.current && (mode === 'poll' || inFlight.current !== 'poll')) return;
+      inFlight.current = mode;
+      const id = ++loadId.current;
+      if (mode !== 'poll') setBusy(true);
       retry.current = mode;
       const previous = current.current;
       const checking = mode === 'poll' && previous !== null;
@@ -405,7 +406,7 @@ function ActivityFeed({
         const result = await api<DeckEvent[]>(
           `/events?${query}&limit=${checking ? 200 : pageSize}${cursor}`,
         );
-        if (!active.current) return;
+        if (!active.current || id !== loadId.current) return;
         if (checking) setFresh(result);
         else {
           const next = mode === 'older' ? [...(previous ?? []), ...result] : result;
@@ -416,10 +417,12 @@ function ActivityFeed({
         }
         setError(false);
       } catch {
-        if (active.current) setError(true);
+        if (active.current && id === loadId.current) setError(true);
       } finally {
-        inFlight.current = false;
-        if (active.current) setBusy(false);
+        if (id === loadId.current) {
+          inFlight.current = null;
+          if (active.current && mode !== 'poll') setBusy(false);
+        }
       }
     },
     [query],
@@ -476,22 +479,24 @@ function ActivityFeed({
           )}
         </p>
       )}
-      {[...days].map(([day, events]) => (
-        <section key={day}>
-          <h3 className="activity-day">{day}</h3>
-          <ul className="activity">
-            {activityEvents(events).map((event) => (
-              <ActivityRow
-                key={event.id}
-                event={event}
-                sources={ctx.data.sources}
-                tools={ctx.tools}
-                ctx={ctx}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
+      {[...days]
+        .sort(([, a], [, b]) => Date.parse(b[0].at) - Date.parse(a[0].at))
+        .map(([day, events]) => (
+          <section key={day}>
+            <h3 className="activity-day">{day}</h3>
+            <ul className="activity">
+              {activityEvents(events).map((event) => (
+                <ActivityRow
+                  key={event.id}
+                  event={event}
+                  sources={ctx.data.sources}
+                  tools={ctx.tools}
+                  ctx={ctx}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
       {more && (
         <button className="button" disabled={busy} onClick={() => void load('older')}>
           {t(busy ? 'common.loading' : 'activity.older')}
