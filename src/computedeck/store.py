@@ -304,10 +304,11 @@ class Store:
                 updates["service:last_gap"] = gap
             if elapsed is None or elapsed >= 60 or elapsed < 0:
                 updates["service:alive_at"] = at
-            self.db.executemany(
-                "INSERT OR REPLACE INTO meta VALUES (?, ?)",
-                [(key, json.dumps(value)) for key, value in updates.items()],
-            )
+            if updates:
+                self.db.executemany(
+                    "INSERT OR REPLACE INTO meta VALUES (?, ?)",
+                    [(key, json.dumps(value)) for key, value in updates.items()],
+                )
         for key in updates:
             self._repaired("meta", key)
         return gap

@@ -168,14 +168,15 @@ null when the window is unknown or history could not be collected. A known windo
 does not guarantee that the scheduler retained every record.
 
 For a known window, the gap threshold is
-`max(max(window - 1 hour, interval) + interval, 2 * interval, 1 hour)`, leaving
-scheduling slack even for daily collections. Without history or with an unknown
-window, it is `max(2 * interval, 1 hour)`. A short known window never lowers this
-floor. Only job sources produce source gaps.
+`max(window - 1 hour, interval + 15 minutes, 1 hour)`, allowing fixed scheduling
+slack even for daily collections. Without history or with an unknown window, it is
+`max(2 * interval, 1 hour)`. Only job sources produce source gaps.
 The service records its heartbeat at most once a minute and reports a gap after more
-than five minutes, on startup or a later scheduling tick. Source gaps are suppressed
-when the most recent service gap starts within one collection interval of the last
-successful observation (or earlier), and the time from service resume to successful
+than five minutes, on startup, a later scheduling tick, or before recording a successful
+collection. Source gaps are suppressed when the most recent service gap starts no later
+than one collection interval after the last successful observation, allowing another
+75 seconds for heartbeat/tick granularity and 120 seconds for a collection in flight,
+and the time from service resume to successful
 collection is no longer than the source-gap threshold. This includes failed attempts
 and retries shortly after waking up.
 First collections have no source gap; repeated observations use the same deduplication

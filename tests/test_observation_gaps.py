@@ -63,7 +63,7 @@ def test_source_gap_bounds_context_and_deduplication(
     assert len(store.recent_events()) == 1
 
 
-@pytest.mark.parametrize("minutes,interval", [(10, 10), (1380, 10), (1445, 1440)])
+@pytest.mark.parametrize("minutes,interval", [(10, 10), (1380, 10), (1445, 1440), (1455, 1440)])
 def test_short_gap_and_daily_scheduling_stay_quiet(
     monkeypatch: pytest.MonkeyPatch, minutes: int, interval: int
 ) -> None:
@@ -77,13 +77,41 @@ def test_short_gap_and_daily_scheduling_stay_quiet(
     )
 
 
+@pytest.mark.parametrize(
+    "interval,window,seconds",
+    [
+        (1440, 86400, 30 * 3600),
+        (1440, 86400, 47 * 3600),
+        (600, 86400, 30 * 3600),
+        (1440, 86400, 24 * 3600 + 901),
+        (60, 3600, 5400),
+    ],
+)
+def test_known_window_reports_unchecked_failures_at_long_intervals(
+    monkeypatch: pytest.MonkeyPatch, interval: int, window: int, seconds: int
+) -> None:
+    monkeypatch.setattr(events, "now", lambda: AT.isoformat())
+    previous = (AT - timedelta(seconds=seconds)).isoformat()
+    [gap] = events.collected(
+        {**SOURCE, "last_success": previous, "interval_minutes": interval},
+        {"lifecycle_pending": []},
+        Batch(jobs=[], capabilities=["jobs", "history"], history_window_seconds=window),
+        first=False,
+    )
+    assert gap["type"] == "source.gap"
+    assert gap["data"]["unobserved_from"] == previous
+    assert gap["data"]["unobserved_to"] == AT.isoformat()
+    assert gap["data"]["failures_checked_from"] == (AT - timedelta(seconds=window)).isoformat()
+    assert gap["data"]["failures_checked_from"] > gap["data"]["unobserved_from"]
+
+
 def test_near_window_gap_does_not_claim_missing_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     [gap] = collect_gap(monkeypatch, last_success=(AT - timedelta(minutes=1430)).isoformat())
     assert gap["data"]["failures_checked_from"] < gap["data"]["unobserved_from"]
 
 
 @pytest.mark.parametrize("seconds", [1205, 3500, 3700])
-def test_short_known_window_keeps_the_unknown_window_floor(
+def test_short_known_window_keeps_the_one_hour_floor(
     monkeypatch: pytest.MonkeyPatch, seconds: int
 ) -> None:
     monkeypatch.setattr(events, "now", lambda: AT.isoformat())
@@ -123,6 +151,18 @@ def test_unknown_or_unavailable_history_has_no_checked_bound(
         )
     assert events.collected(source, {}, batch, first=True) == []
     assert events.collected({**source, "last_success": None}, {}, batch, first=False) == []
+    for hours in (30, 48, 49):
+        rows = events.collected(
+            {
+                **source,
+                "interval_minutes": 1440,
+                "last_success": (AT - timedelta(hours=hours)).isoformat(),
+            },
+            {},
+            batch,
+            first=False,
+        )
+        assert [row["type"] for row in rows] == (["source.gap"] if hours > 48 else [])
 
 
 @pytest.mark.parametrize("capabilities", [["instances"], ["nodes"], []])
@@ -146,7 +186,11 @@ def test_heartbeat_startup_tick_restart_and_write_frequency(
     assert store._meta("service:alive_at") == AT.isoformat()
     assert store.recent_events() == []
     clock += timedelta(seconds=59)
+    statements: list[str] = []
+    store.db.set_trace_callback(statements.append)
     collector._schedule()
+    store.db.set_trace_callback(None)
+    assert not any(sql.startswith(("BEGIN", "INSERT", "UPDATE", "COMMIT")) for sql in statements)
     assert store._meta("service:alive_at") == AT.isoformat()
     clock += timedelta(seconds=1)
     collector._schedule()
@@ -226,20 +270,29 @@ def test_heartbeat_gap_and_metadata_roll_back_together(store: Store) -> None:
     assert len(store.recent_events()) == 1
 
 
-@pytest.mark.parametrize("covered", [True, False])
+@pytest.mark.parametrize(
+    "heartbeat_delay,covered",
+    [(300, True), (610, True), (795, True), (796, False), (46 * 3600, False)],
+)
+@pytest.mark.parametrize("tick_before_collection", [True, False])
 async def test_collector_suppresses_only_source_gaps_covered_by_service_gap(
     monkeypatch: pytest.MonkeyPatch,
     store: Store,
     tmp_path: Path,
     add_source: Callable[..., dict[str, Any]],
+    heartbeat_delay: int,
     covered: bool,
+    tick_before_collection: bool,
 ) -> None:
     source = add_source(last_success=(AT - timedelta(hours=48)).isoformat())
     collector = Collector(runtime(store, tmp_path))
     monkeypatch.setattr(collector_module, "now", lambda: AT.isoformat())
     monkeypatch.setattr(events, "now", lambda: AT.isoformat())
-    store.record_heartbeat((AT - timedelta(hours=48 if covered else 2, minutes=-5)).isoformat())
-    collector._heartbeat()
+    store.record_heartbeat(
+        (AT - timedelta(hours=48) + timedelta(seconds=heartbeat_delay)).isoformat()
+    )
+    if tick_before_collection:
+        collector._heartbeat()
 
     async def batch(_: dict[str, Any]) -> Batch:
         return Batch(jobs=[], capabilities=["jobs", "history"], history_window_seconds=86400)
@@ -293,7 +346,7 @@ async def test_collector_retry_after_wake_keeps_only_the_service_gap(
     assert kinds.count("source.failed") == kinds.count("source.recovered") == 1
 
 
-@pytest.mark.parametrize("window,threshold", [(86400, 83400), (None, 3600)])
+@pytest.mark.parametrize("window,threshold", [(86400, 82800), (None, 3600)])
 @pytest.mark.parametrize("extra", [-1, 0, 1])
 def test_service_gap_suppression_uses_remaining_source_gap_threshold(
     monkeypatch: pytest.MonkeyPatch, window: int | None, threshold: int, extra: int
@@ -345,3 +398,14 @@ def test_batch_window_is_optional_and_not_snapshot_data() -> None:
     for invalid in (-1, True, 1.5, "86400"):
         with pytest.raises(ValueError):
             Batch(history_window_seconds=invalid)
+
+
+@pytest.mark.parametrize("value", [None, 0, 3600, -1, True, False, 1.5, "86400"])
+def test_batch_validates_window_assigned_after_construction(value: Any) -> None:
+    batch = Batch()
+    batch.history_window_seconds = value
+    if value is None or type(value) is int and value >= 0:
+        batch.validate_rows()
+    else:
+        with pytest.raises(ValueError, match="history_window_seconds"):
+            batch.validate_rows()

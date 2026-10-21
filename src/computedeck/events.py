@@ -80,16 +80,17 @@ def source_gap(
     start, end = datetime.fromisoformat(previous), datetime.fromisoformat(at)
     interval = source.get("interval_minutes", 10) * 60
     window = batch.history_window_seconds if "history" in batch.capabilities else None
-    # Leave a scheduling interval of slack, including for daily collections.
+    # Allow fixed scheduling slack without hiding long gaps at slow polling rates.
     threshold = max(2 * interval, 3600)
     if window is not None:
-        threshold = max(threshold, max(window - 3600, interval) + interval)
+        threshold = max(window - 3600, interval + 900, 3600)
     if (end - start).total_seconds() <= threshold:
         return []
     if service_gap:
         offline = job_time(service_gap.get("from"))
         resumed = job_time(service_gap.get("to"))
-        slack = timedelta(seconds=interval)
+        # Include heartbeat/tick granularity and an in-flight collection's timeout.
+        slack = timedelta(seconds=interval + 75 + 120)
         if (
             offline
             and resumed

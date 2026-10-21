@@ -122,6 +122,8 @@ class Collector:
                 # The response belongs to a deleted source or an old connection. New
                 # settings are collected on the next scheduler tick.
                 return
+            # A refresh may finish after waking, before the next scheduler tick.
+            self.store.record_heartbeat(now())
             changes = events.collected(
                 {**source, "status_before": status_before},
                 old,

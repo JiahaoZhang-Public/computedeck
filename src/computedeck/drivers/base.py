@@ -215,6 +215,11 @@ class Batch(BaseModel):
 
     def validate_rows(self) -> None:
         """Reject malformed driver rows before events or the last-good snapshot change."""
+        window = self.history_window_seconds
+        if window is not None and (
+            isinstance(window, bool) or not isinstance(window, int) or window < 0
+        ):
+            raise ValueError("history_window_seconds must be a nonnegative integer or None")
         json.dumps(self.model_dump(), allow_nan=False, ensure_ascii=False).encode("utf-8")
         for rows in (self.jobs, self.nodes, self.instances, self.failures, self.finished):
             for row in rows or []:

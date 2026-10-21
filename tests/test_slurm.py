@@ -839,7 +839,10 @@ async def test_upgrade_seeds_full_history_before_an_accounting_outage(
     runner = collector.Collector(runtime)
     for _ in range(3):
         await runner.collect(source["id"])
-        clock += timedelta(minutes=10)
+        # Accounting is unavailable, but the scheduler stays awake between collections.
+        for _ in range(10):
+            clock += timedelta(minutes=1)
+            runner._heartbeat()
     assert len(history_calls) == 3
     assert "--starttime=now-1440minutes" in history_calls[0]
     assert "--starttime=now-15minutes" in history_calls[1]

@@ -111,8 +111,11 @@ could not be checked. Unknown windows and unavailable history never imply comple
 coverage. Slurm and PBS check 24 hours; LSF is limited by its readable `CLEAN_PERIOD`
 (at most 24 hours); Kubernetes cannot recover deleted pods. Collection lookbacks and
 the Failed tab are unchanged. Normal daily scheduling does not produce a gap each day.
-Even with a short history window, a gap must exceed both one hour and two collection
-intervals to produce a row.
+With a known history window, a gap must exceed the largest of the window minus one
+hour, one collection interval plus 15 minutes, and one hour. For example, a daily
+source produces a row after 24 hours 15 minutes; a one-hour window with a 10-minute
+interval produces one after an hour. Unknown or unavailable history instead requires
+a gap longer than both one hour and two collection intervals.
 
 A separate row says that ComputeDeck was not running or the computer was asleep when
 more than five minutes pass between service heartbeats. Source gaps covered by that
@@ -125,7 +128,9 @@ do not produce source gap events.
 历史窗口未知或本次历史采集失败时，不会暗示记录完整。Slurm 和 PBS 检查最近 24 小时；
 LSF 受可读取的 `CLEAN_PERIOD` 限制，最多 24 小时；Kubernetes 无法恢复已删除的 Pod。
 采集回溯范围与失败标签页保持不变，正常的每日采集不会每天生成空档记录。
-即使历史窗口较短，空档也必须同时超过一小时和两个采集间隔才会显示。
+历史窗口已知时，空档必须超过以下三者中的最大值：历史窗口减一小时、一个采集间隔加 15 分钟、一小时。
+例如，每日采集的来源超过 24 小时 15 分钟后才显示空档；历史窗口为一小时且每 10 分钟采集时，超过一小时后显示。
+历史窗口未知或历史不可用时，空档必须同时超过一小时和两个采集间隔才会显示。
 服务心跳间隔超过五分钟时，会单独说明 ComputeDeck 未运行或电脑处于睡眠状态，
 被该服务空档覆盖的来源空档不再单独显示。这些记录只出现在动态中，不触发 Notify 通知；
 插件需明确订阅 `source.gap` 或 `service.gap`。云来源和 SSH 主机不生成来源空档事件。
