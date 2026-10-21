@@ -1139,6 +1139,16 @@ def test_outcome_filter_only_applies_to_finished_jobs() -> None:
         )
 
 
+@pytest.mark.parametrize("legacy", ["job.failed", "job.ended"])
+def test_mixed_rule_preserves_explicit_outcomes(legacy: str) -> None:
+    rule = {"events": ["job.finished", legacy], "outcomes": ["completed"]}
+    migrated = notify.migrate_rule(rule)
+    assert migrated == {"events": ["job.finished"], "outcomes": ["completed"]}
+    assert notify.matches(migrated, notify.sample_event("job.finished", "completed"))
+    assert not notify.matches(migrated, notify.sample_event("job.finished", "failed"))
+    assert notify.migrate_rule(migrated) == migrated
+
+
 @pytest.mark.parametrize("language,word", [("en", "out of memory"), ("zh-CN", "内存不足")])
 async def test_finished_template_translates_outcome(store: Store, language: str, word: str) -> None:
     store.save_settings({"language": language})

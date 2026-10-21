@@ -10,9 +10,34 @@ from typing import Any
 
 import pytest
 
+from computedeck import store as store_module
 from computedeck.store import SCHEMA_VERSION, DatabaseVersionError, Store, now
 
 AddSource = Callable[..., dict[str, Any]]
+
+
+def test_dashboard_does_not_validate_collector_lifecycle_rows(
+    monkeypatch: pytest.MonkeyPatch, store: Store, add_source: AddSource
+) -> None:
+    source = add_source()
+    ended = {"id": "cluster-a:1", "end": now(), "observed_at": now()}
+    store.save_snapshot(
+        source["id"], {"jobs": [], "lifecycle_pending": [], "lifecycle_ended": [ended]}
+    )
+    # Partial inventory updates must retain the collector's reconciliation state.
+    store.save_snapshot(source["id"], {"nodes": []})
+    validated = []
+    validate = store_module.validate_row
+
+    def track(row: dict[str, Any]) -> None:
+        validated.append(row)
+        validate(row)
+
+    monkeypatch.setattr(store_module, "validate_row", track)
+    assert store.dashboard()["jobs"] == []
+    assert ended not in validated
+    assert store.snapshot(source["id"])["lifecycle_ended"] == [ended]
+    assert ended in validated
 
 
 def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None:

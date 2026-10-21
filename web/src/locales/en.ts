@@ -805,6 +805,7 @@ const en = {
   'event.outcomesUnavailable': 'this cluster does not report outcomes',
   'event.outcomeNotReported': 'the scheduler has not reported an outcome',
   'event.observedTime': 'observation time; end time unknown',
+  'event.observedStartTime': 'observation time; start time unknown',
   'event.seenLater': 'seen {minutes} min later',
   'event.endedAt': 'ended {time}',
   'notify.event.finished': 'Job finished',

@@ -3,12 +3,18 @@
 All sample outputs are hand-written from the documented formats and use fictional data.
 """
 
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from computedeck import collector, events
 from computedeck.drivers import slurm, ssh
 from computedeck.drivers.base import SourceError
+from computedeck.plugins import Runtime
+from computedeck.store import Store
 
 SOURCE: dict[str, Any] = {
     "id": "cluster-a-alice",
@@ -786,3 +792,56 @@ async def test_terminal_window_overlaps_previous_success_and_is_capped(
     assert "env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct" in command
     assert batch.finished and batch.failures
     assert "finished" not in batch.snapshot()
+
+
+async def test_upgrade_seeds_full_history_before_an_accounting_outage(
+    monkeypatch: pytest.MonkeyPatch,
+    store: Store,
+    add_source: Callable[..., dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    clock = datetime.now(UTC)
+    for module in (slurm, collector, events):
+        monkeypatch.setattr(module, "now", lambda: clock.isoformat())
+    source = add_source()
+    source.update(
+        last_success=(clock - timedelta(minutes=10)).isoformat(), capabilities=["history"]
+    )
+    store.save_source(source)
+    store.save_snapshot(source["id"], {"jobs": []})  # A pre-upgrade snapshot.
+    end = (clock - timedelta(hours=3)).isoformat()
+    history_calls: list[str] = []
+    run = fake_cluster([])
+
+    async def ssh_run(alias: str, command: str, options: list[str] | None = None) -> str:
+        if command.startswith("env SLURM_TIME_FORMAT="):
+            return ""
+        if slurm.HISTORY_MARKER in command:
+            history_calls.append(command)
+            if len(history_calls) == 2:
+                raise SourceError("timeout")
+            finished = (
+                "\n".join(
+                    terminal_line(JobID=job_id, State=state, End=end)
+                    for job_id, state in [("1001", "FAILED"), ("1002", "COMPLETED")]
+                )
+                if "--starttime=now-1440minutes" in command
+                else ""
+            )
+            return sacct_line(End=end[:19]) + "\n" + slurm.HISTORY_MARKER + "\n" + finished
+        return await run(alias, command, options)
+
+    monkeypatch.setattr(ssh, "run", ssh_run)
+    runtime = Runtime(tmp_path)
+    runtime.store = store
+    runner = collector.Collector(runtime)
+    for _ in range(3):
+        await runner.collect(source["id"])
+        clock += timedelta(minutes=10)
+    assert len(history_calls) == 3
+    assert "--starttime=now-1440minutes" in history_calls[0]
+    assert "--starttime=now-15minutes" in history_calls[1]
+    assert "--starttime=now-1440minutes" in history_calls[2]
+    assert len(store.events()) == 2
+    assert all(row["silent"] for row in store.events())
+    assert store.recent_events() == []

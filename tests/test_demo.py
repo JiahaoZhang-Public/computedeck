@@ -157,6 +157,11 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     rows = events()
     assert all(row["key"].startswith("example:") and row["source_id"] in sources for row in rows)
     assert [row["at"] for row in rows] == sorted((row["at"] for row in rows), reverse=True)
+    [started] = [row for row in rows if row["type"] == "job.started"]
+    assert started["at"] == started["data"]["started_at"] == started["data"]["job"]["started_at"]
+    assert datetime.fromisoformat(started["data"]["observed_at"]) - datetime.fromisoformat(
+        started["at"]
+    ) == timedelta(minutes=5)
     assert {
         row["data"]["job"]["state"]
         for row in rows

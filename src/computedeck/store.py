@@ -86,7 +86,7 @@ def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, An
     return {**row, **{key: old[key] for key in PROBE_RESULT if key in old}}
 
 
-def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
+def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, Any], bool]:
     """Keep readable records from snapshots written before row validation existed."""
     try:
         snapshot = json.loads(encoded)
@@ -97,6 +97,8 @@ def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
     invalid = False
     result: dict[str, Any] = {}
     for key in ("jobs", "nodes", "instances", "failures", "lifecycle_pending", "lifecycle_ended"):
+        if not lifecycle and key.startswith("lifecycle_"):
+            continue
         if key not in snapshot:
             continue
         result[key] = []
@@ -375,8 +377,10 @@ class Store:
         self._repaired("nodes", node_id)
         return deleted
 
-    def _snapshot(self, source_id: str, encoded: str) -> tuple[dict[str, Any], bool]:
-        snapshot, invalid = _read_snapshot(encoded)
+    def _snapshot(
+        self, source_id: str, encoded: str, *, lifecycle: bool = False
+    ) -> tuple[dict[str, Any], bool]:
+        snapshot, invalid = _read_snapshot(encoded, lifecycle=lifecycle)
         if invalid:
             self._skip("snapshots", source_id, "malformed snapshot")
         return snapshot, invalid
@@ -385,7 +389,7 @@ class Store:
         row = self.db.execute(
             "SELECT data FROM snapshots WHERE source_id = ?", (source_id,)
         ).fetchone()
-        return self._snapshot(source_id, row[0])[0] if row else None
+        return self._snapshot(source_id, row[0], lifecycle=True)[0] if row else None
 
     def sources(self) -> list[dict[str, Any]]:
         result = []

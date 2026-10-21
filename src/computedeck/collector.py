@@ -108,7 +108,14 @@ class Collector:
         self.store.save_source(source)
         changes: list[dict[str, Any]] = []
         try:
-            batch = await asyncio.wait_for(self._batch(source), timeout=120)
+            old = self.store.snapshot(source_id)
+            # An upgrade needs a full history baseline even with a recent 0.5 success.
+            collection_source = (
+                {**source, "last_success": None}
+                if not old or "lifecycle_pending" not in old
+                else source
+            )
+            batch = await asyncio.wait_for(self._batch(collection_source), timeout=120)
             batch.validate_rows()
             current = self.store.source(source_id)
             if not current or any(current.get(key) != source.get(key) for key in CONNECTION_KEYS):
@@ -117,7 +124,7 @@ class Collector:
                 return
             changes = events.collected(
                 {**source, "status_before": status_before},
-                self.store.snapshot(source_id),
+                old,
                 batch,
                 first=not source.get("last_success"),
             )

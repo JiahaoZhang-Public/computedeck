@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -515,3 +515,65 @@ def test_terminal_event_is_recovered_if_snapshot_was_saved_before_event(store: S
     rows = events.collected(SOURCE, batch.snapshot(), batch, first=False)
     assert store.add_events(rows) == 1
     assert store.add_events(events.collected(SOURCE, batch.snapshot(), batch, first=False)) == 0
+
+
+@pytest.mark.parametrize("outcome", ["completed", "cancelled", "unknown"])
+def test_one_failed_collection_does_not_silence_endings(
+    monkeypatch: pytest.MonkeyPatch, store: Store, outcome: str
+) -> None:
+    clock = datetime.fromisoformat(events.now())
+    source = {**SOURCE, "last_success": clock.isoformat(), "interval_minutes": 10}
+    # One failed attempt after 10 minutes; recovery also takes time to finish.
+    monkeypatch.setattr(
+        events, "now", lambda: (clock + timedelta(minutes=20, seconds=50)).isoformat()
+    )
+    batch = Batch(jobs=[], finished=[{**job("1", outcome.upper()), "end": events.now()}])
+    rows = events.collected(source, {"lifecycle_pending": []}, batch, first=False)
+    store.add_events(rows)
+    assert len(store.recent_events()) == 1
+    row = store.recent_events()[0]
+    assert row["data"]["outcome"] == outcome
+    assert events.for_handler(row, None)["type"] == "job.ended"
+    assert notify.matches({"events": ["job.finished"]}, row)
+    assert not events.after_gap(source, (clock + timedelta(minutes=24)).isoformat())
+    assert events.after_gap(source, (clock + timedelta(minutes=24, seconds=1)).isoformat())
+
+
+def test_failure_from_wider_window_is_not_redelivered_with_an_offset(store: Store) -> None:
+    old = {"jobs": [job("1", "RUNNING")], "lifecycle_pending": []}
+    end = datetime.fromisoformat(events.now()).astimezone(timezone(timedelta(hours=4)))
+    raw = {**failure("1"), "end": end.replace(tzinfo=None).isoformat()}
+    for batch in [
+        Batch(jobs=[], finished=[], capabilities=["history"]),
+        Batch(jobs=[], finished=[], failures=[raw], capabilities=["history"]),
+        Batch(jobs=[], capabilities=["jobs"]),
+        Batch(jobs=[], finished=[{**raw, "end": raw["end"] + "+04:00"}], capabilities=["history"]),
+    ]:
+        store.add_events(events.collected(SOURCE, old, batch, first=False))
+        old = batch.snapshot()
+    [row] = store.recent_events()
+    assert row["data"]["outcome"] == "failed"
+    assert events.for_handler(row, None)["type"] == "job.failed"
+    assert notify.matches(notify.migrate_rule({"events": ["job.failed"]}), row)
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_previous_failure_before_start_cannot_resolve_departure(held: bool) -> None:
+    running = {**job("1", "RUNNING"), "started_at": "2026-01-01T12:00:00+00:00"}
+    old = {
+        "jobs": [] if held else [running],
+        "lifecycle_pending": [running] if held else [],
+        "failures": [{**failure("1"), "end": "2026-01-01T11:00:00+00:00"}],
+    }
+    batch = Batch(jobs=[], finished=[], capabilities=["history"])
+    rows = events.collected(SOURCE, old, batch, first=False)
+    if held:
+        assert len(rows) == 1 and rows[0]["data"]["outcome"] == "unknown"
+    else:
+        assert rows == []
+        assert batch.lifecycle_pending[0]["id"] == running["id"]
+
+
+def test_previous_container_failure_does_not_end_an_uncollected_job_list() -> None:
+    old = {"jobs": [job("1", "RUNNING")], "failures": [failure("1")], "lifecycle_pending": []}
+    assert events.collected(SOURCE, old, Batch(jobs=None, finished=[]), first=False) == []

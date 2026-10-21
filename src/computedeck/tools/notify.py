@@ -267,6 +267,8 @@ def migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
     if not {"job.failed", "job.ended"}.intersection(kinds):
         return rule
     outcomes = [] if "job.ended" in kinds else list(FAILURE_OUTCOMES)
+    if "job.finished" in kinds:
+        outcomes = rule.get("outcomes", [])
     return {
         **rule,
         "events": list(

@@ -41,8 +41,10 @@ terminal-state `sacct` query runs in the same SSH call, separated by a marker. I
 COMPLETED, CANCELLED and all failure states, and reads Submit, Start and End under
 `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z`. Its window starts five minutes before the
 previous successful collection, rounded up to minutes and capped at 24 hours. If the
-previous collection lacked history, it reads the full 24 hours instead; a first collection
-records that history silently. Both queries remain read-only.
+previous collection lacked history, or the snapshot has no lifecycle baseline after an
+upgrade, it reads the full 24 hours instead. The baseline records that history silently
+so a later accounting recovery cannot announce pre-upgrade endings again. Both queries
+remain read-only.
 
 Terminal records feed lifecycle events without enlarging the retained failure list.
 PBS and LSF use the offset from their existing remote clock for terminal timestamps;

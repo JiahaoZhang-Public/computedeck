@@ -140,7 +140,8 @@ reported this job). Late accounting does not deliver a second ending for an unkn
 
 `at` uses the offset-bearing job end time (start time for `job.started`) when known;
 otherwise it is the observation time. `data.observed_at` always records collection time.
-Unknown job times are null. After a gap longer than two collection intervals, non-failure
+Unknown job times are null. After a gap longer than two collection intervals plus 240 seconds
+(allowing for a failed attempt and recovery, each bounded by the 120-second collection timeout), non-failure
 endings are recorded silently, including departures resolved in a later collection; failures
 remain eligible for delivery. Unknown departures preserve `data.job` as last seen;
 `data.outcome` is `unknown`, and top-level `data.state` and `data.exit_code` are null.

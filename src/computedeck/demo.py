@@ -473,6 +473,13 @@ def events() -> list[dict[str, Any]]:
         ("source.failed", "example:cluster-b-alice", 420, {"error": {"code": "timeout"}}),
     ]
     for kind, _, minutes, extra in rows:
+        if kind == "job.started":
+            started = (at - timedelta(minutes=minutes)).isoformat()
+            extra.update(
+                started_at=started,
+                observed_at=(at - timedelta(minutes=minutes - 5)).isoformat(),
+            )
+            extra["job"]["started_at"] = started
         if kind == "job.finished":
             ended = (at - timedelta(minutes=minutes)).isoformat()
             extra.update(

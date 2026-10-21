@@ -15,8 +15,11 @@ from typing import Any
 
 import pytest
 
+from computedeck import events
 from computedeck.drivers import kubernetes, ssh
-from computedeck.drivers.base import SourceError
+from computedeck.drivers.base import Batch, SourceError
+from computedeck.store import Store
+from computedeck.tools import notify
 
 AT = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
 SOURCE: dict[str, Any] = {
@@ -1094,3 +1097,54 @@ def test_terminal_pods_include_success_but_not_running_container_failures() -> N
     assert len(rows) == 2
     assert all(row["end"].endswith("+00:00") for row in rows)
     assert len(kubernetes.parse_failures(pods, SOURCE, {}, AT)) == 2
+
+
+@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_deleted_pod_uses_last_observed_container_failure(
+    monkeypatch: pytest.MonkeyPatch, store: Store, held: bool, terminal: bool
+) -> None:
+    at = datetime.now(UTC)
+    monkeypatch.setattr(events, "now", lambda: at.isoformat())
+    pods = [
+        pod(
+            status={
+                "containerStatuses": [
+                    {
+                        "lastState": terminated(
+                            137,
+                            "OOMKilled",
+                            (at - timedelta(hours=1)).isoformat(),
+                            (at - timedelta(minutes=5)).isoformat(),
+                        )
+                    }
+                ]
+            }
+        )
+    ]
+    running = Batch(
+        jobs=kubernetes.parse_jobs(pods, SOURCE, {}, at),
+        failures=kubernetes.parse_failures(pods, SOURCE, {}, at),
+        finished=kubernetes.parse_finished(pods, SOURCE, {}, at),
+        capabilities=["history"],
+    )
+    assert running.finished == []
+    assert (
+        events.collected(
+            SOURCE, {"jobs": running.jobs, "lifecycle_pending": []}, running, first=False
+        )
+        == []
+    )
+    old = running.snapshot()
+    if held:
+        old["lifecycle_pending"], old["jobs"] = old["jobs"], []
+    deleted = Batch(jobs=[], failures=[], finished=[], capabilities=["history"])
+    if terminal:
+        deleted.finished = [{**running.failures[0], "state": "COMPLETED", "exit_code": "0"}]
+    store.add_events(events.collected(SOURCE, old, deleted, first=False))
+    store.add_events(events.collected(SOURCE, deleted.snapshot(), deleted, first=False))
+    [row] = store.recent_events()
+    assert row["data"]["outcome"] == ("completed" if terminal else "out_of_memory")
+    assert row["data"]["outcome_reason"] is None
+    assert events.for_handler(row, None)["type"] == ("job.ended" if terminal else "job.failed")
+    assert notify.matches(notify.migrate_rule({"events": ["job.failed"]}), row) == (not terminal)

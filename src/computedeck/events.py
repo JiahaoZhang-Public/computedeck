@@ -38,10 +38,11 @@ OUTCOMES = ("completed", "cancelled", *FAILURE_OUTCOMES, "unknown")
 
 def after_gap(source: dict[str, Any], at: str) -> bool:
     previous = job_time(source.get("last_success"))
+    # A failed attempt and the recovery both take time between scheduled intervals.
     return bool(
         previous
         and (datetime.fromisoformat(at) - datetime.fromisoformat(previous)).total_seconds()
-        > 120 * source.get("interval_minutes", 10)
+        > 120 * source.get("interval_minutes", 10) + 240
     )
 
 
@@ -120,9 +121,14 @@ def collected(
         job["id"]: job
         for job in (batch.finished if batch.finished is not None else batch.failures) or []
     }
-    # The wider failure window can resolve departures missed by terminal history.
-    for job in batch.failures or []:
-        if job["id"] in pending:
+    # A departed pod may only have reported a container failure before it was deleted.
+    # The wider failure window can also resolve departures missed by terminal history.
+    departed = pending.keys() | (
+        previous.keys() - current.keys() if batch.jobs is not None else set()
+    )
+    departed -= current.keys()
+    for job in [*(batch.failures or []), *(old.get("failures") or [])]:
+        if job["id"] in departed:
             terminal.setdefault(job["id"], job)
     unknown: set[str] = set()
     # An old accounting row for a requeued ID cannot resolve its newer attempt.
@@ -183,8 +189,11 @@ def collected(
         end = job_time(raw_end)
         before = ended.get(job_id)
         # Late or incomplete accounting must not announce the same ending again.
-        if before and (not raw_end or not before.get("end")):
-            continue
+        if before and (not end or not job_time(before.get("end"))):
+            # Keep retrying the same key if event insertion was interrupted after the
+            # snapshot write; an offset added later must not create a second key.
+            if not raw_end or raw_end != before.get("end"):
+                continue
         outcome = "unknown" if job_id in unknown else str(job.get("state", "")).lower()
         if outcome not in OUTCOMES:
             outcome = "unknown"

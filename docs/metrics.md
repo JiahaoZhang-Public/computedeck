@@ -93,8 +93,11 @@ End times with offsets are displayed in the viewer's timezone; the hover text st
 how many minutes later ComputeDeck observed the ending. Without a reliable end time,
 the event is labelled as an observation. Activity sorts the fetched page by event time.
 The Failed tab still reads the existing 24-hour failure list. Kubernetes container
-failures remain in that list, but only terminal pods generate job-ending events.
+failures remain in that list while a pod is running. When the pod disappears without a
+terminal record, its last observed container failure supplies the ending, unless it
+predates the job start. A reported terminal outcome takes precedence.
 
 中文：动态为每次作业结束显示一条记录，优先使用调度器报告的结果与带时区的结束时间。
 没有记账能力时会明确说明结果不可用；有历史能力时等待下一次成功的记账采集，记账中断期间最多等待 24 小时。悬停可查看观测延迟，
 未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。
+Kubernetes Pod 运行期间的容器失败保留在失败列表中；Pod 消失且没有终态记录时，使用此前观测到的容器失败作为结果，但不使用早于作业开始的失败。已有终态记录优先。

@@ -72,11 +72,11 @@ describe('reconciled job endings', () => {
     (language) => {
       setLocale(language);
       expect(eventTimeTitle(event('job.started', { started_at: null }))).toContain(
-        t('event.observedTime'),
+        t('event.observedStartTime'),
       );
       expect(
         eventTimeTitle(event('job.started', { started_at: '2026-01-01T00:00:00Z' })),
-      ).not.toContain(t('event.observedTime'));
+      ).not.toContain(t('event.observedStartTime'));
     },
   );
   it('labels end and observation times and suppresses the old pair for migrated sources', () => {

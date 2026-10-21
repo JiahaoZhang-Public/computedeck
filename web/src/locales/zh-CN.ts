@@ -742,6 +742,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'event.outcomesUnavailable': '此集群不报告作业结果',
   'event.outcomeNotReported': '调度器尚未报告结果',
   'event.observedTime': '观测时间；结束时间未知',
+  'event.observedStartTime': '观测时间；开始时间未知',
   'event.seenLater': '{minutes} 分钟后观测到',
   'event.endedAt': '结束于 {time}',
   'notify.event.finished': '作业结束',

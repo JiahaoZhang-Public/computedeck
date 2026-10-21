@@ -82,10 +82,9 @@ export function eventTimeTitle(event: DeckEvent): string {
     ? Math.floor((Date.parse(event.data.observed_at) - Date.parse(event.at)) / 60000)
     : 0;
   const stamp = dateTime(event.at);
-  if (
-    (event.type === 'job.finished' && !event.data.ended_at) ||
-    (event.type === 'job.started' && !event.data.started_at)
-  )
+  if (event.type === 'job.started' && !event.data.started_at)
+    return `${stamp} · ${t('event.observedStartTime')}`;
+  if (event.type === 'job.finished' && !event.data.ended_at)
     return `${stamp} · ${t('event.observedTime')}`;
   return delay > 0 ? `${stamp} · ${t('event.seenLater', { minutes: delay })}` : stamp;
 }
