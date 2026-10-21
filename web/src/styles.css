@@ -2054,7 +2054,10 @@ form > .form-error {
 .activity time {
   color: var(--text-3);
   font-size: 12px;
-  white-space: nowrap;
+  max-width: 45%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .activity .grow {
@@ -2092,12 +2095,6 @@ form > .form-error {
 }
 .activity-group details[open] > summary::before {
   content: '▾';
-}
-.activity time {
-  max-width: 45%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-align: right;
 }
 
 /* ---------- Toolbox ---------- */

@@ -519,7 +519,7 @@ def events() -> list[dict[str, Any]]:
                 if extra["outcome"] == "completed"
                 else extra["job"].get("exit_code"),
             )
-    for index in range(4):
+    for index in range(60):
         ended = (at - timedelta(minutes=45 + index)).isoformat()
         rows.append(
             (

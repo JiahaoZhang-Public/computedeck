@@ -83,7 +83,12 @@ export function eventText(event: DeckEvent): string {
 
 export function eventTone(event: DeckEvent): EventTone {
   if (event.group) {
-    const tones = event.group.events.map(eventTone);
+    const tones =
+      event.type === 'job.finished' && event.group.outcomes
+        ? Object.keys(event.group.outcomes).map((outcome) =>
+            eventTone({ ...event, group: undefined, data: { outcome } }),
+          )
+        : event.group.events.map(eventTone);
     return tones.includes('red') ? 'red' : tones.includes('green') ? 'green' : 'gray';
   }
   if (event.type === 'job.finished') {
@@ -110,7 +115,7 @@ export function activityEvents(events: DeckEvent[]): DeckEvent[] {
 }
 
 export function eventTimeTitle(event: DeckEvent): string {
-  if (event.group) return eventTimeText(event) ?? dateTime(event.at);
+  if (event.group) return groupTime(event, dateTime);
   const delay = event.data.observed_at
     ? Math.floor((Date.parse(event.data.observed_at) - Date.parse(event.at)) / 60000)
     : 0;
@@ -135,22 +140,27 @@ function eventClock(at: string): string {
     : dateTime(at);
 }
 
-function timeRange(start: string, end: string): string {
+function timeRange(start: string, end: string, format = eventClock): string {
   return Date.parse(start) === Date.parse(end)
-    ? eventClock(start)
-    : t('event.between', { start: eventClock(start), end: eventClock(end) });
+    ? format(start)
+    : t('event.between', { start: format(start), end: format(end) });
+}
+
+function groupTime(event: DeckEvent, format = eventClock): string {
+  const group = event.group!;
+  const unknown = group.events.find((child) => !ownTime(child) && child.data.since);
+  const since = group.since ?? unknown?.data.since;
+  const text = since
+    ? timeRange(since, event.data.observed_at ?? unknown?.data.observed_at ?? event.at, format)
+    : timeRange(group.first_at, group.last_at, format);
+  const observed = group.observed_time ?? group.events.some((child) => !ownTime(child));
+  return observed
+    ? `${text} · ${t(event.type === 'job.started' ? 'event.observedStartTime' : 'event.observedTime')}`
+    : text;
 }
 
 export function eventTimeText(event: DeckEvent): string | null {
-  if (event.group) {
-    const unknown = event.group.events.find((child) => !ownTime(child) && child.data.since);
-    const text = unknown
-      ? timeRange(unknown.data.since!, unknown.data.observed_at ?? unknown.at)
-      : timeRange(event.group.first_at, event.group.last_at);
-    return event.group.events.some((child) => !ownTime(child))
-      ? `${text} · ${t(event.type === 'job.started' ? 'event.observedStartTime' : 'event.observedTime')}`
-      : text;
-  }
+  if (event.group) return groupTime(event);
   const own = ownTime(event);
   if (own && event.type === 'job.finished') return t('event.endedAt', { time: eventClock(own) });
   if (!own && event.data.since)

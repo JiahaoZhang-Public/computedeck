@@ -19,6 +19,7 @@ import secrets
 import shlex
 import time
 from collections import deque
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -598,7 +599,7 @@ def digest_tail(event: dict[str, Any], language: str) -> str:
             str(job.get("name") or job.get("id") or "—"),
             str(data.get("outcome") or ""),
         )
-        groups.setdefault(key, []).append(str(job.get("id") or "—"))
+        groups.setdefault(key, []).append(str(job.get("id") or "—").rsplit(":", 1)[-1])
     parts = []
     remaining = 10
     comma, semicolon, left, right = (
@@ -609,12 +610,12 @@ def digest_tail(event: dict[str, Any], language: str) -> str:
         shown = ids[:remaining]
         remaining -= len(shown)
         detail = comma.join(shown) + (f"{comma}…" if len(shown) < len(ids) else "")
+        detail = semicolon.join(part for part in (label, detail if shown else "") if part)
         parts.append(
             f"{name}"
             + (f" [{array}]" if array else "")
             + f" ×{len(ids)}"
-            + (f"{left}{label}{right}" if label else "")
-            + (f"{left}{detail}{right}" if shown else "")
+            + (f"{left}{detail}{right}" if detail else "")
         )
     cluster = facts(event)["cluster"]
     omitted = sum(len(ids) for ids in list(groups.values())[10:])
@@ -671,6 +672,8 @@ async def compose(
     since = (event.get("data") or {}).get("since")
     if since:
         observed = event["data"].get("observed_at") or event["at"]
+        since = datetime.fromisoformat(since).isoformat(sep=" ", timespec="seconds")
+        observed = datetime.fromisoformat(observed).isoformat(sep=" ", timespec="seconds")
         window = (
             f"采集窗口：{since} 至 {observed}"
             if language == "zh-CN"
@@ -690,7 +693,9 @@ async def compose(
     if log:
         heading = "作业日志最后几行" if language == "zh-CN" else "Last lines of the job log"
         body = f"{body}\n\n--- {heading} ---\n{log}"
-    return Message(subject=subject, body=body, event=event), notes
+    # Siblings are only needed while composing. Keep queue rows and JSON webhooks lean.
+    message_event = {key: value for key, value in event.items() if key != "digest"}
+    return Message(subject=subject, body=body, event=message_event), notes
 
 
 # ---- Plugin ----

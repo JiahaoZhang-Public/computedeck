@@ -1223,15 +1223,18 @@ def test_event_grouping_is_opt_in_and_limits_groups_not_children(client: TestCli
     assert all("group" not in row for row in plain)
     grouped = client.get("/api/events?demo=true&group=1&limit=200").json()
     [digest] = [row for row in grouped if "group" in row]
-    assert digest["group"]["count"] == 4
-    assert digest["group"]["names"] == [{"name": "train-sweep", "count": 4}]
-    assert set(digest["group"]["ids"]) == {row["id"] for row in digest["group"]["events"]}
-    assert len(grouped) == len(plain) - 3
+    assert digest["group"]["count"] == 60
+    assert digest["group"]["names"] == [{"name": "train-sweep", "count": 60}]
+    assert len(digest["group"]["ids"]) == 60
+    assert [row["id"] for row in digest["group"]["events"]] == digest["group"]["ids"][:50]
+    assert len(grouped) == len(plain) - 59
     assert digest["group"]["first_at"] < digest["group"]["last_at"]
     assert digest["at"] == digest["group"]["last_at"]
 
 
-def test_live_event_grouping_retains_whole_burst(client: TestClient, data_dir: Path) -> None:
+def test_live_event_grouping_caps_children_but_retains_totals_and_ids(
+    client: TestClient, data_dir: Path
+) -> None:
     from computedeck.store import now
 
     store = Store(data_dir / "computedeck.sqlite")
@@ -1242,7 +1245,13 @@ def test_live_event_grouping_retains_whole_burst(client: TestClient, data_dir: P
             "type": "job.finished",
             "at": at,
             "source_id": "cluster-a",
-            "data": {"observed_at": at, "job": {"name": "sweep"}},
+            "data": {
+                "observed_at": at,
+                "ended_at": at if i else None,
+                "since": None if i else "2026-01-01T00:00:00Z",
+                "outcome": "completed" if i else "failed",
+                "job": {"name": "sweep"},
+            },
         }
         for i in range(250)
     ]
@@ -1250,7 +1259,12 @@ def test_live_event_grouping_retains_whole_burst(client: TestClient, data_dir: P
     store.db.close()
     result = client.get("/api/events?group=1&limit=1").json()
     assert len(result) == 1 and result[0]["group"]["count"] == 250
-    assert len(result[0]["group"]["events"]) == 250
+    group = result[0]["group"]
+    assert group["ids"] == list(range(250, 0, -1))
+    assert [row["id"] for row in group["events"]] == group["ids"][:50]
+    assert group["observed_time"] is True
+    assert group["since"] == "2026-01-01T00:00:00Z"
+    assert group["outcomes"] == {"completed": 249, "failed": 1}
     assert len(client.get("/api/events?limit=1").json()) == 1
 
 

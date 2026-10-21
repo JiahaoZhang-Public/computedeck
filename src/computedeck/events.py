@@ -284,6 +284,10 @@ def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         stamps = [event["at"] for event in siblings]
         last_at = max(stamps, key=datetime.fromisoformat)
+        time_field = {"job.finished": "ended_at", "job.started": "started_at"}.get(
+            siblings[0]["type"]
+        )
+        unknown = [event for event in siblings if time_field and not event["data"].get(time_field)]
         result.append(
             {
                 **siblings[0],
@@ -303,7 +307,12 @@ def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             if event["type"] == "job.finished"
                         )
                     ),
-                    "events": siblings,
+                    "observed_time": bool(unknown),
+                    "since": next(
+                        (event["data"]["since"] for event in unknown if event["data"].get("since")),
+                        None,
+                    ),
+                    "events": siblings[:50],
                 },
             }
         )

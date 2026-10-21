@@ -150,21 +150,23 @@ Slurm 显示“分区”和“QoS”，PBS 和 LSF 仅显示一个“队列”�
 或“显示全部”。打开元素进入原有作业抽屉，返回可回到数组。每次轮询更新成员，数组不再列出时
 明确提示；不执行调度器命令。失败历史仍逐作业显示。
 
-
 ## Activity collection groups / 动态采集合并
 
 Activity collapses three or more events of the same type and source collected together.
-Expand a row to see every job and outcome. The group shows names and outcome counts with
-failures first, a red dot if any child failed, and the event time range. Known job times
+Expand a row to see the newest 50 events and their outcomes, followed by “and N more”
+for larger groups. Totals, names, outcome counts, failure indicators and time ranges
+cover the entire group, with failures first and a red dot if any child failed. Known job times
 always take precedence: children retain their own end/start times, and a group whose
 children all have known times shows their first-to-last range. Only children without a
 known time use the previous-success-to-observation window after a gap; a group containing
 such children also shows that window. Equal range endpoints display a single time.
 Unknown times keep their observation-time labels, including on group rows when any
-child lacks its own time, even without a collection gap. Grouping does not change job or failure totals.
+child lacks its own time, even without a collection gap. Grouping does not change job
+or failure totals.
 
-动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看各作业
-及结果。合并行显示名称、各结果的数量（失败优先）及时间范围，含失败事件时显示红点。
+动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看最新
+50 个事件及结果，更多事件显示为“另有 N 个事件”。合并行的总数、名称、结果数量
+（失败优先）、失败标记及时间范围仍涵盖全部事件，含失败事件时显示红点。
 已知作业时间优先：子事件显示自身结束或开始时间；全部子事件时间已知时，合并行显示
 最早至最晚时间。只有时间未知的补收事件及包含这些事件的合并行，才显示上次成功采集
 至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注；

@@ -72,6 +72,9 @@ function ActivityRow({ event }: { event: DeckEvent }) {
           {event.group.events.map((child) => (
             <ActivityRow key={child.id} event={child} />
           ))}
+          {event.group.count > event.group.events.length && (
+            <li>{t('event.more', { count: event.group.count - event.group.events.length })}</li>
+          )}
         </ul>
       </details>
     </li>

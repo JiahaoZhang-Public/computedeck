@@ -1322,15 +1322,21 @@ it.each(['en', 'zh-CN'] as const)('shows saved Notify outcome filters in %s', as
   expect(summaries).toContain(`${label} → Team`);
 });
 
-it.each(['en', 'zh-CN'] as const)('expands a collection in Activity in %s', async (language) => {
+it.each([
+  ['en', false],
+  ['zh-CN', false],
+  ['en', true],
+  ['zh-CN', true],
+] as const)('expands a collection in Activity in %s (capped: %s)', async (language, capped) => {
   setLocale(language);
-  const children: DeckEvent[] = ['completed', 'failed', 'unknown'].map((outcome, index) => ({
+  const count = capped ? 60 : 3;
+  const children: DeckEvent[] = Array.from({ length: capped ? 50 : 3 }, (_, index) => ({
     id: index + 1,
     type: 'job.finished',
     source_id: 'cluster-a',
     at: now.toISOString(),
     data: {
-      outcome,
+      outcome: ['completed', 'failed', 'unknown'][index % 3],
       observed_at: now.toISOString(),
       since: '2026-10-13T08:00:00Z',
       job: {
@@ -1345,11 +1351,11 @@ it.each(['en', 'zh-CN'] as const)('expands a collection in Activity in %s', asyn
     {
       ...children[2],
       group: {
-        count: 3,
-        ids: [1, 2, 3],
+        count,
+        ids: Array.from({ length: count }, (_, i) => i + 1),
         first_at: now.toISOString(),
         last_at: now.toISOString(),
-        names: [{ name: 'sweep', count: 3 }],
+        names: [{ name: 'sweep', count }],
         events: children,
       },
     },
@@ -1357,13 +1363,20 @@ it.each(['en', 'zh-CN'] as const)('expands a collection in Activity in %s', asyn
   await render(<ActivityPanel demo={false} />);
   expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
   const summary = container.querySelector('summary')!;
-  expect(summary.textContent).toContain('sweep ×3');
+  expect(summary.textContent).toContain(`sweep ×${count}`);
   expect(summary.textContent).toContain(t('notify.event.finished'));
   expect(summary.querySelector('.dot.red')).not.toBeNull();
   expect(container.querySelector('details')!.open).toBe(false);
   await click('summary');
   expect(container.querySelector('details')!.open).toBe(true);
-  expect(container.querySelectorAll('details li')).toHaveLength(3);
+  expect(container.querySelectorAll('details li')).toHaveLength(capped ? 51 : 3);
+  if (capped) {
+    expect(container.querySelector('details li:last-child')!.textContent).toBe(
+      t('event.more', { count: 10 }),
+    );
+  } else {
+    expect(container.textContent).not.toContain(t('event.more', { count: 0 }));
+  }
   for (let index = 0; index < 3; index++) {
     expect(container.querySelectorAll('details li')[index].textContent).toContain(
       `sweep [100_${index}]`,

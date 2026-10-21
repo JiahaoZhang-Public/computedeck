@@ -286,11 +286,46 @@ describe('short Activity ranges', () => {
         },
       };
       expect(eventTimeText(group)).toBe(expected);
+      const absolute =
+        first === last
+          ? dateTime(first)
+          : t('event.between', { start: dateTime(first), end: dateTime(last) });
+      expect(eventTimeTitle(group)).toBe(absolute);
       group.group!.events = [child]; // unknown child uses the observation window
       expect(eventTimeText(group)).toBe(`${expected} · ${t('event.observedTime')}`);
+      expect(eventTimeTitle(group)).toBe(`${absolute} · ${t('event.observedTime')}`);
     }
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps omitted failures and observation windows visible in %s',
+  (language) => {
+    setLocale(language);
+    const since = '2026-01-01T08:00:00Z';
+    const observed = '2026-01-01T12:00:00Z';
+    const row: DeckEvent = {
+      ...event('job.finished', { observed_at: observed, ended_at: observed }),
+      group: {
+        count: 60,
+        ids: Array.from({ length: 60 }, (_, i) => i + 1),
+        first_at: '2026-01-01T09:00:00Z',
+        last_at: observed,
+        names: [],
+        outcomes: { completed: 59, failed: 1 },
+        observed_time: true,
+        since,
+        events: [event('job.finished', { outcome: 'completed', ended_at: observed })],
+      },
+    };
+    expect(eventTone(row)).toBe('red');
+    const expected = `${t('event.between', { start: dateTime(since), end: dateTime(observed) })} · ${t('event.observedTime')}`;
+    expect(eventTimeText(row)).toBe(expected);
+    expect(eventTimeTitle(row)).toBe(expected);
+    row.group!.outcomes = { completed: 60 };
+    expect(eventTone(row)).toBe('green');
+  },
+);
 
 it.each(['en', 'zh-CN'] as const)('identifies array elements in %s', (language) => {
   setLocale(language);

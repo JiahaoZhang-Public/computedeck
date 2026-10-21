@@ -855,6 +855,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'notify.suppressedCount': '已抑制 · {count} 个事件',
   'notify.groupedCount': '已合并 · {count} 个事件',
   'notify.groupCount': '此消息包含 {count} 个事件',
+  'event.more': '另有 {count} 个事件',
   'event.group': '{count} 个事件 · {type}',
   'event.groupWithNames': '{count} 个事件 · {type}：{names}',
   'event.between': '{start} 至 {end} 之间',

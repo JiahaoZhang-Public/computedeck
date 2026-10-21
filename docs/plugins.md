@@ -175,8 +175,9 @@ The lowest event ID leads. Its template and optional log are used; a translated 
 names the other jobs, grouped by array, name and outcome, with at most ten groups and
 ten additional job IDs; omitted events are counted. Opt-in AI composition receives the
 total count, this summary, and template facts for at most twenty siblings, rather than
-full sibling records. The queued webhook message's `event` may include an additive
-`digest` list of sibling events; this does not alter stored events.
+full sibling records. Full siblings are used only in memory during composition. The
+queued message and JSON webhook `event` contain only the leader event; the message body
+carries the digest summary. Stored events are unchanged.
 
 Notify records one `grouped` row per digest and rule, with `digest` and `event` (the
 leader ID), `events` (the sibling IDs), and `count` (the number of grouped siblings).
@@ -192,17 +193,18 @@ the existing delivery queue.
 collapses three or more non-silent events sharing source, type and observation time.
 Each group is an event-shaped row with an additional `group` object: `count`, `ids`,
 `first_at`, `last_at`, `names` (up to ten `{name, count}` entries), `outcomes` (outcome
-to count for `job.finished`, empty for other types), and complete child `events`.
+to count for `job.finished`, empty for other types), and `events` containing at most
+the newest 50 children by event ID. `count`, `ids`, names and outcome counts cover the
+whole group. `observed_time` is true when any child lacks its own start/end time;
+`since` is the collection-gap start for such children, or null. These fields cover
+omitted children too, so the time label and failure indicator remain accurate.
 The group row's `at` is `last_at`, so Activity sorts it by its latest child time.
-`limit` then counts display rows, so it never cuts a group in half. The Activity panel
-expands groups in place. No event types, database columns or contract versions were
-added.
+`limit` counts display rows. The Activity panel expands groups in place and shows
+“and N more” when children are omitted. No event types, database columns or contract
+versions were added.
 
-Performance follow-ups: grouped reads currently scan the event history and return all
-children, and JSON webhook digests carry all sibling records. Bound collection lookup
-using contiguous collection IDs or a guarded expression index, load children on expand
-or cap them, and cap or trim webhook digest payloads. These limits are not implemented
-in this release slice.
+Known limit: grouped reads scan the event history, so large histories can slow Activity
+polls.
 
 ## Drivers
 

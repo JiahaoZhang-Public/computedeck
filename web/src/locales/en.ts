@@ -920,6 +920,7 @@ const en = {
   'notify.suppressedCount': 'Suppressed · {count} events',
   'notify.groupedCount': 'Grouped · {count} events',
   'notify.groupCount': '{count} events in this message',
+  'event.more': 'and {count} more',
   'event.group': '{count} events · {type}',
   'event.groupWithNames': '{count} events · {type}: {names}',
   'event.between': 'between {start} and {end}',

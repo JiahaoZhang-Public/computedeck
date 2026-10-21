@@ -341,6 +341,8 @@ export interface DeckEvent {
     last_at: string;
     names: { name: string; count: number }[];
     outcomes?: Record<string, number>;
+    observed_time?: boolean;
+    since?: string | null;
     events: DeckEvent[];
   };
   type:

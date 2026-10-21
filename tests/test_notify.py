@@ -1272,10 +1272,11 @@ async def test_array_digests_leave_budget_for_unrelated_failure_and_replay_nothi
     for row in rows:
         await notifier.on_event(row)
     assert len(sent) == 3
-    assert [len(mail.event.get("digest", [])) for mail in sent] == [49, 49, 0]
+    assert all("digest" not in mail.event for mail in sent)
     assert "eval-b" in sent[-1].body
     assert "train-sweep [100] ×49" in sent[0].body
-    assert sum(f"cluster-a:100_failed_{i}" in sent[0].body for i in range(50)) == 11
+    assert sent[0].body.count("100_failed_") == 11
+    assert sent[0].body.count("cluster-a:100_failed_") == 1
     entries = notify._recent_log(store, 200)
     assert sum(row["status"] == "grouped" for row in entries) == 2
     assert sum(row["status"] == "sent" for row in entries) == 3
@@ -1343,7 +1344,7 @@ async def test_digest_filters_silent_siblings_and_groups_catchup_by_type(
     for row in store.events(include_silent=False):
         await notifier.on_event(row)
     assert len(sent) == 2
-    assert len(sent[0].event["digest"]) == 2
+    assert "and 2 more" in sent[0].body and "digest" not in sent[0].event
     assert "between" in sent[0].body
     assert "other" not in sent[0].body
     assert sent[1].event["type"] == "job.started" and "digest" not in sent[1].event
@@ -1462,7 +1463,8 @@ async def test_interrupted_digest_resumes_queue_without_recomposing_or_resending
     restarted = notify.Notifier(notifier.ctx)
     for row in rows:
         await restarted.on_event(row)
-    assert len(sent) == 1 and len(sent[0].event["digest"]) == 2
+    assert len(sent) == 1 and "and 2 more" in sent[0].body
+    assert "digest" not in sent[0].event
     assert len(notify._recent_log(store)) == 2
 
 
@@ -1524,10 +1526,20 @@ async def test_large_digest_preserves_log_history_and_replays_nothing(
     add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
     store.save_plugin_settings("notify", {"max_per_hour": limit})
     notify._log(store, {"status": "sent", "event": -1, "rule": "earlier"})
-    store.add_events(digest_events(600)[:600])
+    burst = digest_events(600)[:600]
+    for sibling in burst[1:]:
+        sibling["data"]["job"]["unused"] = "x" * 10000
+    store.add_events(burst)
     sent = []
 
     async def send(config: Any, mail: Message) -> None:
+        [queued] = store.db.execute("SELECT data FROM notify_queue").fetchall()
+        assert len(queued[0].encode()) < 16000
+        payload = json.loads(queued[0])
+        assert "digest" not in payload["event"]
+        assert "unused" not in queued[0]
+        assert payload["entry"]["count"] == 600
+        assert len(payload["entry"]["events"]) == 599
         sent.append(mail)
 
     use_sender(monkeypatch, send)
@@ -1577,11 +1589,15 @@ async def test_agent_digest_prompt_has_count_summary_and_at_most_twenty_facts(
 async def test_chinese_digest_punctuation_and_observation_window(store: Store) -> None:
     store.save_settings({"language": "zh-CN"})
     row = event("job.finished")
-    row["data"].update(since="08:10", observed_at="11:20")
+    row["data"].update(
+        since="2026-01-01T08:10:00.123456+00:00",
+        observed_at="2026-01-01T11:20:00.654321+00:00",
+    )
     row["digest"] = digest_events(3)[:3]
     row["digest"][-1]["data"]["job"]["name"] = "eval-b"
     mail, _ = await notify.compose(store, {}, {}, row)
-    assert "采集窗口：08:10 至 11:20" in mail.body
+    assert "采集窗口：2026-01-01 08:10:00+00:00 至 2026-01-01 11:20:00+00:00" in mail.body
     tail = notify.digest_tail(row, "zh-CN")
-    assert "（失败）" in tail and "，" in tail and "；eval-b" in tail
+    assert "（失败；100_failed_0，100_failed_1）" in tail and "；eval-b" in tail
+    assert "cluster-a:" not in tail
     assert "(" not in tail and ", " not in tail and "; " not in tail
