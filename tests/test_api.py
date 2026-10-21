@@ -1118,6 +1118,7 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
                 **source,
                 "capabilities": capabilities,
                 "capabilities_seen": capabilities,
+                "history_window_seconds": 86400,
                 "warnings": [{"code": "partitions_unavailable"}],
                 "cluster_state": "degraded",
             }
@@ -1131,6 +1132,11 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
     expected = [] if changed_connection else capabilities
     assert response.json()["capabilities"] == expected
     assert response.json()["capabilities_seen"] == expected
+    expected_window = None if changed_connection else 86400
+    assert response.json()["history_window_seconds"] == expected_window
+    assert client.get("/api/dashboard").json()["sources"][0]["history_window_seconds"] == (
+        expected_window
+    )
     assert response.json()["warnings"] == (
         [] if changed_connection else [{"code": "partitions_unavailable"}]
     )

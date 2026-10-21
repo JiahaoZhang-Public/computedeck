@@ -556,11 +556,11 @@ class LsfDriver:
             "zh-CN": "通过 SSH 读取 IBM Spectrum LSF 上你的作业、可见主机和队列上限。",
         },
         details={
-            "en": "Read-only bjobs, bhosts, lshosts, bqueues and blimits queries through an SSH "
-            "host alias on {where}. ProxyJump and keys come from that SSH config. Needs LSF 10.1 "
-            "Fix Pack 2 or later for JSON output.",
+            "en": "Read-only bjobs, bhosts, lshosts, bqueues, blimits and bparams queries through "
+            "an SSH host alias on {where}. ProxyJump and keys come from that SSH config. "
+            "Needs LSF 10.1 Fix Pack 2 or later for JSON output.",
             "zh-CN": "通过{where}的 SSH Host 别名只读调用 bjobs、bhosts、lshosts、"
-            "bqueues 和 blimits。ProxyJump 和密钥沿用该 SSH 配置。"
+            "bqueues、blimits 和 bparams。ProxyJump 和密钥沿用该 SSH 配置。"
             "JSON 输出需要 LSF 10.1 Fix Pack 2 或更高版本。",
         },
         fields=[username_field(), ssh_alias_field()],

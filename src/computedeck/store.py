@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import node_health, validate_row
+from .drivers.base import job_time, node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
@@ -287,21 +287,20 @@ class Store:
         gap = None
         updates: dict[str, Any] = {}
         with self.db:
-            previous = self._meta("service:alive_at")
+            previous = job_time(self._meta("service:alive_at"))
             elapsed = (
                 (datetime.fromisoformat(at) - datetime.fromisoformat(previous)).total_seconds()
                 if previous
                 else None
             )
-            if elapsed is not None and elapsed > 300:
+            if previous is not None and elapsed is not None and elapsed > 300:
                 gap = {"from": previous, "to": at}
                 self.db.execute(
                     "INSERT OR IGNORE INTO events (key, type, at, source_id, silent, data) "
                     "VALUES (?, 'service.gap', ?, NULL, 0, ?)",
                     (f"service.gap:{previous}", at, json.dumps(gap)),
                 )
-                cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-                self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+                self._prune_events()
                 updates["service:last_gap"] = gap
             if elapsed is None or elapsed >= 60 or elapsed < 0:
                 updates["service:alive_at"] = at
@@ -330,9 +329,12 @@ class Store:
                         json.dumps(event.get("data") or {}),
                     ),
                 ).rowcount
-            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-            self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+            self._prune_events()
         return added
+
+    def _prune_events(self) -> None:
+        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
 
     def events(
         self, after: int = 0, limit: int = 100, *, include_silent: bool = True

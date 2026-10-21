@@ -33,7 +33,7 @@ Each line is one SSH command; the login name is quoted.
 | Your jobs (`bjobs`) | `bjobs -u alice -o "jobid jobindex job_name user queue stat pend_reason exec_host slots run_time proj_name gpu_num gpu_alloc" -json` | yes |
 | Visible hosts (`bhosts`) | `bhosts -o "host_name status max njobs ngpus ngpus_alloc" -json` and `lshosts -gpu -w` | no |
 | Limits | `bqueues -u alice -o "queue_name status max_runlimit" -json` and `blimits -a -w -u alice` | no |
-| Failures (`bjobs -d`) | `date +%Y-%m-%dT%H:%M:%S; bjobs -d -u alice -o "<history fields> exit_reason gpu_num gpu_alloc" -json` | no |
+| Failures (`bjobs -d`) | `date +%Y-%m-%dT%H:%M:%S%z; sh -c 'bparams -l 2>/dev/null \|\| true'; echo COMPUTEDECK_LSF_HISTORY; bjobs -d -u alice -o "<history fields> exit_reason gpu_num gpu_alloc" -json` | no |
 
 If `bjobs` or `bhosts` rejects the field list, it is run once more without the GPU fields (and, for history, without `exit_reason`). If `blimits` rejects `-a` together with `-w`, it is run as `blimits -w -u alice`, which lists only limits that jobs currently use. "No unfinished job found", "No job found" and "No resource usage found" are empty results, not errors.
 

@@ -392,6 +392,7 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
         last_success=now(),
         capabilities=["jobs", "nodes", "history"],
         capabilities_seen=["jobs", "nodes", "history"],
+        history_window_seconds=86400,
         warnings=[{"code": "partitions_unavailable"}],
         cluster_state="degraded",
     )
@@ -403,6 +404,7 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
     assert saved["last_success"] is None
     assert saved["capabilities"] == []
     assert saved["capabilities_seen"] == []
+    assert saved["history_window_seconds"] is None
     assert saved["warnings"] == []
     assert saved["cluster_state"] == "unknown"
 
@@ -415,6 +417,7 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
         last_success=now(),
         capabilities=["jobs"],
         capabilities_seen=["jobs", "history"],
+        history_window_seconds=86400,
         warnings=[{"code": "partitions_unavailable"}],
         cluster_state="degraded",
     )
@@ -432,6 +435,7 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
         assert saved["enabled"] is enabled
         assert saved["capabilities"] == ["jobs"]
         assert saved["capabilities_seen"] == ["jobs", "history"]
+        assert saved["history_window_seconds"] == 86400
         assert saved["last_success"] is None
         assert saved["warnings"] == source["warnings"]
         assert saved["cluster_state"] == "degraded"

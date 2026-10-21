@@ -418,6 +418,12 @@ def test_demo_shows_source_and_service_gaps() -> None:
     data = source["data"]
     assert data["unobserved_from"] < data["failures_checked_from"] < data["unobserved_to"]
     assert data["unobserved_to"] == source["at"]
+    assert any(
+        row["type"] == "source.recovered"
+        and row["source_id"] == source["source_id"]
+        and row["at"] == source["at"]
+        for row in rows
+    )
     assert service["data"]["from"] < service["data"]["to"] == service["at"]
     assert service["source_id"] is None
     for row in rows:

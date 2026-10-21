@@ -89,13 +89,12 @@ def source_gap(
     if service_gap:
         offline = job_time(service_gap.get("from"))
         resumed = job_time(service_gap.get("to"))
-        attempt = job_time(source.get("last_attempt")) or at
         slack = timedelta(seconds=interval)
         if (
             offline
             and resumed
             and datetime.fromisoformat(offline) - slack <= start
-            and datetime.fromisoformat(resumed) + slack >= datetime.fromisoformat(attempt)
+            and (end - datetime.fromisoformat(resumed)).total_seconds() <= threshold
         ):
             return []
     return [

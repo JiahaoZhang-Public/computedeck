@@ -461,6 +461,7 @@ def events() -> list[dict[str, Any]]:
         }
 
     rows: list[tuple[str, str | None, int, dict[str, Any]]] = [
+        ("source.recovered", "example:cluster-d-alice", 10, {}),
         (
             "source.gap",
             "example:cluster-d-alice",

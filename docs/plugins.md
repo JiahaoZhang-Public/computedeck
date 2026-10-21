@@ -159,7 +159,7 @@ map to one `job.failed`, and all other outcomes to one `job.ended`. A handler th
 legacy rows remain readable and deliverable; cursors still use event IDs. `PLUGIN_API`
 and `WEB_API` remain 1.
 
-Gap types are listed separately in `events.GAP_TYPES`, outside `sdk.EVENT_TYPES`.
+The gap types `service.gap` and `source.gap` are outside `sdk.EVENT_TYPES`.
 Subscribe to them by name; wildcard handlers do not receive them, and Notify refuses
 them as rule types. Their `at` is the observation time at the end of the gap.
 `source.gap` describes the full span between successful observations, not job end times.
@@ -173,8 +173,11 @@ scheduling slack even for daily collections. Without history or with an unknown
 window, it is `max(2 * interval, 1 hour)`. A short known window never lowers this
 floor. Only job sources produce source gaps.
 The service records its heartbeat at most once a minute and reports a gap after more
-than five minutes, on startup or a later scheduling tick. Source gaps already covered
-by the most recent service gap (within one collection interval) are suppressed.
+than five minutes, on startup or a later scheduling tick. Source gaps are suppressed
+when the most recent service gap starts within one collection interval of the last
+successful observation (or earlier), and the time from service resume to successful
+collection is no longer than the source-gap threshold. This includes failed attempts
+and retries shortly after waking up.
 First collections have no source gap; repeated observations use the same deduplication
 key. Lookbacks and the Failed tab's 24-hour meaning are unchanged.
 

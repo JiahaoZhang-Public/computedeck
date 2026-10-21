@@ -480,6 +480,7 @@ def create_app(
                 last_success=None,
                 capabilities=[],
                 capabilities_seen=[],
+                history_window_seconds=None,
                 warnings=[],
                 cluster_state="unknown",
             )

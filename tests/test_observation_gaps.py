@@ -12,6 +12,7 @@ from computedeck import collector as collector_module
 from computedeck import events, sdk
 from computedeck.collector import Collector
 from computedeck.drivers.base import Batch
+from computedeck.errors import SourceError
 from computedeck.plugins import Runtime
 from computedeck.store import Store
 from computedeck.tools import notify
@@ -150,7 +151,6 @@ def test_heartbeat_startup_tick_restart_and_write_frequency(
     clock += timedelta(seconds=1)
     collector._schedule()
     assert store._meta("service:alive_at") == clock.isoformat()
-    previous = clock.isoformat()
     clock += timedelta(seconds=300)
     collector._schedule()
     assert store.recent_events() == []  # strictly longer than five minutes
@@ -178,6 +178,27 @@ def test_heartbeat_backwards_clock_rewrites_without_a_gap(store: Store) -> None:
     earlier = (AT - timedelta(seconds=30)).isoformat()
     assert store.record_heartbeat(earlier) is None
     assert store._meta("service:alive_at") == earlier
+    assert store.service_gap() is None
+    assert store.recent_events() == []
+
+
+@pytest.mark.parametrize("previous", ["not a time", "2026-10-19T06:00:00", 12])
+def test_schedule_repairs_invalid_heartbeat_and_enqueues_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    store: Store,
+    tmp_path: Path,
+    add_source: Callable[..., dict[str, Any]],
+    previous: Any,
+) -> None:
+    source = add_source(next_due_at=None)
+    store._set_meta("service:alive_at", previous)
+    collector = Collector(runtime(store, tmp_path))
+    monkeypatch.setattr(collector_module, "now", lambda: AT.isoformat())
+    enqueued = []
+    monkeypatch.setattr(collector, "enqueue", lambda source_id: enqueued.append(source_id))
+    collector._schedule()
+    assert enqueued == [source["id"]]
+    assert store._meta("service:alive_at") == AT.isoformat()
     assert store.service_gap() is None
     assert store.recent_events() == []
 
@@ -231,6 +252,64 @@ async def test_collector_suppresses_only_source_gaps_covered_by_service_gap(
     assert store.source(source["id"])["history_window_seconds"] == 86400
     await collector.collect(source["id"])
     assert [row["type"] for row in store.recent_events()] == kinds
+
+
+async def test_collector_retry_after_wake_keeps_only_the_service_gap(
+    monkeypatch: pytest.MonkeyPatch,
+    store: Store,
+    tmp_path: Path,
+    add_source: Callable[..., dict[str, Any]],
+) -> None:
+    source = add_source(last_success=(AT - timedelta(hours=60, minutes=3)).isoformat())
+    collector = Collector(runtime(store, tmp_path))
+    clock = AT
+    monkeypatch.setattr(collector_module, "now", lambda: clock.isoformat())
+    monkeypatch.setattr(events, "now", lambda: clock.isoformat())
+    store.record_heartbeat((AT - timedelta(hours=60)).isoformat())
+    collector._heartbeat()
+
+    async def fail(_: dict[str, Any]) -> Batch:
+        nonlocal clock
+        clock += timedelta(seconds=30)
+        raise SourceError("ssh_failed", "connection timed out")
+
+    monkeypatch.setattr(collector, "_batch", fail)
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["status"] == "error"
+    # Keep the service awake while waiting one collection interval after the failure.
+    for _ in range(source["interval_minutes"]):
+        clock += timedelta(minutes=1)
+        collector._heartbeat()
+
+    async def succeed(_: dict[str, Any]) -> Batch:
+        return Batch(jobs=[], capabilities=["jobs", "history"], history_window_seconds=86400)
+
+    monkeypatch.setattr(collector, "_batch", succeed)
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["status"] == "ready"
+    kinds = [row["type"] for row in store.recent_events()]
+    assert kinds.count("service.gap") == 1
+    assert "source.gap" not in kinds
+    assert kinds.count("source.failed") == kinds.count("source.recovered") == 1
+
+
+@pytest.mark.parametrize("window,threshold", [(86400, 83400), (None, 3600)])
+@pytest.mark.parametrize("extra", [-1, 0, 1])
+def test_service_gap_suppression_uses_remaining_source_gap_threshold(
+    monkeypatch: pytest.MonkeyPatch, window: int | None, threshold: int, extra: int
+) -> None:
+    monkeypatch.setattr(events, "now", lambda: AT.isoformat())
+    rows = events.collected(
+        SOURCE,
+        {},
+        Batch(capabilities=["jobs", "history"], history_window_seconds=window),
+        first=False,
+        service_gap={
+            "from": SOURCE["last_success"],
+            "to": (AT - timedelta(seconds=threshold + extra)).isoformat(),
+        },
+    )
+    assert [row["type"] for row in rows] == (["source.gap"] if extra > 0 else [])
 
 
 def test_old_service_gap_does_not_hide_later_source_outage(monkeypatch: pytest.MonkeyPatch) -> None:

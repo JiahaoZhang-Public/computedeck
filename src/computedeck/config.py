@@ -225,6 +225,7 @@ def apply(store: Store, text: str) -> dict[str, int]:
                     failures=0,
                     capabilities=[],
                     capabilities_seen=[],
+                    history_window_seconds=None,
                     warnings=[],
                     cluster_state="unknown",
                 )
