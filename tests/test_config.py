@@ -227,7 +227,20 @@ def test_reimport_preserves_runtime_state_and_deletes_nothing(store: Store) -> N
     job = {"id": "cluster-a:1", "source_id": "cluster-a-alice", "state": "RUNNING"}
     store.save_snapshot("cluster-a-alice", {"jobs": [job]})
     [gpu1] = [row for row in store.manual_instances() if row["external_id"] == "gpu1"]
-    gpu1.update(ssh_status="reachable", observed_at=collected_at, last_probe_attempt=collected_at)
+    measurements = {
+        "ssh_status": "reachable",
+        "observed_at": collected_at,
+        "last_probe_attempt": collected_at,
+        "ssh_error": None,
+        "gpu_allocated": 1,
+        "gpu_observed_count": 2,
+        "probe_warnings": [],
+        "metrics_scope": "host_visible",
+        "gpu_utilization": 30,
+        "cpu_utilization": 20,
+        "memory_utilization": 40,
+    }
+    gpu1.update(measurements)
     store.save_instance(gpu1)
 
     changed = """
@@ -268,6 +281,7 @@ gpu_count = 4
     assert gpu1["ssh_status"] == "reachable"
     assert gpu1["observed_at"] == collected_at
     assert gpu1["last_probe_attempt"] == collected_at
+    assert {key: gpu1[key] for key in measurements} == measurements
     assert store.settings()["language"] == "zh-CN"
 
 

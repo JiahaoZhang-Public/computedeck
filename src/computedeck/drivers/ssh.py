@@ -27,6 +27,28 @@ class SSHError(RuntimeError):
     """The remote command or connection failed. The message is untranslated remote text."""
 
 
+def failure_cause(error: BaseException) -> str:
+    """Classify OpenSSH diagnostics without guessing a cause for unknown failures."""
+    text = str(error).lower()
+    if "permission denied" in text or "authentication failed" in text:
+        return "authentication"
+    if "host key" in text or "remote host identification has changed" in text:
+        return "host_key"
+    if isinstance(error, TimeoutError) or "timed out" in text or "timeout" in text:
+        return "timeout"
+    if (
+        "no route" in text
+        or "network is unreachable" in text
+        or "could not resolve hostname" in text
+    ):
+        return "network"
+    if "connection refused" in text:
+        return "refused"
+    if "connection closed" in text:
+        return "closed"
+    return "unknown"
+
+
 def _lock(destination: str) -> asyncio.Lock:
     return _LOCKS.setdefault(destination, asyncio.Lock())
 

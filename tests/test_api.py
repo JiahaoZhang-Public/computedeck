@@ -1851,3 +1851,54 @@ def test_attention_checks_the_viewers_fingerprint(
             assert store.attention_state() == {}
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize(
+    "change,kept",
+    [
+        ({"name": "Renamed box"}, True),
+        ({"hourly_cost": 0.5}, True),
+        ({"monitoring": True}, True),
+        ({"monitoring": False}, True),
+        ({"host": "192.0.2.99"}, False),
+        ({"port": 3333}, False),
+        ({"username": "bob"}, False),
+        ({"identity_file": "~/.ssh/other"}, False),
+        ({"existing_alias": True}, False),
+    ],
+)
+def test_manual_edits_keep_checks_only_for_the_same_connection(client, data_dir, change, kept):
+    from computedeck.store import now
+
+    instance = post(client, "/api/instances", INSTANCE).json()
+    readings = {
+        "ssh_status": "error",
+        "ssh_error": {"code": "ssh_authentication"},
+        "observed_at": now(),
+        "last_probe_attempt": now(),
+        "gpu_allocated": 1,
+        "gpu_observed_count": 2,
+        "metrics_scope": "host_visible",
+        "gpu_utilization": 25,
+        "cpu_utilization": 30,
+        "memory_utilization": 40,
+        "probe_warnings": [{"code": "gpu_processes_unavailable"}],
+    }
+    store = Store(data_dir / "computedeck.sqlite")
+    store.save_instance({**instance, **readings})
+    response = client.put(
+        f"/api/instances/{instance['id']}", json={**INSTANCE, **change}, headers=HEADERS
+    )
+    assert response.status_code == 200
+    saved = response.json()
+    for key, value in change.items():
+        assert saved[key] == value
+    if kept:
+        assert {key: saved[key] for key in readings} == readings
+    else:
+        assert saved["ssh_status"] == "unverified"
+        assert saved["observed_at"] is None
+        assert saved["gpu_utilization"] is None
+        assert "ssh_error" not in saved
+        assert "last_probe_attempt" not in saved
+        assert "gpu_allocated" not in saved

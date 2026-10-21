@@ -11,6 +11,7 @@ from typing import Any
 
 from .drivers import ssh, ssh_host
 from .drivers.base import now
+from .errors import SourceError
 from .ssh_config import validate_alias, validate_endpoint
 
 
@@ -39,7 +40,13 @@ async def probe_instance(instance: dict[str, Any]) -> dict[str, Any]:
         if instance.get("identity_file"):
             identity = await asyncio.to_thread(os.path.expanduser, instance["identity_file"])
             options.extend(["-i", identity])
-    result = parse_probe(await ssh.run(destination, ssh_host.probe_command(), options))
+    try:
+        output = await ssh.run(destination, ssh_host.probe_command(), options)
+    except (ssh.SSHError, TimeoutError, OSError) as error:
+        cause = ssh.failure_cause(error)
+        code = "ssh_failed" if cause == "unknown" else f"ssh_{cause}"
+        raise SourceError(code, str(error)[:300] or None) from None
+    result = parse_probe(output)
     # An absent GPU utility says nothing about inventory obtained from the provider.
     for key in ("gpu_count", "gpu_type"):
         if result[key] is None:

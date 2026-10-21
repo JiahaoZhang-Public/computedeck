@@ -20,6 +20,7 @@ from .records import (
     SettingsInput,
     SourceInput,
     instance_record,
+    keep_instance_probe,
     slug,
     source_record,
 )
@@ -49,7 +50,6 @@ _INSTANCE_KEYS = (
     "currency",
     "monitoring",
 )
-_ENDPOINT_KEYS = ("host", "port", "username", "identity_file", "existing_alias")
 
 
 class ConfigError(ValueError):
@@ -244,11 +244,7 @@ def apply(store: Store, text: str) -> dict[str, int]:
         store.save_source(record)
     for instance in instances:
         old = next((row for row in store.manual_instances() if row["id"] == instance["id"]), None)
-        if old and all(old.get(key) == instance.get(key) for key in _ENDPOINT_KEYS):
-            # Keep the latest observations of an endpoint that did not change.
-            for key in ("state", "ssh_status", "observed_at", "last_probe_attempt"):
-                if key in old:
-                    instance[key] = old[key]
+        keep_instance_probe(instance, old)
         store.save_instance(instance)
     store.save_settings(parsed["settings"].model_dump(exclude_unset=True))
     counts = {"sources": len(sources), "instances": len(instances), "nodes": len(parsed["nodes"])}

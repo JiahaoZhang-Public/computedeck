@@ -306,6 +306,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         username = validate_username(str(snapshot.get("user") or ""))
     except ValueError:
         username = ""
+    observed = now()
     instance = {
         "id": f"{source['cluster_id']}:{alias}",
         "source_id": source["id"],
@@ -324,7 +325,8 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "identity_file": None,
         "hourly_cost": None,
         "currency": "USD",
-        "observed_at": now(),
+        "observed_at": observed,
+        "last_probe_attempt": observed,
         "ssh_status": "reachable",
     }
     return Batch(instances=[instance], capabilities=capabilities, warnings=warnings)

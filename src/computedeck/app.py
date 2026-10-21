@@ -39,6 +39,7 @@ from .records import (
     SourceUpdate,
     instance_id,
     instance_record,
+    keep_instance_probe,
     slug,
     source_record,
 )
@@ -633,6 +634,7 @@ def create_app(
     def save_manual(body: InstanceInput, existing: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
             instance = instance_record(body)
+            keep_instance_probe(instance, existing)
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
         if existing and existing["id"] != instance["id"]:

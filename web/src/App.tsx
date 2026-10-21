@@ -293,6 +293,9 @@ export default function App() {
   const lastAuxLoad = useRef(-Infinity);
   const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
   const [followUntil, setFollowUntil] = useState(0);
+  const followSources = useRef<string[] | null>(null);
+  const latestCollecting = useRef<string[]>([]);
+  const followLoaded = useRef(false);
   const notify = useCallback(
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
     [],
@@ -364,8 +367,10 @@ export default function App() {
       ])
         .then(([next, status, toolbox, machines]) => {
           if (requestId !== loadId.current) return;
+          followLoaded.current = true;
           if (!('unchanged' in next)) {
             dashboardToken.current = next.token;
+            latestCollecting.current = next.collecting ?? [];
             setData(next);
           }
           if (!dashboardOnly) {
@@ -405,7 +410,14 @@ export default function App() {
     [load],
   );
   const poll = useCallback(() => {
-    if (followUntil && Date.now() >= followUntil) {
+    if (
+      followUntil &&
+      (Date.now() >= followUntil ||
+        (followLoaded.current &&
+          !latestCollecting.current.some(
+            (id) => followSources.current === null || followSources.current.includes(id),
+          )))
+    ) {
       setFollowUntil(0);
       return;
     }
@@ -419,7 +431,14 @@ export default function App() {
     });
   }, [load, followUntil]);
   useVisibleInterval(poll, followUntil ? 1000 : 10000);
-  const followCollection = useCallback(() => setFollowUntil(Date.now() + 60000), []);
+  const followCollection = useCallback((sourceIds: string[] | null = null) => {
+    followSources.current = sourceIds;
+    followLoaded.current = false;
+    // A poll started before this action cannot tell us whether its collection finished.
+    loadId.current += 1;
+    activePoll.current = null;
+    setFollowUntil(Date.now() + 60000);
+  }, []);
   const [, setClock] = useState(Date.now);
   const tickClock = useCallback(() => setClock(Date.now()), []);
   useVisibleInterval(tickClock, 30000);
@@ -456,7 +475,7 @@ export default function App() {
           '/refresh',
           sourceId ? { source_id: sourceId } : {},
         );
-        followCollection();
+        followCollection(sourceId ? [sourceId] : null);
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
     } catch (reason) {
@@ -468,12 +487,8 @@ export default function App() {
   async function mutate<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
     setBusy(true);
     try {
-      const followsCollection =
-        path.endsWith('/probe') ||
-        (method === 'POST' && (path === '/sources' || path === '/instances'));
       const result = await api<T>(path, body, method);
-      if (followsCollection) followCollection();
-      else await load();
+      await load();
       return result;
     } finally {
       setBusy(false);
@@ -511,7 +526,7 @@ export default function App() {
   async function collect(source: Source) {
     try {
       await api('/refresh', { source_id: source.id });
-      followCollection();
+      followCollection([source.id]);
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
       );
@@ -943,6 +958,14 @@ export default function App() {
           busy={refreshing || needsToken}
           refresh={refresh}
           close={() => setHealthOpen(false)}
+          addSource={
+            demo
+              ? undefined
+              : () => {
+                  setHealthOpen(false);
+                  configure();
+                }
+          }
         />
       )}
       {modal && (
@@ -1030,7 +1053,7 @@ export default function App() {
                   );
                   if (saved.enabled) {
                     await api('/refresh', { source_id: saved.id });
-                    followCollection();
+                    followCollection([saved.id]);
                   }
                   await load();
                   if (modal.source) notify(t('toast.sourceSaved'));

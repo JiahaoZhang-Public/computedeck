@@ -985,3 +985,106 @@ def test_attention_cleanup_discards_unreadable_state(collector: Collector, store
     assert store.db.execute("SELECT * FROM attention_state").fetchall() == []
     assert store.unreadable_rows() == {"sources": 1}
     assert [item["key"] for item in collector.attention_items()] == ["unreadable_rows:sources"]
+
+
+@pytest.mark.parametrize(
+    "code,retries",
+    [
+        ("ssh_timeout", 1),
+        ("ssh_closed", 1),
+        ("ssh_authentication", 0),
+        ("ssh_host_key", 0),
+        ("ssh_refused", 0),
+        ("ssh_network", 0),
+        ("ssh_failed", 0),
+    ],
+)
+@pytest.mark.parametrize("recovers", [False, True])
+async def test_machine_retry_is_bounded_and_cause_specific(
+    monkeypatch, collector, store, code, retries, recovers
+):
+    instance = manual_instance(store)
+    attempts = []
+    delays = []
+
+    async def probe(row):
+        attempts.append(row)
+        if len(attempts) == 1 or not recovers:
+            raise SourceError(code)
+        return {"ssh_status": "reachable"}
+
+    async def delay(seconds):
+        delays.append(seconds)
+        # A transient first failure is never committed or turned into attention.
+        assert store.manual_instances()[0]["ssh_status"] == "unverified"
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", delay)
+    if retries and recovers:
+        result = await collector.probe(instance["id"])
+        assert result["ssh_status"] == "reachable"
+        assert result["ssh_error"] is None
+    else:
+        with pytest.raises(SourceError, match=code):
+            await collector.probe(instance["id"])
+        assert store.manual_instances()[0]["ssh_error"] == {"code": code}
+    assert len(attempts) == 1 + retries
+    assert delays == [2] * retries
+    assert not collector.probes
+
+
+async def test_machine_checks_have_two_slots_independent_of_collections(
+    monkeypatch, collector, runtime, store
+):
+    original = manual_instance(store)
+    ids = [original["id"]]
+    for index in range(2):
+        row = {**original, "id": f"manual:lab-box-{index}"}
+        store.save_instance(row)
+        ids.append(row["id"])
+    runtime.semaphore = asyncio.Semaphore(0)
+    entered = []
+    two_running = asyncio.Event()
+    release = asyncio.Event()
+
+    async def probe(row):
+        entered.append(row["id"])
+        if len(entered) == 2:
+            two_running.set()
+        await release.wait()
+        return {"ssh_status": "reachable"}
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    tasks = [asyncio.create_task(collector.probe(key)) for key in ids]
+    try:
+        await asyncio.wait_for(two_running.wait(), 1)
+        assert len(entered) == 2
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), 1)
+        assert len(entered) == 3
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_machine_endpoint_changed_during_retry_is_not_checked_again(
+    monkeypatch, collector, store
+):
+    instance = manual_instance(store)
+    calls = []
+
+    async def probe(row):
+        calls.append(row)
+        raise SourceError("ssh_closed")
+
+    async def delay(seconds):
+        store.save_instance({**instance, "host": "192.0.2.99"})
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", delay)
+    with pytest.raises(ProbeConflict, match="endpoint_changed"):
+        await collector.probe(instance["id"])
+    assert len(calls) == 1
+    assert store.manual_instances()[0]["ssh_status"] == "unverified"
+    assert not collector.probes

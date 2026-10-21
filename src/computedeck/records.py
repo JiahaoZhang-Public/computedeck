@@ -136,3 +136,28 @@ def instance_record(body: InstanceInput) -> dict[str, Any]:
         "cpu_utilization": None,
         "memory_utilization": None,
     }
+
+
+def keep_instance_probe(record: dict[str, Any], old: dict[str, Any] | None) -> None:
+    """Keep a manual machine's measurements only while its connection stays the same."""
+    if old is None or any(
+        old.get(key) != record.get(key)
+        for key in ("host", "port", "username", "identity_file", "existing_alias")
+    ):
+        return
+    for key in (
+        "state",
+        "ssh_status",
+        "ssh_error",
+        "observed_at",
+        "last_probe_attempt",
+        "gpu_allocated",
+        "gpu_observed_count",
+        "probe_warnings",
+        "metrics_scope",
+        "gpu_utilization",
+        "cpu_utilization",
+        "memory_utilization",
+    ):
+        if key in old:
+            record[key] = old[key]

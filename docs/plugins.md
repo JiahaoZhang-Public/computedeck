@@ -796,6 +796,21 @@ trusted Python code: this storage separation is not an operating-system sandbox.
 Core database backups do not include the separate plugin directories. Include each plugin's
 files and SQLite database in your own backups while its database connections are closed.
 
+## Machine check results
+
+Manual instance edits and config imports retain check results and measurements for an
+unchanged connection (host, port, username, identity file and alias mode). Changed
+connections start unverified. Provider listing carryover keeps its existing semantics.
+The SSH source driver also sets `last_probe_attempt` on a successful collection; clients
+use it, rather than `observed_at`, to decide whether an SSH check is recent.
+
+Machine check failures return HTTP 502 and store a structured `ssh_error`. Known causes
+use `ssh_authentication`, `ssh_host_key`, `ssh_network`, `ssh_refused`, `ssh_timeout` or
+`ssh_closed`; unclassified SSH failures use `ssh_failed`. The optional `detail` remains
+the remote diagnostic. Checks use two slots independent of source collection and retry
+only `ssh_timeout` and `ssh_closed` once after two seconds. Only the final result is saved.
+No API or database version changes are required.
+
 ## Dashboard polling
 
 Every full `GET /api/dashboard` response includes `token`, a short SHA-256 of the serialized
@@ -820,7 +835,10 @@ not wait for visibility. Hidden GETs to the same path share one request on retur
 with a separate response body for each caller; writes remain separate.
 
 Visible dashboard polls run every ten seconds, or every second for up to sixty
-seconds after the viewer's Refresh, Probe or add action. Health, toolbox and
+seconds after Refresh or starting collection for an added source. Fast polling stops
+when the targeted sources leave `collecting`; unrelated collections do not prolong a
+source-specific follow-up. Probe and manual-add responses complete before one reload.
+The paired visibility and focus events on return trigger only one refresh. Health, toolbox and
 collection-machine status keep their ten-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
 polls every fifteen seconds and when the dashboard token changes. Relative ages

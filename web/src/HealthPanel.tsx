@@ -14,12 +14,14 @@ export function HealthPanel({
   busy,
   refresh,
   close,
+  addSource,
 }: {
   state: ReturnType<typeof computeHealth>;
   data: Dashboard | null;
   busy: boolean;
   refresh: (sourceId?: string) => Promise<void>;
   close: () => void;
+  addSource?: () => void;
 }) {
   const ref = useDialogFocus();
   useEffect(() => {
@@ -128,9 +130,15 @@ export function HealthPanel({
           </div>
         ))}
         {!state.rows.length && <p>{t('health.noSources')}</p>}
-        <button className="button" disabled={busy} onClick={() => void refresh()}>
-          {t('health.collectAll')}
-        </button>
+        {state.rows.length ? (
+          <button className="button" disabled={busy} onClick={() => void refresh()}>
+            {t('health.collectAll')}
+          </button>
+        ) : addSource ? (
+          <button className="button" onClick={addSource}>
+            {t('source.add')}
+          </button>
+        ) : null}
       </section>
     </div>
   );

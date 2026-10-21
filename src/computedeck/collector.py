@@ -56,6 +56,7 @@ class Collector:
         self.contexts = contexts or []
         self.pending: set[str] = set()
         self.probes: set[str] = set()
+        self.probe_semaphore = asyncio.Semaphore(2)
         self.tasks: set[asyncio.Task[Any]] = set()
 
     @property
@@ -288,10 +289,24 @@ class Collector:
             return current
 
         try:
-            async with self.runtime.semaphore:
-                result = measured(
-                    instance_id, await asyncio.wait_for(probe_instance(instance), timeout=45)
-                )
+            async with self.probe_semaphore:
+                for retry in range(2):
+                    attempt = now()
+                    try:
+                        result = measured(
+                            instance_id,
+                            await asyncio.wait_for(probe_instance(instance), timeout=45),
+                        )
+                        break
+                    except SourceError as error:
+                        if retry or error.code not in {"ssh_timeout", "ssh_closed"}:
+                            raise
+                        await asyncio.sleep(2)
+                        current = self._instance(instance_id)
+                        if not current or any(
+                            current.get(key) != value for key, value in endpoint.items()
+                        ):
+                            raise ProbeConflict("endpoint_changed") from None
             current = persist({**result, "ssh_error": None})
             self.store.record_history()
         except ProbeConflict:

@@ -433,6 +433,9 @@ describe('tool lifecycle', () => {
     expect(request).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.red-text')).toBeNull();
     await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledTimes(3);
     expect(container.querySelector('.red-text')).toBeNull();
     failing = false;
@@ -994,6 +997,9 @@ describe('visible dashboard polling', () => {
     );
     request.mockClear();
     await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
     await render(null);
     request.mockClear();
@@ -1004,51 +1010,37 @@ describe('visible dashboard polling', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it.each(['refresh', 'probe', 'add'] as const)(
-    'follows the user %s every second for sixty seconds, with auxiliaries only every ten',
-    async (action) => {
-      const data = { ...serverDemo(), mode: 'live' as const, token: 'live-token' };
-      mockDashboard(data);
-      if (action !== 'refresh') window.history.replaceState(null, '', '/#/cloud');
-      await render(<App />);
-      request.mockClear();
-      if (action === 'refresh') await click(`button[aria-label="${t('topbar.refresh')}"]`);
-      if (action === 'probe') {
-        await click('tr.clickable');
-        await click('.drawer .button.primary');
-        expect(request.mock.calls.some(([path]) => path.endsWith('/probe'))).toBe(true);
-        expect(container.querySelector('.drawer')?.textContent).toContain('Probed machine');
-      }
-      if (action === 'add') {
-        await click(`button[aria-label="${t('cloud.add')}"]`);
-        await act(async () => {
-          container
-            .querySelector('form')!
-            .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        });
-        expect(request.mock.calls.some(([path]) => path === '/instances')).toBe(true);
-      }
-      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
-      request.mockClear();
-      await act(async () => vi.advanceTimersByTimeAsync(999));
-      expect(request).not.toHaveBeenCalled();
-      await act(async () => vi.advanceTimersByTimeAsync(1));
-      expect(request.mock.calls.map(([path]) => path)).toEqual([
-        '/dashboard?demo=false&since=live-token',
-      ]);
-      request.mockClear();
-      await act(async () => vi.advanceTimersByTimeAsync(9000));
-      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(9);
-      for (const path of ['/health', '/toolbox', '/nodes?demo=false'])
-        expect(request.mock.calls.filter(([each]) => each === path)).toHaveLength(1);
-      await act(async () => vi.advanceTimersByTimeAsync(50000));
-      request.mockClear();
-      await act(async () => vi.advanceTimersByTimeAsync(9999));
-      expect(request).not.toHaveBeenCalled();
-      await act(async () => vi.advanceTimersByTimeAsync(1));
-      expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
-    },
-  );
+  it('follows Refresh every second for sixty seconds while collecting, with auxiliaries only every ten', async () => {
+    const data = {
+      ...serverDemo(),
+      mode: 'live' as const,
+      token: 'live-token',
+      collecting: ['source-a'],
+    };
+    mockDashboard(data);
+    await render(<App />);
+    request.mockClear();
+    await click(`button[aria-label="${t('topbar.refresh')}"]`);
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(999));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      '/dashboard?demo=false&since=live-token',
+    ]);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(9000));
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(9);
+    for (const path of ['/health', '/toolbox', '/nodes?demo=false'])
+      expect(request.mock.calls.filter(([each]) => each === path)).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(50000));
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(9999));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+  });
 
   it.each(['refresh', 'probe', 'add'] as const)(
     'does not start following after a failed %s',
@@ -1079,7 +1071,7 @@ describe('visible dashboard polling', () => {
   );
 
   it('lets a slow follow-up finish without piling up requests or discarding its data', async () => {
-    const data = { ...dashboard('Cluster A'), token: 'live-token' };
+    const data = { ...dashboard('Cluster A'), token: 'live-token', collecting: ['source-a'] };
     const slow = deferred<Dashboard>();
     let pending = false;
     request.mockImplementation(async (path) => {
@@ -1095,7 +1087,13 @@ describe('visible dashboard polling', () => {
     request.mockClear();
     await act(async () => vi.advanceTimersByTimeAsync(5000));
     expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
-    await act(async () => slow.resolve({ ...dashboard('Updated cluster'), token: 'next-token' }));
+    await act(async () =>
+      slow.resolve({
+        ...dashboard('Updated cluster'),
+        token: 'next-token',
+        collecting: ['source-a'],
+      }),
+    );
     expect(container.textContent).toContain('Updated cluster');
     request.mockClear();
     await act(async () => vi.advanceTimersByTimeAsync(1000));
@@ -1105,8 +1103,12 @@ describe('visible dashboard polling', () => {
   it.each([1000, 10000])(
     'supersedes a hung poll after ten seconds at the %i ms cadence and ignores its late reply',
     async (cadence) => {
-      const original = { ...dashboard('Cluster A'), token: 'live-token' };
-      const newer = { ...dashboard('Updated cluster'), token: 'next-token' };
+      const original = { ...dashboard('Cluster A'), token: 'live-token', collecting: ['source-a'] };
+      const newer = {
+        ...dashboard('Updated cluster'),
+        token: 'next-token',
+        collecting: ['source-a'],
+      };
       const hung = deferred<Dashboard>();
       let reply: Dashboard | Promise<Dashboard> = original;
       request.mockImplementation(async (path) => {
@@ -1185,6 +1187,9 @@ describe('visible dashboard polling', () => {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
     expect(request).toHaveBeenCalledWith('/plugins/chat/messages?channel=general&after=0');
     request.mockClear();
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledWith('/plugins/chat/messages?channel=general&after=0');
   });
@@ -1976,3 +1981,164 @@ it.each(['en', 'zh-CN'] as const)(
     expect(window.location.hash).toBe('#/notify');
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'offers Add source in an empty health panel in %s',
+  async (locale) => {
+    setLocale(locale);
+    const data = { ...serverDemo(), sources: [] };
+    const refresh = vi.fn();
+    const close = vi.fn();
+    const addSource = vi.fn();
+    await render(
+      <HealthPanel
+        state={computeHealth(data, null, null, false, false)}
+        data={data}
+        busy={false}
+        refresh={refresh}
+        close={close}
+        addSource={addSource}
+      />,
+    );
+    expect(container.textContent).toContain(t('health.noSources'));
+    expect(container.textContent).not.toContain(t('health.collectAll'));
+    const button = container.querySelector<HTMLButtonElement>('.health-panel > button.button')!;
+    expect(button.textContent).toBe(t('source.add'));
+    await act(async () => button.click());
+    expect(addSource).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['probe', 'add'] as const)(
+  'reloads after a completed %s without sixty seconds of polling',
+  async (action) => {
+    const data = { ...serverDemo(), mode: 'live' as const, token: 'live-token' };
+    window.history.replaceState(null, '', '/#/cloud');
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path.endsWith('/probe')) return { ...data.instances[0], name: 'Probed machine' };
+      if (path === '/instances') return data.instances[0];
+      return [];
+    });
+    await render(<App />);
+    request.mockClear();
+    if (action === 'probe') {
+      await click('tr.clickable');
+      await click('.drawer .button.primary');
+      expect(request.mock.calls.some(([path]) => path.endsWith('/probe'))).toBe(true);
+      expect(container.querySelector('.drawer')?.textContent).toContain('Probed machine');
+    } else {
+      await click(`button[aria-label="${t('cloud.add')}"]`);
+      await act(async () => {
+        container
+          .querySelector('form')!
+          .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      expect(request.mock.calls.some(([path]) => path === '/instances')).toBe(true);
+    }
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(9999));
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(0);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+  },
+);
+
+it.each([false, true])('stops following the completed collection (scoped: %s)', async (scoped) => {
+  const data = { ...serverDemo(), mode: 'live' as const, token: 'live-token' };
+  const target = data.sources[0].id;
+  let collecting: string[] = [];
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard'))
+      return { ...data, collecting, token: collecting.join(',') || 'done' };
+    if (path === '/refresh') {
+      collecting = [target, 'unrelated-source'];
+      return { status: 'started' };
+    }
+    return [];
+  });
+  await render(<App />);
+  if (scoped) {
+    await click('.health-pill');
+    const retry = container.querySelector('.health-row button.link')!;
+    await act(async () => (retry as HTMLButtonElement).click());
+    expect(request).toHaveBeenCalledWith('/refresh', { source_id: target });
+  } else {
+    await click(`button[aria-label="${t('topbar.refresh')}"]`);
+  }
+  request.mockClear();
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(3);
+  collecting = scoped ? ['unrelated-source'] : [];
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  request.mockClear();
+  await act(async () => vi.advanceTimersByTimeAsync(9999));
+  expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(0);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+});
+
+it('does not stop a new follow-up using a dashboard requested before Refresh', async () => {
+  const original = { ...serverDemo(), mode: 'live' as const, token: 'initial', collecting: [] };
+  const old = deferred<Dashboard>();
+  const started = deferred<Dashboard>();
+  let reply: Dashboard | Promise<Dashboard> = original;
+  let reads = 0;
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) {
+      reads += 1;
+      return reply;
+    }
+    if (path === '/refresh') return { status: 'started' };
+    return [];
+  });
+  await render(<App />);
+  const initialReads = reads;
+  reply = old.promise;
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(reads).toBe(initialReads + 1);
+  reply = started.promise;
+  await click(`button[aria-label="${t('topbar.refresh')}"]`);
+  expect(reads).toBe(initialReads + 2);
+  await act(async () => old.resolve(original));
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(reads).toBe(initialReads + 2);
+  reply = { ...original, token: 'pending', collecting: ['source-a'] };
+  await act(async () => started.resolve(reply as Dashboard));
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(reads).toBe(initialReads + 3);
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'opens the add-source dialog directly from the empty health panel in %s',
+  async (locale) => {
+    setLocale(locale);
+    const data = { ...dashboard('Cluster A'), sources: [] };
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language: locale };
+      return [];
+    });
+    await render(<App />);
+    await click('.health-pill');
+    expect(container.querySelector('.health-panel')).not.toBeNull();
+    await click('.health-panel > button.button');
+    expect(container.querySelector('.health-panel')).toBeNull();
+    expect(container.querySelector('#modal-title')?.textContent).toBe(t('source.add'));
+    expect(request.mock.calls.some(([path]) => path === '/refresh')).toBe(false);
+  },
+);
+
+it('hides the empty health panel add action in example mode', async () => {
+  window.history.replaceState(null, '', '/?demo=true');
+  const data = { ...serverDemo(), sources: [] };
+  request.mockImplementation(async (path) => (path.startsWith('/dashboard') ? data : []));
+  await render(<App />);
+  await click('.health-pill');
+  const panel = container.querySelector('.health-panel')!;
+  expect(panel.textContent).toContain(t('health.noSources'));
+  expect(panel.textContent).not.toContain(t('source.add'));
+  expect(panel.textContent).not.toContain(t('health.collectAll'));
+});

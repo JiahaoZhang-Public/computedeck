@@ -191,17 +191,10 @@ async def source_checks(
             connected = True
         except (ssh.SSHError, OSError, TimeoutError) as error:
             connected = False
-            text = str(error).lower()
-            if "permission denied" in text or "authentication failed" in text:
-                failure = "authentication"
-            elif "host key" in text or "remote host identification has changed" in text:
-                failure = "host_key"
-            elif isinstance(error, TimeoutError):
-                failure = "timeout"
-            elif "timed out" in text or "no route" in text:
+            failure = ssh.failure_cause(error)
+            # A process timeout may include time queued behind a collection.
+            if failure == "timeout" and not isinstance(error, TimeoutError):
                 failure = "network"
-            elif "connection refused" in text:
-                failure = "refused"
         add(
             check(
                 "ssh_login",
