@@ -26,9 +26,15 @@ class SSHBusyError(RuntimeError):
 class SSHError(RuntimeError):
     """The remote command or connection failed. The message is untranslated remote text."""
 
+    def __init__(self, message: str, returncode: int | None = None) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+
 
 def failure_cause(error: BaseException) -> str:
     """Classify OpenSSH diagnostics without guessing a cause for unknown failures."""
+    if isinstance(error, SSHError) and error.returncode != 255:
+        return "unknown"
     text = str(error).lower()
     if "permission denied" in text or "authentication failed" in text:
         return "authentication"
@@ -158,7 +164,7 @@ async def ssh_command(
         detail = "\n".join(
             line.strip() for line in lines if line.strip() and not _NOISE.match(line.strip())
         )
-        raise SSHError(detail[:300] or "remote command failed")
+        raise SSHError(detail[:300] or "remote command failed", process.returncode)
     return stdout.decode("utf-8", errors="replace")
 
 

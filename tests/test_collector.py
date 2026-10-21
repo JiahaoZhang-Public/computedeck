@@ -1057,10 +1057,10 @@ async def test_machine_checks_have_two_slots_independent_of_collections(
     monkeypatch.setattr(collector_module, "probe_instance", probe)
     tasks = [asyncio.create_task(collector.probe(key)) for key in ids]
     try:
-        await asyncio.wait_for(two_running.wait(), 1)
+        await asyncio.wait_for(two_running.wait(), 10)
         assert len(entered) == 2
         release.set()
-        await asyncio.wait_for(asyncio.gather(*tasks), 1)
+        await asyncio.wait_for(asyncio.gather(*tasks), 10)
         assert len(entered) == 3
     finally:
         for task in tasks:

@@ -38,14 +38,14 @@ dashboards reuse the previous response, and returning to a tab triggers one refr
 After Refresh or adding a source, faster polling stops when the requested sources finish,
 or after sixty seconds. Completed machine checks and manual additions reload once.
 These actions do not turn retained observations into new measurements. Example timestamps
-advance once per minute. With no sources, the health panel’s “Add source” button opens
-the add-source dialog directly; it is hidden in example mode.
+advance once per minute. Once an authenticated dashboard reports no sources, the health
+panel’s “Add source” button opens the add-source dialog directly; it is hidden in example mode.
 
 浏览器轮询与采集相互独立：隐藏标签页暂停请求，未变化的仪表盘复用先前响应，
 返回标签页时刷新一次。刷新或添加数据源后，快速轮询在目标数据源采集结束时停止，
 最长持续六十秒。机器检查完成或手动添加机器后只重新加载一次。
 这些操作不会把保留的观测变成新测量。示例时间每分钟更新一次。
-没有数据源时，健康面板的“添加数据源”按钮直接打开添加对话框；示例模式下隐藏该按钮。
+通过身份验证且仪表盘已加载并确认没有数据源时，健康面板的“添加来源”按钮直接打开添加对话框；示例模式下隐藏该按钮。
 
 ## Machine checks / 机器检查
 
@@ -62,7 +62,9 @@ successfully check the machine during collection.
 Machine checks have two concurrent slots separate from source collections. A timeout or
 closed SSH connection is retried once after two seconds. Authentication, host-key,
 unreachable-network and refused-connection failures have specific guidance and are not
-retried automatically. Unknown errors remain generic. A first transient failure is not
+retried automatically. Remote command failures (SSH exit status other than 255) retain
+their detail as a generic error, without connection guidance or retries. Unknown errors
+remain generic. A first transient failure is not
 saved as a failed check while its retry is pending.
 
 编辑手动添加的机器或导入配置时，如果主机、端口、用户名、密钥文件和别名模式未改变，
@@ -75,6 +77,7 @@ saved as a failed check while its retry is pending.
 机器检查使用独立于数据源采集的两个并发名额。SSH 超时或连接关闭后，等待两秒重试一次。
 认证失败、主机密钥验证失败、网络不可达及连接被拒绝都有具体指引，不会自动重试。
 未知错误保留通用说明。在重试期间，不会将第一次瞬时故障保存为检查失败。
+远程命令失败（SSH 退出码不是 255）保留原始详情并使用通用错误说明，不提供连接指引或重试。
 
 ## Upgrading from 0.3
 

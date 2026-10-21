@@ -129,13 +129,13 @@ export function HealthPanel({
             )}
           </div>
         ))}
-        {!state.rows.length && <p>{t('health.noSources')}</p>}
+        {data?.sources.length === 0 && <p>{t('health.noSources')}</p>}
         {state.rows.length ? (
           <button className="button" disabled={busy} onClick={() => void refresh()}>
             {t('health.collectAll')}
           </button>
         ) : addSource ? (
-          <button className="button" onClick={addSource}>
+          <button className="button" disabled={busy} onClick={addSource}>
             {t('source.add')}
           </button>
         ) : null}

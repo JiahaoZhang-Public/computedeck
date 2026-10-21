@@ -954,17 +954,17 @@ export default function App() {
       {healthOpen && (
         <HealthPanel
           state={healthState}
-          data={data}
+          data={needsToken ? null : data}
           busy={refreshing || needsToken}
           refresh={refresh}
           close={() => setHealthOpen(false)}
           addSource={
-            demo
-              ? undefined
-              : () => {
+            !demo && !needsToken && data && data.sources.length === 0
+              ? () => {
                   setHealthOpen(false);
                   configure();
                 }
+              : undefined
           }
         />
       )}
@@ -1055,7 +1055,6 @@ export default function App() {
                     await api('/refresh', { source_id: saved.id });
                     followCollection([saved.id]);
                   }
-                  await load();
                   if (modal.source) notify(t('toast.sourceSaved'));
                   return saved;
                 }}
@@ -1141,18 +1140,9 @@ export default function App() {
                 ctx={ctx}
                 onProbe={async () => {
                   try {
-                    const item = await mutate<Instance>(
+                    await mutate<Instance>(
                       `/instances/${encodeURIComponent(detail.item.id)}/probe`,
                       {},
-                    );
-                    setData(
-                      (current) =>
-                        current && {
-                          ...current,
-                          instances: current.instances.map((row) =>
-                            row.id === item.id ? item : row,
-                          ),
-                        },
                     );
                     notify(t('toast.probed'));
                   } catch (reason) {

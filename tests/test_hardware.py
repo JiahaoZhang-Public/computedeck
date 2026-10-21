@@ -214,16 +214,26 @@ async def test_probe_rejects_endpoint_injection_before_ssh(
 @pytest.mark.parametrize(
     ("error", "code"),
     [
-        (ssh.SSHError("Permission denied (publickey)"), "ssh_authentication"),
-        (ssh.SSHError("Host key verification failed"), "ssh_host_key"),
-        (ssh.SSHError("REMOTE HOST IDENTIFICATION HAS CHANGED"), "ssh_host_key"),
-        (ssh.SSHError("No route to host"), "ssh_network"),
-        (ssh.SSHError("Could not resolve hostname box.test"), "ssh_network"),
-        (ssh.SSHError("Connection refused"), "ssh_refused"),
-        (ssh.SSHError("Connection timed out during banner exchange"), "ssh_timeout"),
+        (ssh.SSHError("Permission denied (publickey)", returncode=255), "ssh_authentication"),
+        (ssh.SSHError("Host key verification failed", returncode=255), "ssh_host_key"),
+        (ssh.SSHError("REMOTE HOST IDENTIFICATION HAS CHANGED", returncode=255), "ssh_host_key"),
+        (ssh.SSHError("No route to host", returncode=255), "ssh_network"),
+        (ssh.SSHError("Could not resolve hostname box.test", returncode=255), "ssh_network"),
+        (ssh.SSHError("Connection refused", returncode=255), "ssh_refused"),
+        (
+            ssh.SSHError("Connection timed out during banner exchange", returncode=255),
+            "ssh_timeout",
+        ),
         (TimeoutError(), "ssh_timeout"),
-        (ssh.SSHError("kex_exchange_identification: Connection closed"), "ssh_closed"),
-        (ssh.SSHError("remote command failed"), "ssh_failed"),
+        (
+            ssh.SSHError("kex_exchange_identification: Connection closed", returncode=255),
+            "ssh_closed",
+        ),
+        (ssh.SSHError("remote command failed", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Permission denied: /opt/probe.py", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Probe timed out", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Connection closed by probe", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Permission denied"), "ssh_failed"),
     ],
 )
 async def test_probe_classifies_connection_errors(monkeypatch, error, code) -> None:

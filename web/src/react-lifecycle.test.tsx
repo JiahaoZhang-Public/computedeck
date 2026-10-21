@@ -2017,7 +2017,10 @@ it.each(['probe', 'add'] as const)(
     window.history.replaceState(null, '', '/#/cloud');
     request.mockImplementation(async (path) => {
       if (path.startsWith('/dashboard')) return data;
-      if (path.endsWith('/probe')) return { ...data.instances[0], name: 'Probed machine' };
+      if (path.endsWith('/probe')) {
+        data.instances = [{ ...data.instances[0], name: 'Probed machine' }];
+        return data.instances[0];
+      }
       if (path === '/instances') return data.instances[0];
       return [];
     });
@@ -2043,6 +2046,50 @@ it.each(['probe', 'add'] as const)(
     expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(0);
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+  },
+);
+
+it.each([false, true])(
+  'reloads a saved source without duplicate reads (enabled: %s)',
+  async (enabled) => {
+    const source = { ...dashboard('Cluster A').sources[0], enabled };
+    let data: Dashboard = { ...dashboard('Cluster A'), sources: [] };
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/drivers') return [driverInfo([], 'slurm')];
+      if (path === '/sources') {
+        data = { ...data, sources: [source] };
+        return source;
+      }
+      if (path === '/refresh') {
+        data = { ...data, collecting: [source.id] };
+        return { status: 'started' };
+      }
+      return [];
+    });
+    await render(<App />);
+    await click('.health-pill');
+    await click('.health-panel > button.button');
+    await click('.modal .type-card');
+    if (!enabled) await click('input[name="enabled"]');
+    request.mockClear();
+    await act(async () => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(
+      enabled ? 2 : 1,
+    );
+    expect(request.mock.calls.filter(([path]) => path === '/refresh')).toHaveLength(
+      enabled ? 1 : 0,
+    );
+    expect(container.textContent).toContain('Cluster A');
+    if (enabled) {
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard'))).toHaveLength(1);
+    }
   },
 );
 
@@ -2141,4 +2188,35 @@ it('hides the empty health panel add action in example mode', async () => {
   expect(panel.textContent).toContain(t('health.noSources'));
   expect(panel.textContent).not.toContain(t('source.add'));
   expect(panel.textContent).not.toContain(t('health.collectAll'));
+});
+
+describe.each(['en', 'zh-CN'] as const)('unknown source inventory in %s', (locale) => {
+  it.each(['token gate', 'loading', 'unreachable'])(
+    'does not offer source actions while %s',
+    async (state) => {
+      setLocale(locale);
+      const pending = deferred<Dashboard>();
+      request.mockImplementation(async (path) => {
+        if (path === '/settings') return { language: locale };
+        if (path.startsWith('/dashboard')) {
+          if (state === 'token gate') throw new ApiError(401, { code: 'token_required' });
+          if (state === 'unreachable') throw new Error('Service unreachable');
+          return pending.promise;
+        }
+        return [];
+      });
+      await render(<App />);
+      if (state === 'token gate') expect(container.querySelector('.token-gate')).not.toBeNull();
+      await click('.health-pill');
+      const panel = container.querySelector('.health-panel')!;
+      expect(panel.textContent).not.toContain(t('health.noSources'));
+      expect(panel.textContent).not.toContain(t('source.add'));
+      expect(panel.textContent).not.toContain(t('health.collectAll'));
+      expect(request.mock.calls.some(([, body]) => body !== undefined)).toBe(false);
+      if (state === 'loading') {
+        await act(async () => pending.resolve({ ...dashboard('Cluster A'), sources: [] }));
+        expect(panel.textContent).toContain(t('source.add'));
+      }
+    },
+  );
 });

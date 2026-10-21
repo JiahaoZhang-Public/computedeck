@@ -129,12 +129,27 @@ async def test_remote_failure_reports_stderr(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(ssh.SSHError) as failure:
         await ssh.ssh_command("cluster-a", "true")
     assert str(failure.value) == "Connection timed out during banner exchange"
+    assert failure.value.returncode == 255
     silent = FakeProcess(returncode=1)
     silent.release.set()
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=silent))
     with pytest.raises(ssh.SSHError, match="remote command failed"):
         await ssh.ssh_command("cluster-a", "false")
     assert not ssh._lock("cluster-a").locked()
+
+
+@pytest.mark.parametrize(
+    "detail", ["Permission denied", "Operation timed out", "Connection closed"]
+)
+async def test_remote_command_error_is_not_a_connection_failure(monkeypatch, detail):
+    process = FakeProcess(stderr=detail.encode(), returncode=1)
+    process.release.set()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    with pytest.raises(ssh.SSHError) as failure:
+        await ssh.ssh_command("cluster-a", "python3 probe.py")
+    assert failure.value.returncode == 1
+    assert str(failure.value) == detail
+    assert ssh.failure_cause(failure.value) == "unknown"
 
 
 async def test_different_destinations_run_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
