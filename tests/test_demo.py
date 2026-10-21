@@ -14,6 +14,15 @@ from computedeck.store import gpu_allocation, manual_state
 from computedeck.summary import RUNNING, fresh
 
 
+def test_demo_mutes_only_the_named_cluster_and_machine() -> None:
+    items = dashboard()["attention"]
+    assert {item["key"]: item["muted"]["state"] for item in items if item["muted"]} == {
+        "cluster_unavailable:example:cluster-d-alice": "acknowledged",
+        "instance_ssh_failed:example:runpod:demo-pod": "snoozed",
+    }
+    assert all(item["mutable"] for item in items if item["muted"])
+
+
 def test_demo_has_verified_planner_choices() -> None:
     data = dashboard()
     clusters = [source for source in data["sources"] if source["driver"] == "slurm"]

@@ -1638,6 +1638,89 @@ def attention_fault(client: TestClient, data_dir: Path) -> dict[str, Any]:
     return client.get("/api/dashboard").json()["attention"][0]
 
 
+@pytest.mark.parametrize("mutation", ["connection", "disable", "delete"])
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+def test_source_mutation_clears_attention_before_same_failure_returns(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mutation: str, action: str
+) -> None:
+    async def fail(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        raise SourceError("ssh_failed")
+
+    monkeypatch.setattr(SlurmDriver, "collect", fail)
+    source = post(client, "/api/sources", CLUSTER).json()
+    path = f"/api/sources/{source['id']}"
+    assert post(client, "/api/refresh").status_code == 202
+    [item] = wait_until_idle(client)["attention"]
+    assert (
+        client.put(
+            f"/api/attention/{item['key']}",
+            json={"action": action, "until": "1h"},
+            headers=HEADERS,
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/dashboard").json()["attention_count"] == 0
+
+    if mutation == "delete":
+        assert client.delete(path, headers=HEADERS).status_code == 200
+    else:
+        body = {"ssh_alias": "cluster-a-new"} if mutation == "connection" else {"enabled": False}
+        assert client.put(path, json=body, headers=HEADERS).status_code == 200
+    assert client.get("/api/dashboard").json()["attention"] == []
+    if mutation == "delete":
+        assert post(client, "/api/sources", CLUSTER).json()["id"] == source["id"]
+    elif mutation == "disable":
+        assert client.put(path, json={"enabled": True}, headers=HEADERS).status_code == 200
+
+    assert post(client, "/api/refresh").status_code == 202
+    data = wait_until_idle(client)
+    [returned] = data["attention"]
+    assert returned["fingerprint"] == item["fingerprint"]
+    assert returned["muted"] is None
+    assert data["attention_count"] == 1
+
+
+@pytest.mark.parametrize("mutation", ["edit", "delete"])
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+def test_machine_mutation_clears_attention_before_same_probe_failure_returns(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mutation: str, action: str
+) -> None:
+    async def fail(instance: dict[str, Any]) -> dict[str, Any]:
+        raise SourceError("ssh_failed")
+
+    monkeypatch.setattr(collector_module, "probe_instance", fail)
+    body = {**INSTANCE, "monitoring": True}
+    instance = post(client, "/api/instances", body).json()
+    path = f"/api/instances/{instance['id']}"
+    assert post(client, f"{path}/probe").status_code == 502
+    [item] = client.get("/api/dashboard").json()["attention"]
+    assert (
+        client.put(
+            f"/api/attention/{item['key']}",
+            json={"action": action, "until": "1h"},
+            headers=HEADERS,
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/dashboard").json()["attention_count"] == 0
+
+    if mutation == "delete":
+        assert client.delete(path, headers=HEADERS).status_code == 200
+    else:
+        assert (
+            client.put(path, json={**body, "host": "192.0.2.2"}, headers=HEADERS).status_code == 200
+        )
+    assert client.get("/api/dashboard").json()["attention"] == []
+    if mutation == "delete":
+        assert post(client, "/api/instances", body).json()["id"] == instance["id"]
+    assert post(client, f"{path}/probe").status_code == 502
+    data = client.get("/api/dashboard").json()
+    [returned] = data["attention"]
+    assert returned["fingerprint"] == item["fingerprint"]
+    assert returned["muted"] is None
+    assert data["attention_count"] == 1
+
+
 def test_attention_acknowledge_snooze_clear_and_unknown(client: TestClient, data_dir: Path) -> None:
     from datetime import UTC, datetime, timedelta
 

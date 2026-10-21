@@ -62,6 +62,30 @@ def put(client: TestClient, body: dict[str, Any]) -> Any:
     return client.put("/api/toolbox/tool", json=body, headers=HEADERS)
 
 
+def test_switching_tool_off_clears_its_acknowledgement(tmp_path: Path) -> None:
+    def setup(context: PluginContext) -> None:
+        context.health = lambda: {"error": "delivery_failed"}
+
+    plugin = Plugin("tool", setup)
+    with TestClient(api.create_app(tmp_path, polling=False, plugins=[plugin])) as client:
+        [item] = client.get("/api/dashboard").json()["attention"]
+        assert (
+            client.put(
+                f"/api/attention/{item['key']}", json={"action": "acknowledge"}, headers=HEADERS
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/dashboard").json()["attention_count"] == 0
+        assert put(client, {"enabled": False}).status_code == 200
+        assert client.get("/api/dashboard").json()["attention"] == []
+        assert put(client, {"enabled": True}).status_code == 200
+        data = client.get("/api/dashboard").json()
+        [returned] = data["attention"]
+        assert returned["fingerprint"] == item["fingerprint"]
+        assert returned["muted"] is None
+        assert data["attention_count"] == 1
+
+
 def test_an_optional_tool_starts_off_and_its_routes_are_closed(client: TestClient) -> None:
     [entry] = client.get("/api/toolbox").json()
     assert entry["enabled"] is False

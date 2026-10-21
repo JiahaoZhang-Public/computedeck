@@ -532,6 +532,7 @@ def create_app(
                 "change.source", source_id, source["name"], action, fields, source_id
             )
         collector.clear_inactive_commit_errors()
+        collector.try_clear_resolved_attention()
         return store().source(source_id) or source
 
     def check_node(source: dict[str, Any]) -> None:
@@ -623,6 +624,7 @@ def create_app(
             source_id,
         )
         collector.clear_inactive_commit_errors()
+        collector.try_clear_resolved_attention()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
@@ -673,6 +675,7 @@ def create_app(
         fields = [key for key in body.model_dump() if instance.get(key) != current.get(key)]
         if fields:
             store().add_change("change.instance", instance_id, instance["name"], "edited", fields)
+        collector.try_clear_resolved_attention()
         return instance
 
     @app.delete("/api/instances/{instance_id}")
@@ -680,6 +683,7 @@ def create_app(
         instance = manual(instance_id)
         store().delete_instance(instance_id)
         store().add_change("change.instance", instance_id, instance["name"], "removed", [])
+        collector.try_clear_resolved_attention()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
@@ -795,6 +799,7 @@ def create_app(
                 action,
                 [],
             )
+        collector.try_clear_resolved_attention()
         return toolbox.entry(context, runtime)
 
     @app.get("/api/marketplace")

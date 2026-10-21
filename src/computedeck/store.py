@@ -232,6 +232,7 @@ class Store:
             except (ValueError, TypeError):
                 self._skip("attention_state", key, "invalid snooze time")
                 continue
+            self._repaired("attention_state", key)
             result[key] = data
         return result
 

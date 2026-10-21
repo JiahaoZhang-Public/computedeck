@@ -74,11 +74,12 @@ latest failed attempt for a source that never succeeded, an SSH check, or a back
 error report. Repeated observations do not imply a new incident onset. Unreadable rows
 and plugin health errors have neither time. Attention is derived on every dashboard read
 without an additional collection request. Acknowledge keeps an item quiet until its
-cause or severity changes. Snooze keeps it quiet for one hour or until midnight tomorrow
+cause or severity changes. Snooze keeps it quiet for one hour or until the next midnight
 in the service host's timezone; a changed cause or severity also ends a snooze early.
 Names, observation times and free-text error output do not reopen items. A resolved item
-loses its saved acknowledgement after the next collection or machine check, or an
-attention action.
+loses its saved acknowledgement after the next collection, machine check, attention
+action, source or machine edit/removal, or tool update. Unreadable acknowledgement rows
+are discarded during the same cleanup; dashboard reads never delete saved state.
 
 The tile, badge and panel count only unmuted items. Muted items remain in the collapsed
 "Acknowledged (N)" group with Unmute and their snooze expiry, when applicable. This
@@ -88,7 +89,8 @@ shows acknowledged and snoozed items, but its controls cannot change saved state
 
 确认会让待处理项保持静默，直到原因或严重程度发生变化。暂缓可持续一小时，或持续到服务主机
 时区的次日零点；原因或严重程度变化也会提前结束暂缓。名称、观测时间和错误输出文本变化
-不会重新提醒。问题解决后，下次采集、机器检查或待处理项操作会清除其已保存的确认状态。
+不会重新提醒。问题解决后，下次采集、机器检查、待处理项操作、数据源或机器的编辑/删除，
+或工具更新会清除其已保存的确认状态。无法读取的确认记录也会在清理时删除；读取概览不会删除保存的状态。
 
 概览卡片、导航徽标和面板只统计未静默的项目。静默项目保留在默认折叠的“已确认（N）”中，
 可恢复提醒，并显示暂缓截止时间。状态保存在服务端，所有查看者共享。健康状态标记仍反映

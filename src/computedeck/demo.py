@@ -439,7 +439,14 @@ def dashboard() -> dict[str, Any]:
         data, [drivers.describe(name) for name in drivers.names()], now=current
     )
     # Example acknowledgement is isolated from the service's saved state.
-    for item, duration in zip(data["attention"][-2:], (None, timedelta(hours=1)), strict=True):
+    muted = {
+        "cluster_unavailable:example:cluster-d-alice": None,
+        "instance_ssh_failed:example:runpod:demo-pod": timedelta(hours=1),
+    }
+    for item in data["attention"]:
+        if item["key"] not in muted:
+            continue
+        duration = muted[item["key"]]
         item["muted"] = {
             "state": "snoozed" if duration else "acknowledged",
             "at": (current - timedelta(minutes=10)).isoformat(),

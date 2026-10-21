@@ -1262,9 +1262,6 @@ form > .form-error {
   gap: 8px;
   padding: 0 16px 12px 34px;
 }
-.attention-actions select {
-  max-width: 100%;
-}
 .attention-muted > summary {
   padding: 12px 16px;
   cursor: pointer;

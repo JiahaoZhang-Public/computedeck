@@ -620,8 +620,11 @@ including failures, while showing any error.
 The fingerprint covers kind, severity, message parameters except the name, and structured
 detail codes/statuses. Free-text errors and observation times are excluded. A different
 fingerprint or expired snooze reopens the item on read, changing the dashboard content
-token. The collector clears resolved or changed state after commits and machine checks;
-the PUT handler also clears it. GET never writes acknowledgement state. The additive
+token. Resolved or changed state is cleared after collection commits, machine checks,
+attention actions, source or machine edits/removals, and tool updates. Unreadable rows
+in the disposable acknowledgement table are deleted during this cleanup. Cleanup failures
+are logged without changing a completed collection or machine check's outcome.
+GET never writes acknowledgement state. The additive
 `attention_state` table uses `CREATE TABLE IF NOT EXISTS`, with no schema-version bump.
 Acknowledgement is shared by viewers and does not change source health or event delivery.
 

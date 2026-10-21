@@ -312,18 +312,20 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
               >
                 {t('attention.acknowledge')}
               </button>
-              <select
-                aria-label={t('attention.snooze')}
+              <button
+                className="button small"
                 disabled={busy || ctx.demo}
-                value=""
-                onChange={(event) => void update('snooze', event.target.value as '1h' | 'tomorrow')}
+                onClick={() => void update('snooze', '1h')}
               >
-                <option value="" disabled>
-                  {t('attention.snooze')}
-                </option>
-                <option value="1h">{t('attention.oneHour')}</option>
-                <option value="tomorrow">{t('attention.tomorrow')}</option>
-              </select>
+                {t('attention.oneHour')}
+              </button>
+              <button
+                className="button small"
+                disabled={busy || ctx.demo}
+                onClick={() => void update('snooze', 'tomorrow')}
+              >
+                {t('attention.tomorrow')}
+              </button>
             </>
           )}
         </div>

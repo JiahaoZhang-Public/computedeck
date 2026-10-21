@@ -1752,11 +1752,21 @@ it.each(['en', 'zh-CN'] as const)(
     await click('.attention-muted .attention-actions button');
     assertCounts(3);
     for (const until of ['1h', 'tomorrow']) {
-      const select = container.querySelector<HTMLSelectElement>('#attention > ul select')!;
+      const selector = `#attention > ul .attention-actions button:nth-child(${until === '1h' ? 2 : 3})`;
+      const button = container.querySelector<HTMLButtonElement>(selector)!;
+      expect(button.textContent).toBe(
+        t(until === '1h' ? 'attention.oneHour' : 'attention.tomorrow'),
+      );
+      const writes = request.mock.calls.filter(([path]) => path.startsWith('/attention/')).length;
       await act(async () => {
-        select.value = until;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        button.focus();
+        button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
       });
+      expect(request.mock.calls.filter(([path]) => path.startsWith('/attention/'))).toHaveLength(
+        writes,
+      );
+      assertCounts(until === '1h' ? 3 : 2);
+      await click(selector);
       expect(
         request.mock.calls.some(
           ([path, body, method]) =>
@@ -1788,9 +1798,7 @@ it.each(['en', 'zh-CN'] as const)(
       return [];
     });
     await render(<App />);
-    const controls = container.querySelectorAll<HTMLButtonElement | HTMLSelectElement>(
-      '.attention-actions button, .attention-actions select',
-    );
+    const controls = container.querySelectorAll<HTMLButtonElement>('.attention-actions button');
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
       expect(control.disabled).toBe(true);
@@ -1844,11 +1852,7 @@ it.each(['en', 'zh-CN'] as const)(
       if (action === 'acknowledge') {
         await click('#attention > ul .attention-actions button');
       } else if (action === 'snooze') {
-        const select = container.querySelector<HTMLSelectElement>('#attention > ul select')!;
-        await act(async () => {
-          select.value = '1h';
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        });
+        await click('#attention > ul .attention-actions button:nth-child(2)');
       } else {
         await click('.attention-muted summary');
         await click('.attention-muted .attention-actions button');

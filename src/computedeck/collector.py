@@ -79,12 +79,20 @@ class Collector:
 
     def clear_resolved_attention(self) -> None:
         state = self.store.attention_state()
+        # Invalid acknowledgement rows are disposable, unlike collected records.
+        self.store.delete_attention_state(list(self.store.unreadable.get("attention_state", ())))
         if not state:
             return
         current = {item["key"]: item["fingerprint"] for item in self.attention_items()}
         self.store.delete_attention_state(
             [key for key, saved in state.items() if current.get(key) != saved["fingerprint"]]
         )
+
+    def try_clear_resolved_attention(self) -> None:
+        try:
+            self.clear_resolved_attention()
+        except Exception:
+            logger.exception("Attention cleanup failed")
 
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         task = asyncio.create_task(coroutine)
@@ -209,7 +217,7 @@ class Collector:
         if source["status"] == "ready":
             self.store.record_history()
             write_config(self.store.dashboard()["instances"], self.runtime.data_dir)
-        self.clear_resolved_attention()
+        self.try_clear_resolved_attention()
 
     async def _batch(self, source: dict[str, Any]) -> drivers.Batch:
         """Collect here, or on the node the source names."""
@@ -290,13 +298,10 @@ class Collector:
             raise
         except Exception as error:
             persist({"ssh_status": "error", "ssh_error": _error(error)})
-            try:
-                self.clear_resolved_attention()
-            except Exception:
-                logger.exception("Attention cleanup failed after probe of %s", instance_id)
+            self.try_clear_resolved_attention()
             raise
         else:
-            self.clear_resolved_attention()
+            self.try_clear_resolved_attention()
             return current
         finally:
             self.probes.discard(instance_id)

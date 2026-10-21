@@ -896,7 +896,11 @@ async def test_successful_machine_check_clears_acknowledgement(
 
 @pytest.mark.parametrize("outcome", ["conflict", "error", "success"])
 async def test_attention_cleanup_never_replaces_probe_outcome(
-    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, outcome: str
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    outcome: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     instance = manual_instance(store, monitoring=True)
     probe_error = SourceError("ssh_failed")
@@ -926,17 +930,23 @@ async def test_attention_cleanup_never_replaces_probe_outcome(
         assert store.manual_instances()[0]["ssh_error"] == {"code": "ssh_failed"}
         assert cleanup_calls == [True]
     else:
-        with pytest.raises(ValueError, match="cleanup failed"):
-            await collector.probe(instance["id"])
+        result = await collector.probe(instance["id"])
+        assert result["ssh_status"] == "reachable"
         assert store.manual_instances()[0]["ssh_status"] == "reachable"
         assert store.manual_instances()[0]["ssh_error"] is None
         assert store.dashboard()["history"]
         assert cleanup_calls == [True]
+    if outcome != "conflict":
+        assert "Attention cleanup failed" in caplog.text
     assert not collector.probes
 
 
 async def test_collection_writes_history_and_config_before_attention_cleanup(
-    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     source = add_source()
     use_driver(monkeypatch, lambda source: Batch(capabilities=["jobs"]))
@@ -957,6 +967,21 @@ async def test_collection_writes_history_and_config_before_attention_cleanup(
     await collector.collect(source["id"])
     assert steps == ["config", "cleanup"]
     assert store.source(source["id"])["status"] == "ready"
-    assert collector.runtime.loop_errors[f"collector:commit:{source['id']}"]["error"] == (
-        "ValueError: cleanup failed"
+    assert collector.runtime.loop_errors == {}
+    assert "Attention cleanup failed" in caplog.text
+
+
+def test_attention_cleanup_discards_unreadable_state(collector: Collector, store: Store) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO attention_state VALUES ('broken', 'not JSON')")
+        store.db.execute("INSERT INTO sources VALUES ('broken-source', 'not JSON')")
+    store.set_attention_state(
+        "bad-time", {"fingerprint": "x", "acknowledged_at": now(), "snooze_until": "no time"}
     )
+    assert any(
+        item["key"] == "unreadable_rows:attention_state" for item in collector.attention_items()
+    )
+    collector.clear_resolved_attention()
+    assert store.db.execute("SELECT * FROM attention_state").fetchall() == []
+    assert store.unreadable_rows() == {"sources": 1}
+    assert [item["key"] for item in collector.attention_items()] == ["unreadable_rows:sources"]
