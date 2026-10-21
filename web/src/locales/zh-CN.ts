@@ -361,7 +361,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'failure.statusEvidence': '依据：退出状态 {status}',
   'failure.program': '程序以状态 {status} 退出；请查看日志。',
   'failure.schedulerCode': '调度器无法运行此作业（代码 {code}）。',
-  'failure.rawCode': '退出码：{code}',
   'failure.ran': '运行了 {elapsed}',
   'failure.ranFor': '运行时长',
   'failure.ranLimit': '{elapsed}，时间限制 {limit}',

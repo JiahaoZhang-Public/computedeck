@@ -732,9 +732,10 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=200),
         demo: bool = False,
         group: bool = False,
-        id: int | None = Query(default=None, ge=1),
+        id: int | None = Query(default=None, ge=1, le=2**63 - 1),
     ) -> list[dict[str, Any]]:
         if id is not None:
+            # TODO(change-events): apply include=changes visibility to ID lookups too.
             rows = demo_events() if demo else store().events(id - 1, 1)
             return [row for row in rows if row["id"] == id and not row.get("silent")]
         if group:

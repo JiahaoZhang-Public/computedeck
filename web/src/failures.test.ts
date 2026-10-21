@@ -65,15 +65,15 @@ describe.each(['en', 'zh-CN'] as const)('failure facts in %s', (locale) => {
     expect(failureExplanation(job({ exit_code: '-3' }), 'pbs')?.summary).toBe(
       t('failure.schedulerCode', { code: '-3' }),
     );
-    for (const code of ['137', '0:9', '265', '-3', '256', 'unknown']) {
+    for (const code of ['137', '0:9', '265', '-3', '256', 'unknown', null, undefined]) {
       expect(failureExplanation(job({ exit_code: code }), 'kubernetes')).toEqual({
-        summary: t('failure.rawCode', { code }),
+        summary: null,
         evidence: null,
       });
     }
-    expect(failureExplanation(job({ exit_status: 137, exit_code: '137' }), 'lsf')?.summary).toBe(
-      t('failure.rawCode', { code: '137' }),
-    );
+    expect(
+      failureExplanation(job({ exit_status: 137, exit_code: '137' }), 'lsf')?.summary,
+    ).toBeNull();
     expect(failureExplanation(job({ state: 'COMPLETED' }), 'slurm')).toBeNull();
   });
   it('does not treat a naive scheduler time as the browser local time', () => {

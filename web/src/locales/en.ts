@@ -385,7 +385,6 @@ const en = {
   'failure.statusEvidence': 'Evidence: exit status {status}',
   'failure.program': 'Your program exited with {status}; see its log.',
   'failure.schedulerCode': 'The scheduler could not run the job (code {code}).',
-  'failure.rawCode': 'Exit code: {code}',
   'failure.ran': 'ran {elapsed}',
   'failure.ranFor': 'Ran for',
   'failure.ranLimit': '{elapsed} of limit {limit}',

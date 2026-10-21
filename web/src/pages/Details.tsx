@@ -11,6 +11,7 @@ import {
   jobGpuResources,
   listedJobs,
   money,
+  PENDING_STATES,
   relativeTime,
   runningPrice,
 } from '../domain';
@@ -158,7 +159,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
   const terms = jobTerms(driver);
   const failure = failureExplanation(job, driver);
   const historical = !!event || !!job.end || !!failure;
-  const pending = !historical && job.state.toUpperCase() === 'PENDING';
+  const pending = !historical && PENDING_STATES.includes(job.state.toUpperCase());
   const explanation = pending ? jobReason(job, driver) : null;
   const nextStep = failure ? jobReason(job, driver)?.next : null;
   const command =
@@ -169,9 +170,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
     event?.type === 'job.ended' ||
     (event?.type === 'job.finished' && event.data.outcome === 'unknown');
   const observed = event
-    ? (event.data.observed_at ??
-      job.observed_at ??
-      (['job.failed', 'job.ended'].includes(event.type) ? event.at : null))
+    ? (event.data.observed_at ?? event.at)
     : historical
       ? ctx.data.failure_history_observed_at
       : job.observed_at;

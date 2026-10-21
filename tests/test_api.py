@@ -1340,6 +1340,9 @@ def test_event_id_lookup_is_exact_and_excludes_silent_rows(
     assert client.get("/api/events?id=999").json() == []
     assert client.get("/api/events?id=0").status_code == 422
     assert client.get("/api/events?id=invalid").status_code == 422
+    assert client.get(f"/api/events?id={2**63 - 1}").json() == []
+    for event_id in [2**63, 100000000000000000000]:
+        assert client.get(f"/api/events?id={event_id}").status_code == 422
     demo = client.get("/api/events?demo=true").json()[0]
     [row] = client.get(f"/api/events?demo=true&id={demo['id']}").json()
     assert row["id"] == demo["id"] and row["type"] == demo["type"]

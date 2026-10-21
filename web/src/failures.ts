@@ -43,7 +43,7 @@ export function failureExplanation(job: Job, driver: string) {
     };
   if (driver === 'pbs' && /^-\d+$/.test(job.exit_code ?? ''))
     return { summary: t('failure.schedulerCode', { code: job.exit_code! }), evidence: null };
-  return { summary: t('failure.rawCode', { code: job.exit_code ?? '—' }), evidence: null };
+  return { summary: null, evidence: null };
 }
 
 export function failureEnd(job: Job) {

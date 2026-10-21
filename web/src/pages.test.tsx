@@ -805,6 +805,44 @@ it.each(['en', 'zh-CN'] as const)(
 );
 
 it.each(['en', 'zh-CN'] as const)(
+  'explains raw pending states only for live jobs in %s',
+  (locale) => {
+    setLocale(locale);
+    const context = ctx(dash({}));
+    for (const state of ['PENDING', 'PD', 'Q', 'PEND', 'QUEUED', 'queued']) {
+      const item = job('waiting', { state, reason: 'Priority' });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
+      expect(html).toContain(`<strong>${t('job.reason')}</strong>`);
+      expect(html).toContain(jobReason(item, 'slurm')!.summary);
+      expect(html).toContain(`<dt>${t('job.requestedGpus')}</dt>`);
+      const historical = renderToStaticMarkup(
+        <JobDetail job={{ ...item, end: hourAgo }} ctx={context} />,
+      );
+      expect(historical).not.toContain(`<strong>${t('job.reason')}</strong>`);
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows uninterpreted exit codes once and omits missing codes in %s',
+  (locale) => {
+    setLocale(locale);
+    for (const code of ['unknown-code', null]) {
+      const html = renderToStaticMarkup(
+        <JobDetail
+          job={job('failure', { state: 'FAILED', exit_code: code })}
+          ctx={ctx(dash({}))}
+        />,
+      );
+      expect(html.split(`<dt>${t('jobs.col.exitCode')}</dt>`).length - 1).toBe(
+        code == null ? 0 : 1,
+      );
+      if (code != null) expect(html.split(code).length - 1).toBe(1);
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
   'keeps failure next steps and omits missing elapsed time in %s',
   (locale) => {
     setLocale(locale);

@@ -10,7 +10,7 @@ import { jobReason, jobWaiting } from './jobFacts';
 import { relativeTime } from './domain';
 import { serverDashboard, serverDemo } from './test-server';
 import { routeParams, setRouteParams } from './useRouteParam';
-import type { Dashboard } from './types';
+import type { Dashboard, DeckEvent } from './types';
 
 vi.mock('./api', () => ({ api: vi.fn(), upload: vi.fn(), download: vi.fn() }));
 let container: HTMLDivElement;
@@ -433,7 +433,7 @@ it.each(['en', 'zh-CN'] as const)(
   async (locale) => {
     const lastSeen = new Date(Date.now() - 6 * 3600_000).toISOString();
     const observed = new Date().toISOString();
-    const event = {
+    const event: DeckEvent = {
       id: 78,
       type: 'job.finished',
       at: observed,
@@ -452,6 +452,12 @@ it.each(['en', 'zh-CN'] as const)(
     });
     for (const type of ['job.finished', 'job.ended']) {
       event.type = type;
+      if (type === 'job.ended') {
+        // 0.5 stored the previous job snapshot and stamped at with collection time.
+        delete event.data.observed_at;
+        delete event.data.outcome;
+        delete event.data.outcome_reason;
+      }
       await render('/?demo=true#/jobs?event=78');
       const drawer = container.querySelector('[role="dialog"]')!;
       expect(drawer.querySelector('.drawer-header .status')?.textContent).toBe(

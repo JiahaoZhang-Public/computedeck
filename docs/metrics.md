@@ -127,7 +127,8 @@ Job rows in Activity, including expanded group children, open an event snapshot 
 by `?event=<id>`. Links remain usable after the attempt leaves the 24-hour failure list,
 within event retention. Event snapshots hide utilization meters. Legacy `job.ended` records
 and unknown `job.finished` outcomes say "Last seen …; ended between collections", using
-the job snapshot's observation time separately from "Event observed". Unknown outcomes
+the job snapshot's observation time separately from "Event observed". The latter uses
+the event's `data.observed_at`, or its `at` collection time for legacy records. Unknown outcomes
 also keep their reason for being unknown. Missing or expired events show an unavailable drawer.
 
 中文：失败记录可打开作业详情；结果列显示运行时长。只有已知时区的结束时间才显示相对时间，
@@ -140,7 +141,8 @@ Slurm 不查询依赖版本的标准输出或错误路径字段。失败解释�
 检查命令只复制、不执行，请在对应集群或 Kubernetes 上下文中运行。没有历史能力的集群，其未知结果不提供检查命令。历史新鲜度标为“失败历史更新于”。
 动态中的作业记录（含展开的分组子项）通过 `?event=<id>` 打开事件快照，在事件保留期内不受
 24 小时失败列表限制。快照不显示利用率仪表；旧的结束事件和未知结果均标注作业快照的最后观测时间与
-“在两次采集之间结束”，与“事件观测时间”分开显示。未知结果还保留其原因。已过期或不存在的事件显示不可用提示。
+“在两次采集之间结束”，与“事件观测时间”分开显示。后者使用事件的 `data.observed_at`，旧记录则使用 `at` 采集时间。
+未知结果还保留其原因。已过期或不存在的事件显示不可用提示。
 
 ## Job arrays
 
