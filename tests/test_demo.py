@@ -157,7 +157,7 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     rows = events()
     assert all(row["key"].startswith("example:") for row in rows)
     for row in rows:
-        if row["type"] == "service.gap":
+        if row["type"] in {"service.gap", "change.instance"}:
             assert row["source_id"] is None
             assert "source_name" not in row["data"]
         else:
@@ -431,3 +431,25 @@ def test_demo_shows_source_and_service_gaps() -> None:
         assert not service["data"]["from"] < observed < service["data"]["to"]
         if row["source_id"] == source["source_id"]:
             assert not data["unobserved_from"] < observed < data["unobserved_to"]
+
+
+def test_demo_changes_match_existing_subjects_and_contain_no_setting_values() -> None:
+    data = dashboard()
+    rows = [row for row in events() if row["type"].startswith("change.")]
+    assert len(rows) == 2
+    for row in rows:
+        assert set(row["data"]) == {"subject_id", "name", "action", "fields"}
+        subjects = data["sources"] if row["type"] == "change.source" else data["instances"]
+        subject = next(item for item in subjects if item["id"] == row["data"]["subject_id"])
+        assert subject["name"] == row["data"]["name"]
+        if row["type"] == "change.source":
+            assert row["data"]["action"] == "edited"
+            assert row["data"]["fields"] == ["interval_minutes"]
+            assert row["source_id"] == subject["id"]
+            assert subject["enabled"] is True
+            assert not any(
+                event["type"] == "source.gap" and event["source_id"] == subject["id"]
+                for event in events()
+            )
+        else:
+            assert row["data"]["action"] == "added"

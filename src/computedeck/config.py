@@ -251,7 +251,9 @@ def apply(store: Store, text: str) -> dict[str, int]:
                     instance[key] = old[key]
         store.save_instance(instance)
     store.save_settings(parsed["settings"].model_dump(exclude_unset=True))
-    return {"sources": len(sources), "instances": len(instances), "nodes": len(parsed["nodes"])}
+    counts = {"sources": len(sources), "instances": len(instances), "nodes": len(parsed["nodes"])}
+    store.add_change("change.import", "config", "", "imported", [], counts=counts)
+    return counts
 
 
 def _value(value: Any) -> str:

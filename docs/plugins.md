@@ -126,11 +126,36 @@ receives the backlog of an earlier installation.
 | `source.gap` | a job source was not observed long enough to risk missing history | `unobserved_from`, `unobserved_to`, `failures_checked_from` (or null) |
 | `service.gap` | more than five minutes between service heartbeats | `from`, `to` |
 
-Every event has `id`, `type`, `at`, `source_id` and `data`. Source events include
+Every event has `id`, `type`, `at`, `source_id` and `data`. Collection source events include
 `source_name`, `cluster_id`, `username` and `driver` in `data`; `service.gap` has no
 source context and its `source_id` is null. The first collection of a new source records what
 already exists without delivering it. The first successful collection after upgrading to
 reconciled endings also records terminal history silently.
+
+User actions use `events.CHANGE_TYPES`, separate from `TYPES` and `sdk.EVENT_TYPES`:
+`change.source` (added, edited, enabled, disabled, removed), `change.node` and
+`change.instance` (added, edited, removed), `change.tool` (on, off, settings), and
+`change.import` (imported). They are never delivered to any plugin, even one subscribing
+by name, and are not Notify rule types. `Store.recent_events()` excludes them by default.
+`GET /api/events` returns them only with `include=changes`, including grouped and ID
+lookups; filtering happens before `limit`. Changes remain individual rows under `group=1`.
+
+Each successful source, collection-machine, hand-added-machine or Toolbox save/removal
+records one event after saving. `data` contains `subject_id`, the subject's display `name`,
+`action`, and `fields`: top-level field names only, never old/new values, credentials,
+connection details or nested option keys. Edits list only fields whose values changed;
+saving unchanged data can produce an empty list. A source enable/disable takes precedence
+over edited when one save changes both. Tool settings always have an empty field list;
+when a save also switches the tool on/off, that switch is the action. Tool names use the
+plugin's English display name, falling back to its ID. Other changes have `source_id` null;
+`change.source` retains its source ID after removal. These rows do not carry the collection
+source context described above.
+
+`config.apply` (also used by CLI import) records one `change.import` after a successful
+import, with `data.counts = {sources, nodes, instances}` instead of individual records.
+Language and server-name preferences are not logged. Rejected writes create no change row.
+There is no merge window: a quick pause/resume keeps both actions. These events use the
+existing 30-day retention and do not add a table or change an API version.
 
 `job.finished` is stored once. Its `outcome` is `completed`, `cancelled`, `failed`, `timeout`,
 `out_of_memory`, `node_fail`, `boot_fail`, `deadline`, `preempted`, or `unknown`. A departed

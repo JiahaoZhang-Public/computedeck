@@ -1960,6 +1960,15 @@ form > .form-error {
 
 /* ---------- Sources ---------- */
 
+.source-group {
+  scroll-margin-top: 64px;
+}
+@media (max-width: 560px) {
+  .source-group {
+    scroll-margin-top: 104px;
+  }
+}
+
 .capabilities {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2052,6 +2061,9 @@ form > .form-error {
   font: inherit;
   text-align: start;
   cursor: pointer;
+}
+.activity a.activity-job {
+  text-decoration: none;
 }
 .activity-job:hover .grow {
   text-decoration: underline;

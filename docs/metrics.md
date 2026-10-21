@@ -247,3 +247,32 @@ or failure totals.
 至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注；
 只要任一子事件自身时间未知，合并行也显示该标注，即使没有采集中断。
 合并展示不改变作业数或失败总数。
+
+## Your changes / 你的更改
+
+Recent activity includes successful changes you make in ComputeDeck: adding, editing,
+pausing, resuming or removing sources; adding, editing or removing collection machines
+and hand-added machines; switching tools on/off or saving their settings; and importing
+configuration. These are grey rows, separate from job outcomes and collection gaps. A
+source change scrolls its Sources group into view while that source still exists, keeping
+all groups visible; removed sources have no link. The recorded name is the name at the
+time of the action.
+
+Records contain changed field names, never their values; tool settings omit even the
+field names. Edited rows show raw changed field names, never values; pause/resume rows
+show any other changed fields except `enabled`, while added, removed, tool and import
+rows show no field list. Imports produce one summary with counts. Pausing and immediately resuming
+keeps both records. These records are kept for 30 days and never trigger notifications or
+plugin handlers. Language and server-name preferences do not produce records. Activity
+requests `include=changes`; API event lists omit them unless requested explicitly.
+
+最近动态会显示你在 ComputeDeck 中成功保存的更改：添加、编辑、暂停、恢复或移除数据源；
+添加、编辑或移除采集机器和手动添加的机器；开启、关闭工具或保存工具设置；以及导入配置。
+这些灰色记录与作业结果、采集空白分开显示。数据源仍存在时，更改记录会滚动到对应的数据源分组，同时保留其他分组；
+已移除的数据源不再显示链接。名称保留为操作发生时的名称。
+
+记录只包含更改的字段名，不包含字段值；工具设置连字段名也不记录。
+编辑记录显示更改的原始字段名，不显示字段值；暂停或恢复记录只显示 `enabled` 之外的更改字段，
+添加、移除、工具和导入记录不显示字段列表。每次导入只生成一条带数量的摘要。
+暂停后立即恢复会保留两条记录。这些记录保留 30 天，不会触发通知或插件处理程序。
+语言和服务器名称偏好设置不产生记录。动态面板会请求 `include=changes`；API 默认不返回这些记录。

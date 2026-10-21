@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
@@ -333,17 +334,56 @@ class Store:
             self._prune_events()
         return added
 
+    def add_change(
+        self,
+        type: str,
+        subject_id: str,
+        name: str,
+        action: str,
+        fields: list[str],
+        source_id: str | None = None,
+        *,
+        counts: dict[str, int] | None = None,
+    ) -> None:
+        """Record a saved user action, with field names only; never pass setting values."""
+        at = now()
+        data: dict[str, Any] = {
+            "subject_id": subject_id,
+            "name": name,
+            "action": action,
+            "fields": sorted(fields),
+        }
+        if counts is not None:
+            data["counts"] = counts
+        self.add_events(
+            [
+                {
+                    "key": f"change:{type}:{subject_id}:{at}:{secrets.token_hex(8)}",
+                    "type": type,
+                    "at": at,
+                    "source_id": source_id,
+                    "data": data,
+                }
+            ]
+        )
+
     def _prune_events(self) -> None:
         cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
 
     def events(
-        self, after: int = 0, limit: int = 100, *, include_silent: bool = True
+        self,
+        after: int = 0,
+        limit: int = 100,
+        *,
+        include_silent: bool = True,
+        include_changes: bool = True,
     ) -> list[dict[str, Any]]:
         rows = self.db.execute(
             "SELECT id, key, type, at, source_id, silent, data FROM events "
-            "WHERE id > ? AND (? OR silent = 0) ORDER BY id LIMIT ?",
-            (after, int(include_silent), limit),
+            "WHERE id > ? AND (? OR silent = 0) "
+            "AND (? OR type NOT LIKE 'change.%') ORDER BY id LIMIT ?",
+            (after, int(include_silent), int(include_changes), limit),
         )
         result = []
         for row in rows:
@@ -363,15 +403,21 @@ class Store:
             )
         return result
 
-    def recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_events(
+        self, limit: int = 50, *, include_changes: bool = False
+    ) -> list[dict[str, Any]]:
         """The latest events people should see, newest first."""
         rows = self.db.execute(
-            "SELECT id FROM events WHERE silent = 0 ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id FROM events WHERE silent = 0 "
+            "AND (? OR type NOT LIKE 'change.%') ORDER BY id DESC LIMIT ?",
+            (int(include_changes), limit),
         ).fetchall()
         if not rows:
             return []
         oldest = rows[-1][0]
-        events = self.events(oldest - 1, limit, include_silent=False)
+        events = self.events(
+            oldest - 1, limit, include_silent=False, include_changes=include_changes
+        )
         return [event for event in reversed(events) if not event["silent"]]
 
     def events_in_collection(
@@ -401,19 +447,23 @@ class Store:
                 )
         return result
 
-    def recent_event_collections(self, limit: int) -> list[dict[str, Any]]:
+    def recent_event_collections(
+        self, limit: int, *, include_changes: bool = False
+    ) -> list[dict[str, Any]]:
         """Complete collections for display, so a burst does not consume the row limit."""
         rows = self.db.execute(
             "WITH collections AS ("
-            "SELECT id, source_id, type, COALESCE(json_extract(data, '$.observed_at'), at) "
-            "AS observed FROM events WHERE silent = 0 AND json_valid(data)), "
+            "SELECT id, source_id, type, CASE WHEN type LIKE 'change.%' THEN key "
+            "ELSE COALESCE(json_extract(data, '$.observed_at'), at) END "
+            "AS observed FROM events WHERE silent = 0 AND json_valid(data) "
+            "AND (? OR type NOT LIKE 'change.%')), "
             "latest AS (SELECT source_id, type, observed FROM collections "
             "GROUP BY source_id, type, observed ORDER BY MAX(id) DESC LIMIT ?) "
             "SELECT e.id, e.key, e.type, e.at, e.source_id, e.data FROM latest "
             "JOIN collections c ON c.source_id IS latest.source_id "
             "AND c.type = latest.type AND c.observed = latest.observed "
             "JOIN events e ON e.id = c.id ORDER BY e.id DESC",
-            (limit,),
+            (int(include_changes), limit),
         )
         result = []
         for key, event_key, kind, at, source, raw in rows:

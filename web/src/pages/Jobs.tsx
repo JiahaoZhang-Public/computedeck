@@ -175,7 +175,12 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
           </>
         )}
       </Panel>
-      <ActivityPanel demo={ctx.demo} token={data.token} onOpen={ctx.openEvent} />
+      <ActivityPanel
+        sources={data.sources}
+        demo={ctx.demo}
+        token={data.token}
+        onOpen={ctx.openEvent}
+      />
     </>
   );
 }

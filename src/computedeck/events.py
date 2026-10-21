@@ -27,6 +27,7 @@ from .summary import RUNNING
 LEGACY_TYPES = ("job.started", "job.ended", "job.failed", "source.failed", "source.recovered")
 TYPES = (*LEGACY_TYPES, "job.finished")
 GAP_TYPES = ("service.gap", "source.gap")
+CHANGE_TYPES = ("change.source", "change.node", "change.instance", "change.tool", "change.import")
 FAILURE_OUTCOMES = (
     "failed",
     "timeout",
@@ -329,7 +330,9 @@ def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = (
             event.get("source_id"),
             event["type"],
-            event["data"].get("observed_at") or event["at"],
+            event["id"]
+            if event["type"].startswith("change.")
+            else event["data"].get("observed_at") or event["at"],
         )
         collections.setdefault(key, []).append(event)
     result = []

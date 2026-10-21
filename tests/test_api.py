@@ -1212,6 +1212,12 @@ def test_reenable_starts_a_silent_event_baseline(
         rows = store.events()
     finally:
         store.db.close()
+    assert [row["data"]["action"] for row in rows if row["type"] == "change.source"] == [
+        "added",
+        "disabled",
+        "enabled",
+    ]
+    rows = [row for row in rows if row["type"] != "change.source"]
     if outcome == "jobs_ended":
         assert [(row["type"], row["silent"]) for row in rows] == [
             ("job.started", True),

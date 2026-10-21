@@ -448,6 +448,14 @@ def create_app(
         if source["enabled"]:
             source["next_due_at"] = now()
         store().save_source(source)
+        store().add_change(
+            "change.source",
+            source["id"],
+            source["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
+            source["id"],
+        )
         return store().source(source["id"]) or source
 
     @app.put("/api/sources/{source_id}")
@@ -459,6 +467,7 @@ def create_app(
         # Sources saved before options existed have none; an empty dict is the same.
         source.setdefault("options", {})
         source.setdefault("node", "")
+        fields = [key for key, value in changes.items() if value != source.get(key)]
         connection_changed = any(
             key in changes and changes[key] != source.get(key)
             for key in ("ssh_alias", "credential", "username", "options", "node")
@@ -485,6 +494,8 @@ def create_app(
                 cluster_state="unknown",
             )
         store().save_source(source)
+        action = ("enabled" if source["enabled"] else "disabled") if enabled_changed else "edited"
+        store().add_change("change.source", source_id, source["name"], action, fields, source_id)
         collector.clear_inactive_commit_errors()
         return store().source(source_id) or source
 
@@ -505,6 +516,9 @@ def create_app(
         if store().node(node["id"]):
             raise HTTPException(409, message("node_exists"))
         store().save_node(node)
+        store().add_change(
+            "change.node", node["id"], node["name"], "added", list(body.model_dump())
+        )
         return node
 
     @app.put("/api/nodes/{node_id}")
@@ -517,6 +531,8 @@ def create_app(
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
         store().save_node(node)
+        fields = [key for key in body.model_dump() if node.get(key) != current.get(key)]
+        store().add_change("change.node", node_id, node["name"], "edited", fields)
         for source in store().sources():
             if source.get("node") == node_id:
                 # A different machine or command is a different connection.
@@ -527,8 +543,10 @@ def create_app(
     async def delete_node(node_id: str) -> dict[str, bool]:
         if any(source.get("node") == node_id for source in store().sources()):
             raise HTTPException(409, message("node_in_use"))
+        node = store().node(node_id)
         if not store().delete_node(node_id):
             raise HTTPException(404, message("node_not_found", node=node_id))
+        store().add_change("change.node", node_id, (node or {}).get("name", node_id), "removed", [])
         return {"deleted": True}
 
     @app.post("/api/nodes/{node_id}/check")
@@ -553,10 +571,19 @@ def create_app(
 
     @app.delete("/api/sources/{source_id}")
     async def delete_source(source_id: str) -> dict[str, bool]:
+        source = store().source(source_id)
         if not store().delete_source(source_id):
             raise HTTPException(404, message("source_not_found"))
         collector.clear_inactive_commit_errors()
         write_config(store().dashboard()["instances"], data_dir)
+        store().add_change(
+            "change.source",
+            source_id,
+            (source or {}).get("name", source_id),
+            "removed",
+            [],
+            source_id,
+        )
         return {"deleted": True}
 
     def save_manual(body: InstanceInput, existing: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -589,17 +616,26 @@ def create_app(
             raise HTTPException(422, message(str(error))) from None
         if any(row["id"] == key for row in store().manual_instances()):
             raise HTTPException(409, message("instance_exists"))
-        return save_manual(body)
+        instance = save_manual(body)
+        store().add_change(
+            "change.instance", instance["id"], instance["name"], "added", list(body.model_dump())
+        )
+        return instance
 
     @app.put("/api/instances/{instance_id}")
     async def update_instance(instance_id: str, body: InstanceInput) -> dict[str, Any]:
-        return save_manual(body, manual(instance_id))
+        current = manual(instance_id)
+        instance = save_manual(body, current)
+        fields = [key for key in body.model_dump() if instance.get(key) != current.get(key)]
+        store().add_change("change.instance", instance_id, instance["name"], "edited", fields)
+        return instance
 
     @app.delete("/api/instances/{instance_id}")
     async def delete_instance(instance_id: str) -> dict[str, bool]:
-        manual(instance_id)
+        instance = manual(instance_id)
         store().delete_instance(instance_id)
         write_config(store().dashboard()["instances"], data_dir)
+        store().add_change("change.instance", instance_id, instance["name"], "removed", [])
         return {"deleted": True}
 
     @app.post("/api/instances/{instance_id}/probe")
@@ -695,10 +731,17 @@ def create_app(
     @app.put("/api/toolbox/{plugin_id}")
     async def toolbox_update(plugin_id: str, body: toolbox.ToolboxUpdate) -> dict[str, Any]:
         context = plugin_context(plugin_id)
+        was_enabled = context.enabled
         try:
             toolbox.update(context, body)
         except toolbox.SettingsError as error:
             raise HTTPException(422, message(str(error), **error.params)) from None
+        action = "settings"
+        if body.enabled is not None and (body.enabled != was_enabled or body.settings is None):
+            action = "on" if body.enabled else "off"
+        store().add_change(
+            "change.tool", plugin_id, (context.plugin.name or {}).get("en", plugin_id), action, []
+        )
         return toolbox.entry(context, runtime)
 
     @app.get("/api/marketplace")
@@ -733,16 +776,25 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=200),
         demo: bool = False,
         group: bool = False,
+        include: str | None = None,
         id: int | None = Query(default=None, ge=1, le=2**63 - 1),
     ) -> list[dict[str, Any]]:
+        include_changes = include == "changes"
+        if demo:
+            rows = [
+                row
+                for row in demo_events()
+                if include_changes or not row["type"].startswith("change.")
+            ]
+        elif id is not None:
+            rows = store().events(id - 1, 1, include_changes=include_changes)
+        elif group:
+            rows = store().recent_event_collections(limit, include_changes=include_changes)
+        else:
+            rows = store().recent_events(limit, include_changes=include_changes)
         if id is not None:
-            # TODO(change-events): apply include=changes visibility to ID lookups too.
-            rows = demo_events() if demo else store().events(id - 1, 1)
             return [row for row in rows if row["id"] == id and not row.get("silent")]
-        if group:
-            rows = demo_events() if demo else store().recent_event_collections(limit)
-            return group_events(rows)[:limit]
-        return demo_events()[:limit] if demo else store().recent_events(limit)
+        return group_events(rows)[:limit] if group else rows[:limit]
 
     @app.post("/api/backup")
     async def backup() -> dict[str, str]:

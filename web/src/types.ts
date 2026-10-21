@@ -362,6 +362,11 @@ export interface DeckEvent {
   at: string;
   source_id: string | null;
   data: {
+    subject_id?: string;
+    name?: string;
+    action?: string;
+    fields?: string[];
+    counts?: { sources: number; nodes: number; instances: number };
     outcome?: string;
     outcome_reason?: 'outcomes_unavailable' | 'outcome_not_reported' | null;
     state?: string | null;

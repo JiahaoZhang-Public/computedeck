@@ -22,6 +22,7 @@ import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
 import { ActivityPanel } from './pages/Activity';
+import { SourcesPage } from './pages/Sources';
 import { EMPTY_RULE } from './notify';
 import { OUTCOME_LABELS } from './events';
 import type { Ctx } from './pages/shared';
@@ -109,6 +110,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   HTMLElement.prototype.scrollTo = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
   window.history.replaceState(null, '', '/');
   window.localStorage.clear();
   setLocale('en');
@@ -984,7 +986,7 @@ describe('visible dashboard polling', () => {
     hidden.mockReturnValue(false);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
     request.mockClear();
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
@@ -1144,7 +1146,7 @@ describe('visible dashboard polling', () => {
     request.mockClear();
     data = { ...data, token: 'next-token' };
     await act(async () => vi.advanceTimersByTimeAsync(10000));
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
     request.mockClear();
     await click('[role="switch"]');
     expect(request).toHaveBeenCalledWith('/dashboard?demo=true');
@@ -1361,7 +1363,7 @@ it.each([
     },
   ]);
   await render(<ActivityPanel demo={false} />);
-  expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1');
+  expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
   const summary = container.querySelector('summary')!;
   expect(summary.textContent).toContain(`sweep ×${count}`);
   expect(summary.textContent).toContain(t('notify.event.finished'));
@@ -1499,5 +1501,143 @@ it.each(['en', 'zh-CN'] as const)(
       language === 'en' ? 'computer was asleep' : '电脑处于睡眠状态',
     );
     expect(container.textContent).toContain(dateTime(rows[0].data.unobserved_from));
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'links source changes only while their subject exists in %s',
+  async (language) => {
+    setLocale(language);
+    const source = dashboard('Cluster A').sources[0];
+    const rows: DeckEvent[] = [
+      {
+        id: 3,
+        type: 'change.source',
+        at: now.toISOString(),
+        source_id: source.id,
+        data: { subject_id: source.id, name: 'Cluster A', action: 'disabled', fields: ['enabled'] },
+      },
+      {
+        id: 2,
+        type: 'change.source',
+        at: now.toISOString(),
+        source_id: 'removed',
+        data: { subject_id: 'removed', name: 'Cluster B', action: 'removed', fields: [] },
+      },
+      {
+        id: 1,
+        type: 'change.source',
+        at: now.toISOString(),
+        source_id: 'removed',
+        data: { subject_id: 'removed', name: 'Cluster B', action: 'added', fields: [] },
+      },
+    ];
+    request.mockResolvedValue(rows);
+    await render(<ActivityPanel demo={false} sources={[source]} onOpen={vi.fn()} />);
+    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
+    expect(container.querySelectorAll('.activity a')).toHaveLength(1);
+    expect(container.querySelector('.activity a')?.getAttribute('href')).toBe(
+      '#/sources?group=cluster-a',
+    );
+    expect(container.querySelectorAll('.activity .dot.gray')).toHaveLength(3);
+    expect(container.querySelector('.activity button')).toBeNull();
+    expect(container.querySelector('.activity small')).toBeNull();
+    expect(container.textContent).toContain(
+      language === 'en' ? 'You paused Cluster A' : '你暂停了 Cluster A 的采集',
+    );
+    // A dashboard poll removes the link even if the Activity rows did not change.
+    await render(<ActivityPanel demo={false} sources={[]} onOpen={vi.fn()} />);
+    expect(container.querySelector('.activity a')).toBeNull();
+    expect(container.querySelectorAll('.activity > li')).toHaveLength(3);
+  },
+);
+
+it('scrolls only the selected Sources group without hiding other groups', async () => {
+  const data = serverDemo();
+  const ctx = {
+    ...context('sources'),
+    data,
+    groups: groupsOf(data),
+    nodes: [],
+    drivers: [],
+    demo: true,
+  };
+  const scroll = vi.mocked(Element.prototype.scrollIntoView);
+  const first = ctx.groups.find((group) => group.key === 'example:cluster-b')!;
+  const second = ctx.groups.find((group) => group.key === 'example:cluster-d')!;
+  await render(<SourcesPage ctx={{ ...ctx, group: first.key }} />);
+  const panel = document.getElementById(`source-group:${first.key}`);
+  expect(panel?.tagName).toBe('SECTION');
+  expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+  expect(scroll.mock.contexts.every((element) => element === panel)).toBe(true);
+  expect(container.querySelectorAll('.source-group')).toHaveLength(
+    ctx.groups.filter((group) => group.sources.length).length + 1,
+  );
+  scroll.mockClear();
+  // Updating dashboard data with the same group must not yank the user's scroll position.
+  await render(<SourcesPage ctx={{ ...ctx, groups: [...ctx.groups], group: first.key }} />);
+  expect(scroll).not.toHaveBeenCalled();
+  await render(<SourcesPage ctx={{ ...ctx, group: second.key }} />);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(scroll.mock.contexts[0]).toBe(document.getElementById(`source-group:${second.key}`));
+  for (const group of ['all', 'missing']) {
+    scroll.mockClear();
+    await render(<SourcesPage ctx={{ ...ctx, group }} />);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(first.label);
+    expect(container.textContent).toContain(second.label);
+  }
+  const manual = ctx.groups.find((group) => !group.sources.length)!;
+  await render(<SourcesPage ctx={{ ...ctx, group: manual.key }} />);
+  expect(scroll.mock.contexts).toEqual([document.getElementById('source-manual')]);
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows only relevant changed field names in %s',
+  async (language) => {
+    setLocale(language);
+    const row = (type: string, action: string, fields: string[]): DeckEvent => ({
+      id: 0,
+      type,
+      at: now.toISOString(),
+      source_id: null,
+      data: {
+        name: 'Example',
+        action,
+        fields,
+        ...{ credential: 'secret-value', options: { region: 'private-region' } },
+      },
+    });
+    const rows = [
+      row('change.source', 'edited', ['credential', 'options']),
+      row('change.source', 'disabled', ['enabled']),
+      row('change.source', 'added', ['credential']),
+      row('change.source', 'enabled', ['enabled', 'interval_minutes', 'options']),
+      row('change.source', 'disabled', ['enabled', 'credential']),
+      row('change.node', 'edited', ['ssh_alias', 'command']),
+      row('change.instance', 'edited', ['host', 'port']),
+      row('change.source', 'removed', ['credential']),
+      row('change.tool', 'settings', ['credential']),
+      row('change.import', 'imported', ['credential']),
+      row('change.source', 'edited', []),
+    ].map((event, id) => ({ ...event, id }));
+    request.mockResolvedValue(rows);
+    await render(<ActivityPanel demo={false} />);
+    const rendered = [...container.querySelectorAll('.activity > li')];
+    const changed = (fields: string[]) =>
+      t('event.change.fields', { fields: fields.join(language === 'en' ? ', ' : '、') });
+    for (const [index, fields] of [
+      [0, ['credential', 'options']],
+      [3, ['interval_minutes', 'options']],
+      [4, ['credential']],
+      [5, ['ssh_alias', 'command']],
+      [6, ['host', 'port']],
+    ] as const) {
+      expect(rendered[index].querySelector('small')?.textContent).toBe(changed([...fields]));
+    }
+    for (const index of [1, 2, 7, 8, 9, 10])
+      expect(rendered[index].querySelector('small')).toBeNull();
+    expect(container.textContent).not.toContain('secret-value');
+    expect(container.textContent).not.toContain('private-region');
   },
 );

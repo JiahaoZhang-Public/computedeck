@@ -390,3 +390,44 @@ describe('observation gaps', () => {
     expect(eventTone(service)).toBe('gray');
   });
 });
+
+describe('user changes', () => {
+  afterEach(() => setLocale('en'));
+  it.each(['en', 'zh-CN'] as const)('renders every change action in %s', (language) => {
+    setLocale(language);
+    const actions: Record<string, string[]> = {
+      source: ['added', 'edited', 'enabled', 'disabled', 'removed'],
+      node: ['added', 'edited', 'removed'],
+      instance: ['added', 'edited', 'removed'],
+      tool: ['on', 'off', 'settings'],
+    };
+    for (const [subject, values] of Object.entries(actions)) {
+      for (const action of values) {
+        const row = event(`change.${subject}`, { name: 'Example', action, fields: ['credential'] });
+        expect(eventText(row)).toContain('Example');
+        expect(eventText(row)).toMatch(language === 'en' ? /^You / : /^你/);
+        expect(eventText(row)).not.toContain('credential');
+        expect(eventTone(row)).toBe('gray');
+      }
+    }
+    const paused = event('change.source', { name: 'Cluster A', action: 'disabled' });
+    expect(eventText(paused)).toBe(
+      language === 'en' ? 'You paused Cluster A' : '你暂停了 Cluster A 的采集',
+    );
+    const imported = event('change.import', {
+      action: 'imported',
+      counts: { sources: 3, nodes: 1, instances: 2 },
+    });
+    expect(eventText(imported)).toContain(language === 'en' ? 'sources: 3' : '数据源：3');
+    expect(eventText(imported)).toContain(
+      language === 'en' ? 'collection machines: 1' : '采集机器：1',
+    );
+    expect(eventText(imported)).toContain(language === 'en' ? 'machines: 2' : '机器：2');
+    expect(eventTone(imported)).toBe('gray');
+    for (const type of ['change.source', 'change.future']) {
+      expect(eventText(event(type, { name: 'Example', action: 'future' }))).toBe(
+        t('event.change.unknown', { name: 'Example' }),
+      );
+    }
+  });
+});

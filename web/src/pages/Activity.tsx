@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVisibleInterval } from '../useVisibleInterval';
-import type { DeckEvent } from '../types';
+import type { DeckEvent, Source } from '../types';
 import { api } from '../api';
-import { t } from '../i18n';
+import { locale, t } from '../i18n';
 import { relativeTime } from '../domain';
 import {
   activityEvents,
@@ -13,6 +13,7 @@ import {
   eventTimeText,
 } from '../events';
 import { Panel } from '../ui';
+import { routeHash } from '../routes';
 
 /** What changed between collections: jobs that started, ended or failed, sources that broke. */
 export function ActivityPanel({
@@ -20,7 +21,9 @@ export function ActivityPanel({
   limit = 12,
   token,
   onOpen,
+  sources = [],
 }: {
+  sources?: Source[];
   demo: boolean;
   limit?: number;
   token?: string;
@@ -31,7 +34,9 @@ export function ActivityPanel({
   const load = useCallback(async () => {
     const id = ++loadId.current;
     try {
-      const rows = await api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}&group=1`);
+      const rows = await api<DeckEvent[]>(
+        `/events?limit=${limit}&demo=${demo}&group=1&include=changes`,
+      );
       if (id === loadId.current) setEvents(activityEvents(rows));
     } catch {
       if (id === loadId.current) setEvents((current) => current ?? []);
@@ -49,7 +54,7 @@ export function ActivityPanel({
       {events?.length ? (
         <ul className="activity">
           {events.map((event) => (
-            <ActivityRow key={event.id} event={event} onOpen={onOpen} />
+            <ActivityRow key={event.id} event={event} onOpen={onOpen} sources={sources} />
           ))}
         </ul>
       ) : (
@@ -59,13 +64,38 @@ export function ActivityPanel({
   );
 }
 
-function ActivityRow({ event, onOpen }: { event: DeckEvent; onOpen?: (event: DeckEvent) => void }) {
+function ActivityRow({
+  event,
+  onOpen,
+  sources,
+}: {
+  event: DeckEvent;
+  onOpen?: (event: DeckEvent) => void;
+  sources: Source[];
+}) {
+  const source =
+    event.type === 'change.source' && event.data.action !== 'removed'
+      ? sources.find((source) => source.id === event.data.subject_id)
+      : undefined;
+  const sourceLine = [event.data.source_name, event.data.username].filter(Boolean).join(' · ');
+  const fields = ['change.source', 'change.node', 'change.instance'].includes(event.type)
+    ? (event.data.fields ?? []).filter(
+        (field) =>
+          event.data.action === 'edited' ||
+          (['enabled', 'disabled'].includes(event.data.action ?? '') && field !== 'enabled'),
+      )
+    : [];
   const content = (
     <>
       <span className={`dot ${eventTone(event)}`} />
       <span className="grow">
         {eventText(event)}
-        <small>{[event.data.source_name, event.data.username].filter(Boolean).join(' · ')}</small>
+        {sourceLine && <small>{sourceLine}</small>}
+        {fields.length > 0 && (
+          <small>
+            {t('event.change.fields', { fields: fields.join(locale() === 'zh-CN' ? '、' : ', ') })}
+          </small>
+        )}
       </span>
       <time dateTime={event.at} title={eventTimeTitle(event)}>
         {eventTimeText(event) ?? relativeTime(event.at)}
@@ -79,6 +109,10 @@ function ActivityRow({ event, onOpen }: { event: DeckEvent; onOpen?: (event: Dec
           <button className="activity-job" onClick={() => onOpen(event)}>
             {content}
           </button>
+        ) : source ? (
+          <a className="activity-job" href={routeHash('sources', source.cluster_id)}>
+            {content}
+          </a>
         ) : (
           content
         )}
@@ -90,7 +124,7 @@ function ActivityRow({ event, onOpen }: { event: DeckEvent; onOpen?: (event: Dec
         <summary>{content}</summary>
         <ul className="activity">
           {event.group.events.map((child) => (
-            <ActivityRow key={child.id} event={child} onOpen={onOpen} />
+            <ActivityRow key={child.id} event={child} onOpen={onOpen} sources={sources} />
           ))}
           {event.group.count > event.group.events.length && (
             <li>{t('event.more', { count: event.group.count - event.group.events.length })}</li>

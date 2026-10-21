@@ -461,6 +461,28 @@ def events() -> list[dict[str, Any]]:
         }
 
     rows: list[tuple[str, str | None, int, dict[str, Any]]] = [
+        (
+            "change.source",
+            "example:cluster-b-alice",
+            8,
+            {
+                "subject_id": "example:cluster-b-alice",
+                "name": "Cluster B",
+                "action": "edited",
+                "fields": ["interval_minutes"],
+            },
+        ),
+        (
+            "change.instance",
+            None,
+            45,
+            {
+                "subject_id": "example:manual:lab-workstation-buildbox",
+                "name": "build-box",
+                "action": "added",
+                "fields": ["host", "name", "platform"],
+            },
+        ),
         ("source.recovered", "example:cluster-d-alice", 10, {}),
         (
             "source.gap",
@@ -587,7 +609,7 @@ def events() -> list[dict[str, Any]]:
             "at": (at - timedelta(minutes=minutes)).isoformat(),
             "source_id": source_id,
             "silent": False,
-            "data": {**context(source_id), **extra},
+            "data": extra if kind.startswith("change.") else {**context(source_id), **extra},
         }
         for index, (kind, source_id, minutes, extra) in enumerate(rows)
     ]

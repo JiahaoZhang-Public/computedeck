@@ -17,10 +17,45 @@ export const OUTCOME_LABELS: Record<string, MessageKey> = {
   unknown: 'event.outcome.unknown',
 };
 
+const CHANGE_LABELS: Record<string, Record<string, MessageKey>> = {
+  'change.source': {
+    added: 'event.change.source.added',
+    edited: 'event.change.source.edited',
+    enabled: 'event.change.source.enabled',
+    disabled: 'event.change.source.disabled',
+    removed: 'event.change.source.removed',
+  },
+  'change.node': {
+    added: 'event.change.node.added',
+    edited: 'event.change.node.edited',
+    removed: 'event.change.node.removed',
+  },
+  'change.instance': {
+    added: 'event.change.instance.added',
+    edited: 'event.change.instance.edited',
+    removed: 'event.change.instance.removed',
+  },
+  'change.tool': {
+    on: 'event.change.tool.on',
+    off: 'event.change.tool.off',
+    settings: 'event.change.tool.settings',
+  },
+  'change.import': { imported: 'event.change.import' },
+};
+
 export type EventTone = 'green' | 'amber' | 'red' | 'gray';
 
 /** One line describing an event, in the current language. */
 export function eventText(event: DeckEvent): string {
+  if (event.type.startsWith('change.')) {
+    const key = CHANGE_LABELS[event.type]?.[event.data.action ?? ''];
+    return t(key ?? 'event.change.unknown', {
+      name: event.data.name ?? event.data.subject_id ?? '',
+      sources: event.data.counts?.sources ?? '—',
+      nodes: event.data.counts?.nodes ?? '—',
+      instances: event.data.counts?.instances ?? '—',
+    });
+  }
   if (event.group) {
     const names = event.group.names.map(({ name, count }) => `${name} ×${count}`).join(', ');
     const labels: Record<string, MessageKey> = {
