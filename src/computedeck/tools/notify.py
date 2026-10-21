@@ -190,6 +190,13 @@ def facts(event: dict[str, Any]) -> dict[str, str]:
         "error": error,
         "time": event.get("at"),
     }
+    if event.get("type") == "job.finished":
+        values.update(
+            state=data.get("state"),
+            exit_code=data.get("exit_code"),
+            end=data.get("ended_at")
+            or (job.get("end") if data.get("outcome") != "unknown" else None),
+        )
     return {key: "—" if value in (None, "") else str(value) for key, value in values.items()}
 
 
@@ -212,8 +219,8 @@ class RuleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
     enabled: bool = True
-    events: list[str] = Field(default_factory=lambda: ["job.failed"], min_length=1)
-    outcomes: list[str] = Field(default_factory=list)
+    events: list[str] = Field(default_factory=lambda: ["job.finished"], min_length=1)
+    outcomes: list[str] = Field(default_factory=lambda: list(FAILURE_OUTCOMES))
     clusters: list[str] = Field(default_factory=list, max_length=50)
     users: list[str] = Field(default_factory=list, max_length=50)
     name_pattern: str = Field(default="", max_length=200)
@@ -879,6 +886,12 @@ def sample_event(kind: str = "job.finished", outcome: str = "failed") -> dict[st
         "source_id": None,
         "data": {
             "outcome": outcome,
+            "state": outcome.upper() if outcome != "unknown" else None,
+            "exit_code": None
+            if outcome == "unknown"
+            else "0:0"
+            if outcome == "completed"
+            else "1:0",
             "observed_at": now(),
             "ended_at": now(),
             "source_name": "Cluster A",
@@ -1084,7 +1097,7 @@ def setup(ctx: PluginContext) -> None:
             ctx.store,
             notifier.settings(),
             rule,
-            event or sample_event(body.events[0], next(iter(body.outcomes), "failed")),
+            event or sample_event(rule["events"][0], next(iter(rule["outcomes"]), "failed")),
         )
         return {
             "subject": mail.subject,

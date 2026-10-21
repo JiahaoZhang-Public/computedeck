@@ -36,6 +36,16 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def job_time(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        stamp = datetime.fromisoformat(value)
+        return stamp.isoformat() if stamp.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None

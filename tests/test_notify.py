@@ -15,8 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from computedeck import app as api
-from computedeck import credentials, plugins
-from computedeck.drivers.base import SourceError
+from computedeck import credentials, events, plugins
+from computedeck.drivers.base import Batch, SourceError
 from computedeck.plugins import Plugin, PluginContext, Runtime
 from computedeck.store import Store
 from computedeck.tools import channels, notify
@@ -366,7 +366,18 @@ def test_api_creates_channels_and_rules_and_previews(
         preview = client.post(
             "/api/plugins/notify/rules/preview", json=rule, headers=HEADERS
         ).json()
-        assert preview["example"] is True and "failed on Cluster A" in preview["subject"]
+        assert preview["example"] is True and ": failed on Cluster A" in preview["subject"]
+        default_rule = {"name": "Failures", "channels": [channel["id"]]}
+        default_created = client.post(
+            "/api/plugins/notify/rules", json=default_rule, headers=HEADERS
+        ).json()
+        assert default_created["events"] == ["job.finished"]
+        assert default_created["outcomes"] == list(notify.FAILURE_OUTCOMES)
+        default_preview = client.post(
+            "/api/plugins/notify/rules/preview", json=default_rule, headers=HEADERS
+        ).json()
+        assert default_preview["example"] is True
+        assert ": failed on Cluster A" in default_preview["subject"]
         tested = client.post(
             f"/api/plugins/notify/channels/{channel['id']}/test", json={}, headers=HEADERS
         )
@@ -1135,3 +1146,66 @@ async def test_finished_template_translates_outcome(store: Store, language: str,
         store, {}, {}, notify.sample_event("job.finished", "out_of_memory")
     )
     assert word in mail.subject and word in mail.body
+
+
+@pytest.mark.parametrize(
+    "language,state_label,exit_label,end_label",
+    [("en", "State: ", "Exit code: ", "Ended: "), ("zh-CN", "状态：", "退出码：", "结束时间：")],
+)
+async def test_unknown_departure_message_uses_reconciled_fields(
+    store: Store, language: str, state_label: str, exit_label: str, end_label: str
+) -> None:
+    store.save_settings({"language": language})
+    source = {"id": "cluster-a-alice", "name": "Cluster A", "driver": "slurm"}
+    last_seen = event(state="RUNNING", exit_code="0:0", end="Unknown")["data"]["job"]
+    row = events.collected(
+        source,
+        {"jobs": [last_seen], "lifecycle_pending": []},
+        Batch(jobs=[]),
+        first=False,
+    )[0]
+    assert row["data"]["job"] == last_seen
+    mail, _ = await notify.compose(store, {}, {}, row)
+    assert "RUNNING" not in mail.body
+    assert f"{state_label}—" in mail.body
+    assert f"{exit_label}—" in mail.body
+    assert f"{end_label}—" in mail.body
+
+    # Failed endings retain their reconciled state/code and either form of end time.
+    for end in ("2026-01-01T12:00:00+00:00", "2026-01-01T12:00:00"):
+        row = events.collected(
+            source,
+            {"lifecycle_pending": []},
+            Batch(
+                jobs=[], finished=[{**last_seen, "state": "FAILED", "exit_code": "1:0", "end": end}]
+            ),
+            first=False,
+        )[0]
+        mail, _ = await notify.compose(store, {}, {}, row)
+        assert f"{state_label}FAILED" in mail.body
+        assert f"{exit_label}1:0" in mail.body
+        assert f"{end_label}{end}" in mail.body
+
+
+@pytest.mark.parametrize("kind", ["job.started", "job.ended", "job.failed"])
+def test_legacy_notification_facts_keep_job_fields(kind: str) -> None:
+    row = event(kind, state="RUNNING", exit_code="0:0", end="Unknown")
+    row["data"].update(state=None, exit_code=None, ended_at=None, outcome="unknown")
+    values = notify.facts(row)
+    assert values["state"] == "RUNNING"
+    assert values["exit_code"] == "0:0"
+    assert values["end"] == "Unknown"
+
+
+def test_finished_notification_facts_prefer_reconciled_fields() -> None:
+    row = event("job.finished", state="RUNNING", exit_code="0:0", end="Unknown")
+    row["data"].update(
+        state="FAILED", exit_code="1:0", ended_at="2026-01-01T12:00:00+00:00", outcome="failed"
+    )
+    values = notify.facts(row)
+    assert values["state"] == "FAILED"
+    assert values["exit_code"] == "1:0"
+    assert values["end"] == "2026-01-01T12:00:00+00:00"
+    sample = notify.facts(notify.sample_event())
+    assert sample["state"] == "FAILED"
+    assert sample["exit_code"] == "1:0"

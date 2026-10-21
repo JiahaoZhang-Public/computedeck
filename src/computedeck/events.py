@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Any
 
 from .drivers import Batch
+from .drivers.base import job_time
 from .store import now
 from .summary import RUNNING
 
@@ -33,15 +34,6 @@ FAILURE_OUTCOMES = (
     "preempted",
 )
 OUTCOMES = ("completed", "cancelled", *FAILURE_OUTCOMES, "unknown")
-
-
-def job_time(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return value if datetime.fromisoformat(value).tzinfo is not None else None
-    except ValueError:
-        return None
 
 
 def after_gap(source: dict[str, Any], at: str) -> bool:
@@ -110,7 +102,7 @@ def collected(
     baseline = first or "lifecycle_pending" not in old
     gap = after_gap(source, at)
     history_capable = "history" in batch.capabilities or "history" in (
-        source.get("capabilities") or []
+        source.get("capabilities_seen") or source.get("capabilities") or []
     )
     previous = {job["id"]: job for job in old.get("jobs") or []}
     current = {job["id"]: job for job in batch.jobs or []}
@@ -128,6 +120,11 @@ def collected(
         job["id"]: job
         for job in (batch.finished if batch.finished is not None else batch.failures) or []
     }
+    # The wider failure window can resolve departures missed by terminal history.
+    for job in batch.failures or []:
+        if job["id"] in pending:
+            terminal.setdefault(job["id"], job)
+    unknown: set[str] = set()
     # An old accounting row for a requeued ID cannot resolve its newer attempt.
     for job_id, job in {**previous, **pending, **current}.items():
         reported = terminal.get(job_id)
@@ -158,20 +155,37 @@ def collected(
         for job_id, job in {**previous, **pending}.items():
             if job_id in current or job_id in terminal or job_id in renamed or job_id in ended:
                 continue
-            if history_capable and job_id not in pending:
-                waiting.append(job)
+            held_at = job.get("held_at", at)
+            expired = (
+                datetime.fromisoformat(at) - datetime.fromisoformat(held_at)
+            ).total_seconds() >= 86400
+            if (
+                (history_capable or job_id in pending)
+                and not expired
+                and (job_id not in pending or "history" not in batch.capabilities)
+            ):
+                waiting.append(
+                    {
+                        **job,
+                        "held_at": held_at,
+                        "held_silent": job.get("held_silent", baseline or gap),
+                    }
+                )
             else:
-                terminal[job_id] = {**job, "state": "UNKNOWN", "end": None, "exit_code": None}
+                terminal[job_id] = job
+                unknown.add(job_id)
     else:
         waiting = list(pending.values())
     for job_id, job in terminal.items():
-        end = job_time(job.get("end"))
-        raw_end = job.get("end")
+        held_silent = pending.get(job_id, {}).get("held_silent", False)
+        job = {key: value for key, value in job.items() if key not in {"held_at", "held_silent"}}
+        raw_end = None if job_id in unknown else job.get("end")
+        end = job_time(raw_end)
         before = ended.get(job_id)
         # Late or incomplete accounting must not announce the same ending again.
-        if before and (not raw_end or not before.get("end") or before.get("end") == raw_end):
+        if before and (not raw_end or not before.get("end")):
             continue
-        outcome = str(job.get("state", "")).lower()
+        outcome = "unknown" if job_id in unknown else str(job.get("state", "")).lower()
         if outcome not in OUTCOMES:
             outcome = "unknown"
         reason = None
@@ -187,13 +201,13 @@ def collected(
                 "type": "job.finished",
                 "at": end or at,
                 "source_id": source["id"],
-                "silent": baseline or (gap and outcome not in FAILURE_OUTCOMES),
+                "silent": baseline or ((gap or held_silent) and outcome not in FAILURE_OUTCOMES),
                 "data": {
                     **context,
                     "job": job,
                     "outcome": outcome,
-                    "state": job.get("state"),
-                    "exit_code": job.get("exit_code"),
+                    "state": None if job_id in unknown else job.get("state"),
+                    "exit_code": None if job_id in unknown else job.get("exit_code"),
                     "submitted_at": job_time(job.get("submitted_at")),
                     "started_at": job_time(job.get("started_at")),
                     "ended_at": end,

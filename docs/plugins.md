@@ -119,7 +119,7 @@ receives the backlog of an earlier installation.
 |---|---|---|
 | `job.started` | a job is first seen running or changes to running | `job`, `started_at`, `observed_at` |
 | `job.finished` | one reconciled ending, including jobs seen only in history | `job`, `outcome`, `state`, `exit_code`, `submitted_at`, `started_at`, `ended_at`, `observed_at`, `outcome_reason` |
-| `job.ended` | legacy delivery of a non-failure ending | `job` |
+| `job.ended` | legacy delivery of a non-failure ending | `job` (as last seen for unknown departures) |
 | `job.failed` | legacy delivery of a failure ending | `job` with `exit_code`, `end` |
 | `source.failed` | a source that worked could not be collected | `error` |
 | `source.recovered` | a failing source was collected again | |
@@ -131,16 +131,19 @@ reconciled endings also records terminal history silently.
 
 `job.finished` is stored once. Its `outcome` is `completed`, `cancelled`, `failed`, `timeout`,
 `out_of_memory`, `node_fail`, `boot_fail`, `deadline`, `preempted`, or `unknown`. A departed
-job waits at most one collection for accounting when this or the previous collection had
-history, including a temporary accounting failure; otherwise its outcome is immediately
-unknown. `outcome_reason` distinguishes `outcomes_unavailable`
+job waits until the next successful accounting collection when history has been available.
+During an accounting outage it stays pending for up to 24 hours; a successful history
+collection that still omits it, or expiry of that window, resolves it as unknown.
+Sources that have never reported history resolve departures immediately as unknown. `outcome_reason` distinguishes `outcomes_unavailable`
 (the cluster does not report outcomes) from `outcome_not_reported` (history has not
 reported this job). Late accounting does not deliver a second ending for an unknown one.
 
 `at` uses the offset-bearing job end time (start time for `job.started`) when known;
 otherwise it is the observation time. `data.observed_at` always records collection time.
 Unknown job times are null. After a gap longer than two collection intervals, non-failure
-endings are recorded silently; failures remain eligible for delivery.
+endings are recorded silently, including departures resolved in a later collection; failures
+remain eligible for delivery. Unknown departures preserve `data.job` as last seen;
+`data.outcome` is `unknown`, and top-level `data.state` and `data.exit_code` are null.
 
 **Named-type delivery:** new event types reach only handlers that explicitly name them
 in `ctx.on_event(handler, types=[...])`. API-1 wildcard handlers retain the original set

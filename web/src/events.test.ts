@@ -67,6 +67,18 @@ describe('reconciled job endings', () => {
       t('event.outcomeNotReported'),
     );
   });
+  it.each(['en', 'zh-CN'] as const)(
+    'labels unknown start times as observations in %s',
+    (language) => {
+      setLocale(language);
+      expect(eventTimeTitle(event('job.started', { started_at: null }))).toContain(
+        t('event.observedTime'),
+      );
+      expect(
+        eventTimeTitle(event('job.started', { started_at: '2026-01-01T00:00:00Z' })),
+      ).not.toContain(t('event.observedTime'));
+    },
+  );
   it('labels end and observation times and suppresses the old pair for migrated sources', () => {
     const row = event('job.finished', {
       outcome: 'completed',

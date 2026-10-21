@@ -189,7 +189,8 @@ function RuleEditor({
           ...body,
           name: body.name || 'preview',
           channels: body.channels.length ? body.channels : ['preview'],
-          events: body.events.length ? body.events : ['job.failed'],
+          events: body.events.length ? body.events : EMPTY_RULE.events,
+          outcomes: body.events.length ? body.outcomes : EMPTY_RULE.outcomes,
         }),
       );
       setError(null);
@@ -228,7 +229,7 @@ function RuleEditor({
         </fieldset>
         <fieldset className="span-two choice-group">
           <legend>
-            {t('notify.rule.outcomes')} <small>{t('notify.rule.allIfNone')}</small>
+            {t('notify.rule.outcomes')} <small>{t('notify.rule.outcomesHint')}</small>
           </legend>
           {Object.entries(OUTCOME_LABELS).map(([outcome, label]) => (
             <label key={outcome} className="checkbox">
@@ -478,7 +479,19 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                   </strong>
                   <span className="sub">
                     {rule.events
-                      .map((type) => (EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type))
+                      .map((type) => {
+                        const label = EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type;
+                        return type === 'job.finished' && rule.outcomes?.length
+                          ? t('notify.rule.filteredOutcomes', {
+                              event: label,
+                              outcomes: rule.outcomes
+                                .map((outcome) =>
+                                  OUTCOME_LABELS[outcome] ? t(OUTCOME_LABELS[outcome]) : outcome,
+                                )
+                                .join(', '),
+                            })
+                          : label;
+                      })
                       .join(', ')}
                     {' → '}
                     {rule.channels.map(channelName).join(', ')}

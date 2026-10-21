@@ -21,6 +21,8 @@ import { driverInfo } from './drivers';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
 import { NotifyPage } from './pages/Notify';
+import { EMPTY_RULE } from './notify';
+import { OUTCOME_LABELS } from './events';
 import type { Ctx } from './pages/shared';
 import type { Dashboard, HistoryPoint, Tool } from './types';
 
@@ -1262,6 +1264,21 @@ it.each(['en', 'zh-CN'] as const)(
     );
     await act(async () => add!.click());
     expect(container.textContent).toContain(t('notify.rule.outcomes'));
+    expect(container.textContent).toContain(t('notify.rule.outcomesHint'));
+    const finished = container.querySelector<HTMLInputElement>(
+      'input[name="events"][value="job.finished"]',
+    )!;
+    finished.checked = false;
+    const previewButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === t('notify.preview'),
+    )!;
+    request.mockResolvedValueOnce({ subject: 'Preview', body: 'Sample', example: true });
+    await act(async () => previewButton.click());
+    expect(request).toHaveBeenCalledWith(
+      '/plugins/notify/rules/preview',
+      expect.objectContaining({ events: ['job.finished'], outcomes: EMPTY_RULE.outcomes }),
+    );
+    finished.checked = true;
     const outcomes = container.querySelectorAll<HTMLInputElement>('input[name="outcomes"]');
     expect(outcomes).toHaveLength(10);
     for (const checkbox of outcomes) checkbox.checked = checkbox.value === 'timeout';
@@ -1278,3 +1295,28 @@ it.each(['en', 'zh-CN'] as const)(
     );
   },
 );
+
+it.each(['en', 'zh-CN'] as const)('shows saved Notify outcome filters in %s', async (language) => {
+  setLocale(language);
+  request.mockResolvedValue({
+    channels: [{ id: 'team', name: 'Team', kind: 'webhook', config: {} }],
+    rules: [
+      { ...EMPTY_RULE, id: 'failures', name: 'Failures', channels: ['team'] },
+      { ...EMPTY_RULE, id: 'all', name: 'All', channels: ['team'], outcomes: [] },
+    ],
+    kinds: [],
+    event_types: ['job.finished'],
+    placeholders: [],
+    log: [],
+    ai_ready: false,
+  });
+  await render(<NotifyPage ctx={{ ...context('notify'), groups: [] }} />);
+  const summaries = Array.from(container.querySelectorAll('.rows .sub')).map(
+    (row) => row.textContent,
+  );
+  const label = t('notify.event.finished');
+  expect(summaries).toContain(
+    `${t('notify.rule.filteredOutcomes', { event: label, outcomes: EMPTY_RULE.outcomes!.map((outcome) => t(OUTCOME_LABELS[outcome])).join(', ') })} → Team`,
+  );
+  expect(summaries).toContain(`${label} → Team`);
+});

@@ -780,6 +780,7 @@ async def test_terminal_window_overlaps_previous_success_and_is_capped(
         }
     )
     command = next(command for _, command, _ in calls if slurm.HISTORY_MARKER in command)
+    assert "\n" not in command
     assert f"--starttime=now-{window}minutes" in command
     assert "--starttime=now-24hours" in command
     assert "env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct" in command

@@ -17,6 +17,7 @@ from .base import (
     SourceError,
     cluster_state,
     integer,
+    job_time,
     message,
     now,
     ssh_alias_field,
@@ -105,15 +106,6 @@ def gpu_type(tres: str) -> str | None:
 def gpus_tracked(nodes_output: str) -> bool:
     """Whether the cluster accounts GPUs as TRES, so a TRES list without them means none."""
     return re.search(r"(?:^|\s)CfgTRES=\S*gres/gpu", nodes_output, re.M) is not None
-
-
-def job_time(value: str) -> str | None:
-    """The queue query requests an explicit UTC offset; unknown dates stay unknown."""
-    try:
-        stamp = datetime.fromisoformat(value)
-        return stamp.isoformat() if stamp.tzinfo is not None else None
-    except ValueError:
-        return None
 
 
 def parse_jobs(
@@ -622,20 +614,23 @@ class SlurmDriver:
                         + 5,
                     ),
                 )
-            terminal = (
-                history.replace("now-24hours", f"now-{minutes}minutes")
-                .replace(
-                    "--state=" + ",".join(FAILURE_STATES),
+            terminal = shlex.join(
+                [
+                    "env",
+                    "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
+                    "sacct",
+                    "--noheader",
+                    "--parsable2",
+                    "--allocations",
+                    f"--user={username}",
+                    f"--starttime=now-{minutes}minutes",
+                    "--endtime=now",
                     "--state=" + ",".join((*FAILURE_STATES, "COMPLETED", "CANCELLED")),
-                )
-                .replace(
-                    "--format=" + ",".join(_HISTORY_FIELDS),
                     "--format=" + ",".join(_FINISHED_FIELDS),
-                )
+                ]
             )
-            terminal = "env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z " + terminal
             output = await ssh.run(
-                alias, f"{history} && printf '\n{HISTORY_MARKER}\n' && {terminal}", options
+                alias, f"{history} && echo {HISTORY_MARKER} && {terminal}", options
             )
             failures, marker, finished = output.partition(HISTORY_MARKER)
             if not marker:

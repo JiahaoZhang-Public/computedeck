@@ -808,6 +808,8 @@ const en = {
   'event.seenLater': 'seen {minutes} min later',
   'event.endedAt': 'ended {time}',
   'notify.event.finished': 'Job finished',
+  'notify.rule.outcomesHint': 'Applies to Job finished only; all outcomes if none selected',
+  'notify.rule.filteredOutcomes': '{event} ({outcomes})',
   'notify.rule.outcomes': 'Job outcomes',
   'event.jobEnded': '{job} left the queue',
   'event.jobFailed': '{job} failed ({state}, exit code {code})',

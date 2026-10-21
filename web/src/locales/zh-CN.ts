@@ -745,6 +745,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'event.seenLater': '{minutes} 分钟后观测到',
   'event.endedAt': '结束于 {time}',
   'notify.event.finished': '作业结束',
+  'notify.rule.outcomesHint': '仅适用于作业结束；不选则匹配所有结果',
+  'notify.rule.filteredOutcomes': '{event}（{outcomes}）',
   'notify.rule.outcomes': '作业结果',
   'event.jobEnded': '{job} 已离开队列',
   'event.jobFailed': '{job} 失败（{state}，退出码 {code}）',
