@@ -1376,3 +1376,161 @@ def test_gap_events_are_visible_in_plain_grouped_and_id_reads(
         assert client.get(f"/api/events?id={row['id']}").json() == [row]
     demo = client.get("/api/events?demo=true&group=1").json()
     assert {row["type"] for row in demo} >= {"source.gap", "service.gap"}
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "type=job.started",
+        "type=job.started&type=source.failed",
+        "category=failed",
+        "category=jobs",
+        "category=sources",
+        "category=gaps",
+        "category=changes",
+        "category=plugins",
+        "source_id=example:cluster-b-alice",
+        "cluster_id=example:cluster-b",
+        "job=example:cluster-b:48211",
+        "q=train-sweep",
+        "q=CLUSTER",
+        "q=%25",
+        "q=_",
+        "q=build-box",
+        "range=7d",
+        "range=30d",
+        "since=2026-01-01T00:00:00%2B04:00",
+        "before_id=30",
+        "after_id=30",
+        "after_id=10&before_id=30",
+        "category=failed&range=7d&group=1",
+        "group=1&before_id=30",
+        "group=1&after_id=30",
+    ],
+)
+def test_activity_filters_match_example_mode(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    from computedeck import demo
+
+    rows = demo.events()
+    data = demo.dashboard()
+    monkeypatch.setattr(api, "demo_events", lambda: rows)
+    monkeypatch.setattr(api, "demo_dashboard", lambda: data)
+    store = Store(data_dir / "computedeck.sqlite")
+    for source in data["sources"]:
+        store.save_source(source)
+    for instance in data["instances"]:
+        if instance["source_id"] == "manual":
+            store.save_instance(instance)
+    store.add_events(list(reversed(rows)))
+    store.add_events([{**rows[0], "key": "silent", "silent": True}])
+    store.db.close()
+    url = f"/api/events?include=changes&limit=200&{query}"
+    live = client.get(url)
+    example = client.get(url + "&demo=true")
+    assert live.status_code == example.status_code == 200
+    assert live.json() == example.json()
+
+
+@pytest.mark.parametrize("group", [False, True])
+def test_activity_paging_never_loses_interleaved_rows(
+    client: TestClient, data_dir: Path, group: bool
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    at = now()
+    # A group of three interleaved with a pair (which must remain two display rows).
+    rows = [
+        {
+            "key": str(i),
+            "type": "job.finished",
+            "source_id": source,
+            "at": at,
+            "data": {"observed_at": at, "outcome": "failed" if i % 2 else "completed"},
+        }
+        for i, source in enumerate(["a", "b", "a", "b", "a"])
+    ]
+    store.add_events(rows)
+    store.db.close()
+    base = f"/api/events?group={str(group).lower()}&range=30d"
+    expected = client.get(base).json()
+    paged = []
+    cursor = ""
+    while page := client.get(base + "&limit=1" + cursor).json():
+        paged.extend(page)
+        cursor = f"&before_id={page[-1]['id']}"
+        assert len(paged) <= 5
+    assert paged == expected
+    assert sorted(i for row in paged for i in row.get("group", {}).get("ids", [row["id"]])) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    fresh = client.get(base + "&after_id=4").json()
+    assert [row["id"] for row in fresh] == [5]
+    if group:
+        assert fresh[0]["group"]["ids"] == [5, 3, 1]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=201",
+        "limit=0",
+        "before_id=0",
+        "after_id=-1",
+        f"after_id={2**63}",
+        "type=not.real",
+        "category=invalid",
+        "range=3d",
+        "since=not-a-date",
+        "q=" + "x" * 65,
+    ],
+)
+def test_activity_rejects_invalid_filters(client: TestClient, query: str) -> None:
+    assert client.get("/api/events?" + query).status_code == 422
+
+
+def test_activity_since_compares_instants_and_search_is_literal(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": "a",
+                "type": "job.finished",
+                "at": now(),
+                "source_id": "a",
+                "data": {"outcome": "failed", "job": {"id": "a:1", "name": "50%_done"}},
+            },
+        ]
+    )
+    # Fixed offset-bearing instants avoid lexical timestamp comparison.
+    store.db.execute("UPDATE events SET at = '2026-10-21T10:00:00+04:00'")
+    store.db.commit()
+    store.db.close()
+    assert len(client.get("/api/events?since=2026-10-21T05:59:00Z&q=%25_").json()) == 1
+    assert client.get("/api/events?since=2026-10-21T06:01:00Z").json() == []
+    assert client.get("/api/events?category=changes").json() == []
+
+
+def test_activity_categories_keep_changes_opt_in_and_filter_before_limit(
+    client: TestClient,
+) -> None:
+    for category in ("changes", "plugins"):
+        assert client.get(f"/api/events?demo=true&category={category}").json() == []
+    assert client.get("/api/events?demo=true&type=change.tool").json() == []
+    [tool] = client.get("/api/events?demo=true&include=changes&category=plugins&limit=1").json()
+    assert tool["type"] == "change.tool"
+    [failed] = client.get("/api/events?demo=true&category=failed&limit=1").json()
+    assert failed["type"] == "source.failed"
+    recent = client.get("/api/events?demo=true&range=24h&group=1").json()
+    older = client.get("/api/events?demo=true&range=30d&group=1").json()
+    assert len(older) > 30 > len(recent)

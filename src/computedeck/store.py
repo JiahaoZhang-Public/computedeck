@@ -420,6 +420,126 @@ class Store:
         )
         return [event for event in reversed(events) if not event["silent"]]
 
+    def query_events(
+        self,
+        limit: int = 50,
+        *,
+        before_id: int | None = None,
+        after_id: int | None = None,
+        types: list[str] | None = None,
+        category: str | None = None,
+        source_id: str | None = None,
+        cluster_id: str | None = None,
+        job: str | None = None,
+        since: str | None = None,
+        q: str | None = None,
+        include_changes: bool = False,
+        group: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Visible Activity rows. Filters precede grouping; cursors address display rows."""
+        # Local import: events also uses Store's clock.
+        from .events import FAILURE_OUTCOMES, group_events
+
+        where = ["silent = 0", "json_valid(data)"]
+        args: list[Any] = []
+        if not include_changes:
+            where.append("type NOT LIKE 'change.%'")
+        if types:
+            where.append("type IN (" + ",".join("?" for _ in types) + ")")
+            args.extend(types)
+        if category == "failed":
+            where.append(
+                "(type IN ('job.failed', 'source.failed') OR (type = 'job.finished' "
+                "AND json_extract(data, '$.outcome') IN ("
+                + ",".join("?" for _ in FAILURE_OUTCOMES)
+                + ")))"
+            )
+            args.extend(FAILURE_OUTCOMES)
+        elif category:
+            where.append(
+                {
+                    "jobs": "type LIKE 'job.%'",
+                    "sources": "type IN ('source.failed', 'source.recovered')",
+                    "gaps": "type IN ('source.gap', 'service.gap')",
+                    "changes": "type LIKE 'change.%'",
+                    "plugins": "type = 'change.tool'",
+                }[category]
+            )
+        for column, value in (("source_id", source_id), ("json_extract(data, '$.job.id')", job)):
+            if value is not None:
+                where.append(f"{column} = ?")
+                args.append(value)
+        if cluster_id is not None:
+            where.append(
+                "(json_extract(data, '$.cluster_id') = ? OR source_id IN "
+                "(SELECT id FROM sources WHERE json_extract(data, '$.cluster_id') = ?) OR "
+                "(type = 'change.instance' AND json_extract(data, '$.subject_id') IN "
+                "(SELECT id FROM instances WHERE 'platform:' || "
+                "lower(trim(json_extract(data, '$.platform'))) = ?)))"
+            )
+            args.extend([cluster_id] * 3)
+        if since is not None:
+            where.append("julianday(at) >= julianday(?)")
+            args.append(since)
+        if q:
+            # Treat LIKE metacharacters as literal search text.
+            pattern = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+            fields = ("cluster_id", "job.id", "job.name", "source_name", "name")
+            where.append(
+                "("
+                + " OR ".join(
+                    f"json_extract(data, '$.{field}') LIKE ? ESCAPE '!'" for field in fields
+                )
+                + ")"
+            )
+            args.extend([pattern] * len(fields))
+        cursor = []
+        for operator, cursor_id in (("<", before_id), (">", after_id)):
+            if cursor_id is not None:
+                cursor.append(f"display_id {operator} ?")
+                args.append(cursor_id)
+        cursor_sql = " AND ".join(cursor) or "1"
+        filtered = "SELECT * FROM events WHERE " + " AND ".join(where)
+        if group:
+            sql = (
+                "WITH filtered AS (" + filtered + "), collections AS ("
+                "SELECT *, CASE WHEN type LIKE 'change.%' THEN key ELSE "
+                "COALESCE(json_extract(data, '$.observed_at'), at) END AS observed FROM filtered), "
+                "sizes AS (SELECT source_id, type, observed, COUNT(*) AS n, MAX(id) AS newest "
+                "FROM collections GROUP BY source_id, type, observed), keyed AS ("
+                "SELECT c.*, CASE WHEN s.n >= 3 THEN s.newest ELSE c.id END AS display_id "
+                "FROM collections c JOIN sizes s ON c.source_id IS s.source_id "
+                "AND c.type = s.type AND c.observed = s.observed), page AS ("
+                "SELECT DISTINCT display_id FROM keyed WHERE "
+                + cursor_sql
+                + " ORDER BY display_id DESC LIMIT ?) SELECT id, key, type, at, source_id, data "
+                "FROM keyed WHERE display_id IN (SELECT display_id FROM page) ORDER BY id DESC"
+            )
+        else:
+            sql = (
+                "WITH keyed AS (SELECT *, id AS display_id FROM (" + filtered + ")) "
+                "SELECT id, key, type, at, source_id, data FROM keyed WHERE "
+                + cursor_sql
+                + " ORDER BY id DESC LIMIT ?"
+            )
+        args.append(limit)
+        result = []
+        for key, event_key, kind, at, source, raw in self.db.execute(sql, args):
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    dict(
+                        id=key,
+                        key=event_key,
+                        type=kind,
+                        at=at,
+                        source_id=source,
+                        silent=False,
+                        data=data,
+                    )
+                )
+        return group_events(result) if group else result
+
     def events_in_collection(
         self, source_id: str | None, observed_at: str, kind: str
     ) -> list[dict[str, Any]]:

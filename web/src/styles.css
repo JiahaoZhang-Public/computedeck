@@ -2937,3 +2937,44 @@ td.wrap {
 .account-qos[open] summary {
   margin-bottom: 6px;
 }
+
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.activity-filters > input {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.activity-filters > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.activity-filters select {
+  min-width: 0;
+  max-width: 100%;
+}
+.activity-day {
+  margin: 16px 0 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.activity-details {
+  padding: 12px 16px 12px 20px;
+  overflow-wrap: anywhere;
+}
+.activity-details .kv {
+  margin-bottom: 12px;
+}
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.page-activity .activity-group summary {
+  cursor: pointer;
+}

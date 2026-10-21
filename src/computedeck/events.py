@@ -323,6 +323,69 @@ def failed(source: dict[str, Any], error: dict[str, Any]) -> list[dict[str, Any]
     ]
 
 
+def filter_events(
+    rows: list[dict[str, Any]],
+    *,
+    types: list[str] | None = None,
+    category: str | None = None,
+    source_id: str | None = None,
+    cluster_id: str | None = None,
+    job: str | None = None,
+    since: str | None = None,
+    q: str | None = None,
+    include_changes: bool = False,
+    dashboard: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Example-mode counterpart of Store.query_events; apply before grouping and paging."""
+    sources = {source["id"]: source["cluster_id"] for source in dashboard["sources"]}
+    instances = {
+        item["id"]: "platform:" + item["platform"].strip().lower()
+        for item in dashboard["instances"]
+    }
+    result = []
+    for row in rows:
+        kind, data = row["type"], row["data"]
+        task = data.get("job") or {}
+        categories = {
+            "failed": kind in ("job.failed", "source.failed")
+            or (kind == "job.finished" and data.get("outcome") in FAILURE_OUTCOMES),
+            "jobs": kind.startswith("job."),
+            "sources": kind in ("source.failed", "source.recovered"),
+            "gaps": kind in GAP_TYPES,
+            "changes": kind.startswith("change."),
+            "plugins": kind == "change.tool",
+        }
+        if row.get("silent") or (not include_changes and kind.startswith("change.")):
+            continue
+        if types and kind not in types or category and not categories[category]:
+            continue
+        if source_id is not None and row.get("source_id") != source_id:
+            continue
+        if cluster_id is not None and cluster_id not in (
+            data.get("cluster_id"),
+            sources.get(row.get("source_id")),
+            instances.get(data.get("subject_id")) if kind == "change.instance" else None,
+        ):
+            continue
+        if job is not None and task.get("id") != job:
+            continue
+        if since and datetime.fromisoformat(row["at"]) < datetime.fromisoformat(since):
+            continue
+        if q and not any(
+            q.lower() in str(value or "").lower()
+            for value in (
+                data.get("cluster_id"),
+                task.get("id"),
+                task.get("name"),
+                data.get("source_name"),
+                data.get("name"),
+            )
+        ):
+            continue
+        result.append(row)
+    return sorted(result, key=lambda row: row["id"], reverse=True)
+
+
 def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Opt-in Activity presentation only. Stored events and plugin delivery stay individual."""
     collections: dict[tuple[Any, ...], list[dict[str, Any]]] = {}

@@ -102,6 +102,51 @@ predates the job start. A reported terminal outcome takes precedence.
 未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。
 Kubernetes Pod 运行期间的容器失败保留在失败列表中；Pod 消失且没有终态记录时，使用此前观测到的容器失败作为结果，但不使用早于作业开始的失败。已有终态记录优先。
 
+## Exploring activity / 浏览动态
+
+Open **Activity** from the sidebar, or **All activity** on Overview or Jobs. Choose
+Failed, Jobs, Sources, Gaps, My changes or Plugins; Plugins currently shows changes to
+tool switches and settings. Scope by cluster/platform, search names and job IDs, and choose
+24 hours, 7 days or 30 days. Filters are kept in the URL. A job's **All activity for this
+job** link uses `job_filter` on the page (the existing `job` URL parameter still opens a
+live-job drawer).
+
+Rows are grouped by day, with absolute times on hover. Expand a row for recorded state,
+exit code, nodes, elapsed time and translated errors. End times use your local timezone
+when an offset is known; otherwise they are labelled as scheduler time. Open the live job
+if still listed, otherwise its immutable event snapshot; connections and existing machines have their own
+links. **Load older** pages back without splitting collection groups. New arrivals appear
+behind an **N new** button until you choose to refresh. Loading, fetch errors with Retry,
+an empty history and filters with no matches are shown separately; errors retain the last
+successfully loaded rows. If there is no activity in the selected 24-hour or 7-day range,
+**Show 30 days** widens the range. **Clear filters** removes type, search, job and scope
+filters and returns to the default 24 hours, wherever you click it.
+
+Overview shows up to five recent changes, with failures and connection problems or
+recoveries first. **Mark seen** marks the current activity as read; the teaser then shows
+changes that arrive afterward. Opening Activity does not mark anything seen. Read state
+stays in this browser and is not shared with other viewers. Without browser storage,
+the teaser shows recent activity and hides the read controls. Example mode also shows
+recent activity without reading or changing your read state. The Jobs Failed tab still
+includes failures found during the first collection, which do not appear in Activity.
+
+中文：从侧栏进入**动态**，或点击概览及作业页的**全部动态**。可按失败、作业、来源、观测空档、
+我的更改、插件筛选；插件目前显示工具开关和设置的更改。支持集群或平台范围、名称及作业 ID 搜索，
+以及 24 小时、7 天、30 天范围，筛选保存在 URL 中。作业动态链接使用 `job_filter`，
+原有 `job` 参数仍用于打开实时作业抽屉。
+
+动态按日期分组，悬停可查看绝对时间。展开后显示已记录的状态、退出码、节点、运行时长及翻译后的错误。
+已知时区的结束时间显示为本地时间，否则标注为调度器时间。
+仍在列表中的作业打开实时详情，其余打开事件快照；存在的连接和机器也有详情链接。**加载更早的动态**
+不会拆分采集合并组，新动态通过按钮提示，点击后才刷新列表。加载中、加载失败并重试、历史为空及筛选无匹配
+分别显示，失败时保留上次成功加载的内容。所选的 24 小时或 7 天内没有动态时，点击**查看 30 天**可扩大范围。
+两处**清除筛选**都会移除类型、搜索、作业和集群或平台筛选，并恢复默认的 24 小时。
+
+概览最多显示五条最近动态，优先显示失败及连接故障和恢复。**标为已读**将当前动态标记为已读，
+此后摘要显示新到达的动态；打开动态页不会自动标记。已读状态仅保留在当前浏览器，不与其他查看者共享。
+浏览器存储不可用时，摘要显示最近动态并隐藏已读控件。示例模式同样显示最近动态，不读取或更改你的已读状态。
+作业页的失败标签仍包括首次采集发现的失败，这些记录不会出现在动态中。
+
 ## Observation gaps / 观测空档
 
 Activity shows grey rows with absolute times when job sources go unobserved long enough

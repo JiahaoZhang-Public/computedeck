@@ -11,9 +11,9 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -30,7 +30,7 @@ from . import attention, auth, credentials, demo, drivers, marketplace, nodes, p
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .errors import SourceError, message
-from .events import group_events
+from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -799,23 +799,74 @@ def create_app(
         group: bool = False,
         include: str | None = None,
         id: int | None = Query(default=None, ge=1, le=2**63 - 1),
+        before_id: int | None = Query(default=None, ge=1, le=2**63 - 1),
+        after_id: int | None = Query(default=None, ge=0, le=2**63 - 1),
+        type: Annotated[list[str] | None, Query()] = None,
+        category: Literal["failed", "jobs", "sources", "gaps", "changes", "plugins"] | None = None,
+        source_id: str | None = None,
+        cluster_id: str | None = None,
+        job: str | None = None,
+        range: Literal["24h", "7d", "30d"] | None = None,
+        since: datetime | None = None,
+        q: str | None = Query(default=None, max_length=64),
     ) -> list[dict[str, Any]]:
         include_changes = include == "changes"
-        if demo:
-            rows = [
-                row
-                for row in demo_events()
-                if include_changes or not row["type"].startswith("change.")
-            ]
-        elif id is not None:
-            rows = store().events(id - 1, 1, include_changes=include_changes)
-        elif group:
-            rows = store().recent_event_collections(limit, include_changes=include_changes)
-        else:
-            rows = store().recent_events(limit, include_changes=include_changes)
+        if type and any(kind not in (*TYPES, *GAP_TYPES, *CHANGE_TYPES) for kind in type):
+            raise HTTPException(422, message("event_type_unknown"))
         if id is not None:
-            return [row for row in rows if row["id"] == id and not row.get("silent")]
-        return group_events(rows)[:limit] if group else rows[:limit]
+            rows = demo_events() if demo else store().events(id - 1, 1)
+            return [
+                row
+                for row in rows
+                if row["id"] == id
+                and not row.get("silent")
+                and (include_changes or not row["type"].startswith("change."))
+            ]
+        if since is not None:
+            since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
+        if range:
+            cutoff = datetime.now(UTC) - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
+            since = max(since, cutoff) if since else cutoff
+        filters: dict[str, Any] = dict(
+            types=type,
+            category=category,
+            source_id=source_id,
+            cluster_id=cluster_id,
+            job=job,
+            since=since.isoformat() if since else None,
+            q=q,
+            include_changes=include_changes,
+        )
+        if demo:
+            rows = filter_events(demo_events(), **filters, dashboard=demo_dashboard())
+            rows = group_events(rows) if group else rows
+            return [
+                row
+                for row in rows
+                if (before_id is None or row["id"] < before_id)
+                and (after_id is None or row["id"] > after_id)
+            ][:limit]
+        if not any(
+            (
+                before_id is not None,
+                after_id is not None,
+                type,
+                category,
+                source_id is not None,
+                cluster_id is not None,
+                job is not None,
+                since,
+                q,
+            )
+        ):
+            if group:
+                return group_events(
+                    store().recent_event_collections(limit, include_changes=include_changes)
+                )[:limit]
+            return store().recent_events(limit, include_changes=include_changes)
+        return store().query_events(
+            limit, before_id=before_id, after_id=after_id, group=group, **filters
+        )
 
     @app.post("/api/backup")
     async def backup() -> dict[str, str]:

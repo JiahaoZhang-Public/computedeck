@@ -2,6 +2,7 @@ export const corePages = [
   'overview',
   'plan',
   'jobs',
+  'activity',
   'resources',
   'cloud',
   'usage',

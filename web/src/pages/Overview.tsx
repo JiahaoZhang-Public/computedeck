@@ -17,9 +17,10 @@ import {
 import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
 import { Empty, GroupMark, Meter, Panel, Stat, Status } from '../ui';
+import { ActivityTeaser } from './Activity';
 import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
-import { FailuresTable, JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
+import { JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
 import { recentlyReachable } from './util';
 import { capacityText, groupSummary, instanceCount } from './summary';
 
@@ -31,7 +32,6 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const jobRows = groupArrays(allJobs).slice(0, 8);
   const visibleJobs = jobRows.flatMap((row) => ('jobs' in row ? row.jobs : [row]));
   const missingJobs = jobsMissing(data);
-  const failures = data.recent_failures ?? [];
   const setupNeeded =
     !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
   const issues = ctx.attention.length;
@@ -225,11 +225,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           />
         )}
       </Panel>
-      {failures.length > 0 && (
-        <Panel title={t('overview.failures')} count={failures.length}>
-          <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} onOpen={ctx.openJob} />
-        </Panel>
-      )}
+      <ActivityTeaser key={String(demo)} ctx={ctx} />
       <Panel
         title={t('overview.sources')}
         actions={

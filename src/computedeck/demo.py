@@ -462,6 +462,12 @@ def events() -> list[dict[str, Any]]:
 
     rows: list[tuple[str, str | None, int, dict[str, Any]]] = [
         (
+            "change.tool",
+            None,
+            360,
+            {"subject_id": "notify", "name": "Notifications", "action": "on", "fields": []},
+        ),
+        (
             "change.source",
             "example:cluster-b-alice",
             8,
@@ -600,10 +606,20 @@ def events() -> list[dict[str, Any]]:
                 },
             )
         )
+    for day in range(1, 29):
+        rows.append(("source.recovered", "example:cluster-b-alice", day * 1440, {}))
+        rows.append(
+            (
+                "source.failed",
+                "example:cluster-b-alice",
+                day * 1440 + 10,
+                {"error": {"code": "timeout"}},
+            )
+        )
     rows.sort(key=lambda row: row[2])
     return [
         {
-            "id": 100 - index,
+            "id": len(rows) - index,
             "key": f"example:{index}",
             "type": kind,
             "at": (at - timedelta(minutes=minutes)).isoformat(),

@@ -21,6 +21,11 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
 
     class Clock(datetime):
         @classmethod
+        def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+            # API query annotations still describe ordinary datetimes while time is frozen.
+            return handler(datetime)
+
+        @classmethod
         def now(cls, tz: Any = None) -> datetime:
             return current[0].astimezone(tz) if tz else current[0].replace(tzinfo=None)
 
@@ -185,3 +190,10 @@ def test_health_never_builds_dashboard_or_renders_ssh_config(
     monkeypatch.setattr(store.Store, "dashboard", forbidden)
     monkeypatch.setattr(api, "render_config", forbidden)
     assert client.get("/api/health").status_code == 200
+
+
+def test_event_since_validates_datetimes_with_frozen_clock(
+    client: TestClient, clock: list[datetime]
+) -> None:
+    assert client.get("/api/events", params={"since": clock[0].isoformat()}).json() == []
+    assert client.get("/api/events?since=not-a-date").status_code == 422

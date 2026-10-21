@@ -13,6 +13,7 @@ import {
   Cloud,
   Compass,
   Gauge,
+  History,
   LayoutDashboard,
   Loader2,
   Menu,
@@ -65,6 +66,7 @@ import { BrandMark, Status } from './ui';
 import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
 import { OverviewPage } from './pages/Overview';
+import { ActivityPage } from './pages/Activity';
 import { JobsPage } from './pages/Jobs';
 import { ClustersPage } from './pages/Clusters';
 import { CloudPage } from './pages/Cloud';
@@ -107,6 +109,7 @@ const navGroups: {
     label: 'nav.resources',
     items: [
       { id: 'jobs', label: 'nav.jobs', icon: Activity },
+      { id: 'activity', label: 'nav.activity', icon: History },
       { id: 'resources', label: 'nav.clusters', icon: Server },
       { id: 'cloud', label: 'nav.cloud', icon: Cloud },
       { id: 'usage', label: 'nav.usage', icon: Gauge },
@@ -120,7 +123,16 @@ const navGroups: {
     ],
   },
 ];
-const dataPages: Page[] = ['overview', 'plan', 'jobs', 'resources', 'cloud', 'usage', 'sources'];
+const dataPages: Page[] = [
+  'overview',
+  'plan',
+  'jobs',
+  'activity',
+  'resources',
+  'cloud',
+  'usage',
+  'sources',
+];
 const pageTitles: Record<CorePage, MessageKey> = {
   overview: 'nav.overview',
   plan: 'nav.plan',
@@ -129,6 +141,7 @@ const pageTitles: Record<CorePage, MessageKey> = {
   notify: 'nav.notify',
   chat: 'nav.chat',
   jobs: 'nav.jobs',
+  activity: 'nav.activity',
   resources: 'nav.clusters',
   cloud: 'nav.cloud',
   usage: 'nav.usage',
@@ -885,6 +898,8 @@ export default function App() {
               <OverviewPage ctx={ctx} />
             ) : page === 'jobs' ? (
               <JobsPage ctx={ctx} />
+            ) : page === 'activity' ? (
+              <ActivityPage ctx={ctx} />
             ) : page === 'resources' ? (
               <ClustersPage ctx={ctx} />
             ) : page === 'cloud' ? (

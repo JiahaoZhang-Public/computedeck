@@ -267,6 +267,35 @@ The group row's `at` is `last_at`, so Activity sorts it by its latest child time
 “and N more” when children are omitted. No event types, database columns or contract
 versions were added.
 
+### Activity filters
+
+`GET /api/events` accepts optional `before_id` and `after_id` (exclusive ID cursors),
+repeatable `type`, `source_id`, `cluster_id`, `job` (the full stored job ID),
+`range=24h|7d|30d`, ISO `since`, and `q` (up to 64 characters). Types must be one of
+`TYPES`, `GAP_TYPES` or `CHANGE_TYPES`. Change rows still require `include=changes`,
+even with a type filter. All reads exclude silent rows. `limit` remains 1–200 and the
+response remains a plain list. The exact `id` lookup takes precedence over filters.
+
+`category=failed|jobs|sources|gaps|changes|plugins` supplies the page's type filters.
+Failed includes `job.failed`, `source.failed` and the failure outcomes of `job.finished`.
+Sources includes collection failures and recoveries; gaps has its own category.
+Plugins currently selects `change.tool` (tool switches and settings), and also requires
+`include=changes`; it does not introduce plugin-emitted event types.
+
+Search matches literal substrings in recorded cluster IDs, job IDs and names, source names
+and changed-object names. `%` and `_` are literal characters. Cluster/platform scope also
+resolves change rows through currently configured sources and manual machines; a deleted
+object without recorded scope cannot be matched that way. `since` compares instants,
+assuming UTC for an offset-free timestamp; when supplied with `range`, the later cutoff wins.
+
+Filters run before grouping. With `group=1`, the display row ID is the newest matching
+child ID. Cursor bounds apply to that display ID, and the whole matching collection is
+returned (with the existing 50-child detail cap). Use the last returned display ID as
+`before_id` and the first as `after_id`. One- and two-event collections remain individual
+rows, so paging through interleaved collections loses no rows. A collection extended since
+the previous read can reappear with a newer display ID; clients should refresh it rather
+than append a second copy. Stored events and plugin/Notify reads are unchanged.
+
 Known limit: grouped reads scan the event history, so large histories can slow Activity
 polls.
 

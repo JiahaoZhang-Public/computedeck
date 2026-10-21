@@ -314,7 +314,7 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
       [
         t('overview.attention'),
         t('overview.jobs'),
-        t('overview.failures'),
+        t('activity.title'),
         t('overview.sources'),
         t('chart.heading'),
       ].map((heading) => heading.replaceAll('&', '&amp;')),

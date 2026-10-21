@@ -176,6 +176,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         )}
       </Panel>
       <ActivityPanel
+        key={String(ctx.demo)}
         sources={data.sources}
         tools={ctx.tools}
         demo={ctx.demo}

@@ -157,7 +157,7 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     rows = events()
     assert all(row["key"].startswith("example:") for row in rows)
     for row in rows:
-        if row["type"] in {"service.gap", "change.instance"}:
+        if row["type"] in {"service.gap", "change.instance", "change.tool"}:
             assert row["source_id"] is None
             assert "source_name" not in row["data"]
         else:
@@ -436,9 +436,19 @@ def test_demo_shows_source_and_service_gaps() -> None:
 def test_demo_changes_match_existing_subjects_and_contain_no_setting_values() -> None:
     data = dashboard()
     rows = [row for row in events() if row["type"].startswith("change.")]
-    assert len(rows) == 2
+    assert len(rows) == 3
     for row in rows:
         assert set(row["data"]) == {"subject_id", "name", "action", "fields"}
+        if row["type"] == "change.tool":
+            from computedeck.tools.notify import plugin
+
+            assert row["data"] == {
+                "subject_id": plugin.id,
+                "name": plugin.name["en"],
+                "action": "on",
+                "fields": [],
+            }
+            continue
         subjects = data["sources"] if row["type"] == "change.source" else data["instances"]
         subject = next(item for item in subjects if item["id"] == row["data"]["subject_id"])
         assert subject["name"] == row["data"]["name"]
