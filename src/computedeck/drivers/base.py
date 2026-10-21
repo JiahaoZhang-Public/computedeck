@@ -208,6 +208,8 @@ class Batch(BaseModel):
     # What a cloud provider says about the account, e.g. {"balance": 12.5, "currency": "USD"}.
     account: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    # Failure-history lookback, not a guarantee that the scheduler retained every job.
+    history_window_seconds: int | None = Field(default=None, ge=0, strict=True)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
     observed_at: str = Field(default_factory=now)
 

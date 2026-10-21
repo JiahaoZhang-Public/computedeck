@@ -449,7 +449,9 @@ def events() -> list[dict[str, Any]]:
     timeout, oom = data["recent_failures"]
     at = datetime.now(UTC).replace(second=0, microsecond=0)
 
-    def context(source_id: str) -> dict[str, Any]:
+    def context(source_id: str | None) -> dict[str, Any]:
+        if source_id is None:
+            return {}
         source = sources[source_id]
         return {
             "source_name": source["name"],
@@ -458,7 +460,26 @@ def events() -> list[dict[str, Any]]:
             "driver": source["driver"],
         }
 
-    rows = [
+    rows: list[tuple[str, str | None, int, dict[str, Any]]] = [
+        (
+            "source.gap",
+            "example:cluster-d-alice",
+            10,
+            {
+                "unobserved_from": (at - timedelta(hours=48)).isoformat(),
+                "unobserved_to": (at - timedelta(minutes=10)).isoformat(),
+                "failures_checked_from": (at - timedelta(hours=24, minutes=10)).isoformat(),
+            },
+        ),
+        (
+            "service.gap",
+            None,
+            450,
+            {
+                "from": (at - timedelta(hours=8)).isoformat(),
+                "to": (at - timedelta(minutes=450)).isoformat(),
+            },
+        ),
         (
             "source.failed",
             "example:runpod-secondary",

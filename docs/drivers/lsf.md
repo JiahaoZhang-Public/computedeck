@@ -97,6 +97,13 @@ The drawer shows the scheduler reason verbatim and offers a copy-only `bhist -l`
 Time limits and log paths are not collected: the optional field lists remain unchanged
 for compatibility with older LSF releases.
 
+The history SSH request also reads `bparams -l` to learn `CLEAN_PERIOD`, using its
+value in seconds capped at 24 hours as `history_window_seconds`. If that optional
+read fails or the value is absent, the window stays unknown and job history still
+loads. This does not add an SSH connection or widen the history query. Activity uses
+the window to explain observation gaps; it does not assume that LSF retained records
+outside that window.
+
 ## Warnings
 
 | Code | Meaning |
@@ -111,6 +118,7 @@ for compatibility with older LSF releases.
 
 - The GPU fields of `bjobs -o` and `bhosts -o` are documented without the fix pack that introduced them, and without their value for jobs and hosts without GPUs. Pending jobs that show `-` for `gpu_num` have an unknown GPU request.
 - Failure history reaches back only `CLEAN_PERIOD`, which defaults to one hour; `bhist` and `bacct` are not read.
+- When `bjobs -d` reports "No job found", the history output is empty and the window stays unknown for that collection.
 - The format of `exit_reason` is not documented; a cancellation that does not mention `TERM_OWNER`, `TERM_ADMIN` or "killed by owner" is listed as a failure.
 - `blimits` limits that span several queues or all queues, and limits on user groups, are not shown, because ComputeDeck compares a limit only with the jobs of one queue. Rows that cannot be aligned with their header (a value containing spaces) are skipped.
 - `bhosts` and `lshosts -gpu` list the whole cluster; the job queries read only your jobs.
@@ -119,5 +127,5 @@ for compatibility with older LSF releases.
 
 Checked against documentation only, not against a running cluster:
 
-- IBM Spectrum LSF 10.1.0 command reference: [bjobs -o](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.o.1.html), [bjobs -json](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.json.1.html), [bjobs -d](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.d.1.html), [bhosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bhosts.1.html), [lshosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/lshosts.1.html), [bqueues](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bqueues.1.html), [blimits](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/blimits.1.html).
+- IBM Spectrum LSF 10.1.0 command reference: [bjobs -o](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.o.1.html), [bjobs -json](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.json.1.html), [bjobs -d](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.d.1.html), [bhosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bhosts.1.html), [lshosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/lshosts.1.html), [bqueues](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bqueues.1.html), [blimits](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/blimits.1.html), [bparams](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bparams.1.html).
 - [LSF 10.1 Fix Pack 2 release notes](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_release_notes/lsf_relnotes_cmdout10.1.0.2.html) (`-json` for `bjobs`, `bhosts`, `bqueues`).

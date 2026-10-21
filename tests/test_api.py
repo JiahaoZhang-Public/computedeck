@@ -1346,3 +1346,21 @@ def test_event_id_lookup_is_exact_and_excludes_silent_rows(
     demo = client.get("/api/events?demo=true").json()[0]
     [row] = client.get(f"/api/events?demo=true&id={demo['id']}").json()
     assert row["id"] == demo["id"] and row["type"] == demo["type"]
+
+
+def test_gap_events_are_visible_in_plain_grouped_and_id_reads(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.demo import events
+
+    rows = [row for row in events() if row["type"] in {"source.gap", "service.gap"}]
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(rows)
+    stored = store.recent_events()
+    store.db.close()
+    for query in ("", "?group=1"):
+        assert client.get(f"/api/events{query}").json() == stored
+    for row in stored:
+        assert client.get(f"/api/events?id={row['id']}").json() == [row]
+    demo = client.get("/api/events?demo=true&group=1").json()
+    assert {row["type"] for row in demo} >= {"source.gap", "service.gap"}

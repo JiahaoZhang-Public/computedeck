@@ -1463,3 +1463,41 @@ it.each(['en', 'zh-CN'] as const)(
     expect(zeroMessage.textContent).toBe('—');
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'renders gap rows without job actions in %s',
+  async (language) => {
+    setLocale(language);
+    const rows: DeckEvent[] = [
+      {
+        id: 2,
+        type: 'source.gap',
+        at: now.toISOString(),
+        source_id: 'cluster-a-alice',
+        data: {
+          source_name: 'Cluster A',
+          unobserved_from: '2026-10-11T08:00:00Z',
+          unobserved_to: now.toISOString(),
+          failures_checked_from: '2026-10-12T12:00:00Z',
+        },
+      },
+      {
+        id: 1,
+        type: 'service.gap',
+        at: now.toISOString(),
+        source_id: null,
+        data: { from: '2026-10-12T16:00:00Z', to: now.toISOString() },
+      },
+    ];
+    request.mockResolvedValue(rows);
+    await render(<ActivityPanel demo={false} onOpen={vi.fn()} />);
+    expect(container.querySelectorAll('.activity > li')).toHaveLength(2);
+    expect(container.querySelectorAll('.activity .dot.gray')).toHaveLength(2);
+    expect(container.querySelector('.activity button')).toBeNull();
+    expect(container.textContent).toContain(language === 'en' ? 'was not observed' : '未被观测');
+    expect(container.textContent).toContain(
+      language === 'en' ? 'computer was asleep' : '电脑处于睡眠状态',
+    );
+    expect(container.textContent).toContain(dateTime(rows[0].data.unobserved_from));
+  },
+);

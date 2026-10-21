@@ -82,6 +82,10 @@ QUEUE_FIELDS = ("queue_name", "status", "max_runlimit")
 GPU_INVENTORY_COMMAND = "lshosts -gpu -w"
 # Remote local time, so finish times without a year can be dated and windowed.
 CLOCK = shlex.join(["date", "+%Y-%m-%dT%H:%M:%S%z"])
+HISTORY_MARKER = "COMPUTEDECK_LSF_HISTORY"
+# Optional configuration read in the existing history SSH call. Failure leaves the
+# retention window unknown and must not prevent bjobs from running.
+HISTORY_CONFIG = shlex.join(["sh", "-c", "bparams -l 2>/dev/null || true"])
 
 STATES = {
     "PEND": "PENDING",
@@ -675,11 +679,22 @@ class LsfDriver:
             history_query = _formatted("bjobs", "-d", "-u", username)
             output = await _with_optional(
                 alias,
-                lambda fields: f"{CLOCK}; {history_query(fields)}",
+                lambda fields: (
+                    f"{CLOCK}; {HISTORY_CONFIG}; echo {HISTORY_MARKER}; {history_query(fields)}"
+                ),
                 HISTORY_FIELDS,
                 HISTORY_EXTRA_FIELDS,
                 options,
             )
+            clock, _, rest = output.partition("\n")
+            config, marker, history = rest.partition(HISTORY_MARKER + "\n")
+            if marker:
+                period = re.search(
+                    r"(?m)^\s*CLEAN_PERIOD\s*=\s*(\d+)\s*(?:\(seconds\))?\s*$", config
+                )
+                if period:
+                    batch.history_window_seconds = min(86400, int(period[1]))
+                output = f"{clock}\n{history}"
             batch.failures = parse_failures(output, source)
             batch.finished = parse_failures(output, source, terminal=True)
             batch.capabilities.append("history")

@@ -53,6 +53,24 @@ export function eventText(event: DeckEvent): string {
   const name = (job?.name || job?.id || '') + (job?.name && element ? ` [${element}]` : '');
   const source = event.data.source_name ?? event.source_id ?? '';
   switch (event.type) {
+    case 'source.gap': {
+      const checked = event.data.failures_checked_from;
+      const unchecked =
+        checked &&
+        event.data.unobserved_from &&
+        Date.parse(checked) > Date.parse(event.data.unobserved_from);
+      return t(unchecked ? 'event.sourceGapUnchecked' : 'event.sourceGap', {
+        source,
+        from: dateTime(event.data.unobserved_from),
+        to: dateTime(event.data.unobserved_to),
+        time: dateTime(checked),
+      });
+    }
+    case 'service.gap':
+      return t('event.serviceGap', {
+        from: dateTime(event.data.from),
+        to: dateTime(event.data.to),
+      });
     case 'job.started':
       return job?.node
         ? t('event.jobStartedOn', { job: name, node: job.node })

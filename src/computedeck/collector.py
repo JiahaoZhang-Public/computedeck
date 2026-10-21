@@ -127,6 +127,7 @@ class Collector:
                 old,
                 batch,
                 first=not source.get("last_success"),
+                service_gap=self.store.service_gap(),
             )
             # Write only a successful collection. Failures preserve last good snapshots.
             self.store.save_snapshot(source_id, batch.snapshot())
@@ -136,6 +137,7 @@ class Collector:
                 error=None,
                 failures=0,
                 capabilities=batch.capabilities,
+                history_window_seconds=batch.history_window_seconds,
                 capabilities_seen=sorted(
                     set(source.get("capabilities_seen", []))
                     | set(source.get("capabilities", []))
@@ -291,6 +293,7 @@ class Collector:
             await asyncio.sleep(15)
 
     def _schedule(self) -> None:
+        self._heartbeat()
         for source in self.store.sources():
             if source["enabled"]:
                 due = source.get("next_due_at")
@@ -304,6 +307,9 @@ class Collector:
                     or datetime.now(UTC) - datetime.fromisoformat(attempted) >= PROBE_INTERVAL
                 ):
                     self.spawn(self._auto_probe(instance["id"]))
+
+    def _heartbeat(self) -> None:
+        self.store.record_heartbeat(now())
 
     async def _auto_probe(self, instance_id: str) -> None:
         with suppress(Exception):

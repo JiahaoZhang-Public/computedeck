@@ -102,6 +102,34 @@ predates the job start. A reported terminal outcome takes precedence.
 未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。
 Kubernetes Pod 运行期间的容器失败保留在失败列表中；Pod 消失且没有终态记录时，使用此前观测到的容器失败作为结果，但不使用早于作业开始的失败。已有终态记录优先。
 
+## Observation gaps / 观测空档
+
+Activity shows grey rows with absolute times when job sources go unobserved long enough
+to risk missing history. The row gives the full interval between observations. When a
+known history window does not cover it, a second sentence says which earlier failures
+could not be checked. Unknown windows and unavailable history never imply complete
+coverage. Slurm and PBS check 24 hours; LSF is limited by its readable `CLEAN_PERIOD`
+(at most 24 hours); Kubernetes cannot recover deleted pods. Collection lookbacks and
+the Failed tab are unchanged. Normal daily scheduling does not produce a gap each day.
+Even with a short history window, a gap must exceed both one hour and two collection
+intervals to produce a row.
+
+A separate row says that ComputeDeck was not running or the computer was asleep when
+more than five minutes pass between service heartbeats. Source gaps covered by that
+service gap are suppressed. These are Activity records, never Notify alerts; plugins
+must explicitly subscribe to `source.gap` or `service.gap`. Cloud and SSH-host sources
+do not produce source gap events.
+
+中文：作业来源长时间未被观测时，动态显示灰色空档记录，并以绝对时间标明两次观测之间的完整区间。
+如果已知的历史窗口无法覆盖该区间，会补充说明哪个时间之前的失败记录无法检查。
+历史窗口未知或本次历史采集失败时，不会暗示记录完整。Slurm 和 PBS 检查最近 24 小时；
+LSF 受可读取的 `CLEAN_PERIOD` 限制，最多 24 小时；Kubernetes 无法恢复已删除的 Pod。
+采集回溯范围与失败标签页保持不变，正常的每日采集不会每天生成空档记录。
+即使历史窗口较短，空档也必须同时超过一小时和两个采集间隔才会显示。
+服务心跳间隔超过五分钟时，会单独说明 ComputeDeck 未运行或电脑处于睡眠状态，
+被该服务空档覆盖的来源空档不再单独显示。这些记录只出现在动态中，不触发 Notify 通知；
+插件需明确订阅 `source.gap` 或 `service.gap`。云来源和 SSH 主机不生成来源空档事件。
+
 ## Understanding a failure
 
 Failure rows open the job drawer. The Result column shows how long the attempt ran;

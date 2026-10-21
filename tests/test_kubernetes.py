@@ -688,6 +688,7 @@ async def test_collect_reads_jobs_nodes_quotas_and_failures(
     source = {**SOURCE, "options": {"context": "alice@cluster-a"}}
     batch = await kubernetes.KubernetesDriver().collect(source)
     assert batch.capabilities == ["jobs", "nodes", "qos_limits", "history"]
+    assert batch.history_window_seconds is None  # Deleted pods cannot be recovered.
     assert batch.warnings == []
     assert batch.jobs is not None and [job["id"] for job in batch.jobs] == [
         "cluster-a:ml-team/train-a-x7k2p"

@@ -545,6 +545,7 @@ async def test_collect_reads_jobs_nodes_queues_and_failures(
     monkeypatch.setattr(ssh, "run", fake_cluster(calls))
     batch = await pbs.PbsDriver().collect(SOURCE)
     assert batch.capabilities == ["jobs", "nodes", "qos_limits", "history"]
+    assert batch.history_window_seconds == 86400
     assert batch.warnings == []
     assert batch.jobs is not None and [job["id"] for job in batch.jobs] == ["cluster-a:1001"]
     assert batch.nodes is not None and len(batch.nodes) == 5

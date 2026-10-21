@@ -634,7 +634,7 @@ class PbsDriver:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
             raise SourceError("ssh_timeout") from None
-        batch = Batch(jobs=jobs, capabilities=["jobs"])
+        batch = Batch(jobs=jobs, capabilities=["jobs"], history_window_seconds=86400)
         if _unknown_gpus(jobs, "gpu_count"):
             batch.warnings.append(message("gpu_count_unknown", command="qstat"))
         qos = {

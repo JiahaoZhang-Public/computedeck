@@ -863,6 +863,10 @@ const en = {
   'event.jobFailed': '{job} failed ({state}, exit code {code})',
   'event.sourceFailed': '{source} could not be collected: {error}',
   'event.sourceRecovered': '{source} is collected again',
+  'event.sourceGap': '{source} was not observed from {from} to {to}.',
+  'event.sourceGapUnchecked':
+    '{source} was not observed from {from} to {to}. Failures before {time} could not be checked.',
+  'event.serviceGap': 'ComputeDeck was not running or the computer was asleep from {from} to {to}.',
   'msg.channel_kind_unknown': 'Unknown channel type: {kind}',
   'msg.channel_not_found': 'Channel not found',
   'msg.channel_in_use': 'A rule still uses this channel; change the rule first',

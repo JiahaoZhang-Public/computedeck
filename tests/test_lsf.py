@@ -4,6 +4,7 @@ Sample outputs are hand-written from the IBM Spectrum LSF 10.1 command reference
 fictional data.
 """
 
+import asyncio
 import json
 import re
 import shutil
@@ -524,7 +525,9 @@ async def test_collect_reads_jobs_hosts_limits_and_failures(
     )
     assert "bqueues -u alice -o 'queue_name status max_runlimit' -json" in commands
     assert "blimits -a -w -u alice" in commands
-    assert commands[-1].startswith("date +%Y-%m-%dT%H:%M:%S%z; bjobs -d -u alice -o ")
+    assert commands[-1].startswith(
+        f"{lsf.CLOCK}; {lsf.HISTORY_CONFIG}; echo {lsf.HISTORY_MARKER}; bjobs -d -u alice -o "
+    )
     # Collection is read-only.
     words = set(" ".join(commands).replace("'", " ").replace(";", " ").split())
     assert not {"bsub", "bkill", "bmod", "bstop", "bresume", "brequeue", "badmin"} & words
@@ -833,3 +836,76 @@ def test_failure_exit_fields_and_reason(code, status) -> None:
     assert row["reason"] == "TERM_MEMLIMIT"
     assert row["end"] == "2026-01-05T10:00:00"
     assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+
+
+@pytest.mark.parametrize(
+    "config,window",
+    [
+        ("    CLEAN_PERIOD = 3600 (seconds)\n", 3600),
+        ("CLEAN_PERIOD = 172800 (seconds)\n", 86400),
+        ("CLEAN_PERIOD = 0 (seconds)\n", 0),
+        ("", None),
+        ("CLEAN_PERIOD = unknown\n", None),
+        ("CLEAN_PERIOD = -1\n", None),
+    ],
+)
+async def test_history_window_uses_readable_clean_period(
+    monkeypatch: pytest.MonkeyPatch, config: str, window: int | None
+) -> None:
+    clock, _, rows = history(failed()).partition("\n")
+    framed = f"{clock}\n{config}{lsf.HISTORY_MARKER}\n{rows}"
+    calls: Calls = []
+    monkeypatch.setattr(ssh, "run", fake_cluster(calls, history=framed))
+    batch = await lsf.LsfDriver().collect(SOURCE)
+    assert batch.history_window_seconds == window
+    assert "history" in batch.capabilities
+    assert batch.failures and batch.failures[0]["id"] == "cluster-b:2101"
+    # Configuration rides on the existing history request, without another SSH call.
+    assert len([command for _, command, _ in calls if "bparams" in command]) == 1
+    assert len(calls) == 6
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash", "tcsh"])
+@pytest.mark.parametrize("config_available", [True, False])
+async def test_history_config_is_optional_under_login_shells(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, config_available: bool
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    calls: Calls = []
+    monkeypatch.setattr(ssh, "run", fake_cluster(calls))
+    await lsf.LsfDriver().collect(SOURCE)
+    command = calls[-1][1]
+    for tool in ("date", "bjobs", "bparams"):
+        script = FAKE_TOOL
+        if tool == "bparams":
+            script = (
+                '#!/bin/sh\necho "    CLEAN_PERIOD = 3600 (seconds)"\n'
+                if config_available
+                else '#!/bin/sh\necho "permission denied" >&2\nexit 1\n'
+            )
+        (tmp_path / tool).write_text(script)
+        (tmp_path / tool).chmod(0o755)
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [shell, "-c", command],
+        cwd=tmp_path,
+        env={"PATH": f"{tmp_path}:/usr/bin:/bin", "LOG": str(tmp_path / "log")},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert lsf.HISTORY_MARKER in result.stdout
+    assert (
+        "CLEAN_PERIOD" in result.stdout if config_available else "CLEAN_PERIOD" not in result.stdout
+    )
+    assert (
+        lsf.parse_failures(
+            result.stdout.splitlines()[0]
+            + "\n"
+            + result.stdout.split(lsf.HISTORY_MARKER + "\n")[1],
+            SOURCE,
+        )
+        == []
+    )

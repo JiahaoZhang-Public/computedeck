@@ -45,7 +45,7 @@ class NodeOnlyDriver:
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
         }
-        return Batch(jobs=[job], capabilities=["jobs"])
+        return Batch(jobs=[job], capabilities=["jobs"], history_window_seconds=86400)
 
 
 @pytest.fixture
@@ -96,6 +96,7 @@ SOURCE = {
 
 async def test_a_source_is_collected_on_its_node(fake_node: list[dict[str, Any]]) -> None:
     batch = await nodes.collect(NODE, SOURCE)
+    assert batch.history_window_seconds == 86400
     assert batch.jobs and batch.jobs[0]["id"] == "cluster-b:7"
     [call] = fake_node
     assert call["destination"] == "lab-gateway"

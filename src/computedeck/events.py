@@ -12,10 +12,11 @@ Types:
 - ``job.ended`` / ``job.failed``: legacy API-1 delivery names.
 - ``source.failed``: a source that worked could not be collected.
 - ``source.recovered``: a failing source was collected again.
+- ``source.gap`` / ``service.gap``: a span without observations (explicit subscriptions only).
 """
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .drivers import Batch
@@ -25,6 +26,7 @@ from .summary import RUNNING
 
 LEGACY_TYPES = ("job.started", "job.ended", "job.failed", "source.failed", "source.recovered")
 TYPES = (*LEGACY_TYPES, "job.finished")
+GAP_TYPES = ("service.gap", "source.gap")
 FAILURE_OUTCOMES = (
     "failed",
     "timeout",
@@ -69,6 +71,51 @@ def _context(source: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def source_gap(
+    source: dict[str, Any], batch: Batch, at: str, service_gap: dict[str, str] | None
+) -> list[dict[str, Any]]:
+    previous = job_time(source.get("last_success"))
+    if not previous or "jobs" not in batch.capabilities:
+        return []
+    start, end = datetime.fromisoformat(previous), datetime.fromisoformat(at)
+    interval = source.get("interval_minutes", 10) * 60
+    window = batch.history_window_seconds if "history" in batch.capabilities else None
+    # Leave a scheduling interval of slack, including for daily collections.
+    threshold = max(2 * interval, 3600)
+    if window is not None:
+        threshold = max(threshold, max(window - 3600, interval) + interval)
+    if (end - start).total_seconds() <= threshold:
+        return []
+    if service_gap:
+        offline = job_time(service_gap.get("from"))
+        resumed = job_time(service_gap.get("to"))
+        attempt = job_time(source.get("last_attempt")) or at
+        slack = timedelta(seconds=interval)
+        if (
+            offline
+            and resumed
+            and datetime.fromisoformat(offline) - slack <= start
+            and datetime.fromisoformat(resumed) + slack >= datetime.fromisoformat(attempt)
+        ):
+            return []
+    return [
+        {
+            "key": f"source.gap:{source['id']}:{previous}",
+            "type": "source.gap",
+            "at": at,
+            "source_id": source["id"],
+            "data": {
+                **_context(source),
+                "unobserved_from": previous,
+                "unobserved_to": at,
+                "failures_checked_from": (end - timedelta(seconds=window)).isoformat()
+                if window is not None
+                else None,
+            },
+        }
+    ]
+
+
 def _local(job_id: str) -> str:
     return job_id.split(":", 1)[-1]
 
@@ -94,7 +141,12 @@ def _renamed(previous: dict[str, Any], current: dict[str, Any]) -> set[str]:
 
 
 def collected(
-    source: dict[str, Any], old: dict[str, Any] | None, batch: Batch, *, first: bool
+    source: dict[str, Any],
+    old: dict[str, Any] | None,
+    batch: Batch,
+    *,
+    first: bool,
+    service_gap: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Events from a successful collection. ``old`` is the snapshot before it."""
     at = now()
@@ -239,6 +291,8 @@ def collected(
             event["data"]["since"] = source["last_success"]
     batch.lifecycle_pending = waiting
     batch.lifecycle_ended = list(ended.values())
+    if not first:
+        events.extend(source_gap(source, batch, at, service_gap))
     if source.get("status_before") == "error":
         events.append(
             {

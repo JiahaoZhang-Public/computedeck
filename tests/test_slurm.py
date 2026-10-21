@@ -442,6 +442,7 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(ssh, "run", run)
     batch = await slurm.SlurmDriver().collect(source)
+    assert batch.history_window_seconds == 86400
     assert batch.capabilities == [
         "jobs",
         "nodes",

@@ -34,6 +34,7 @@ export interface Source {
   interval_minutes: number;
   capabilities: string[];
   capabilities_seen?: string[];
+  history_window_seconds?: number | null;
   qos: QosLimit[];
   warnings?: (Message | string)[];
   stale?: boolean;
@@ -370,6 +371,11 @@ export interface DeckEvent {
     ended_at?: string | null;
     observed_at?: string;
     since?: string;
+    from?: string;
+    to?: string;
+    unobserved_from?: string;
+    unobserved_to?: string;
+    failures_checked_from?: string | null;
     source_name?: string;
     driver?: string;
     cluster_id?: string;

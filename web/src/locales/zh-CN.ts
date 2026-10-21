@@ -800,6 +800,10 @@ const zhCN: Record<keyof typeof en, string> = {
   'event.jobFailed': '{job} 失败（{state}，退出码 {code}）',
   'event.sourceFailed': '{source} 采集失败：{error}',
   'event.sourceRecovered': '{source} 已恢复采集',
+  'event.sourceGap': '{source} 在 {from} 至 {to} 期间未被观测。',
+  'event.sourceGapUnchecked':
+    '{source} 在 {from} 至 {to} 期间未被观测。无法检查 {time} 之前的失败记录。',
+  'event.serviceGap': '在 {from} 至 {to} 期间，ComputeDeck 未运行或电脑处于睡眠状态。',
   'msg.channel_kind_unknown': '未知的渠道类型：{kind}',
   'msg.channel_not_found': '找不到这个渠道',
   'msg.channel_in_use': '仍有规则在使用这个渠道，请先修改规则',

@@ -500,7 +500,7 @@ class SlurmDriver:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
             raise SourceError("ssh_timeout") from None
-        batch = Batch(capabilities=["jobs"])
+        batch = Batch(capabilities=["jobs"], history_window_seconds=86400)
         node_output = ""
         try:
             # -d adds GresUsed, the only GPU usage of clusters that do not account GPUs.

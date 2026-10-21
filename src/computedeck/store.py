@@ -278,6 +278,41 @@ class Store:
 
     # ---- Events: what changed between collections ----
 
+    def service_gap(self) -> dict[str, str] | None:
+        value = self._meta("service:last_gap")
+        return value if isinstance(value, dict) else None
+
+    def record_heartbeat(self, at: str) -> dict[str, str] | None:
+        """Record a heartbeat and any gap together; ordinary ticks write at most once a minute."""
+        gap = None
+        updates: dict[str, Any] = {}
+        with self.db:
+            previous = self._meta("service:alive_at")
+            elapsed = (
+                (datetime.fromisoformat(at) - datetime.fromisoformat(previous)).total_seconds()
+                if previous
+                else None
+            )
+            if elapsed is not None and elapsed > 300:
+                gap = {"from": previous, "to": at}
+                self.db.execute(
+                    "INSERT OR IGNORE INTO events (key, type, at, source_id, silent, data) "
+                    "VALUES (?, 'service.gap', ?, NULL, 0, ?)",
+                    (f"service.gap:{previous}", at, json.dumps(gap)),
+                )
+                cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+                self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+                updates["service:last_gap"] = gap
+            if elapsed is None or elapsed >= 60 or elapsed < 0:
+                updates["service:alive_at"] = at
+            self.db.executemany(
+                "INSERT OR REPLACE INTO meta VALUES (?, ?)",
+                [(key, json.dumps(value)) for key, value in updates.items()],
+            )
+        for key in updates:
+            self._repaired("meta", key)
+        return gap
+
     def add_events(self, events: list[dict[str, Any]]) -> int:
         """Store events; one whose ``key`` was seen before is ignored. Returns how many are new."""
         added = 0

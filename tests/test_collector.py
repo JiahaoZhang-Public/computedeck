@@ -696,7 +696,7 @@ async def test_non_json_safe_batch_never_reaches_storage(
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [
-        (Batch(jobs=[], capabilities=["jobs"]), ["source.recovered"]),
+        (Batch(jobs=[], capabilities=["jobs"]), ["source.gap", "source.recovered"]),
         (SourceError("ssh_timeout"), []),
     ],
 )

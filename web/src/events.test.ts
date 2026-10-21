@@ -352,3 +352,41 @@ it.each(['en', 'zh-CN'] as const)('identifies array elements in %s', (language) 
   }
   setLocale('en');
 });
+
+describe('observation gaps', () => {
+  afterEach(() => setLocale('en'));
+  it.each(['en', 'zh-CN'] as const)('explains the missing failure window in %s', (language) => {
+    setLocale(language);
+    const from = '2026-01-01T18:10:00Z';
+    const to = '2026-01-03T09:20:00Z';
+    const checked = '2026-01-02T09:20:00Z';
+    const gap = event('source.gap', {
+      unobserved_from: from,
+      unobserved_to: to,
+      failures_checked_from: checked,
+    });
+    const text = eventText(gap);
+    expect(text).toBe(
+      language === 'en'
+        ? `Cluster A was not observed from ${dateTime(from)} to ${dateTime(to)}. Failures before ${dateTime(checked)} could not be checked.`
+        : `Cluster A 在 ${dateTime(from)} 至 ${dateTime(to)} 期间未被观测。无法检查 ${dateTime(checked)} 之前的失败记录。`,
+    );
+    expect(eventTone(gap)).toBe('gray');
+    // Unknown history, or a warning shortly before the history window is exceeded.
+    for (const bound of [null, from, '2026-01-01T09:20:00Z']) {
+      const row = { ...gap, data: { ...gap.data, failures_checked_from: bound } };
+      expect(eventText(row)).toBe(
+        language === 'en'
+          ? `Cluster A was not observed from ${dateTime(from)} to ${dateTime(to)}.`
+          : `Cluster A 在 ${dateTime(from)} 至 ${dateTime(to)} 期间未被观测。`,
+      );
+    }
+    const service = event('service.gap', { from, to });
+    expect(eventText(service)).toBe(
+      language === 'en'
+        ? `ComputeDeck was not running or the computer was asleep from ${dateTime(from)} to ${dateTime(to)}.`
+        : `在 ${dateTime(from)} 至 ${dateTime(to)} 期间，ComputeDeck 未运行或电脑处于睡眠状态。`,
+    );
+    expect(eventTone(service)).toBe('gray');
+  });
+});

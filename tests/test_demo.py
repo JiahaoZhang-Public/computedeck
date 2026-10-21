@@ -155,7 +155,13 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     assert all(identifier.startswith("example:") for identifier in machines)
     assert all(not source["node"] or source["node"] in machines for source in data["sources"])
     rows = events()
-    assert all(row["key"].startswith("example:") and row["source_id"] in sources for row in rows)
+    assert all(row["key"].startswith("example:") for row in rows)
+    for row in rows:
+        if row["type"] == "service.gap":
+            assert row["source_id"] is None
+            assert "source_name" not in row["data"]
+        else:
+            assert row["source_id"] in sources
     assert [row["at"] for row in rows] == sorted((row["at"] for row in rows), reverse=True)
     [started] = [row for row in rows if row["type"] == "job.started"]
     assert started["at"] == started["data"]["started_at"] == started["data"]["job"]["started_at"]
@@ -403,3 +409,19 @@ def test_demo_failure_details_include_normalized_exits_and_known_limits() -> Non
     assert datetime.fromisoformat(unknown["job"]["observed_at"]) < datetime.fromisoformat(
         unknown["observed_at"]
     )
+
+
+def test_demo_shows_source_and_service_gaps() -> None:
+    rows = events()
+    [source] = [row for row in rows if row["type"] == "source.gap"]
+    [service] = [row for row in rows if row["type"] == "service.gap"]
+    data = source["data"]
+    assert data["unobserved_from"] < data["failures_checked_from"] < data["unobserved_to"]
+    assert data["unobserved_to"] == source["at"]
+    assert service["data"]["from"] < service["data"]["to"] == service["at"]
+    assert service["source_id"] is None
+    for row in rows:
+        observed = row["data"].get("observed_at", row["at"])
+        assert not service["data"]["from"] < observed < service["data"]["to"]
+        if row["source_id"] == source["source_id"]:
+            assert not data["unobserved_from"] < observed < data["unobserved_to"]

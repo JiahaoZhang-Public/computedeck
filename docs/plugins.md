@@ -123,9 +123,12 @@ receives the backlog of an earlier installation.
 | `job.failed` | legacy delivery of a failure ending | `job` with `exit_code`, `end` |
 | `source.failed` | a source that worked could not be collected | `error` |
 | `source.recovered` | a failing source was collected again | |
+| `source.gap` | a job source was not observed long enough to risk missing history | `unobserved_from`, `unobserved_to`, `failures_checked_from` (or null) |
+| `service.gap` | more than five minutes between service heartbeats | `from`, `to` |
 
-Every event has `id`, `type`, `at`, `source_id` and `data` with `source_name`,
-`cluster_id`, `username` and `driver`. The first collection of a new source records what
+Every event has `id`, `type`, `at`, `source_id` and `data`. Source events include
+`source_name`, `cluster_id`, `username` and `driver` in `data`; `service.gap` has no
+source context and its `source_id` is null. The first collection of a new source records what
 already exists without delivering it. The first successful collection after upgrading to
 reconciled endings also records terminal history silently.
 
@@ -155,6 +158,25 @@ map to one `job.failed`, and all other outcomes to one `job.ended`. A handler th
 `job.finished` receives that event once, even if it also names the legacy types. Stored
 legacy rows remain readable and deliverable; cursors still use event IDs. `PLUGIN_API`
 and `WEB_API` remain 1.
+
+Gap types are listed separately in `events.GAP_TYPES`, outside `sdk.EVENT_TYPES`.
+Subscribe to them by name; wildcard handlers do not receive them, and Notify refuses
+them as rule types. Their `at` is the observation time at the end of the gap.
+`source.gap` describes the full span between successful observations, not job end times.
+`failures_checked_from` uses the current successful history query's lookback. It is
+null when the window is unknown or history could not be collected. A known window
+does not guarantee that the scheduler retained every record.
+
+For a known window, the gap threshold is
+`max(max(window - 1 hour, interval) + interval, 2 * interval, 1 hour)`, leaving
+scheduling slack even for daily collections. Without history or with an unknown
+window, it is `max(2 * interval, 1 hour)`. A short known window never lowers this
+floor. Only job sources produce source gaps.
+The service records its heartbeat at most once a minute and reports a gap after more
+than five minutes, on startup or a later scheduling tick. Source gaps already covered
+by the most recent service gap (within one collection interval) are suppressed.
+First collections have no source gap; repeated observations use the same deduplication
+key. Lookbacks and the Failed tab's 24-hour meaning are unchanged.
 
 `GET /api/events?id=<positive integer>` returns a list containing that exact visible
 stored event, or an empty list when missing, expired or silent. With `demo=true` it
@@ -291,6 +313,12 @@ Rules that keep the numbers honest:
   including Slurm heterogeneous jobs and ranges, remain ungrouped. Kubernetes does
   not set these fields. Existing snapshots and third-party drivers need no change.
 - Put optional parts that failed in `Batch.warnings` as `{"code": ..., "detail": ...}`.
+- `Batch.history_window_seconds` is an optional nonnegative integer, defaulting to
+  `None` (unknown). The collector stores it on the source beside `capabilities`, not
+  in the snapshot. Slurm and PBS use 86400; LSF uses the lesser of 86400 and the
+  readable `CLEAN_PERIOD` from `bparams -l`, otherwise unknown. Kubernetes leaves it
+  unknown because deleted pods are no longer visible. The `history` capability must
+  also be present in the current batch before this window describes checked failures.
 - Only read. Quote or strictly validate everything placed in a command, and never pass a
   provider's error body on: it may echo secrets.
 
