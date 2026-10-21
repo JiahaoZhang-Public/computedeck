@@ -142,6 +142,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS attention_state (key TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS snapshots (source_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -210,6 +211,44 @@ class Store:
 
     def unreadable_rows(self) -> dict[str, int]:
         return {table: len(keys) for table, keys in sorted(self.unreadable.items()) if keys}
+
+    def attention_state(self) -> dict[str, dict[str, Any]]:
+        # A read-only doctor may open a version-2 database before the service upgrades it.
+        if not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attention_state'"
+        ).fetchone():
+            return {}
+        result = {}
+        for key, raw in self.db.execute("SELECT key, data FROM attention_state"):
+            data = self._read(
+                "attention_state", key, raw, {"fingerprint": str, "acknowledged_at": str}
+            )
+            if data is None:
+                continue
+            until = data.get("snooze_until")
+            try:
+                if until is not None and datetime.fromisoformat(until).tzinfo is None:
+                    raise ValueError("snooze time needs an offset")
+            except (ValueError, TypeError):
+                self._skip("attention_state", key, "invalid snooze time")
+                continue
+            result[key] = data
+        return result
+
+    def set_attention_state(self, key: str, data: dict[str, Any]) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO attention_state VALUES (?, ?)", (key, json.dumps(data))
+            )
+        self._repaired("attention_state", key)
+
+    def delete_attention_state(self, keys: list[str]) -> None:
+        if not keys:
+            return
+        with self.db:
+            self.db.executemany("DELETE FROM attention_state WHERE key=?", ((key,) for key in keys))
+        for key in keys:
+            self._repaired("attention_state", key)
 
     def settings(self) -> dict[str, Any]:
         result = dict(DEFAULT_SETTINGS)

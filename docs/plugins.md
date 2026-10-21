@@ -593,11 +593,37 @@ the service log for details.
 ## Dashboard attention
 
 `GET /api/dashboard` adds an `attention` list, also present in example data. It is
-computed on read, without stored inbox state or new events. Each item has `key`,
-`kind`, `subject: {kind, id, name}`, `severity` (`error` or `warn`), a translatable
-`message`, all relevant `details`, nullable `since`, `observed_at` and `next_attempt` times, and an
-`action` (`diagnose`, `instance`, `health` or `toolbox`). All attention counts use
-this list's length.
+computed on read, with acknowledgement state stored separately and no new events. Each
+item has `key`, `kind`, `subject: {kind, id, name}`, `severity` (`error` or `warn`), a
+translatable `message`, all relevant `details`, nullable `since`, `observed_at` and
+`next_attempt` times, and an `action` (`diagnose`, `instance`, `health` or `toolbox`).
+Each item also has a `fingerprint` and a boolean `mutable` (false for service-loop faults
+and unreadable rows), plus nullable `muted`: `{state: "acknowledged" | "snoozed", at,
+until}`. `at` is the action time; `until` is the snooze expiry or null. All items remain
+in the list. The additive `attention_count` is the number with `muted == null`, used by
+the tile, badge and panel.
+
+`PUT /api/attention/{key}` accepts `{action: "acknowledge" | "snooze" | "clear", until?:
+"1h" | "tomorrow", fingerprint?: string | null}` under the usual origin and
+`X-ComputeDeck` checks. Snooze requires `until`; tomorrow means the next midnight in the
+service host's timezone. Unknown or resolved keys return 404 (`attention_not_found`);
+`service_loop_failed` and `unreadable_rows` return 422 (`attention_not_mutable`) for every
+action. Example mode refuses writes in the web request layer; example keys are absent from
+the live list and return 404.
+
+For acknowledge and snooze, a supplied fingerprint must match the current item or the
+request returns 409 (`attention_changed`) without saving acknowledgement state. Omitting
+it preserves the behaviour of acknowledging the current item; clear ignores it. The web
+sends the displayed fingerprint and reloads the dashboard after every attention action,
+including failures, while showing any error.
+
+The fingerprint covers kind, severity, message parameters except the name, and structured
+detail codes/statuses. Free-text errors and observation times are excluded. A different
+fingerprint or expired snooze reopens the item on read, changing the dashboard content
+token. The collector clears resolved or changed state after commits and machine checks;
+the PUT handler also clears it. GET never writes acknowledgement state. The additive
+`attention_state` table uses `CREATE TABLE IF NOT EXISTS`, with no schema-version bump.
+Acknowledgement is shared by viewers and does not change source health or event delivery.
 
 `since` is the last success for `source_failed` and `source_stale` (no good data
 since that collection), otherwise null. `observed_at` is the latest observation,

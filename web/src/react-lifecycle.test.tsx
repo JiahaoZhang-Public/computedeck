@@ -11,7 +11,7 @@ import { HealthPanel } from './HealthPanel';
 import { SourceDiagnosis } from './SourceDiagnosis';
 import { computeHealth } from './health';
 import { api } from './api';
-import { setLocale, t } from './i18n';
+import { ApiError, setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
 import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
@@ -760,6 +760,7 @@ it.each(['en', 'zh-CN'] as const)(
         action: 'diagnose',
       },
     ];
+    data.attention_count = 1;
     request.mockImplementation(async (path) => {
       if (path.startsWith('/dashboard')) return data;
       if (path === '/settings') return { language: locale };
@@ -815,6 +816,7 @@ it('keeps service attention visible before any sources are connected', async () 
   data.attention = [
     {
       key: 'service_loop_failed:collector:schedule',
+      mutable: false,
       kind: 'service_loop_failed',
       subject: { kind: 'service', id: 'collector:schedule', name: 'collector:schedule' },
       severity: 'error',
@@ -834,6 +836,7 @@ it('keeps service attention visible before any sources are connected', async () 
   });
   await render(<App />);
   expect(container.querySelector('#attention')?.textContent).toContain('Scheduler stopped');
+  expect(container.querySelector('#attention .attention-actions')).toBeNull();
   await click('#attention button');
   expect(container.querySelector('.health-panel')).not.toBeNull();
 });
@@ -1682,5 +1685,182 @@ it.each(['en', 'zh-CN'] as const)(
       expect(rendered[index].querySelector('small')).toBeNull();
     expect(container.textContent).not.toContain('secret-value');
     expect(container.textContent).not.toContain('private-region');
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'acknowledges, snoozes and unmutes attention with shared counts in %s',
+  async (locale) => {
+    const data = serverDemo();
+    setLocale(locale);
+    const healthBefore = computeHealth(data, null, null, false, false);
+    request.mockImplementation(async (path, body, method) => {
+      if (path.startsWith('/dashboard')) return structuredClone(data);
+      if (path === '/settings') return { language: locale };
+      if (path === '/health') return null;
+      if (path.startsWith('/attention/')) {
+        expect(method).toBe('PUT');
+        const item = data.attention!.find(
+          (row) => row.key === decodeURIComponent(path.slice('/attention/'.length)),
+        )!;
+        const action = body as { action: string; until?: string; fingerprint?: string };
+        expect(action.fingerprint).toBe(action.action === 'clear' ? undefined : item.fingerprint);
+        item.muted =
+          action.action === 'clear'
+            ? null
+            : {
+                state: action.action === 'snooze' ? 'snoozed' : 'acknowledged',
+                at: now.toISOString(),
+                until: action.until ? new Date(now.getTime() + 3600000).toISOString() : null,
+              };
+        data.attention_count = data.attention!.filter((row) => !row.muted).length;
+        return { status: 'ok' };
+      }
+      return [];
+    });
+    await render(<App />);
+    const assertCounts = (count: number) => {
+      expect(container.querySelector('a[href="#/overview"] .badge')?.textContent).toBe(
+        count ? String(count) : undefined,
+      );
+      expect(container.querySelector('#attention .count')?.textContent).toBe(String(count));
+      const tile = [...container.querySelectorAll('.stat')].find(
+        (element) => element.querySelector('.stat-label')?.textContent === t('overview.attention'),
+      );
+      expect(tile?.querySelector('.stat-value')?.textContent).toBe(String(count));
+    };
+    assertCounts(3);
+    expect(container.querySelector<HTMLDetailsElement>('.attention-muted')!.open).toBe(false);
+    expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
+      t('attention.acknowledged', { count: 2 }),
+    );
+    expect(container.querySelector('.attention-muted')?.textContent).toContain(
+      t('attention.snoozedUntil', { time: dateTime(data.attention!.at(-1)!.muted!.until) }),
+    );
+    const key = data.attention![0].key;
+    await click('#attention > ul .attention-actions button');
+    expect(request).toHaveBeenCalledWith(
+      `/attention/${encodeURIComponent(key)}`,
+      { action: 'acknowledge', until: undefined, fingerprint: data.attention![0].fingerprint },
+      'PUT',
+    );
+    assertCounts(2);
+    expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
+      t('attention.acknowledged', { count: 3 }),
+    );
+    await click('.attention-muted summary');
+    await click('.attention-muted .attention-actions button');
+    assertCounts(3);
+    for (const until of ['1h', 'tomorrow']) {
+      const select = container.querySelector<HTMLSelectElement>('#attention > ul select')!;
+      await act(async () => {
+        select.value = until;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      expect(
+        request.mock.calls.some(
+          ([path, body, method]) =>
+            path.startsWith('/attention/') &&
+            method === 'PUT' &&
+            (body as { until?: string })?.until === until,
+        ),
+      ).toBe(true);
+    }
+    assertCounts(1);
+    await click('#attention > ul .attention-actions button');
+    assertCounts(0);
+    expect(container.querySelector('#attention > .panel-note')?.textContent).toBe(
+      t('attention.allMuted'),
+    );
+    expect(container.querySelector('#attention > ul')).toBeNull();
+    expect(computeHealth(data, null, null, false, false)).toEqual(healthBefore);
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps example attention controls read-only in %s',
+  async (locale) => {
+    window.history.replaceState(null, '', '/?demo=true');
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return serverDemo();
+      if (path === '/settings') return { language: locale };
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    const controls = container.querySelectorAll<HTMLButtonElement | HTMLSelectElement>(
+      '.attention-actions button, .attention-actions select',
+    );
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) {
+      expect(control.disabled).toBe(true);
+      await act(async () => control.click());
+    }
+    expect(request.mock.calls.some(([path]) => path.startsWith('/attention/'))).toBe(false);
+  },
+);
+
+it('keeps a failed acknowledgement visible and reports the error', async () => {
+  const data = serverDemo();
+  request.mockImplementation(async (path) => {
+    if (path.startsWith('/dashboard')) return data;
+    if (path.startsWith('/attention/')) throw new Error('Save failed');
+    if (path === '/health') return null;
+    return [];
+  });
+  await render(<App />);
+  await click('#attention > ul .attention-actions button');
+  expect(container.querySelector('#attention .count')?.textContent).toBe('3');
+  expect(container.textContent).toContain('Save failed');
+  expect(
+    container.querySelector<HTMLButtonElement>('#attention > ul .attention-actions button')
+      ?.disabled,
+  ).toBe(false);
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'reloads changed attention after failed actions and keeps the error in %s',
+  async (locale) => {
+    const data = serverDemo();
+    let reads = 0;
+    request.mockImplementation(async (path, body) => {
+      if (path.startsWith('/dashboard')) {
+        reads += 1;
+        return structuredClone(data);
+      }
+      if (path === '/settings') return { language: locale };
+      if (path === '/health') return null;
+      if (path.startsWith('/attention/')) {
+        data.attention![0].fingerprint = `changed-${reads}`;
+        data.attention![0].details = [`Changed cause ${reads}`];
+        if ((body as { action: string }).action === 'clear') throw new Error('Save failed');
+        throw new ApiError(409, { code: 'attention_changed' });
+      }
+      return [];
+    });
+    await render(<App />);
+    for (const action of ['acknowledge', 'snooze', 'clear']) {
+      const before = reads;
+      if (action === 'acknowledge') {
+        await click('#attention > ul .attention-actions button');
+      } else if (action === 'snooze') {
+        const select = container.querySelector<HTMLSelectElement>('#attention > ul select')!;
+        await act(async () => {
+          select.value = '1h';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      } else {
+        await click('.attention-muted summary');
+        await click('.attention-muted .attention-actions button');
+      }
+      expect(reads).toBeGreaterThan(before);
+      expect(container.querySelector('#attention')?.textContent).toContain(
+        `Changed cause ${before}`,
+      );
+      expect(container.textContent).toContain(
+        action === 'clear' ? 'Save failed' : t('msg.attention_changed'),
+      );
+      expect(container.querySelector('#attention .count')?.textContent).toBe('3');
+    }
   },
 );

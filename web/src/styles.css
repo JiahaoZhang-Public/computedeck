@@ -1222,7 +1222,7 @@ form > .form-error {
 .attention li + li {
   border-top: 1px solid var(--border);
 }
-.attention button {
+.attention .attention-open {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -1230,13 +1230,13 @@ form > .form-error {
   padding: 10px 16px;
   text-align: left;
 }
-.attention button:hover {
+.attention .attention-open:hover {
   background: var(--surface-hover);
 }
 .attention .dot {
   margin-top: 6px;
 }
-.attention button > span:nth-child(2) {
+.attention .attention-open > span:nth-child(2) {
   flex: 1;
   min-width: 0;
 }
@@ -1255,6 +1255,24 @@ form > .form-error {
 }
 .attention {
   list-style: none;
+}
+.attention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px 34px;
+}
+.attention-actions select {
+  max-width: 100%;
+}
+.attention-muted > summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  color: var(--text-3);
+  border-top: 1px solid var(--border);
+}
+.attention .attention-mute-note {
+  padding: 0 16px 8px 34px;
 }
 .setup {
   padding: 16px 18px;

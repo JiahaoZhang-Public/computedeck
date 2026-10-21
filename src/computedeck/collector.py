@@ -8,10 +8,10 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import drivers, events, nodes
+from . import attention, drivers, events, nodes
 from .errors import SourceError, message
 from .hardware import probe_instance
-from .plugins import Runtime
+from .plugins import PluginContext, Runtime
 from .ssh_config import write_config
 from .store import PROBE_INTERVAL, Store, manual_state, now
 
@@ -51,8 +51,9 @@ class ProbeConflict(Exception):
 
 
 class Collector:
-    def __init__(self, runtime: Runtime) -> None:
+    def __init__(self, runtime: Runtime, *, contexts: list[PluginContext] | None = None) -> None:
         self.runtime = runtime
+        self.contexts = contexts or []
         self.pending: set[str] = set()
         self.probes: set[str] = set()
         self.tasks: set[asyncio.Task[Any]] = set()
@@ -60,6 +61,30 @@ class Collector:
     @property
     def store(self) -> Store:
         return self.runtime.store
+
+    def attention_items(self, dashboard: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        state = self.store.attention_state()
+        return attention.derive(
+            self.store.dashboard() if dashboard is None else dashboard,
+            [drivers.describe(name) for name in drivers.names()],
+            now=datetime.fromisoformat(now()),
+            state=state,
+            loop_errors=self.runtime.loop_errors,
+            unreadable_rows=self.store.unreadable_rows(),
+            plugin_status={
+                context.id: {**context.status(), "enabled": context.enabled}
+                for context in self.contexts
+            },
+        )
+
+    def clear_resolved_attention(self) -> None:
+        state = self.store.attention_state()
+        if not state:
+            return
+        current = {item["key"]: item["fingerprint"] for item in self.attention_items()}
+        self.store.delete_attention_state(
+            [key for key, saved in state.items() if current.get(key) != saved["fingerprint"]]
+        )
 
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         task = asyncio.create_task(coroutine)
@@ -184,6 +209,7 @@ class Collector:
         if source["status"] == "ready":
             self.store.record_history()
             write_config(self.store.dashboard()["instances"], self.runtime.data_dir)
+        self.clear_resolved_attention()
 
     async def _batch(self, source: dict[str, Any]) -> drivers.Batch:
         """Collect here, or on the node the source names."""
@@ -260,12 +286,18 @@ class Collector:
                 )
             current = persist({**result, "ssh_error": None})
             self.store.record_history()
-            return current
         except ProbeConflict:
             raise
         except Exception as error:
             persist({"ssh_status": "error", "ssh_error": _error(error)})
+            try:
+                self.clear_resolved_attention()
+            except Exception:
+                logger.exception("Attention cleanup failed after probe of %s", instance_id)
             raise
+        else:
+            self.clear_resolved_attention()
+            return current
         finally:
             self.probes.discard(instance_id)
 

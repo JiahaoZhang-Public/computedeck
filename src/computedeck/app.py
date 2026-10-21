@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import attention, auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .errors import SourceError, message
@@ -51,6 +51,12 @@ SHUTDOWN_SECONDS = 10
 
 class RefreshInput(BaseModel):
     source_id: str | None = None
+
+
+class AttentionInput(BaseModel):
+    action: Literal["acknowledge", "snooze", "clear"]
+    fingerprint: str | None = None
+    until: Literal["1h", "tomorrow"] | None = None
 
 
 class ConfirmInput(BaseModel):
@@ -107,10 +113,10 @@ def create_app(
     paths.secure_data_dir(data_dir)
     drivers._policy_dir = data_dir
     runtime = plugin_host.Runtime(data_dir)
-    collector = Collector(runtime)
     contexts = plugin_host.load(
         plugin_host.discover(data_dir) if plugins is None else plugins, runtime
     )
+    collector = Collector(runtime, contexts=contexts)
     token = auth.ensure_token(data_dir) if auth.enabled() else None
     browser_token = secrets.token_urlsafe(32)
     session_nonce = secrets.token_hex(32)
@@ -324,17 +330,8 @@ def create_app(
             result = store().dashboard()
             result["refreshing"] = bool(collector.pending)
             result["collecting"] = sorted(collector.pending)
-            result["attention"] = attention.derive(
-                result,
-                [drivers.describe(name) for name in drivers.names()],
-                now=datetime.now(UTC),
-                loop_errors=runtime.loop_errors,
-                unreadable_rows=store().unreadable_rows(),
-                plugin_status={
-                    context.id: {**context.status(), "enabled": context.enabled}
-                    for context in contexts
-                },
-            )
+            result["attention"] = collector.attention_items(result)
+        result["attention_count"] = sum(item["muted"] is None for item in result["attention"])
         # Hash the complete response, including time-derived state and pending work.
         # Reuse these bytes so the large dashboard is serialized only once.
         body = bytes(EncodableJSON(jsonable_encoder(result)).body)
@@ -345,6 +342,41 @@ def create_app(
             content=body[:-1] + f',"token":"{token}"}}'.encode(),
             media_type="application/json",
         )
+
+    @app.put("/api/attention/{key}")
+    async def update_attention(key: str, body: AttentionInput) -> dict[str, str]:
+        collector.clear_resolved_attention()
+        item = next((item for item in collector.attention_items() if item["key"] == key), None)
+        if item is None:
+            raise HTTPException(404, message("attention_not_found"))
+        if not item["mutable"]:
+            raise HTTPException(422, message("attention_not_mutable"))
+        if body.action == "clear":
+            store().delete_attention_state([key])
+        else:
+            if body.fingerprint is not None and body.fingerprint != item["fingerprint"]:
+                raise HTTPException(409, message("attention_changed"))
+            current = datetime.now(UTC)
+            until = None
+            if body.action == "snooze":
+                if body.until is None:
+                    raise HTTPException(422, message("attention_snooze_required"))
+                until = (
+                    current + timedelta(hours=1)
+                    if body.until == "1h"
+                    else datetime.combine(
+                        current.astimezone().date() + timedelta(days=1), datetime.min.time()
+                    ).astimezone(UTC)
+                ).isoformat()
+            store().set_attention_state(
+                key,
+                {
+                    "fingerprint": item["fingerprint"],
+                    "acknowledged_at": current.isoformat(),
+                    "snooze_until": until,
+                },
+            )
+        return {"status": "ok"}
 
     @app.get("/api/history")
     async def history(

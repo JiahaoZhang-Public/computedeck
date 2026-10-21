@@ -86,6 +86,9 @@ describe.each(['en', 'zh-CN'] as const)('example request isolation in %s', (loca
     );
     vi.stubGlobal('fetch', fetch);
     await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
+    await expect(
+      api('/attention/source_failed:example:cluster-a', { action: 'acknowledge' }, 'PUT'),
+    ).rejects.toThrow(t('toast.demoReadOnly'));
     await expect(upload('/plugins/chat/attachments', new Blob(['file']))).rejects.toThrow(
       t('toast.demoReadOnly'),
     );

@@ -240,6 +240,9 @@ export interface FleetSummary extends Summary {
 }
 export interface Attention {
   key: string;
+  fingerprint?: string;
+  mutable?: boolean;
+  muted?: { state: 'acknowledged' | 'snoozed'; at: string; until: string | null } | null;
   kind: string;
   subject: { kind: 'source' | 'instance' | 'service' | 'plugin'; id: string; name: string };
   severity: 'error' | 'warn';
@@ -253,6 +256,7 @@ export interface Attention {
 export interface Dashboard {
   token?: string;
   attention?: Attention[];
+  attention_count?: number;
   summary: FleetSummary;
   mode: string;
   sources: Source[];

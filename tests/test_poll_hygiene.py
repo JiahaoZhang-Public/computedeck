@@ -197,3 +197,32 @@ def test_event_since_validates_datetimes_with_frozen_clock(
 ) -> None:
     assert client.get("/api/events", params={"since": clock[0].isoformat()}).json() == []
     assert client.get("/api/events?since=not-a-date").status_code == 422
+
+
+def test_attention_snooze_expiry_changes_content_token_without_writes(
+    client: TestClient, tmp_path: Path, clock: list[datetime]
+) -> None:
+    db = store.Store(tmp_path / "computedeck.sqlite")
+    try:
+        source = source_record(SourceInput(name="Cluster A", driver="slurm"))
+        source.update(error={"code": "ssh_timeout"}, failures=2, status="error")
+        db.save_source(source)
+        item = client.get("/api/dashboard").json()["attention"][0]
+        db.set_attention_state(
+            item["key"],
+            {
+                "fingerprint": item["fingerprint"],
+                "acknowledged_at": clock[0].isoformat(),
+                "snooze_until": (clock[0] + timedelta(hours=1)).isoformat(),
+            },
+        )
+        before = client.get("/api/dashboard").json()
+        assert before["attention_count"] == 0
+        clock[0] += timedelta(hours=1)
+        after = client.get("/api/dashboard", params={"since": before["token"]}).json()
+        assert after["token"] != before["token"]
+        assert after["attention_count"] == 1
+        assert after["attention"][0]["muted"] is None
+        assert item["key"] in db.attention_state()
+    finally:
+        db.db.close()

@@ -563,7 +563,7 @@ export default function App() {
     [data],
   );
   const attention = data?.attention ?? [];
-  const problems = attention.length;
+  const problems = data?.attention_count ?? attention.length;
   const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
   const diagnosisSource =
     modal?.kind === 'diagnosis'

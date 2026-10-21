@@ -1627,3 +1627,143 @@ def test_activity_categories_keep_changes_opt_in_and_filter_before_limit(
     recent = client.get("/api/events?demo=true&range=24h&group=1").json()
     older = client.get("/api/events?demo=true&range=30d&group=1").json()
     assert len(older) > 30 > len(recent)
+
+
+def attention_fault(client: TestClient, data_dir: Path) -> dict[str, Any]:
+    source = post(client, "/api/sources", CLUSTER).json()
+    store = Store(data_dir / "computedeck.sqlite")
+    source.update(error={"code": "ssh_timeout"}, status="error", failures=2)
+    store.save_source(source)
+    store.db.close()
+    return client.get("/api/dashboard").json()["attention"][0]
+
+
+def test_attention_acknowledge_snooze_clear_and_unknown(client: TestClient, data_dir: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    item = attention_fault(client, data_dir)
+    path = f"/api/attention/{item['key']}"
+    before = client.get("/api/dashboard").json()
+    for body in (
+        {"action": "acknowledge"},
+        {"action": "snooze", "until": "1h"},
+        {"action": "snooze", "until": "tomorrow"},
+    ):
+        assert client.put(path, json=body, headers=HEADERS).status_code == 200
+        data = client.get("/api/dashboard").json()
+        [muted] = data["attention"]
+        assert data["attention_count"] == 0
+        assert muted["fingerprint"] == item["fingerprint"]
+        assert data["token"] != before["token"]
+        state = muted["muted"]
+        if body["action"] == "acknowledge":
+            assert state["state"] == "acknowledged" and state["until"] is None
+        elif body["until"] == "1h":
+            assert datetime.fromisoformat(state["until"]) - datetime.fromisoformat(
+                state["at"]
+            ) == timedelta(hours=1)
+        else:
+            until = datetime.fromisoformat(state["until"]).astimezone()
+            assert until.date() == datetime.now(UTC).astimezone().date() + timedelta(days=1)
+            assert (until.hour, until.minute, until.second) == (0, 0, 0)
+    assert client.put(path, json={"action": "clear"}, headers=HEADERS).status_code == 200
+    assert client.get("/api/dashboard").json()["attention_count"] == 1
+    assert client.put(path, json={"action": "snooze"}, headers=HEADERS).status_code == 422
+    assert (
+        client.put(path, json={"action": "snooze", "until": "forever"}, headers=HEADERS).status_code
+        == 422
+    )
+    for key in ("missing", "source_failed:example:cluster-a"):
+        assert (
+            client.put(
+                f"/api/attention/{key}", json={"action": "acknowledge"}, headers=HEADERS
+            ).status_code
+            == 404
+        )
+
+
+def test_attention_write_requires_origin_and_header(client: TestClient, data_dir: Path) -> None:
+    item = attention_fault(client, data_dir)
+    for headers in (
+        {},
+        {k: v for k, v in HEADERS.items() if k != "Origin"},
+        {k: v for k, v in HEADERS.items() if k != "X-ComputeDeck"},
+        {**HEADERS, "Origin": "https://evil.example"},
+    ):
+        assert (
+            client.put(
+                f"/api/attention/{item['key']}", json={"action": "acknowledge"}, headers=headers
+            ).status_code
+            == 403
+        )
+    assert client.get("/api/dashboard").json()["attention_count"] == 1
+
+
+@pytest.mark.parametrize("action", ["acknowledge", "snooze", "clear"])
+def test_service_attention_cannot_be_muted(client: TestClient, data_dir: Path, action: str) -> None:
+    store = Store(data_dir / "computedeck.sqlite")
+    with store.db:
+        store.db.execute("INSERT INTO sources VALUES ('broken', 'bad JSON')")
+    store.db.close()
+    item = client.get("/api/dashboard").json()["attention"][0]
+    assert item["kind"] == "unreadable_rows"
+    response = client.put(
+        f"/api/attention/{item['key']}", json={"action": action, "until": "1h"}, headers=HEADERS
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "attention_not_mutable"
+
+
+def test_resolved_attention_is_pruned_on_put_but_never_get(
+    client: TestClient, data_dir: Path
+) -> None:
+    item = attention_fault(client, data_dir)
+    path = f"/api/attention/{item['key']}"
+    assert client.put(path, json={"action": "acknowledge"}, headers=HEADERS).status_code == 200
+    store = Store(data_dir / "computedeck.sqlite")
+    source = store.sources()[0]
+    source.update(error=None, status="ready", failures=0)
+    store.save_source(source)
+    assert client.get("/api/dashboard").json()["attention"] == []
+    assert item["key"] in store.attention_state()
+    assert client.put(path, json={"action": "clear"}, headers=HEADERS).status_code == 404
+    assert store.attention_state() == {}
+    store.db.close()
+
+
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+@pytest.mark.parametrize("fingerprint", ["matching", "stale", "omitted"])
+def test_attention_checks_the_viewers_fingerprint(
+    client: TestClient, data_dir: Path, action: str, fingerprint: str
+) -> None:
+    item = attention_fault(client, data_dir)
+    body = {"action": action, "until": "1h"}
+    if fingerprint != "omitted":
+        body["fingerprint"] = item["fingerprint"]
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        if fingerprint == "stale":
+            source = store.sources()[0]
+            source["error"] = {"code": "ssh_failed"}
+            store.save_source(source)
+        response = client.put(f"/api/attention/{item['key']}", json=body, headers=HEADERS)
+        if fingerprint == "stale":
+            assert response.status_code == 409
+            assert response.json() == {"detail": {"code": "attention_changed"}}
+            assert store.attention_state() == {}
+            assert client.get("/api/dashboard").json()["attention_count"] == 1
+        else:
+            assert response.status_code == 200
+            assert store.attention_state()[item["key"]]["fingerprint"] == item["fingerprint"]
+            assert client.get("/api/dashboard").json()["attention_count"] == 0
+            assert (
+                client.put(
+                    f"/api/attention/{item['key']}",
+                    json={"action": "clear", "fingerprint": "outdated"},
+                    headers=HEADERS,
+                ).status_code
+                == 200
+            )
+            assert store.attention_state() == {}
+    finally:
+        store.db.close()

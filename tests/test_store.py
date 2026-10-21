@@ -683,3 +683,40 @@ def test_retained_nodes_do_not_override_collection_state(
         {**source, "last_success": None, "capabilities": [], "cluster_state": "unknown"}
     )
     assert store.dashboard()["sources"][0]["cluster_state"] == "unknown"
+
+
+def test_attention_state_upgrades_version_two_idempotently_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.sqlite"
+    old = Store(path)
+    old.db.execute("DROP TABLE attention_state")
+    old.db.close()
+    readonly = Store(path, readonly=True)
+    assert readonly.attention_state() == {}
+    readonly.db.close()
+    data = {"fingerprint": "cause", "acknowledged_at": now(), "snooze_until": None}
+    upgraded = Store(path)
+    upgraded.set_attention_state("source_failed:cluster-a", data)
+    upgraded.db.close()
+    reopened = Store(path)
+    assert reopened.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone() == (
+        "2",
+    )
+    assert reopened.attention_state() == {"source_failed:cluster-a": data}
+    readonly = Store(path, readonly=True)
+    assert readonly.attention_state() == reopened.attention_state()
+    readonly.db.close()
+    reopened.delete_attention_state(["source_failed:cluster-a"])
+    assert reopened.attention_state() == {}
+    reopened.db.close()
+
+
+def test_unreadable_attention_state_is_skipped(store: Store) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO attention_state VALUES ('broken', 'not JSON')")
+    store.set_attention_state(
+        "bad-time", {"fingerprint": "x", "acknowledged_at": now(), "snooze_until": "no time"}
+    )
+    assert store.attention_state() == {}
+    assert store.unreadable_rows()["attention_state"] == 2

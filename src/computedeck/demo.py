@@ -438,6 +438,14 @@ def dashboard() -> dict[str, Any]:
     data["attention"] = attention.derive(
         data, [drivers.describe(name) for name in drivers.names()], now=current
     )
+    # Example acknowledgement is isolated from the service's saved state.
+    for item, duration in zip(data["attention"][-2:], (None, timedelta(hours=1)), strict=True):
+        item["muted"] = {
+            "state": "snoozed" if duration else "acknowledged",
+            "at": (current - timedelta(minutes=10)).isoformat(),
+            "until": (current + duration).isoformat() if duration else None,
+        }
+    data["attention_count"] = sum(item["muted"] is None for item in data["attention"])
     return data
 
 

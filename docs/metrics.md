@@ -48,34 +48,52 @@ because it now follows the oldest enabled source instead of the newest one.
 
 ## Needs attention
 
-The Overview tile, navigation badge and attention panel count the same server
-list. The first collection failure appears as a warning; two consecutive failures
-or stale data make it an error. Stale data becomes an error after three collection
-intervals. Built-in drivers classify cluster availability using the node-health
-rule over GPU-capable nodes (positive or unknown GPU counts), so healthy CPU-only
-nodes cannot hide a GPU outage. One item per cluster uses the worst state reported
-by its current logins. Source-failure and stale-data items replace retained cluster
-faults and collection warnings.
-A capability warning counts only when the source has
-delivered that capability before; permanent gaps stay on Sources. Other warnings
-are all included. Unchecked connections and machines with monitoring off do not
-produce attention items; failed SSH checks on monitored machines and provider
-instances do. Disabled sources and plugins do not produce items.
-Disabling or re-enabling a source clears its collection error and retry count while
-preserving retained observations and capability history. It clears `last_success`
-so the next collection establishes a silent event baseline. Retained inventories
-do not override the cluster state reported by the latest collection.
+The Overview tile, navigation badge and attention panel count the same server list of
+unmuted items. The first collection failure appears as a warning; two consecutive
+failures or stale data make it an error. Stale data becomes an error after three
+collection intervals. Built-in drivers classify cluster availability using the
+node-health rule over GPU-capable nodes (positive or unknown GPU counts), so healthy
+CPU-only nodes cannot hide a GPU outage. One item per cluster uses the worst state
+reported by its current logins. Source-failure and stale-data items replace retained
+cluster faults and collection warnings. A capability warning counts only when the source
+has delivered that capability before; permanent gaps stay on Sources. Other warnings are
+all included. Unchecked connections and machines with monitoring off do not produce
+attention items; failed SSH checks on monitored machines and provider instances do.
+Disabled sources and plugins do not produce items. Disabling or re-enabling a source
+clears its collection error and retry count while preserving retained observations and
+capability history. It clears `last_success` so the next collection establishes a silent
+event baseline. Retained inventories do not override the cluster state reported by the
+latest collection.
 
-Rows link to diagnosis (the last error and an explicit Test connection button),
-the instance, service health or Toolbox. Their times use existing observations:
-`since` is the last successful collection for a failing or stale source: no good
-data has arrived since then. It is null for all other cases. `observed_at` records
-the latest observation, shown as "Last seen": the collection that observed a
-source condition, the latest failed attempt for a source that never succeeded,
-an SSH check, or a background error report. Repeated observations do not imply a
-new incident onset. Unreadable rows and plugin health errors have neither time.
-Attention is derived on every dashboard read; there is no acknowledge, snooze or
-additional collection request.
+Rows link to diagnosis (the last error and an explicit Test connection button), the
+instance, service health or Toolbox. Their times use existing observations: `since` is
+the last successful collection for a failing or stale source: no good data has arrived
+since then. It is null for all other cases. `observed_at` records the latest
+observation, shown as "Last seen": the collection that observed a source condition, the
+latest failed attempt for a source that never succeeded, an SSH check, or a background
+error report. Repeated observations do not imply a new incident onset. Unreadable rows
+and plugin health errors have neither time. Attention is derived on every dashboard read
+without an additional collection request. Acknowledge keeps an item quiet until its
+cause or severity changes. Snooze keeps it quiet for one hour or until midnight tomorrow
+in the service host's timezone; a changed cause or severity also ends a snooze early.
+Names, observation times and free-text error output do not reopen items. A resolved item
+loses its saved acknowledgement after the next collection or machine check, or an
+attention action.
+
+The tile, badge and panel count only unmuted items. Muted items remain in the collapsed
+"Acknowledged (N)" group with Unmute and their snooze expiry, when applicable. This
+state is saved on the service and shared by all viewers. The health pill still reports
+source health. Background-task faults and unreadable rows cannot be muted. Example data
+shows acknowledged and snoozed items, but its controls cannot change saved state.
+
+确认会让待处理项保持静默，直到原因或严重程度发生变化。暂缓可持续一小时，或持续到服务主机
+时区的次日零点；原因或严重程度变化也会提前结束暂缓。名称、观测时间和错误输出文本变化
+不会重新提醒。问题解决后，下次采集、机器检查或待处理项操作会清除其已保存的确认状态。
+
+概览卡片、导航徽标和面板只统计未静默的项目。静默项目保留在默认折叠的“已确认（N）”中，
+可恢复提醒，并显示暂缓截止时间。状态保存在服务端，所有查看者共享。健康状态标记仍反映
+数据源健康状况。后台任务故障和无法读取的数据行不能静默。示例数据包含已确认和暂缓项目，
+但其中的控件不能修改保存的状态。
 
 Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
 `instances_skipped` as driver capability checks or coverage-only conditions.

@@ -1,8 +1,10 @@
-import type { Summary } from '../types';
+import { useState } from 'react';
+import { api } from '../api';
+import type { Attention, Summary } from '../types';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { attentionText, nextAttemptText } from '../health';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
-import { formatMessage, localized, t } from '../i18n';
+import { errorText, formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
 import {
   groupArrays,
@@ -34,7 +36,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const missingJobs = jobsMissing(data);
   const setupNeeded =
     !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
-  const issues = ctx.attention.length;
+  const issues = data.attention_count ?? ctx.attention.length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
@@ -123,6 +125,8 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
               >
                 {t('overview.issues.some')}
               </a>
+            ) : ctx.attention.length ? (
+              t('attention.allMuted')
             ) : connected ? (
               t('overview.issues.none')
             ) : (
@@ -131,59 +135,33 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           }
         />
       </div>
-      <Panel
-        title={t('overview.attention')}
-        count={ctx.attention.length}
-        id="attention"
-        tabIndex={-1}
-      >
-        {ctx.attention.length ? (
+      <Panel title={t('overview.attention')} count={issues} id="attention" tabIndex={-1}>
+        {ctx.attention.some((item) => !item.muted) ? (
           <ul className="attention">
-            {ctx.attention.map((item) => (
-              <li key={item.key}>
-                <button onClick={() => ctx.openAttention(item)}>
-                  <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
-                  <span>
-                    <strong>{attentionText(item, ctx.tools)}</strong>
-                    {item.details.map((detail, index) => (
-                      <small key={index}>{formatMessage(detail)}</small>
-                    ))}
-                    <small>
-                      {item.since
-                        ? t('attention.since', {
-                            time: dateTime(item.since),
-                            age: relativeTime(item.since),
-                          })
-                        : item.observed_at
-                          ? t(
-                              item.kind === 'instance_ssh_failed'
-                                ? 'attention.checked'
-                                : 'attention.lastSeen',
-                              {
-                                time: dateTime(item.observed_at),
-                                age: relativeTime(item.observed_at),
-                              },
-                            )
-                          : t('attention.sinceUnknown')}
-                      {item.next_attempt &&
-                        ` · ${nextAttemptText(
-                          item.next_attempt,
-                          item.subject.kind === 'source' &&
-                            (data.collecting?.includes(item.subject.id) ||
-                              data.sources.some(
-                                (source) =>
-                                  source.id === item.subject.id && source.status === 'syncing',
-                              )),
-                        )}`}
-                    </small>
-                  </span>
-                  <ChevronRight size={14} />
-                </button>
-              </li>
-            ))}
+            {ctx.attention
+              .filter((item) => !item.muted)
+              .map((item) => (
+                <AttentionRow key={item.key} item={item} ctx={ctx} />
+              ))}
           </ul>
         ) : (
-          <p className="panel-note">{t('overview.attention.none')}</p>
+          <p className="panel-note">
+            {t(ctx.attention.length ? 'attention.allMuted' : 'overview.attention.none')}
+          </p>
+        )}
+        {ctx.attention.some((item) => item.muted) && (
+          <details className="attention-muted">
+            <summary>
+              {t('attention.acknowledged', { count: ctx.attention.length - issues })}
+            </summary>
+            <ul className="attention">
+              {ctx.attention
+                .filter((item) => item.muted)
+                .map((item) => (
+                  <AttentionRow key={item.key} item={item} ctx={ctx} />
+                ))}
+            </ul>
+          </details>
         )}
       </Panel>
       <Panel
@@ -248,6 +226,109 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
         )}
       </div>
     </>
+  );
+}
+
+function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
+  const [busy, setBusy] = useState(false);
+  async function update(action: 'acknowledge' | 'snooze' | 'clear', until?: '1h' | 'tomorrow') {
+    setBusy(true);
+    try {
+      await api(
+        `/attention/${encodeURIComponent(item.key)}`,
+        { action, until, ...(action === 'clear' ? {} : { fingerprint: item.fingerprint }) },
+        'PUT',
+      );
+    } catch (error) {
+      ctx.notify(errorText(error, 'error.save'), 'error');
+    } finally {
+      await ctx.reload();
+      setBusy(false);
+    }
+  }
+  return (
+    <li>
+      <button className="attention-open" onClick={() => ctx.openAttention(item)}>
+        <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
+        <span>
+          <strong>{attentionText(item, ctx.tools)}</strong>
+          {item.details.map((detail, index) => (
+            <small key={index}>{formatMessage(detail)}</small>
+          ))}
+          <small>
+            {item.since
+              ? t('attention.since', {
+                  time: dateTime(item.since),
+                  age: relativeTime(item.since),
+                })
+              : item.observed_at
+                ? t(
+                    item.kind === 'instance_ssh_failed'
+                      ? 'attention.checked'
+                      : 'attention.lastSeen',
+                    {
+                      time: dateTime(item.observed_at),
+                      age: relativeTime(item.observed_at),
+                    },
+                  )
+                : t('attention.sinceUnknown')}
+            {item.next_attempt &&
+              ` · ${nextAttemptText(
+                item.next_attempt,
+                item.subject.kind === 'source' &&
+                  (ctx.data.collecting?.includes(item.subject.id) ||
+                    ctx.data.sources.some(
+                      (source) => source.id === item.subject.id && source.status === 'syncing',
+                    )),
+              )}`}
+          </small>
+        </span>
+        <ChevronRight size={14} />
+      </button>
+      {item.muted && (
+        <small className="attention-mute-note">
+          {item.muted.state === 'snoozed'
+            ? t('attention.snoozedUntil', { time: dateTime(item.muted.until) })
+            : t('attention.untilChanges')}
+        </small>
+      )}
+      {item.mutable !== false && (
+        <div className="attention-actions">
+          {item.muted ? (
+            <button
+              className="button small"
+              disabled={busy || ctx.demo}
+              onClick={() => void update('clear')}
+            >
+              {t('attention.unmute')}
+            </button>
+          ) : (
+            <>
+              <button
+                className="button small"
+                disabled={busy || ctx.demo}
+                title={t('attention.untilChanges')}
+                onClick={() => void update('acknowledge')}
+              >
+                {t('attention.acknowledge')}
+              </button>
+              <select
+                aria-label={t('attention.snooze')}
+                disabled={busy || ctx.demo}
+                value=""
+                onChange={(event) => void update('snooze', event.target.value as '1h' | 'tomorrow')}
+              >
+                <option value="" disabled>
+                  {t('attention.snooze')}
+                </option>
+                <option value="1h">{t('attention.oneHour')}</option>
+                <option value="tomorrow">{t('attention.tomorrow')}</option>
+              </select>
+            </>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
