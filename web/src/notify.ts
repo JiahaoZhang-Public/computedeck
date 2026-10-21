@@ -18,6 +18,7 @@ export interface Rule {
   name: string;
   enabled: boolean;
   events: string[];
+  outcomes?: string[];
   clusters: string[];
   users: string[];
   name_pattern: string;
@@ -55,7 +56,16 @@ export interface NotifyState {
 export const EMPTY_RULE: RuleInput = {
   name: '',
   enabled: true,
-  events: ['job.failed'],
+  events: ['job.finished'],
+  outcomes: [
+    'failed',
+    'timeout',
+    'out_of_memory',
+    'node_fail',
+    'boot_fail',
+    'deadline',
+    'preempted',
+  ],
   clusters: [],
   users: [],
   name_pattern: '',

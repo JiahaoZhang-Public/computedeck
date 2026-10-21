@@ -96,7 +96,7 @@ def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
         return {}, True
     invalid = False
     result: dict[str, Any] = {}
-    for key in ("jobs", "nodes", "instances", "failures"):
+    for key in ("jobs", "nodes", "instances", "failures", "lifecycle_pending", "lifecycle_ended"):
         if key not in snapshot:
             continue
         result[key] = []

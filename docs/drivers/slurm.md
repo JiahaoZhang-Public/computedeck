@@ -33,3 +33,18 @@ an outage even if no GPUs are allocated, rather than looking idle.
 References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 [sacctmgr](https://slurm.schedmd.com/sacctmgr.html),
 [association text formatter](https://github.com/SchedMD/slurm/blob/master/src/scontrol/info_assoc_mgr.c).
+
+## Terminal job history
+
+The existing 24-hour failure query and its raw `end` field are unchanged. A second,
+terminal-state `sacct` query runs in the same SSH call, separated by a marker. It includes
+COMPLETED, CANCELLED and all failure states, and reads Submit, Start and End under
+`env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z`. Its window starts five minutes before the
+previous successful collection, rounded up to minutes and capped at 24 hours. If the
+previous collection lacked history, it reads the full 24 hours instead; a first collection
+records that history silently. Both queries remain read-only.
+
+Terminal records feed lifecycle events without enlarging the retained failure list.
+PBS and LSF use the offset from their existing remote clock for terminal timestamps;
+that current offset may differ across a daylight-saving transition. Their legacy
+failure-row `end` strings also remain unchanged. No extra SSH connection is added.

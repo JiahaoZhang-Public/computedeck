@@ -4,7 +4,7 @@ import type { DeckEvent } from '../types';
 import { api } from '../api';
 import { t } from '../i18n';
 import { relativeTime } from '../domain';
-import { eventText, eventTone } from '../events';
+import { activityEvents, eventText, eventTone, eventTimeTitle, eventTimeText } from '../events';
 import { Panel } from '../ui';
 
 /** What changed between collections: jobs that started, ended or failed, sources that broke. */
@@ -23,7 +23,7 @@ export function ActivityPanel({
     const id = ++loadId.current;
     try {
       const rows = await api<DeckEvent[]>(`/events?limit=${limit}&demo=${demo}`);
-      if (id === loadId.current) setEvents(rows);
+      if (id === loadId.current) setEvents(activityEvents(rows));
     } catch {
       if (id === loadId.current) setEvents((current) => current ?? []);
     }
@@ -48,7 +48,9 @@ export function ActivityPanel({
                   {[event.data.source_name, event.data.username].filter(Boolean).join(' · ')}
                 </small>
               </span>
-              <time dateTime={event.at}>{relativeTime(event.at)}</time>
+              <time dateTime={event.at} title={eventTimeTitle(event)}>
+                {eventTimeText(event) ?? relativeTime(event.at)}
+              </time>
             </li>
           ))}
         </ul>

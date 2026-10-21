@@ -137,7 +137,7 @@ async def test_loops_run_only_while_the_tool_is_on(store: Store, tmp_path: Path)
 
 def test_example_events_are_served_in_demo_mode(client: TestClient) -> None:
     rows = client.get("/api/events?demo=true").json()
-    assert [row["type"] for row in rows[:3]] == ["source.failed", "job.started", "job.failed"]
+    assert [row["type"] for row in rows[:3]] == ["source.failed", "job.started", "job.finished"]
     assert rows[0]["source_id"] == "example:runpod-secondary"
     assert rows[0]["data"]["error"] == {"code": "http_status", "status": 429}
     assert [row["at"] for row in rows] == sorted((row["at"] for row in rows), reverse=True)

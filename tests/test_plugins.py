@@ -513,3 +513,69 @@ async def test_an_event_handler_that_works_again_is_no_longer_reported(
         await asyncio.sleep(0.01)
     assert runtime.loop_errors == {}
     task.cancel()
+
+
+@pytest.mark.parametrize(
+    "subscription",
+    [
+        None,
+        ["job.failed", "job.ended"],
+        ["job.finished"],
+        ["job.finished", "job.failed", "job.ended"],
+    ],
+)
+async def test_finished_delivery_preserves_api1_and_named_opt_in(
+    store: Store, tmp_path: Path, subscription: list[str] | None
+) -> None:
+    from computedeck.events import FAILURE_OUTCOMES, OUTCOMES
+
+    runtime = plugin_host.Runtime(tmp_path)
+    runtime.store = store
+    context = plugin_host.PluginContext(plugin_host.Plugin("watcher", lambda ctx: None), runtime)
+    seen: list[dict[str, Any]] = []
+    received = asyncio.Event()
+
+    async def handle(event: dict[str, Any]) -> None:
+        seen.append(event)
+        if len(seen) == len(OUTCOMES):
+            received.set()
+
+    context.on_event(handle, subscription)
+    store.set_plugin_cursor("watcher", 0)
+    store.add_events(
+        [
+            {"key": outcome, "type": "job.finished", "data": {"outcome": outcome}}
+            for outcome in OUTCOMES
+        ]
+    )
+    task = asyncio.create_task(plugin_host.deliver(context, poll=0.01))
+    try:
+        await asyncio.wait_for(received.wait(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    expected = [
+        "job.finished"
+        if subscription and "job.finished" in subscription
+        else "job.failed"
+        if outcome in FAILURE_OUTCOMES
+        else "job.ended"
+        for outcome in OUTCOMES
+    ]
+    assert [event["type"] for event in seen] == expected
+    assert len({event["id"] for event in seen}) == len(OUTCOMES)
+    # The cursor prevents replay on restart.
+    task = asyncio.create_task(plugin_host.deliver(context, poll=0.001))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert len(seen) == len(OUTCOMES)
+
+
+def test_new_event_types_require_named_handlers() -> None:
+    from computedeck.events import for_handler
+
+    event = {"type": "source.gap", "data": {}}
+    assert for_handler(event, None) is None
+    assert for_handler(event, frozenset(["source.gap"])) == event
+    assert for_handler({"type": "change.source", "data": {}}, frozenset(["change.source"])) is None

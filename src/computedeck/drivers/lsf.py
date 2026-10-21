@@ -81,7 +81,7 @@ GPU_HOST_FIELDS = ("ngpus", "ngpus_alloc")
 QUEUE_FIELDS = ("queue_name", "status", "max_runlimit")
 GPU_INVENTORY_COMMAND = "lshosts -gpu -w"
 # Remote local time, so finish times without a year can be dated and windowed.
-CLOCK = shlex.join(["date", "+%Y-%m-%dT%H:%M:%S"])
+CLOCK = shlex.join(["date", "+%Y-%m-%dT%H:%M:%S%z"])
 
 STATES = {
     "PEND": "PENDING",
@@ -413,7 +413,13 @@ def finish_time(value: str, remote_now: datetime) -> datetime | None:
     for candidate in years:
         try:
             stamp = datetime(
-                candidate, MONTHS[month], int(day), int(hour), int(minute), int(second or 0)
+                candidate,
+                MONTHS[month],
+                int(day),
+                int(hour),
+                int(minute),
+                int(second or 0),
+                tzinfo=remote_now.tzinfo,
             )
         except ValueError:
             continue
@@ -431,7 +437,9 @@ def _failure_state(reason: str) -> str:
     return "FAILED"
 
 
-def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_failures(
+    output: str, source: dict[str, Any], *, terminal: bool = False
+) -> list[dict[str, Any]]:
     """``date; bjobs -d``: the user's EXIT jobs that finished in the last 24 hours.
 
     ``bjobs -d`` only keeps jobs for CLEAN_PERIOD (lsb.params, one hour by default), so the
@@ -450,16 +458,24 @@ def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     observed_at = now()
     for row in records(rest, "bjobs -d", empty=True):
         reason = row.get("EXIT_REASON", "")
-        if row.get("USER") != source["username"] or row.get("STAT", "").upper() != "EXIT":
+        states = {"EXIT", "DONE"} if terminal else {"EXIT"}
+        if row.get("USER") != source["username"] or row.get("STAT", "").upper() not in states:
             continue
-        if CANCELLED.search(reason):
+        if CANCELLED.search(reason) and not terminal:
             continue
         end = finish_time(row.get("FINISH_TIME", ""), remote_now)
         if end is None or end < since:
             continue
-        job = _job(row, _failure_state(reason), source, "bjobs -d")
+        state = (
+            "COMPLETED"
+            if row.get("STAT", "").upper() == "DONE"
+            else "CANCELLED"
+            if CANCELLED.search(reason)
+            else _failure_state(reason)
+        )
+        job = _job(row, state, source, "bjobs -d")
         job.update(
-            end=end.isoformat(),
+            end=(end if terminal else end.replace(tzinfo=None)).isoformat(),
             exit_code=None if _blank(row.get("EXIT_CODE")) else row["EXIT_CODE"],
             observed_at=observed_at,
         )
@@ -655,6 +671,7 @@ class LsfDriver:
                 options,
             )
             batch.failures = parse_failures(output, source)
+            batch.finished = parse_failures(output, source, terminal=True)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

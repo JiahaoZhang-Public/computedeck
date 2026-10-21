@@ -1,6 +1,7 @@
 """Read-only Slurm collection over SSH: own jobs, visible nodes, QoS limits, recent failures."""
 
 import asyncio
+import math
 import re
 import shlex
 from datetime import datetime
@@ -56,6 +57,9 @@ _HISTORY_FIELDS = (
     "End",
     "ExitCode",
 )
+_FINISHED_FIELDS = (*_HISTORY_FIELDS, "Submit", "Start")
+HISTORY_MARKER = "COMPUTEDECK_TERMINAL_HISTORY"
+
 FAILURE_STATES = (
     "FAILED",
     "TIMEOUT",
@@ -342,26 +346,30 @@ def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
     return result
 
 
-def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_failures(
+    output: str, source: dict[str, Any], *, terminal: bool = False
+) -> list[dict[str, Any]]:
     """sacct allocations in a failure state. Only terminal accounting records count."""
+    fields = _FINISHED_FIELDS if terminal else _HISTORY_FIELDS
+    states = (*FAILURE_STATES, "COMPLETED", "CANCELLED") if terminal else FAILURE_STATES
     failures: dict[str, dict[str, Any]] = {}
     observed_at = now()
     for line in output.splitlines():
         if not line.strip():
             continue
         columns = line.split("|")
-        if len(columns) != len(_HISTORY_FIELDS):
+        if len(columns) != len(fields):
             raise SourceError("unexpected_output", command="sacct")
-        row = dict(zip(_HISTORY_FIELDS, columns, strict=True))
+        row = dict(zip(fields, columns, strict=True))
         state = row["State"].split(" ", 1)[0].rstrip("+").upper()
-        if row["User"] != source["username"] or state not in FAILURE_STATES:
+        if row["User"] != source["username"] or state not in states:
             continue
         if row["End"] in EMPTY:
             continue
         job_id = f"{source['cluster_id']}:{row['JobID']}"
         previous = failures.get(job_id)
         # Requeued jobs can appear more than once; keep the latest attempt.
-        if previous and previous["end"] >= row["End"]:
+        if previous and (previous["end"] or "") >= row["End"]:
             continue
         failures[job_id] = {
             "id": job_id,
@@ -382,11 +390,13 @@ def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
-            "end": row["End"],
+            "end": job_time(row["End"]) if terminal else row["End"],
+            "submitted_at": job_time(row.get("Submit", "")),
+            "started_at": job_time(row.get("Start", "")),
             "exit_code": None if row["ExitCode"] in EMPTY else row["ExitCode"],
             "observed_at": observed_at,
         }
-    return sorted(failures.values(), key=lambda job: job["end"], reverse=True)
+    return sorted(failures.values(), key=lambda job: job["end"] or "", reverse=True)
 
 
 def _unavailable(code: str, error: BaseException) -> dict[str, Any]:
@@ -595,7 +605,43 @@ class SlurmDriver:
                     "--format=" + ",".join(_HISTORY_FIELDS),
                 ]
             )
-            batch.failures = parse_failures(await ssh.run(alias, history, options), source)
+            minutes = 1440
+            if "history" in (source.get("capabilities") or []) and (
+                previous := job_time(source.get("last_success") or "")
+            ):
+                minutes = min(
+                    1440,
+                    max(
+                        5,
+                        math.ceil(
+                            (
+                                datetime.fromisoformat(now()) - datetime.fromisoformat(previous)
+                            ).total_seconds()
+                            / 60
+                        )
+                        + 5,
+                    ),
+                )
+            terminal = (
+                history.replace("now-24hours", f"now-{minutes}minutes")
+                .replace(
+                    "--state=" + ",".join(FAILURE_STATES),
+                    "--state=" + ",".join((*FAILURE_STATES, "COMPLETED", "CANCELLED")),
+                )
+                .replace(
+                    "--format=" + ",".join(_HISTORY_FIELDS),
+                    "--format=" + ",".join(_FINISHED_FIELDS),
+                )
+            )
+            terminal = "env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z " + terminal
+            output = await ssh.run(
+                alias, f"{history} && printf '\n{HISTORY_MARKER}\n' && {terminal}", options
+            )
+            failures, marker, finished = output.partition(HISTORY_MARKER)
+            if not marker:
+                raise SourceError("unexpected_output", command="sacct")
+            batch.failures = parse_failures(failures, source)
+            batch.finished = parse_failures(finished, source, terminal=True)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

@@ -27,13 +27,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..drivers import ssh
 from ..errors import SourceError, message
-from ..events import TYPES
+from ..events import FAILURE_OUTCOMES, OUTCOMES
 from ..plugins import Plugin, PluginContext, SettingField
 from ..ssh_config import validate_alias
 from ..store import Store, now
 from ..toolbox import _coerce
 from . import channels
 from .channels import Message
+
+NOTIFY_TYPES = ("job.started", "job.finished", "source.failed", "source.recovered")
 
 logger = logging.getLogger("computedeck")
 
@@ -66,6 +68,11 @@ PERMANENT_ERRORS = ("credential_unavailable", "webhook_url_invalid", "channel_ki
 
 DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
     "en": {
+        "job.finished": (
+            "{job}: {outcome} on {cluster}",
+            "{job} ({job_id}): {outcome} on {cluster}.\nState: {state}\n"
+            "Exit code: {exit_code}\nEnded: {end}",
+        ),
         "job.failed": (
             "{job} failed on {cluster}",
             "{job} ({job_id}) failed on {cluster}.\n\nState: {state}\nExit code: {exit_code}\n"
@@ -86,6 +93,10 @@ DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
         "source.recovered": ("{source} is collected again", "{source} is collected again."),
     },
     "zh-CN": {
+        "job.finished": (
+            "{job}：{outcome}（{cluster}）",
+            "{job}（{job_id}）：{outcome}（{cluster}）。\n状态：{state}\n退出码：{exit_code}\n结束时间：{end}",
+        ),
         "job.failed": (
             "{job} 在 {cluster} 上失败",
             "{job}（{job_id}）在 {cluster} 上失败。\n\n状态：{state}\n退出码：{exit_code}\n"
@@ -104,8 +115,35 @@ DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
         "source.recovered": ("{source} 已恢复采集", "{source} 已恢复采集。"),
     },
 }
+OUTCOME_TEXT = {
+    "en": {
+        "completed": "completed",
+        "cancelled": "cancelled",
+        "failed": "failed",
+        "timeout": "time limit reached",
+        "out_of_memory": "out of memory",
+        "node_fail": "node failure",
+        "boot_fail": "boot failure",
+        "deadline": "deadline reached",
+        "preempted": "preempted",
+        "unknown": "outcome unknown",
+    },
+    "zh-CN": {
+        "completed": "已完成",
+        "cancelled": "已取消",
+        "failed": "失败",
+        "timeout": "达到时间限制",
+        "out_of_memory": "内存不足",
+        "node_fail": "节点故障",
+        "boot_fail": "启动失败",
+        "deadline": "达到截止时间",
+        "preempted": "被抢占",
+        "unknown": "结果未知",
+    },
+}
 PLACEHOLDERS = (
     "event",
+    "outcome",
     "source",
     "cluster",
     "user",
@@ -134,6 +172,7 @@ def facts(event: dict[str, Any]) -> dict[str, str]:
         error = ": ".join(str(part) for part in (error.get("code"), error.get("detail")) if part)
     values = {
         "event": event.get("type"),
+        "outcome": data.get("outcome"),
         "source": data.get("source_name"),
         "cluster": data.get("source_name") or data.get("cluster_id"),
         "user": job.get("user") or data.get("username"),
@@ -174,6 +213,7 @@ class RuleInput(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     enabled: bool = True
     events: list[str] = Field(default_factory=lambda: ["job.failed"], min_length=1)
+    outcomes: list[str] = Field(default_factory=list)
     clusters: list[str] = Field(default_factory=list, max_length=50)
     users: list[str] = Field(default_factory=list, max_length=50)
     name_pattern: str = Field(default="", max_length=200)
@@ -208,6 +248,27 @@ def _prepare(store: Store) -> None:
                 PRIMARY KEY (rule, event, channel)
             );
         """)
+
+    for rule in _rows(store, "notify_rules"):
+        migrated = migrate_rule(rule)
+        if migrated != rule:
+            _save(store, "notify_rules", migrated)
+
+
+def migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    kinds = rule.get("events", [])
+    if not {"job.failed", "job.ended"}.intersection(kinds):
+        return rule
+    outcomes = [] if "job.ended" in kinds else list(FAILURE_OUTCOMES)
+    return {
+        **rule,
+        "events": list(
+            dict.fromkeys(
+                "job.finished" if kind in {"job.failed", "job.ended"} else kind for kind in kinds
+            )
+        ),
+        "outcomes": outcomes,
+    }
 
 
 def _rows(store: Store, table: str) -> list[dict[str, Any]]:
@@ -275,8 +336,10 @@ def check_channel(body: ChannelInput) -> dict[str, Any]:
 
 
 def check_rule(body: RuleInput, known_channels: set[str]) -> None:
-    if any(event not in TYPES for event in body.events):
+    if any(event not in (*NOTIFY_TYPES, "job.failed", "job.ended") for event in body.events):
         raise ValueError("event_type_unknown")
+    if any(outcome not in OUTCOMES for outcome in body.outcomes):
+        raise ValueError("setting_invalid")
     if any(channel not in known_channels for channel in body.channels):
         raise ValueError("channel_not_found")
     for value in [*body.clusters, *body.users]:
@@ -285,10 +348,28 @@ def check_rule(body: RuleInput, known_channels: set[str]) -> None:
 
 
 def matches(rule: dict[str, Any], event: dict[str, Any]) -> bool:
+    # Pre-upgrade events can still be waiting behind the plugin cursor.
+    if event["type"] in {"job.failed", "job.ended"} and "job.finished" in rule.get("events", []):
+        data = event.get("data") or {}
+        state = str((data.get("job") or {}).get("state", "")).lower()
+        outcome = (
+            state
+            if state in FAILURE_OUTCOMES
+            else "failed"
+            if event["type"] == "job.failed"
+            else "unknown"
+        )
+        event = {**event, "type": "job.finished", "data": {**data, "outcome": outcome}}
     if not rule.get("enabled", True) or event["type"] not in rule.get("events", []):
         return False
     data = event.get("data") or {}
     job = data.get("job") or {}
+    if (
+        event["type"] == "job.finished"
+        and rule.get("outcomes")
+        and data.get("outcome") not in rule["outcomes"]
+    ):
+        return False
     if rule.get("clusters") and data.get("cluster_id") not in rule["clusters"]:
         return False
     if rule.get("users") and not {job.get("user"), data.get("username")} & set(rule["users"]):
@@ -479,6 +560,21 @@ async def compose(
     language = store.settings().get("language") or "en"
     defaults = DEFAULTS.get(language, DEFAULTS["en"]).get(event["type"], ("{event}", "{event}"))
     values = facts(event)
+    outcome = (event.get("data") or {}).get("outcome")
+    if outcome:
+        values["outcome"] = OUTCOME_TEXT.get(language, OUTCOME_TEXT["en"]).get(outcome, outcome)
+        if outcome == "unknown":
+            unavailable = (event.get("data") or {}).get("outcome_reason") == "outcomes_unavailable"
+            reason = (
+                ("此集群不报告作业结果" if unavailable else "调度器尚未报告结果")
+                if language == "zh-CN"
+                else (
+                    "this cluster does not report outcomes"
+                    if unavailable
+                    else "the scheduler has not reported an outcome"
+                )
+            )
+            values["outcome"] += f" ({reason})"
     subject = render(rule.get("subject") or defaults[0], values)
     body = render(rule.get("body") or defaults[1], values)
     notes: list[str] = []
@@ -774,7 +870,7 @@ async def send_once(channel: dict[str, Any], mail: Message) -> tuple[dict[str, A
     return None, False
 
 
-def sample_event(kind: str = "job.failed") -> dict[str, Any]:
+def sample_event(kind: str = "job.finished", outcome: str = "failed") -> dict[str, Any]:
     """An example used by "Send test" and previews when no real event matches."""
     return {
         "id": 0,
@@ -782,6 +878,9 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
         "at": now(),
         "source_id": None,
         "data": {
+            "outcome": outcome,
+            "observed_at": now(),
+            "ended_at": now(),
             "source_name": "Cluster A",
             "cluster_id": "cluster-a",
             "username": "alice",
@@ -789,8 +888,8 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
                 "id": "cluster-a:12345",
                 "name": "example / test notification",
                 "user": "alice",
-                "state": "FAILED",
-                "exit_code": "1:0",
+                "state": outcome.upper(),
+                "exit_code": "0:0" if outcome == "completed" else "1:0",
                 "partition": "gpu",
                 "qos": "normal",
                 "gpu_count": 4,
@@ -805,7 +904,7 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
 def setup(ctx: PluginContext) -> None:
     notifier = Notifier(ctx)
     ctx.on_startup(lambda: _prepare(ctx.store))
-    ctx.on_event(notifier.on_event)
+    ctx.on_event(notifier.on_event, types=(*NOTIFY_TYPES, "job.failed", "job.ended"))
     ctx.background(notifier.retry_loop)
 
     def validate_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -870,7 +969,7 @@ def setup(ctx: PluginContext) -> None:
                 }
                 for kind in channels.kinds()
             ],
-            "event_types": list(TYPES),
+            "event_types": list(NOTIFY_TYPES),
             "placeholders": list(PLACEHOLDERS),
             "log": _recent_log(ctx.store),
             "ai_ready": bool(ctx.settings().get("ai_key")),
@@ -944,7 +1043,7 @@ def setup(ctx: PluginContext) -> None:
         row = {"id": rule_id, **body.model_dump()}
         # A channel listed twice still gets one message.
         row["channels"] = list(dict.fromkeys(row["channels"]))
-        return row
+        return migrate_rule(row)
 
     @ctx.router.post("/rules", status_code=201)
     async def add_rule(body: RuleInput) -> dict[str, Any]:
@@ -972,7 +1071,7 @@ def setup(ctx: PluginContext) -> None:
 
         The AI step is skipped here so a preview never sends event data anywhere.
         """
-        rule = {"id": "preview", **body.model_dump(), "agent": False}
+        rule = migrate_rule({"id": "preview", **body.model_dump(), "agent": False})
         event = next(
             (
                 row
@@ -982,7 +1081,10 @@ def setup(ctx: PluginContext) -> None:
             None,
         )
         mail, notes = await compose(
-            ctx.store, notifier.settings(), rule, event or sample_event(body.events[0])
+            ctx.store,
+            notifier.settings(),
+            rule,
+            event or sample_event(body.events[0], next(iter(body.outcomes), "failed")),
         )
         return {
             "subject": mail.subject,

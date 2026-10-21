@@ -7,20 +7,63 @@ must not announce every failure of the past day.
 
 Types:
 
-- ``job.started``: a job that was pending is running.
-- ``job.ended``: a job left the queue (finished, failed or cancelled; see ``job.failed``).
-- ``job.failed``: a job of the source ended with a failure in the last 24 hours.
+- ``job.started``: a job is first seen running or changes to running.
+- ``job.finished``: one reconciled terminal outcome (possibly unknown).
+- ``job.ended`` / ``job.failed``: legacy API-1 delivery names.
 - ``source.failed``: a source that worked could not be collected.
 - ``source.recovered``: a failing source was collected again.
 """
 
+from datetime import datetime
 from typing import Any
 
 from .drivers import Batch
 from .store import now
-from .summary import PENDING, RUNNING
+from .summary import RUNNING
 
-TYPES = ("job.started", "job.ended", "job.failed", "source.failed", "source.recovered")
+LEGACY_TYPES = ("job.started", "job.ended", "job.failed", "source.failed", "source.recovered")
+TYPES = (*LEGACY_TYPES, "job.finished")
+FAILURE_OUTCOMES = (
+    "failed",
+    "timeout",
+    "out_of_memory",
+    "node_fail",
+    "boot_fail",
+    "deadline",
+    "preempted",
+)
+OUTCOMES = ("completed", "cancelled", *FAILURE_OUTCOMES, "unknown")
+
+
+def job_time(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return value if datetime.fromisoformat(value).tzinfo is not None else None
+    except ValueError:
+        return None
+
+
+def after_gap(source: dict[str, Any], at: str) -> bool:
+    previous = job_time(source.get("last_success"))
+    return bool(
+        previous
+        and (datetime.fromisoformat(at) - datetime.fromisoformat(previous)).total_seconds()
+        > 120 * source.get("interval_minutes", 10)
+    )
+
+
+def for_handler(event: dict[str, Any], types: frozenset[str] | None) -> dict[str, Any] | None:
+    """New types require an explicit subscription; API-1 endings keep their old names."""
+    kind = event["type"]
+    if kind.startswith("change."):
+        return None
+    if kind == "job.finished" and (types is None or kind not in types):
+        kind = "job.failed" if event["data"].get("outcome") in FAILURE_OUTCOMES else "job.ended"
+        event = {**event, "type": kind}
+    if (types is None and kind in LEGACY_TYPES) or (types is not None and kind in types):
+        return event
+    return None
 
 
 def _context(source: dict[str, Any]) -> dict[str, Any]:
@@ -63,50 +106,105 @@ def collected(
     at = now()
     events: list[dict[str, Any]] = []
     context = _context(source)
-    for failure in batch.failures or []:
-        events.append(
-            {
-                # A requeued job can fail again under the same id; each end is one event.
-                "key": f"job.failed:{failure['id']}:{failure.get('end') or ''}",
-                "type": "job.failed",
-                "at": at,
-                "source_id": source["id"],
-                "silent": first,
-                "data": {**context, "job": failure},
-            }
-        )
-    previous = {job["id"]: job for job in (old or {}).get("jobs") or []}
-    if batch.jobs is not None and previous and not first:
-        current = {job["id"]: job for job in batch.jobs}
+    old = old or {}
+    baseline = first or "lifecycle_pending" not in old
+    gap = after_gap(source, at)
+    history_capable = "history" in batch.capabilities or "history" in (
+        source.get("capabilities") or []
+    )
+    previous = {job["id"]: job for job in old.get("jobs") or []}
+    current = {job["id"]: job for job in batch.jobs or []}
+    pending = {job["id"]: job for job in old.get("lifecycle_pending") or []}
+    ended = {
+        value["id"]: value
+        for value in old.get("lifecycle_ended") or []
+        if (
+            datetime.fromisoformat(at) - datetime.fromisoformat(value["observed_at"])
+        ).total_seconds()
+        < 86400
+    }
+    # Drivers without terminal history can still supply the existing failure contract.
+    terminal = {
+        job["id"]: job
+        for job in (batch.finished if batch.finished is not None else batch.failures) or []
+    }
+    # An old accounting row for a requeued ID cannot resolve its newer attempt.
+    for job_id, job in {**previous, **pending, **current}.items():
+        reported = terminal.get(job_id)
+        started = job_time(job.get("started_at"))
+        end = job_time(reported.get("end")) if reported else None
+        if started and end and datetime.fromisoformat(end) < datetime.fromisoformat(started):
+            terminal.pop(job_id, None)
+    waiting: list[dict[str, Any]] = []
+    if batch.jobs is not None:
         renamed = _renamed(previous, current)
         for job_id, job in current.items():
             before = previous.get(job_id)
-            if (
-                before
-                and str(before.get("state", "")).upper() in PENDING
-                and str(job.get("state", "")).upper() in RUNNING
+            if str(job.get("state", "")).upper() in RUNNING and (
+                before is None or str(before.get("state", "")).upper() not in RUNNING
             ):
+                ended.pop(job_id, None)
+                started = job_time(job.get("started_at"))
                 events.append(
                     {
-                        # A requeued job starts again under the same id.
-                        "key": f"job.started:{job_id}:{at}",
+                        "key": f"job.started:{job_id}:{started or at}",
                         "type": "job.started",
-                        "at": at,
+                        "at": started or at,
                         "source_id": source["id"],
-                        "data": {**context, "job": job},
+                        "silent": first,
+                        "data": {**context, "job": job, "started_at": started, "observed_at": at},
                     }
                 )
-        for job_id, before in previous.items():
-            if job_id not in current and job_id not in renamed:
-                events.append(
-                    {
-                        "key": f"job.ended:{job_id}",
-                        "type": "job.ended",
-                        "at": at,
-                        "source_id": source["id"],
-                        "data": {**context, "job": before},
-                    }
-                )
+        for job_id, job in {**previous, **pending}.items():
+            if job_id in current or job_id in terminal or job_id in renamed or job_id in ended:
+                continue
+            if history_capable and job_id not in pending:
+                waiting.append(job)
+            else:
+                terminal[job_id] = {**job, "state": "UNKNOWN", "end": None, "exit_code": None}
+    else:
+        waiting = list(pending.values())
+    for job_id, job in terminal.items():
+        end = job_time(job.get("end"))
+        raw_end = job.get("end")
+        before = ended.get(job_id)
+        # Late or incomplete accounting must not announce the same ending again.
+        if before and (not raw_end or not before.get("end") or before.get("end") == raw_end):
+            continue
+        outcome = str(job.get("state", "")).lower()
+        if outcome not in OUTCOMES:
+            outcome = "unknown"
+        reason = None
+        if outcome == "unknown":
+            reason = (
+                "outcome_not_reported"
+                if history_capable or job_id in pending
+                else "outcomes_unavailable"
+            )
+        events.append(
+            {
+                "key": f"job.finished:{job_id}:{raw_end or 'left'}",
+                "type": "job.finished",
+                "at": end or at,
+                "source_id": source["id"],
+                "silent": baseline or (gap and outcome not in FAILURE_OUTCOMES),
+                "data": {
+                    **context,
+                    "job": job,
+                    "outcome": outcome,
+                    "state": job.get("state"),
+                    "exit_code": job.get("exit_code"),
+                    "submitted_at": job_time(job.get("submitted_at")),
+                    "started_at": job_time(job.get("started_at")),
+                    "ended_at": end,
+                    "observed_at": at,
+                    "outcome_reason": reason,
+                },
+            }
+        )
+        ended[job_id] = {"id": job_id, "end": raw_end, "observed_at": at}
+    batch.lifecycle_pending = waiting
+    batch.lifecycle_ended = list(ended.values())
     if source.get("status_before") == "error":
         events.append(
             {

@@ -157,7 +157,11 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     rows = events()
     assert all(row["key"].startswith("example:") and row["source_id"] in sources for row in rows)
     assert [row["at"] for row in rows] == sorted((row["at"] for row in rows), reverse=True)
-    assert {row["data"]["job"]["state"] for row in rows if row["type"] == "job.failed"} == {
+    assert {
+        row["data"]["job"]["state"]
+        for row in rows
+        if row["type"] == "job.finished" and row["data"]["outcome"] in {"timeout", "out_of_memory"}
+    } == {
         "OUT_OF_MEMORY",
         "TIMEOUT",
     }
@@ -242,15 +246,15 @@ def test_demo_source_failure_events_match_current_outages_or_recoveries() -> Non
 
 
 @pytest.mark.parametrize("timezone", ["UTC0", "UTC-4", "UTC+7"])
-def test_demo_failed_job_local_end_times_match_events(timezone: str) -> None:
+def test_demo_finished_job_offset_times_match_events(timezone: str) -> None:
     try:
         with pytest.MonkeyPatch.context() as patch:
             patch.setenv("TZ", timezone)
             time.tzset()
             for event in events():
-                if event["type"] == "job.failed":
+                if event["type"] == "job.finished" and event["data"]["outcome"] != "unknown":
                     end = datetime.fromisoformat(event["data"]["job"]["end"])
-                    assert end.tzinfo is None
+                    assert end.tzinfo is not None
                     assert (
                         abs(end.timestamp() - datetime.fromisoformat(event["at"]).timestamp()) < 1
                     )
@@ -334,3 +338,32 @@ def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) ->
         gaps += sum(point["at"] >= i["added_at"] for i in unprobed)
         assert point["unknown_allocation_sources"] == gaps
         assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])
+
+
+def test_demo_shows_completed_and_unavailable_outcomes() -> None:
+    rows = [row for row in events() if row["type"] == "job.finished"]
+    assert {row["data"]["outcome"] for row in rows} == {
+        "completed",
+        "timeout",
+        "out_of_memory",
+        "unknown",
+    }
+    unknown = next(row for row in rows if row["data"]["outcome"] == "unknown")
+    source = next(
+        source for source in dashboard()["sources"] if source["id"] == unknown["source_id"]
+    )
+    assert "history" not in source["capabilities"]
+    assert unknown["data"]["ended_at"] is None
+    assert unknown["source_id"] == "example:cluster-a-bob"
+    assert unknown["at"] == unknown["data"]["observed_at"]
+    completed = next(row for row in rows if row["data"]["outcome"] == "completed")
+    source = next(
+        source for source in dashboard()["sources"] if source["id"] == completed["source_id"]
+    )
+    assert "history" in source["capabilities"]
+    assert completed["data"]["job"]["source_id"] == source["id"]
+    assert completed["data"]["job"]["user"] == source["username"]
+    assert completed["data"]["job"]["id"].startswith(source["cluster_id"] + ":")
+    for row in rows:
+        if row["data"]["ended_at"]:
+            assert row["at"] == row["data"]["ended_at"] < row["data"]["observed_at"]

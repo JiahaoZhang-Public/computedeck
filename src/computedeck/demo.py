@@ -439,17 +439,54 @@ def events() -> list[dict[str, Any]]:
             150,
             {"error": sources["example:cluster-c-alice"]["error"]},
         ),
-        ("job.failed", timeout["source_id"], 120, {"job": timeout}),
-        ("job.failed", oom["source_id"], 300, {"job": oom}),
+        ("job.finished", timeout["source_id"], 120, {"job": timeout, "outcome": "timeout"}),
+        ("job.finished", oom["source_id"], 300, {"job": oom, "outcome": "out_of_memory"}),
         (
-            "job.ended",
-            "example:cluster-a-bob",
+            "job.finished",
+            "example:cluster-b-alice",
             210,
-            {"job": {**jobs["example:cluster-a:48212"], "name": "speech-asr / prep"}},
+            {
+                "job": {
+                    **jobs["example:cluster-b:48211"],
+                    "id": "example:cluster-b:48001",
+                    "name": "vit-pretrain / prepare",
+                    "state": "COMPLETED",
+                },
+                "outcome": "completed",
+            },
+        ),
+        (
+            "job.finished",
+            "example:cluster-a-bob",
+            90,
+            {
+                "job": {
+                    "id": "example:cluster-a:48000",
+                    "name": "data / prepare",
+                    "state": "UNKNOWN",
+                },
+                "outcome": "unknown",
+                "outcome_reason": "outcomes_unavailable",
+            },
         ),
         ("source.recovered", "example:cluster-b-alice", 390, {}),
         ("source.failed", "example:cluster-b-alice", 420, {"error": {"code": "timeout"}}),
     ]
+    for kind, _, minutes, extra in rows:
+        if kind == "job.finished":
+            ended = (at - timedelta(minutes=minutes)).isoformat()
+            extra.update(
+                ended_at=None if extra["outcome"] == "unknown" else ended,
+                observed_at=ended
+                if extra["outcome"] == "unknown"
+                else (at - timedelta(minutes=minutes - 5)).isoformat(),
+            )
+            extra["job"].update(
+                end=extra["ended_at"],
+                exit_code="0:0"
+                if extra["outcome"] == "completed"
+                else extra["job"].get("exit_code"),
+            )
     rows.sort(key=lambda row: row[2])
     return [
         {

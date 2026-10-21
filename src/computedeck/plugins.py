@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .errors import message
+from .events import for_handler
 
 if TYPE_CHECKING:
     from .store import Store
@@ -534,9 +535,9 @@ async def deliver(context: PluginContext, poll: float = 2.0) -> None:
         for event in store.events(after=cursor, limit=100):
             if not event["silent"]:
                 for types, handler in context.handlers:
-                    if types is None or event["type"] in types:
+                    if (delivery := for_handler(event, types)) is not None:
                         try:
-                            await handler(event)
+                            await handler(delivery)
                             handled = True
                         except asyncio.CancelledError:
                             raise

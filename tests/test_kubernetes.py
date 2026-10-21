@@ -1057,3 +1057,40 @@ def test_fractional_cpu_counts_are_valid_collection_rows() -> None:
     jobs = kubernetes.parse_jobs([workload], SOURCE, {}, AT)
     assert jobs[0]["cpu_count"] == 0.5
     Batch(jobs=jobs).validate_rows()
+
+
+def test_terminal_pods_include_success_but_not_running_container_failures() -> None:
+    pods = [
+        pod(
+            "done",
+            status={
+                "phase": "Succeeded",
+                "containerStatuses": [
+                    {"state": terminated(0, "Completed", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+        pod(
+            "failed",
+            status={
+                "phase": "Failed",
+                "containerStatuses": [
+                    {"state": terminated(137, "OOMKilled", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+        pod(
+            "restarting",
+            status={
+                "phase": "Running",
+                "containerStatuses": [
+                    {"lastState": terminated(1, "Error", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+    ]
+    rows = kubernetes.parse_finished(pods, SOURCE, {}, AT)
+    assert {row["state"] for row in rows} == {"COMPLETED", "OUT_OF_MEMORY"}
+    assert len(rows) == 2
+    assert all(row["end"].endswith("+00:00") for row in rows)
+    assert len(kubernetes.parse_failures(pods, SOURCE, {}, AT)) == 2

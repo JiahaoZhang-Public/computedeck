@@ -80,3 +80,21 @@ additional collection request.
 Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
 `instances_skipped` as driver capability checks or coverage-only conditions.
 They currently count as partial data, including when the gap is permanent.
+
+## Job lifecycle and Activity
+
+Activity shows one reconciled ending per job attempt, with a scheduler outcome where
+available. Jobs that start and end between collections can be found in terminal history.
+A job leaving the queue is not assumed successful: sources without accounting say that
+they do not report outcomes. With history, an unmatched departure waits one collection
+before being reported as unknown. A later accounting row does not announce it twice.
+
+End times with offsets are displayed in the viewer's timezone; the hover text states
+how many minutes later ComputeDeck observed the ending. Without a reliable end time,
+the event is labelled as an observation. Activity sorts the fetched page by event time.
+The Failed tab still reads the existing 24-hour failure list. Kubernetes container
+failures remain in that list, but only terminal pods generate job-ending events.
+
+中文：动态为每次作业结束显示一条记录，优先使用调度器报告的结果与带时区的结束时间。
+没有记账能力时会明确说明结果不可用；有历史能力时最多等待一次采集。悬停可查看观测延迟，
+未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。

@@ -122,3 +122,19 @@ These are links within your own dashboard; they do not grant access to its servi
 中文：筛选、搜索、“去哪跑”输入和详情保存在地址栏中，刷新和浏览器返回会恢复对应状态。
 链接不会包含凭据，也不会授予他人访问服务的权限。调度器未提供时区的作业时间会明确标注；
 无法可靠计算的等待时长保持未知。
+
+## Notify job outcomes
+
+Notify rules can select **Job finished** and any combination of outcomes. No selected
+outcomes means all outcomes; this filter applies only to job endings. The default new
+rule selects failure outcomes. Templates support `{outcome}` in English and Chinese.
+
+Existing saved `job.failed` rules migrate to `job.finished` with the failure outcomes;
+`job.ended` rules, including rules containing both old types, migrate to all outcomes.
+Channels, custom templates and other filters are preserved. Pending legacy events and
+queued deliveries continue to work after upgrading. New-source and first-upgrade
+terminal history is silent; after a gap, non-failure catch-up endings are also silent.
+
+中文：通知规则可选择“作业结束”及具体结果，未选择结果表示全部结果。原失败规则迁移为
+失败结果筛选，原离开队列规则迁移为全部结果；渠道、自定义模板和其他筛选条件保持不变。
+`{outcome}` 会按界面语言显示结果。首次采集及升级后的首次历史记录不会发送通知。

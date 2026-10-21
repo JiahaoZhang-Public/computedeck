@@ -184,6 +184,10 @@ class Batch(BaseModel):
     nodes: list[dict[str, Any]] | None = None
     instances: list[dict[str, Any]] | None = None
     failures: list[dict[str, Any]] | None = None
+    finished: list[dict[str, Any]] | None = None
+    # Reconciliation state only; terminal history itself is never snapshotted.
+    lifecycle_pending: list[dict[str, Any]] | None = None
+    lifecycle_ended: list[dict[str, Any]] | None = None
     qos: list[dict[str, Any]] | None = None
     cluster_state: Literal["available", "degraded", "unavailable", "unknown"] = "unknown"
     # What a cloud provider says about the account, e.g. {"balance": 12.5, "currency": "USD"}.
@@ -195,7 +199,7 @@ class Batch(BaseModel):
     def validate_rows(self) -> None:
         """Reject malformed driver rows before events or the last-good snapshot change."""
         json.dumps(self.model_dump(), allow_nan=False, ensure_ascii=False).encode("utf-8")
-        for rows in (self.jobs, self.nodes, self.instances, self.failures):
+        for rows in (self.jobs, self.nodes, self.instances, self.failures, self.finished):
             for row in rows or []:
                 validate_row(row, complete=True)
         for entry in self.qos or []:
@@ -227,7 +231,14 @@ class Batch(BaseModel):
         return {
             key: value
             for key, value in self.model_dump(
-                include={"jobs", "nodes", "instances", "failures"}
+                include={
+                    "jobs",
+                    "nodes",
+                    "instances",
+                    "failures",
+                    "lifecycle_pending",
+                    "lifecycle_ended",
+                }
             ).items()
             if value is not None
         }

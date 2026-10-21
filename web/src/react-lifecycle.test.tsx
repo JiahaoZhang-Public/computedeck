@@ -1242,3 +1242,39 @@ it.each(['queued', 'syncing'])(
     expect(dialog.textContent).not.toContain(t('health.overdueReason'));
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'saves selected job outcomes from Notify in %s',
+  async (locale) => {
+    setLocale(locale);
+    request.mockResolvedValue({
+      channels: [{ id: 'team', name: 'Team', kind: 'webhook', config: {} }],
+      rules: [],
+      kinds: [],
+      event_types: ['job.finished', 'job.started'],
+      placeholders: ['outcome'],
+      log: [],
+      ai_ready: false,
+    });
+    await render(<NotifyPage ctx={{ ...context('notify'), groups: [] }} />);
+    const add = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes(t('notify.addRule')),
+    );
+    await act(async () => add!.click());
+    expect(container.textContent).toContain(t('notify.rule.outcomes'));
+    const outcomes = container.querySelectorAll<HTMLInputElement>('input[name="outcomes"]');
+    expect(outcomes).toHaveLength(10);
+    for (const checkbox of outcomes) checkbox.checked = checkbox.value === 'timeout';
+    container.querySelector<HTMLInputElement>('input[name="name"]')!.value = 'Timeouts';
+    await act(async () =>
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    expect(request).toHaveBeenCalledWith(
+      '/plugins/notify/rules',
+      expect.objectContaining({ events: ['job.finished'], outcomes: ['timeout'] }),
+      'POST',
+    );
+  },
+);

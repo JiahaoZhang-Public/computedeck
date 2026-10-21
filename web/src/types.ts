@@ -332,10 +332,25 @@ export interface Tool {
 /** Something that changed between two collections, from `GET /api/events`. */
 export interface DeckEvent {
   id: number;
-  type: 'job.started' | 'job.ended' | 'job.failed' | 'source.failed' | 'source.recovered' | string;
+  type:
+    | 'job.finished'
+    | 'job.started'
+    | 'job.ended'
+    | 'job.failed'
+    | 'source.failed'
+    | 'source.recovered'
+    | string;
   at: string;
   source_id: string | null;
   data: {
+    outcome?: string;
+    outcome_reason?: 'outcomes_unavailable' | 'outcome_not_reported' | null;
+    state?: string | null;
+    exit_code?: string | null;
+    submitted_at?: string | null;
+    started_at?: string | null;
+    ended_at?: string | null;
+    observed_at?: string;
     source_name?: string;
     cluster_id?: string;
     username?: string;

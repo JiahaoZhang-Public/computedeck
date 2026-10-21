@@ -117,15 +117,43 @@ receives the backlog of an earlier installation.
 
 | Type | When | `data` |
 |---|---|---|
-| `job.started` | a pending job is running | `job` |
-| `job.ended` | a job left the queue | `job` (as last seen) |
-| `job.failed` | a job ended with a failure in the last day | `job` with `exit_code`, `end` |
+| `job.started` | a job is first seen running or changes to running | `job`, `started_at`, `observed_at` |
+| `job.finished` | one reconciled ending, including jobs seen only in history | `job`, `outcome`, `state`, `exit_code`, `submitted_at`, `started_at`, `ended_at`, `observed_at`, `outcome_reason` |
+| `job.ended` | legacy delivery of a non-failure ending | `job` |
+| `job.failed` | legacy delivery of a failure ending | `job` with `exit_code`, `end` |
 | `source.failed` | a source that worked could not be collected | `error` |
 | `source.recovered` | a failing source was collected again | |
 
 Every event has `id`, `type`, `at`, `source_id` and `data` with `source_name`,
 `cluster_id`, `username` and `driver`. The first collection of a new source records what
-already exists without delivering it.
+already exists without delivering it. The first successful collection after upgrading to
+reconciled endings also records terminal history silently.
+
+`job.finished` is stored once. Its `outcome` is `completed`, `cancelled`, `failed`, `timeout`,
+`out_of_memory`, `node_fail`, `boot_fail`, `deadline`, `preempted`, or `unknown`. A departed
+job waits at most one collection for accounting when this or the previous collection had
+history, including a temporary accounting failure; otherwise its outcome is immediately
+unknown. `outcome_reason` distinguishes `outcomes_unavailable`
+(the cluster does not report outcomes) from `outcome_not_reported` (history has not
+reported this job). Late accounting does not deliver a second ending for an unknown one.
+
+`at` uses the offset-bearing job end time (start time for `job.started`) when known;
+otherwise it is the observation time. `data.observed_at` always records collection time.
+Unknown job times are null. After a gap longer than two collection intervals, non-failure
+endings are recorded silently; failures remain eligible for delivery.
+
+**Named-type delivery:** new event types reach only handlers that explicitly name them
+in `ctx.on_event(handler, types=[...])`. API-1 wildcard handlers retain the original set
+of five types above. For a handler that does not name `job.finished`, failure outcomes
+map to one `job.failed`, and all other outcomes to one `job.ended`. A handler that names
+`job.finished` receives that event once, even if it also names the legacy types. Stored
+legacy rows remain readable and deliverable; cursors still use event IDs. `PLUGIN_API`
+and `WEB_API` remain 1.
+
+Drivers may supply `Batch.finished` as terminal history, separate from `Batch.failures`
+(the retained 24-hour failure list). Finished rows undergo the same row validation but
+are not copied into snapshots. Reconciliation retains only pending departures and recent
+ending IDs/times in snapshot lists.
 
 ## Drivers
 

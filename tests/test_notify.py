@@ -1084,3 +1084,54 @@ def test_api_checks_the_ai_address_and_saves_each_channel_once(tmp_path: Path) -
         rule = {"name": "Twice", "channels": [channel["id"], channel["id"]]}
         saved = client.post("/api/plugins/notify/rules", json=rule, headers=HEADERS).json()
         assert saved["channels"] == [channel["id"]]
+
+
+@pytest.mark.parametrize(
+    "kinds,outcomes",
+    [
+        (["job.failed"], list(notify.FAILURE_OUTCOMES)),
+        (["job.ended"], []),
+        (["job.failed", "job.ended"], []),
+    ],
+)
+def test_stored_legacy_rules_migrate_once(
+    store: Store, kinds: list[str], outcomes: list[str]
+) -> None:
+    notify._prepare(store)
+    rule = {
+        "id": "r",
+        "events": [*kinds, "source.failed"],
+        "channels": ["team"],
+        "subject": "Custom {state}",
+    }
+    notify._save(store, "notify_rules", rule)
+    notify._prepare(store)
+    migrated = notify._rows(store, "notify_rules")[0]
+    assert migrated == {**rule, "events": ["job.finished", "source.failed"], "outcomes": outcomes}
+    notify._prepare(store)
+    assert notify._rows(store, "notify_rules") == [migrated]
+    assert notify.matches(migrated, notify.sample_event("job.finished", "failed"))
+    assert notify.matches(migrated, notify.sample_event("job.finished", "completed")) == (
+        not outcomes
+    )
+    assert notify.matches(migrated, event())
+
+
+def test_outcome_filter_only_applies_to_finished_jobs() -> None:
+    rule = {"events": ["job.finished", "source.failed"], "outcomes": ["timeout"]}
+    assert notify.matches(rule, notify.sample_event("job.finished", "timeout"))
+    assert not notify.matches(rule, notify.sample_event("job.finished", "completed"))
+    assert notify.matches(rule, {"type": "source.failed", "data": {}})
+    with pytest.raises(ValueError, match="setting_invalid"):
+        notify.check_rule(
+            notify.RuleInput(name="test", channels=["team"], outcomes=["invented"]), {"team"}
+        )
+
+
+@pytest.mark.parametrize("language,word", [("en", "out of memory"), ("zh-CN", "内存不足")])
+async def test_finished_template_translates_outcome(store: Store, language: str, word: str) -> None:
+    store.save_settings({"language": language})
+    mail, _ = await notify.compose(
+        store, {}, {}, notify.sample_event("job.finished", "out_of_memory")
+    )
+    assert word in mail.subject and word in mail.body

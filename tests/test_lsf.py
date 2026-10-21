@@ -521,7 +521,7 @@ async def test_collect_reads_jobs_hosts_limits_and_failures(
     )
     assert "bqueues -u alice -o 'queue_name status max_runlimit' -json" in commands
     assert "blimits -a -w -u alice" in commands
-    assert commands[-1].startswith("date +%Y-%m-%dT%H:%M:%S; bjobs -d -u alice -o ")
+    assert commands[-1].startswith("date +%Y-%m-%dT%H:%M:%S%z; bjobs -d -u alice -o ")
     # Collection is read-only.
     words = set(" ".join(commands).replace("'", " ").replace(";", " ").split())
     assert not {"bsub", "bkill", "bmod", "bstop", "bresume", "brequeue", "badmin"} & words
@@ -744,7 +744,7 @@ def test_history_command_runs_under_common_login_shells(tmp_path: Path, shell: s
     )
     assert result.returncode == 0, result.stderr
     assert log.read_text().splitlines() == [
-        "<+%Y-%m-%dT%H:%M:%S>",
+        "<+%Y-%m-%dT%H:%M:%S%z>",
         "<-d><-u><alice.b><-o><" + " ".join(lsf.HISTORY_FIELDS) + "><-json>",
     ]
     assert lsf.parse_failures(result.stdout, SOURCE) == []
@@ -779,3 +779,16 @@ def test_job_times_preserve_scheduler_text_without_inventing_a_timezone() -> Non
     assert running["started_at"] == "Jan 5 09:00"
     pending = parse(job(STAT="PEND", START_TIME="Jan 5 13:00"))[0]
     assert pending["started_at"] is None
+
+
+def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> None:
+    text = history(
+        failed(JOBID="1", STAT="DONE", EXIT_CODE="0"),
+        failed(JOBID="2", EXIT_REASON="TERM_OWNER: job killed by owner"),
+        failed(JOBID="3", EXIT_REASON="TERM_MEMLIMIT"),
+        clock="2026-01-05T12:00:00+0400",
+    )
+    rows = lsf.parse_failures(text, SOURCE, terminal=True)
+    assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "OUT_OF_MEMORY"}
+    assert all(row["end"].endswith("+04:00") for row in rows)
+    assert lsf.parse_failures(text, SOURCE)[0]["end"] == "2026-01-05T10:00:00"

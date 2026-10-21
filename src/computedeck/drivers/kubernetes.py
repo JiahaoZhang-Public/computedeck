@@ -469,6 +469,44 @@ def parse_failures(
     return sorted(failures.values(), key=lambda job: job["end"], reverse=True)
 
 
+def parse_finished(
+    pods: list[dict[str, Any]],
+    source: dict[str, Any],
+    labels_by_node: dict[str, dict[str, Any]],
+    at: datetime,
+) -> list[dict[str, Any]]:
+    terminal = [
+        pod for pod in pods if _dict(pod.get("status")).get("phase") in {"Succeeded", "Failed"}
+    ]
+    rows = parse_failures(
+        [pod for pod in terminal if _dict(pod.get("status")).get("phase") == "Failed"],
+        source,
+        labels_by_node,
+        at,
+    )
+    for pod in terminal:
+        status = _dict(pod.get("status"))
+        if pod_gpus(_dict(pod.get("spec"))) == 0:
+            continue
+        if status.get("phase") == "Failed":
+            if (
+                _failure(pod) is None
+                and (job := _record(pod, source, labels_by_node, now())) is not None
+            ):
+                job.update(state=failed_state(status), end=None, exit_code=None)
+                rows.append(job)
+            continue
+        ends = [end for item in _terminations(status) if (end := _time(item.get("finishedAt")))]
+        end = max(ends, default=None)
+        if end is not None and end < at - HISTORY:
+            continue
+        job = _record(pod, source, labels_by_node, now())
+        if job is not None:
+            job.update(state="COMPLETED", end=end.isoformat() if end else None, exit_code="0")
+            rows.append(job)
+    return rows
+
+
 def node_state(node: dict[str, Any], gpu_count: int | None, gpu_allocated: int | None) -> str:
     """Kubernetes words joined with the scheduler words the web app colours by
     (``down``, ``drain``, ``unknown``, ``idle``).
@@ -864,6 +902,7 @@ class KubernetesDriver:
         except SourceError as error:
             batch.warnings.append(_warning("qos_unavailable", error))
         batch.failures = parse_failures(pods, source, labels_by_node, at)
+        batch.finished = parse_finished(pods, source, labels_by_node, at)
         batch.capabilities.append("history")
         batch.cluster_state = cluster_state(batch.nodes)
         for entry in batch.qos or []:

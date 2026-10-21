@@ -714,7 +714,7 @@ async def test_unsafe_connection_settings_are_rejected_before_ssh(
 FAKE_TOOL = """#!/bin/sh
 echo "$(basename "$0") $*" >> "$LOG"
 case "$(basename "$0") $*" in
-  "date +%Y-%m-%dT%H:%M:%S") echo 2026-01-05T12:00:00 ;;
+  "date +%Y-%m-%dT%H:%M:%S%z") echo 2026-01-05T12:00:00 ;;
   "date -d 24 hours ago +%Y%m%d%H%M") echo 202601041200 ;;
   "qselect -u alice.b") printf '%s\\n' "$QSELECT" ;;
   "qselect -H -u alice.b -tm.gt.202601041200") printf '%s\\n' "$QSELECT" ;;
@@ -779,3 +779,19 @@ def test_job_times_preserve_scheduler_local_text_and_ignore_pending_start() -> N
         qstat({"1001.pbs-server": qstat_job(job_state="Q", stime=stamp)}), SOURCE
     )
     assert pending[0]["started_at"] is None
+
+
+def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> None:
+    output = history(
+        {
+            "1101.pbs-server": finished(Exit_status=0, qtime="Mon Jan  5 08:00:00 2026"),
+            "1102.pbs-server": finished(Exit_status=271, substate=91),
+            "1103.pbs-server": finished(Exit_status=-29),
+        }
+    ).replace("2026-01-05T12:00:00\n", "2026-01-05T12:00:00+0400\n")
+    rows = pbs.parse_failures(output, SOURCE, terminal=True)
+    assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "TIMEOUT"}
+    assert all(row["end"].endswith("+04:00") for row in rows)
+    assert rows[0]["submitted_at"] == "2026-01-05T08:00:00+04:00"
+    assert rows[1]["submitted_at"] is None
+    assert pbs.parse_failures(output, SOURCE)[0]["end"] == "2026-01-05T10:00:00"

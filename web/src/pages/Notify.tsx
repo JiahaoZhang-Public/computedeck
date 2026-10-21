@@ -5,6 +5,7 @@ import { api } from '../api';
 import { errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { relativeTime } from '../domain';
+import { OUTCOME_LABELS } from '../events';
 import { channelSummary, EMPTY_RULE, listOf, smtpPortFor } from '../notify';
 import type { Channel, NotifyState, Rule, RuleInput } from '../notify';
 import { readSettings } from '../settingValues';
@@ -15,6 +16,7 @@ import type { Ctx } from './shared';
 
 const BASE = '/plugins/notify';
 const EVENT_LABELS: Record<string, MessageKey> = {
+  'job.finished': 'notify.event.finished',
   'job.failed': 'notify.event.failed',
   'job.started': 'notify.event.started',
   'job.ended': 'notify.event.ended',
@@ -155,6 +157,7 @@ function RuleEditor({
       users: listOf(String(data.get('users') ?? '')),
       name_pattern: String(data.get('name_pattern') ?? '').trim(),
       channels: all('channels'),
+      outcomes: all('outcomes'),
       subject: String(data.get('subject') ?? '').trim(),
       body: String(data.get('body') ?? '').trim(),
       include_log: data.get('include_log') === 'on',
@@ -220,6 +223,22 @@ function RuleEditor({
                 defaultChecked={start.events.includes(type)}
               />
               <span>{EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type}</span>
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="span-two choice-group">
+          <legend>
+            {t('notify.rule.outcomes')} <small>{t('notify.rule.allIfNone')}</small>
+          </legend>
+          {Object.entries(OUTCOME_LABELS).map(([outcome, label]) => (
+            <label key={outcome} className="checkbox">
+              <input
+                type="checkbox"
+                name="outcomes"
+                value={outcome}
+                defaultChecked={start.outcomes?.includes(outcome)}
+              />
+              <span>{t(label)}</span>
             </label>
           ))}
         </fieldset>
