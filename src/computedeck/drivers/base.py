@@ -87,6 +87,8 @@ TEXT_FIELDS = (
     "external_id",
     "metrics_scope",
     "observed_at",
+    "array_id",
+    "array_index",
     "submitted_at",
     "started_at",
     "last_probe_attempt",

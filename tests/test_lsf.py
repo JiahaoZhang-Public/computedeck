@@ -147,6 +147,8 @@ def test_running_job_reads_gpus_hosts_and_run_time() -> None:
     assert jobs == [
         {
             "id": "cluster-b:2001",
+            "array_id": None,
+            "array_index": None,
             "source_id": "cluster-b-alice",
             "cluster_id": "cluster-b",
             "name": "train-b",
@@ -792,3 +794,26 @@ def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> 
     assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "OUT_OF_MEMORY"}
     assert all(row["end"].endswith("+04:00") for row in rows)
     assert lsf.parse_failures(text, SOURCE)[0]["end"] == "2026-01-05T10:00:00"
+
+
+@pytest.mark.parametrize(
+    ("job_id", "index", "array_id", "array_index"),
+    [
+        ("2002", "1", "2002", "1"),
+        ("2002[7]", "7", "2002", "7"),
+        ("2002", "0", None, None),
+        ("2002[0]", "0", None, None),
+        ("2002", "-", None, None),
+        ("2002", "1-30", None, None),
+    ],
+)
+def test_array_fields_on_queue_and_history_rows(
+    job_id: str, index: str, array_id: str | None, array_index: str | None
+) -> None:
+    rows = parse(job(JOBID=job_id, JOBINDEX=index))
+    text = f"{CLOCK}\n" + bjobs(failed(JOBID=job_id, JOBINDEX=index))
+    rows += lsf.parse_failures(text, SOURCE)
+    rows += lsf.parse_failures(text, SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)

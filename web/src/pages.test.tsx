@@ -344,7 +344,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       (item) => item.subject.kind === 'instance',
     );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
-    expect(overview).toContain('≥ 21');
+    expect(overview).toContain('≥ 25');
     expect(overview).toContain('build-box');
     expect(overview).toContain(t('msg.summary_not_probed_yet'));
     expect(overview).toContain(t('summary.unmonitored.one'));
@@ -633,4 +633,96 @@ it('counts hand-added machines by normalized manual group and names secondary cl
   expect(manual).toContain(t('overview.instances', { count: 2 }));
   expect(manual).not.toContain(t('overview.instances', { count: 3 }));
   expect(html).toContain('RunPod secondary');
+});
+
+describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
+  it('groups after search, counts elements in chips, and translates summaries', () => {
+    setLocale(locale);
+    const elements = Array.from({ length: 3 }, (_, index) =>
+      job(String(index), {
+        array_id: '1234',
+        array_index: String(index),
+        name: index < 2 ? 'selected' : 'excluded',
+        state: index === 2 ? 'PENDING' : 'RUNNING',
+        gpu_count: index === 0 ? null : 2,
+        qos: index === 0 ? 'normal' : 'long',
+      }),
+    );
+    const data = dash({ jobs: elements });
+    const context = ctx(data);
+    let html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(tabs(html)).toContain(`${t('filter.all')}=3`);
+    expect(tabs(html)).toContain(`${t('status.RUNNING')}=2`);
+    expect(html.match(/class="clickable array-row/g)).toHaveLength(1);
+    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    expect(html).toContain(t('jobs.array.mixed'));
+    expect(html).toContain('≥ 2');
+    expect(html).toContain(t('jobs.array.unknownGpus', { count: 1 }));
+    context.query = '1234'; // Matches array_id even though the element ids differ.
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    context.query = 'selected';
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).toContain(t('jobs.array.count', { count: 2 }));
+    expect(html).not.toContain('excluded');
+    expect(tabs(html)).toContain(`${t('filter.all')}=2`);
+    context.query = 'excluded';
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).not.toContain('array-row');
+    expect(html).toContain('a:2');
+  });
+
+  it('shows unknown fields honestly and omits a duplicate partition line', () => {
+    setLocale(locale);
+    const render = (qos: string | null, partitions: (string | null)[]) => {
+      const data = dash({
+        jobs: partitions.map((partition, index) =>
+          job(String(index), {
+            array_id: '1234',
+            array_index: String(index),
+            qos,
+            partition,
+          }),
+        ),
+      });
+      return renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
+    };
+    const unknown = render(null, [null, null]);
+    expect(unknown).not.toContain(t('jobs.array.mixed'));
+    expect(unknown).toContain('<span class="sub">—</span>');
+    const sameQueue = render('long', ['long', 'long']);
+    expect(sameQueue).toContain('<span class="sub">long</span>');
+    expect(sameQueue).not.toContain(t('jobs.array.partition', { name: 'long' }));
+    expect(render('long', ['gpu', 'gpu'])).toContain(t('jobs.array.partition', { name: 'gpu' }));
+    expect(render('long', ['long', 'gpu'])).toContain(
+      t('jobs.array.partition', { name: t('jobs.array.mixed') }),
+    );
+  });
+
+  it('takes eight rows after grouping and tags an array with any stale element', () => {
+    setLocale(locale);
+    const elements = Array.from({ length: 12 }, (_, index) =>
+      job(`1234_${index}`, {
+        array_id: '1234',
+        array_index: String(index),
+        elapsed: '2:00:00',
+        source_id: index === 11 ? 'a-bob' : 'a-alice',
+      }),
+    );
+    const data = dash({
+      jobs: [...elements, ...Array.from({ length: 9 }, (_, index) => job(`ordinary-${index}`))],
+      sources: [source(), source({ id: 'a-bob', username: 'bob', stale: true })],
+    });
+    const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
+    const table = html.slice(
+      html.indexOf('class="table jobs-table'),
+      html.indexOf('</table>', html.indexOf('class="table jobs-table')),
+    );
+    expect(table.match(/class="clickable/g)).toHaveLength(8);
+    expect(table).toContain('array-row stale-row');
+    expect(table).toContain(t('jobs.array.count', { count: 12 }));
+    expect(table).toContain('a:ordinary-6');
+    expect(table).not.toContain('a:ordinary-7');
+    expect(html).toContain(t('jobs.lastKnownCount', { count: 1 }));
+  });
 });

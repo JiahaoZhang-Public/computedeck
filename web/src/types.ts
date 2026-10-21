@@ -94,13 +94,15 @@ export interface DriverInfo {
 }
 export interface Job {
   id: string;
+  array_id?: string | null;
+  array_index?: string | null;
   source_id: string;
   cluster_id: string;
   name: string;
   user: string;
   account: string;
-  partition: string;
-  qos: string;
+  partition: string | null;
+  qos: string | null;
   state: string;
   gpu_count: number | null;
   gpu_type: string | null;

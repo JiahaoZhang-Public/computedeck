@@ -212,6 +212,8 @@ def test_running_job_reads_ngpus_queue_host_and_walltime() -> None:
     assert jobs == [
         {
             "id": "cluster-a:1001",
+            "array_id": None,
+            "array_index": None,
             "source_id": "cluster-a-alice",
             "cluster_id": "cluster-a",
             "name": "train-a",
@@ -795,3 +797,25 @@ def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> 
     assert rows[0]["submitted_at"] == "2026-01-05T08:00:00+04:00"
     assert rows[1]["submitted_at"] is None
     assert pbs.parse_failures(output, SOURCE)[0]["end"] == "2026-01-05T10:00:00"
+
+
+@pytest.mark.parametrize(
+    ("job_id", "attributes", "array_id", "array_index"),
+    [
+        ("1010[1].pbs-server", {"array_id": "1010[].pbs-server", "array_index": 1}, "1010[]", "1"),
+        ("1010[2].pbs-server", {}, "1010[]", "2"),
+        ("1010[0].pbs-server", {}, "1010[]", "0"),
+        ("1010.pbs-server", {}, None, None),
+        ("1010[1-30].pbs-server", {}, None, None),
+        ("unknown.pbs-server", {}, None, None),
+    ],
+)
+def test_array_fields_on_queue_and_history_rows(
+    job_id: str, attributes: dict[str, Any], array_id: str | None, array_index: str | None
+) -> None:
+    rows = pbs.parse_jobs(qstat({job_id: qstat_job(**attributes)}), SOURCE)
+    rows += pbs.parse_failures(history({job_id: finished(**attributes)}), SOURCE)
+    rows += pbs.parse_failures(history({job_id: finished(**attributes)}), SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)

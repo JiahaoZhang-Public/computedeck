@@ -140,9 +140,12 @@ def parse_jobs(
         if count is None and tracked and "gpu" not in requests.lower():
             # GPUs are accounted, so a job whose resources name none holds none.
             count = gpu_count(row["tres-alloc"])
+        array = re.fullmatch(r"(\d+)_(\d+)", row["JobArrayID"])
         job_id = f"{source['cluster_id']}:{row['JobArrayID']}"
         jobs[job_id] = {
             "id": job_id,
+            "array_id": array[1] if array else None,
+            "array_index": array[2] if array else None,
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": row["Name"],
@@ -358,6 +361,7 @@ def parse_failures(
             continue
         if row["End"] in EMPTY:
             continue
+        array = re.fullmatch(r"(\d+)_(\d+)", row["JobID"])
         job_id = f"{source['cluster_id']}:{row['JobID']}"
         previous = failures.get(job_id)
         # Requeued jobs can appear more than once; keep the latest attempt.
@@ -365,6 +369,8 @@ def parse_failures(
             continue
         failures[job_id] = {
             "id": job_id,
+            "array_id": array[1] if array else None,
+            "array_index": array[2] if array else None,
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": row["JobName"],

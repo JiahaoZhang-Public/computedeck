@@ -1148,3 +1148,9 @@ def test_deleted_pod_uses_last_observed_container_failure(
     assert row["data"]["outcome_reason"] is None
     assert events.for_handler(row, None)["type"] == ("job.ended" if terminal else "job.failed")
     assert notify.matches(notify.migrate_rule({"events": ["job.failed"]}), row) == (not terminal)
+
+
+def test_kubernetes_jobs_do_not_infer_arrays_from_names() -> None:
+    [job] = kubernetes.parse_jobs([pod("1234_7")], SOURCE, {}, AT)
+    assert job.get("array_id") is None
+    assert job.get("array_index") is None

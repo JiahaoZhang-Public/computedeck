@@ -195,11 +195,17 @@ def job_gpu_count(row: dict[str, str], state: str) -> int | None:
 
 
 def _job(row: dict[str, str], state: str, source: dict[str, Any], command: str) -> dict[str, Any]:
-    key = f"{source['cluster_id']}:{_job_id(row, command)}"
+    job_id = _job_id(row, command)
+    key = f"{source['cluster_id']}:{job_id}"
+    array = re.fullmatch(r"(\d+)\[(\d+)\]", job_id)
+    if array and int(array[2]) == 0:
+        array = None
     elapsed = run_seconds(row.get("RUN_TIME", ""))
     queue = row.get("QUEUE", "")
     return {
         "id": key,
+        "array_id": array[1] if array else None,
+        "array_index": array[2] if array else None,
         "source_id": source["id"],
         "cluster_id": source["cluster_id"],
         "name": row.get("JOB_NAME", ""),

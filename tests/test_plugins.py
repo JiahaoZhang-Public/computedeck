@@ -579,3 +579,17 @@ def test_new_event_types_require_named_handlers() -> None:
     assert for_handler(event, None) is None
     assert for_handler(event, frozenset(["source.gap"])) == event
     assert for_handler({"type": "change.source", "data": {}}, frozenset(["change.source"])) is None
+
+
+@pytest.mark.parametrize("field", ["array_id", "array_index"])
+def test_job_array_fields_follow_the_optional_text_contract(field: str) -> None:
+    row = {"id": "cluster-a:123_1", "source_id": "cluster-a-alice", "state": "RUNNING"}
+    Batch(jobs=[row]).validate_rows()
+    assert row.get(field) is None  # Older and third-party rows stay ungrouped.
+    row[field] = None
+    Batch(jobs=[row]).validate_rows()
+    row[field] = "123"
+    Batch(jobs=[row]).validate_rows()
+    row[field] = ["123"]
+    with pytest.raises(ValueError, match=f"Invalid collection text: {field}"):
+        Batch(jobs=[row]).validate_rows()

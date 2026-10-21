@@ -173,6 +173,84 @@ export function sortJobs(jobs: Job[]): Job[] {
     (a, b) => rank(a) - rank(b) || elapsedSeconds(b.elapsed) - elapsedSeconds(a.elapsed),
   );
 }
+
+export type JobArray = {
+  id: string;
+  name: string;
+  cluster_id: string;
+  array_id: string;
+  jobs: Job[];
+  running: number;
+  pending: number;
+  other: number;
+  heldGpus: number | string;
+  unknownGpus: number;
+  qos: string | null;
+  qosMixed: boolean;
+  partition: string | null;
+  partitionMixed: boolean;
+  pendingReasons: Job[];
+};
+
+/** A shared array fact; unknown values are distinct from differing values. */
+export function arrayField(jobs: Job[], field: 'user' | 'qos' | 'partition') {
+  const value = jobs[0]?.[field] ?? null;
+  const mixed = jobs.some((job) => (job[field] ?? null) !== value);
+  return { value: mixed ? null : value, mixed };
+}
+
+/** Group the already filtered, ordered list; the first element determines each group's rank. */
+export function groupArrays(jobs: Job[]): (Job | JobArray)[] {
+  const arrays = new Map<string, Job[]>();
+  for (const job of jobs) {
+    if (!job.array_id) continue;
+    const key = `${job.cluster_id}:${job.array_id}`;
+    const elements = arrays.get(key) ?? [];
+    elements.push(job);
+    arrays.set(key, elements);
+  }
+  const shown = new Set<string>();
+  return jobs.flatMap((job): (Job | JobArray)[] => {
+    const key = `${job.cluster_id}:${job.array_id}`;
+    const elements = job.array_id ? arrays.get(key)! : [];
+    if (elements.length < 2) return [job];
+    if (shown.has(key)) return [];
+    shown.add(key);
+    const held = elements.filter(holdsAllocation);
+    const pending = elements.filter((item) => PENDING_STATES.includes(item.state.toUpperCase()));
+    const known = held.reduce((sum, item) => sum + (item.gpu_count ?? 0), 0);
+    const unknown = held.filter((item) => item.gpu_count == null).length;
+    const reasons = new Map<string | null, Job[]>();
+    for (const item of pending) {
+      const same = reasons.get(item.reason) ?? [];
+      same.push(item);
+      reasons.set(item.reason, same);
+    }
+    const qos = arrayField(elements, 'qos');
+    const partition = arrayField(elements, 'partition');
+    return [
+      {
+        id: key,
+        name: job.name,
+        cluster_id: job.cluster_id,
+        array_id: job.array_id!,
+        jobs: elements,
+        running: held.length,
+        pending: pending.length,
+        other: elements.length - held.length - pending.length,
+        heldGpus: partialCount(unknown ? null : known, known),
+        unknownGpus: unknown,
+        qos: qos.value,
+        qosMixed: qos.mixed,
+        partition: partition.value,
+        partitionMixed: partition.mixed,
+        pendingReasons: [...reasons.values()]
+          .sort((a, b) => b.length - a.length)
+          .map((items) => items[0]),
+      },
+    ];
+  });
+}
 /** GPU entries in a Slurm TRES list; typed and total entries are distinct constraints. */
 export function gpuTres(tres: string | null | undefined) {
   return (tres ?? '').split(',').flatMap((entry) => {

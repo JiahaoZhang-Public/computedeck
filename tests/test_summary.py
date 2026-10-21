@@ -319,7 +319,7 @@ def test_summary_keys_are_snake_case_and_job_ids_only_appear_at_fleet_level():
         assert ("listed_ids" in scope["jobs"]) == (scope is summary)
         assert ("running_ids" in scope["jobs"]) == (scope is summary)
         assert ("pending_ids" in scope["jobs"]) == (scope is summary)
-    assert len(summary["jobs"]["current_ids"]) == summary["jobs"]["known"] == 6
+    assert len(summary["jobs"]["current_ids"]) == summary["jobs"]["known"] == 36
 
 
 @pytest.mark.parametrize("known_source", [True, False])

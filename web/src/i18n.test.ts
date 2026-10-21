@@ -83,3 +83,19 @@ it.each(['en', 'zh-CN'] as const)('uses singular count hints in %s', (locale) =>
     );
   }
 });
+
+it.each(['en', 'zh-CN'] as const)('pluralizes array reason and GPU hints in %s', (locale) => {
+  setLocale(locale);
+  expect(t('jobs.array.otherReasons', { count: 1 })).toBe(
+    locale === 'en' ? '+1 other reason' : '另有 1 种等待原因',
+  );
+  expect(t('jobs.array.otherReasons', { count: 2 })).toBe(
+    locale === 'en' ? '+2 other reasons' : '另有 2 种等待原因',
+  );
+  expect(t('jobs.array.unknownGpus', { count: 1 })).toBe(
+    locale === 'en' ? 'GPU count unknown for 1 allocated job' : '1 个占用资源的作业 GPU 数量未知',
+  );
+  expect(t('jobs.array.unknownGpus', { count: 2 })).toBe(
+    locale === 'en' ? 'GPU count unknown for 2 allocated jobs' : '2 个占用资源的作业 GPU 数量未知',
+  );
+});

@@ -1,14 +1,24 @@
+import { useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { Instance, Job, SSHConfig } from '../types';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
-import { instanceAllocation, jobGpuResources, money, relativeTime, runningPrice } from '../domain';
+import {
+  arrayField,
+  instanceAllocation,
+  jobGpuResources,
+  listedJobs,
+  money,
+  relativeTime,
+  runningPrice,
+} from '../domain';
 import { directSSHCommand } from '../connections';
 import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
+import { JobsTable } from './shared';
 
 export function SSHConfigView({
   config,
@@ -78,6 +88,59 @@ function Metrics({ values }: { values: { label: string; value: number | null | u
           <Meter value={item.value ?? null} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** The drawer follows the full listed array on each poll, independently of page filters. */
+export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
+  const [limit, setLimit] = useState(50);
+  const user = arrayField(jobs, 'user');
+  const qos = arrayField(jobs, 'qos');
+  const partition = arrayField(jobs, 'partition');
+  const fact = ({ value, mixed }: ReturnType<typeof arrayField>) =>
+    mixed ? t('jobs.array.mixed') : value || '—';
+  return (
+    <div className="drawer-body array-detail">
+      <p>{t('jobs.array.elements', { count: jobs.length })}</p>
+      <dl className="kv">
+        <div>
+          <dt>{t('job.cluster')}</dt>
+          <dd>{groupLabel(ctx.groups, jobs[0].cluster_id)}</dd>
+        </div>
+        <div>
+          <dt>{t('job.user')}</dt>
+          <dd>{fact(user)}</dd>
+        </div>
+        <div>
+          <dt>{t('jobs.array.qos')}</dt>
+          <dd>{fact(qos)}</dd>
+        </div>
+        {(partition.mixed || qos.mixed || partition.value !== qos.value) && (
+          <div>
+            <dt>{t('jobs.array.partitionLabel')}</dt>
+            <dd>{fact(partition)}</dd>
+          </div>
+        )}
+      </dl>
+      <JobsTable
+        compact
+        jobs={jobs.slice(0, limit)}
+        groups={ctx.groups}
+        onOpen={ctx.openJob}
+        stale={listedJobs(ctx.data).stale}
+        empty={null}
+      />
+      {jobs.length > limit && (
+        <div className="drawer-actions">
+          <button className="button" onClick={() => setLimit(limit + 50)}>
+            {t('jobs.array.showMore')}
+          </button>
+          <button className="button" onClick={() => setLimit(Infinity)}>
+            {t('jobs.array.showAll')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

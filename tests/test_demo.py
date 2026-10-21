@@ -41,7 +41,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     data = dashboard()
     assert data["summary"]["unmonitored"] == 1
     assert data["summary"]["allocated"] is None
-    assert data["summary"]["known_allocated"] == 21
+    assert data["summary"]["known_allocated"] == 25
     assert {row["subject"]["name"] for row in data["summary"]["unmeasured"]} == {
         "build-box",
         "Cluster A · carol",
@@ -372,3 +372,18 @@ def test_demo_shows_completed_and_unavailable_outcomes() -> None:
     for row in rows:
         if row["data"]["ended_at"]:
             assert row["at"] == row["data"]["ended_at"] < row["data"]["observed_at"]
+
+
+def test_demo_array_has_mixed_states_and_element_counts() -> None:
+    data = dashboard()
+    elements = [job for job in data["jobs"] if job.get("array_id") == "48300"]
+    assert len(elements) == 30
+    assert {job["array_index"] for job in elements} == {str(i) for i in range(1, 31)}
+    assert Counter(job["state"] for job in elements) == {
+        "RUNNING": 4,
+        "PENDING": 25,
+        "SUSPENDED": 1,
+    }
+    assert {job["id"] for job in elements} <= set(data["summary"]["jobs"]["listed_ids"])
+    assert len(data["summary"]["jobs"]["running_ids"]) >= 4
+    assert len(data["summary"]["jobs"]["pending_ids"]) >= 25

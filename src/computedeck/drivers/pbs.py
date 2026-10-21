@@ -277,8 +277,17 @@ def _job(job_id: str, job: dict[str, Any], state: str, source: dict[str, Any]) -
     resources = _mapping(job.get("Resource_List"))
     queue = str(job.get("queue") or "")
     key = f"{source['cluster_id']}:{_short_id(job_id)}"
+    array = re.fullmatch(r"(\d+)\[(\d+)\]", _short_id(job_id))
+    array_id = f"{array[1]}[]" if array else None
+    array_index = array[2] if array else None
+    parent = _short_id(str(job.get("array_id") or ""))
+    index = integer(job.get("array_index"))
+    if re.fullmatch(r"\d+\[\]", parent) and index is not None:
+        array_id, array_index = parent, str(index)
     return {
         "id": key,
+        "array_id": array_id,
+        "array_index": array_index,
         "source_id": source["id"],
         "cluster_id": source["cluster_id"],
         "name": str(job.get("Job_Name") or ""),

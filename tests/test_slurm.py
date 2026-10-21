@@ -845,3 +845,26 @@ async def test_upgrade_seeds_full_history_before_an_accounting_outage(
     assert len(store.events()) == 2
     assert all(row["silent"] for row in store.events())
     assert store.recent_events() == []
+
+
+@pytest.mark.parametrize(
+    ("job_id", "array_id", "array_index"),
+    [
+        ("1234_7", "1234", "7"),
+        ("1234_0", "1234", "0"),
+        ("1234", None, None),
+        ("1234+0", None, None),
+        ("1234_[1-30]", None, None),
+        ("1234_7.batch", None, None),
+        ("unknown", None, None),
+    ],
+)
+def test_array_fields_on_queue_and_accounting_rows(
+    job_id: str, array_id: str | None, array_index: str | None
+) -> None:
+    rows = slurm.parse_jobs(job_line(JobArrayID=job_id), SOURCE)
+    rows += slurm.parse_failures(sacct_line(JobID=job_id), SOURCE)
+    rows += slurm.parse_failures(terminal_line(JobID=job_id), SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)

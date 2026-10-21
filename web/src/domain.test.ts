@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  groupArrays,
   runningPrice,
   instanceLifecycle,
   partialCount,
@@ -637,4 +638,99 @@ it('uses the server running and pending aliases for GPU resources', async () => 
   for (const state of serverPendingStates())
     expect(jobGpuResources(job({ state }))).toEqual({ requested: 4, allocated: 0 });
   expect(holdsAllocation({ state: 'FAILED' })).toBe(false);
+});
+
+describe('job arrays', () => {
+  const element = (index: number, extra: Partial<Job> = {}) =>
+    job({
+      id: `cluster-a:1234_${index}`,
+      array_id: '1234',
+      array_index: String(index),
+      ...extra,
+    });
+
+  it('keeps single elements and legacy rows plain, and scopes arrays by cluster', () => {
+    const first = element(1);
+    const legacy = job({ id: 'cluster-a:1234_2' });
+    const other = element(3, { id: 'cluster-b:1234_3', cluster_id: 'cluster-b' });
+    expect(groupArrays([first, legacy, other])).toEqual([first, legacy, other]);
+  });
+
+  it('keeps the best-ranked position and summarizes mixed states, limits and reasons', () => {
+    const ordinary = job({ id: 'cluster-a:other', elapsed: '2:00:00' });
+    const elements = [
+      element(1, { elapsed: '3:00:00', gpu_count: 2 }),
+      element(2, { state: 'CONFIGURING', gpu_count: null, qos: 'long', partition: 'debug' }),
+      element(3, { state: 'PENDING', reason: 'Priority', gpu_count: 8 }),
+      element(4, { state: 'PENDING', reason: 'Resources' }),
+      element(5, { state: 'PENDING', reason: 'Resources' }),
+      element(6, { state: 'SUSPENDED' }),
+    ];
+    const rows = groupArrays(sortJobs([ordinary, ...elements]));
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toBe(ordinary);
+    const array = rows[0];
+    expect(array).toMatchObject({
+      running: 2,
+      pending: 3,
+      other: 1,
+      heldGpus: '≥ 2',
+      unknownGpus: 1,
+      qos: null,
+      qosMixed: true,
+      partition: null,
+      partitionMixed: true,
+    });
+    if (!('jobs' in array)) throw new Error('Expected array row');
+    expect(array.pendingReasons.map((item) => item.reason)).toEqual(['Resources', 'Priority']);
+    expect(array.jobs).toHaveLength(6);
+    expect(elements).toHaveLength(6);
+  });
+
+  it('keeps all-null queue and partition facts unknown, and flags differing values explicitly', () => {
+    const unknown = element(1, { qos: null, partition: null });
+    expect(groupArrays([unknown, element(2, { qos: null, partition: null })])[0]).toMatchObject({
+      qos: null,
+      qosMixed: false,
+      partition: null,
+      partitionMixed: false,
+    });
+    expect(groupArrays([unknown, element(2)])[0]).toMatchObject({
+      qos: null,
+      qosMixed: true,
+      partition: null,
+      partitionMixed: true,
+    });
+  });
+
+  it('distinguishes unknown allocation, known zero, and pending requests', () => {
+    expect(
+      groupArrays([element(1, { gpu_count: null }), element(2, { gpu_count: null })])[0],
+    ).toMatchObject({ heldGpus: '—' });
+    expect(
+      groupArrays([element(1, { gpu_count: 0 }), element(2, { gpu_count: 0 })])[0],
+    ).toMatchObject({ heldGpus: 0 });
+    expect(
+      groupArrays([
+        element(1, { state: 'PENDING' }),
+        element(2, { state: 'PENDING', gpu_count: null }),
+      ])[0],
+    ).toMatchObject({ heldGpus: 0, pending: 2, unknownGpus: 0 });
+  });
+
+  it('groups only the tab elements without changing server counts or input rows', () => {
+    const data = serverDashboard(
+      dashboard([element(1), element(2), element(3, { state: 'PENDING' })]),
+    );
+    const before = JSON.stringify(data);
+    const listed = readListedJobs(data).jobs;
+    const running = listed.filter((item) => data.summary.jobs.running_ids.includes(item.id));
+    expect(groupArrays(running)[0]).toMatchObject({ running: 2, pending: 0 });
+    const pending = listed.filter((item) => data.summary.jobs.pending_ids.includes(item.id));
+    expect(groupArrays(pending)).toEqual(pending);
+    expect(data.summary.jobs.known).toBe(3);
+    expect(data.summary.known_running).toBe(2);
+    expect(data.summary.known_pending).toBe(1);
+    expect(JSON.stringify(data)).toBe(before);
+  });
 });

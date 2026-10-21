@@ -5,6 +5,7 @@ import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-
 import { formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
 import {
+  groupArrays,
   jobCount,
   jobsMissing,
   listedJobs,
@@ -27,6 +28,8 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const summary = data.summary;
   // Current jobs first, then the last-known jobs of logins whose job list is not current.
   const { jobs: allJobs, stale } = listedJobs(data);
+  const jobRows = groupArrays(allJobs).slice(0, 8);
+  const visibleJobs = jobRows.flatMap((row) => ('jobs' in row ? row.jobs : [row]));
   const missingJobs = jobsMissing(data);
   const failures = data.recent_failures ?? [];
   const setupNeeded =
@@ -193,9 +196,10 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
         }
       >
         <JobsTable
-          jobs={allJobs.slice(0, 8)}
+          jobs={jobRows}
           groups={ctx.groups}
           onOpen={ctx.openJob}
+          onOpenArray={ctx.openArray}
           stale={stale}
           empty={
             missingJobs.length ? (
@@ -216,8 +220,8 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           <JobsMissingNote
             groups={ctx.groups}
             missing={missingJobs}
-            staleRows={allJobs.slice(0, 8).some((job) => stale.has(job.source_id))}
-            staleCount={allJobs.slice(0, 8).filter((job) => stale.has(job.source_id)).length}
+            staleRows={visibleJobs.some((job) => stale.has(job.source_id))}
+            staleCount={visibleJobs.filter((job) => stale.has(job.source_id)).length}
           />
         )}
       </Panel>

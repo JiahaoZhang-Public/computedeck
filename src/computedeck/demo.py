@@ -216,6 +216,31 @@ def dashboard() -> dict[str, Any]:
         )
     )
     jobs[-1]["node"] = "a-gpu-02"
+    # One mixed-state sweep occupies one list row, while counts still include every element.
+    for index in range(1, 31):
+        state = "RUNNING" if index <= 4 else "PENDING" if index < 30 else "SUSPENDED"
+        element = _job(
+            index,
+            (
+                "example:cluster-a-alice",
+                "vision / parameter sweep",
+                state,
+                1,
+                None,
+                None,
+                "00:24:00" if state == "RUNNING" else "00:00:00",
+            ),
+            observed,
+        )
+        element.update(
+            id=f"example:cluster-a:48300_{index}",
+            array_id="48300",
+            array_index=str(index),
+            node=f"a-gpu-{4 + (index - 1) // 2:02}" if state == "RUNNING" else None,
+            qos="long",
+            reason=("Resources" if index < 25 else "Priority") if state == "PENDING" else None,
+        )
+        jobs.append(element)
     local_current = current.astimezone().replace(tzinfo=None)
     failure = {
         **_job(

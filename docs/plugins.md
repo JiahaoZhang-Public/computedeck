@@ -217,6 +217,13 @@ Rules that keep the numbers honest:
 - Ids are `<cluster_id>:<id>`, so two logins on one cluster count a job once.
 - Fields shown as text (`name`, `user`, `qos`, `node`, `elapsed`, ...) are strings or
   `None`; numbers are stored as text, and a list or object rejects the whole batch.
+- Jobs and accounting rows may add `array_id` and `array_index` (text or `None`).
+  Missing fields mean no known array membership; the web app never guesses from a job id.
+  `array_id` is scheduler-local and grouped together with `cluster_id`; `array_index` is
+  the element index as text. Slurm uses `1234` / `7` for `1234_7`, PBS `1234[]` / `7`
+  for `1234[7].server`, and LSF `1234` / `7` for `1234[7]`. Unrecognised forms,
+  including Slurm heterogeneous jobs and ranges, remain ungrouped. Kubernetes does
+  not set these fields. Existing snapshots and third-party drivers need no change.
 - Put optional parts that failed in `Batch.warnings` as `{"code": ..., "detail": ...}`.
 - Only read. Quote or strictly validate everything placed in a command, and never pass a
   provider's error body on: it may echo secrets.

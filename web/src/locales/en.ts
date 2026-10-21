@@ -149,6 +149,7 @@ const en = {
   'drawer.unavailableHint':
     'It may have finished or been removed. Close this view to see the latest list.',
   'drawer.job': 'Job',
+  'drawer.array': 'Job array',
   'drawer.instance': 'Instance',
 
   // Shared words
@@ -261,6 +262,25 @@ const en = {
   'jobs.byCluster': 'Filter by cluster',
   'jobs.allClusters': 'All clusters',
   'jobs.search': 'Job name, ID, user, queue or QoS, node',
+  'jobs.array.count': '{count} jobs',
+  'jobs.array.partitionLabel': 'Partition / queue',
+  'jobs.array.qos': 'Queue / QoS',
+  'jobs.array.element': 'Element',
+  'jobs.array.open': 'View elements',
+  'jobs.array.mixed': 'mixed',
+  'jobs.array.partition': 'Partition / queue: {name}',
+  'jobs.array.held': 'GPUs held',
+  'jobs.array.unknownGpus': 'GPU count unknown for {count} allocated jobs',
+  'jobs.array.unknownGpus.one': 'GPU count unknown for 1 allocated job',
+  'jobs.array.running': '{count} running',
+  'jobs.array.pending': '{count} pending',
+  'jobs.array.other': '{count} other',
+  'jobs.array.otherReasons': '+{count} other reasons',
+  'jobs.array.otherReasons.one': '+1 other reason',
+  'jobs.array.elements':
+    'All {count} listed elements, including any last-known jobs. Open an element for details.',
+  'jobs.array.showMore': 'Show next 50',
+  'jobs.array.showAll': 'Show all',
   'jobs.col.job': 'Job',
   'jobs.col.clusterQos': 'Cluster / queue or QoS',
   'jobs.col.clusterQosHint': 'Slurm QoS, PBS or LSF queue, Kubernetes priority class',

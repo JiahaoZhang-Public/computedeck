@@ -6,7 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
 import { api } from './api';
 import { setLocale, t } from './i18n';
-import { serverDemo } from './test-server';
+import { jobReason, jobWaiting } from './jobFacts';
+import { relativeTime } from './domain';
+import { serverDashboard, serverDemo } from './test-server';
 import { routeParams, setRouteParams } from './useRouteParam';
 import type { Dashboard } from './types';
 
@@ -152,4 +154,174 @@ it('uses the same deduplicated job record in the list and detail', async () => {
   data = { ...data, jobs: [...data.jobs, { ...job, name: 'Current observation' }] };
   await render(`/?demo=true#/jobs?job=${encodeURIComponent(job.id)}`);
   expect(container.querySelector('#detail-title')?.textContent).toBe('Current observation');
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'opens arrays by keyboard and lists 50 elements at a time in %s',
+  async (language) => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return data;
+      if (path === '/settings') return { language };
+      return [];
+    });
+    const example = data.jobs.find((item) => item.array_id)!;
+    data = serverDashboard({
+      ...data,
+      jobs: Array.from({ length: 110 }, (_, index) => ({
+        ...example,
+        id: `${example.cluster_id}:48300_${index}`,
+        array_index: String(index),
+      })),
+    });
+    await render('/?demo=true#/jobs');
+    expect(container.querySelectorAll('.jobs-table tbody tr')).toHaveLength(1);
+    const push = vi.spyOn(window.history, 'pushState');
+    await act(async () =>
+      container
+        .querySelector('.array-row')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    );
+    expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
+    expect(routeParams().get('job')).toBeNull();
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(50);
+    const table = container.querySelector<HTMLTableElement>('.drawer .array-elements-table')!;
+    expect(table.classList.contains('stack-on-phone')).toBe(true);
+    expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual([
+      t('jobs.array.element'),
+      t('jobs.col.state'),
+      'GPU',
+      t('jobs.col.nodeReason'),
+      t('jobs.col.timing'),
+    ]);
+    for (const row of table.tBodies[0].rows) {
+      expect(row.cells).toHaveLength(5);
+      expect(row.cells[0].hasAttribute('data-label')).toBe(false);
+      expect([...row.cells].slice(1).every((cell) => cell.hasAttribute('data-label'))).toBe(true);
+      expect(row.tabIndex).toBe(0);
+      expect(row.textContent).not.toContain(example.name);
+      expect(row.textContent).not.toContain(example.gpu_type);
+    }
+    expect(table.tBodies[0].rows[0].cells[0].querySelector('strong')?.textContent).toBe('0');
+    expect(table.tBodies[0].rows[0].cells[0].querySelector('.sub.mono')?.textContent).toBe(
+      data.jobs[0].id,
+    );
+    const facts = [...container.querySelectorAll('.drawer .kv dd')].map((cell) => cell.textContent);
+    expect(facts).toEqual(['Cluster A', example.user, example.qos, example.partition]);
+
+    const button = (key: 'jobs.array.showMore' | 'jobs.array.showAll') =>
+      [...container.querySelectorAll<HTMLButtonElement>('.drawer button')].find(
+        (item) => item.textContent === t(key),
+      )!;
+    await act(async () => button('jobs.array.showMore').click());
+    expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(100);
+    await act(async () => button('jobs.array.showAll').click());
+    expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(110);
+    await act(async () => container.querySelector<HTMLElement>('.drawer .clickable')!.click());
+    expect(routeParams().get('job')).toBe(data.jobs[0].id);
+    expect(routeParams().get('array')).toBeNull();
+    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.job'));
+    await act(async () => {
+      window.history.back();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
+    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    await act(async () =>
+      container
+        .querySelector('.drawer .clickable')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    );
+    expect(routeParams().get('job')).toBe(data.jobs[0].id);
+  },
+);
+
+it('restores the array drawer, follows live membership, and explains a missing array', async () => {
+  const example = data.jobs.find((item) => item.array_id)!;
+  const arrayId = `${example.cluster_id}:${example.array_id}`;
+  await render(`/?demo=true#/jobs?state=pending&q=unmatched&array=${encodeURIComponent(arrayId)}`);
+  expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(30);
+  data = serverDashboard({ ...data, jobs: [{ ...example, name: 'Updated sweep' }] });
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(1);
+  expect(container.querySelector('#detail-title')?.textContent).toContain('Updated sweep');
+  data = serverDashboard({ ...data, jobs: [] });
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(container.querySelector('#detail-title')?.textContent).toBe(t('drawer.unavailable'));
+  expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+});
+
+it('keeps tab and navigation counts in elements when the Jobs table groups arrays', async () => {
+  const example = data.jobs.find((item) => item.array_id)!;
+  data = serverDashboard({
+    ...data,
+    sources: data.sources.filter((item) => item.id === example.source_id),
+    jobs: Array.from({ length: 3 }, (_, index) => ({
+      ...example,
+      id: `${example.cluster_id}:48300_${index}`,
+      state: index === 2 ? 'PENDING' : 'RUNNING',
+    })),
+  });
+  await render('/?demo=true#/jobs?state=pending');
+  expect(container.querySelector('.jobs-table .array-row')).toBeNull();
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    `${t('status.PENDING')}1`,
+  );
+  expect(container.querySelector('a[href="#/jobs"] .badge')?.textContent).toBe('3');
+  await act(async () => setRouteParams({ state: 'running' }));
+  expect(container.querySelectorAll('.jobs-table .array-row')).toHaveLength(1);
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    `${t('status.RUNNING')}2`,
+  );
+});
+
+it('keeps ordinary and array card titles unlabelled while labelling their facts', async () => {
+  await render('/?demo=true#/jobs');
+  const rows = [...container.querySelectorAll<HTMLTableRowElement>('.jobs-table tbody tr')];
+  expect(rows.some((row) => row.classList.contains('array-row'))).toBe(true);
+  expect(rows.some((row) => !row.classList.contains('array-row'))).toBe(true);
+  for (const row of rows) {
+    expect(row.cells[0].hasAttribute('data-label')).toBe(false);
+    expect(row.cells[0].querySelector('strong')?.textContent).toBeTruthy();
+    expect([...row.cells].slice(1).every((cell) => cell.hasAttribute('data-label'))).toBe(true);
+  }
+});
+
+it('keeps compact element resources, waiting reasons and stale tags', async () => {
+  const example = data.jobs.find((item) => item.array_id)!;
+  const pending = {
+    ...example,
+    id: `${example.cluster_id}:48300_31`,
+    array_index: '31',
+    state: 'PENDING',
+    gpu_count: null,
+    reason: 'Resources',
+  };
+  data = serverDashboard({
+    ...data,
+    sources: data.sources.map((item) =>
+      item.id === example.source_id ? { ...item, stale: true } : item,
+    ),
+    jobs: [example, pending],
+  });
+  await render(
+    `/?demo=true#/jobs?array=${encodeURIComponent(`${example.cluster_id}:${example.array_id}`)}`,
+  );
+  const rows = [
+    ...container.querySelectorAll<HTMLTableRowElement>('.drawer .array-elements-table tbody tr'),
+  ];
+  expect(rows).toHaveLength(2);
+  expect(rows[0].cells[2].textContent).toBe(String(example.gpu_count));
+  expect(rows[0].cells[3].textContent).toBe(example.node);
+  expect(rows[0].cells[4].textContent).toBe(example.elapsed);
+  expect(rows[1].cells[2].textContent).toBe(t('jobs.requested', { count: '?' }));
+  expect(rows[1].cells[3].textContent).toBe(jobReason(pending, 'slurm')!.summary);
+  expect(rows[1].cells[4].textContent).toBe(jobWaiting(pending));
+  for (const row of rows) {
+    expect(row.classList.contains('stale-row')).toBe(true);
+    expect(row.cells[0].textContent).toContain(
+      t('cloud.staleSince', { time: relativeTime(example.observed_at) }),
+    );
+  }
 });

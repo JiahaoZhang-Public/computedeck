@@ -38,7 +38,7 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, partialCount, uniqueJobs } from './domain';
+import { dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { api } from './api';
 import { groupsOf } from './groups';
@@ -75,7 +75,7 @@ import { PageBoundary } from './PageBoundary';
 import { NotifyPage } from './pages/Notify';
 import { ChatPage } from './pages/Chat';
 import { enabledToolPages } from './tools';
-import { InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
+import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
 
 type Modal =
   | { kind: 'instance'; item?: Instance }
@@ -83,7 +83,11 @@ type Modal =
   | { kind: 'diagnosis'; sourceId: string }
   | { kind: 'ssh'; data: SSHConfig }
   | null;
-type Detail = { kind: 'job'; item: Job } | { kind: 'instance'; item: Instance } | null;
+type Detail =
+  | { kind: 'job'; item: Job }
+  | { kind: 'instance'; item: Instance }
+  | { kind: 'array'; item: { id: string; name: string; jobs: Job[] } }
+  | null;
 type Toast = { text: string; tone: 'ok' | 'error' } | null;
 
 const startPages = [...corePages, ...pagesOf(buildTimePlugins).map((page) => page.id)];
@@ -154,7 +158,8 @@ export default function App() {
   const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const params = routeParams(hash);
-  const detailId = params.get('job') || params.get('failure') || params.get('instance');
+  const detailId =
+    params.get('job') || params.get('failure') || params.get('instance') || params.get('array');
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -163,17 +168,33 @@ export default function App() {
   const instance = params.get('instance')
     ? data?.instances.find((item) => item.id === params.get('instance'))
     : null;
+  const arrayJobs =
+    params.get('array') && data
+      ? listedJobs(data).jobs.filter(
+          (item) => item.array_id && `${item.cluster_id}:${item.array_id}` === params.get('array'),
+        )
+      : [];
   const detail: Detail = job
     ? { kind: 'job', item: job }
     : instance
       ? { kind: 'instance', item: instance }
-      : null;
+      : arrayJobs.length
+        ? {
+            kind: 'array',
+            item: {
+              id: params.get('array')!,
+              name: `${arrayJobs[0].name} [${arrayJobs[0].array_id}]`,
+              jobs: arrayJobs,
+            },
+          }
+        : null;
   const setDetail = useCallback((next: Detail) => {
     setRouteParams(
       {
         job: next?.kind === 'job' && !next.item.end ? next.item.id : null,
         failure: next?.kind === 'job' && next.item.end ? next.item.id : null,
         instance: next?.kind === 'instance' ? next.item.id : null,
+        array: next?.kind === 'array' ? next.item.id : null,
       },
       !!next,
     );
@@ -539,6 +560,7 @@ export default function App() {
         addInstance,
         showSSH,
         openJob: (item) => setDetail({ kind: 'job', item }),
+        openArray: (item) => setDetail({ kind: 'array', item }),
         openInstance: (item) => setDetail({ kind: 'instance', item }),
         copy,
         notify,
@@ -997,16 +1019,22 @@ export default function App() {
             <header className="drawer-header">
               <div>
                 <span className="drawer-kind">
-                  {detail.kind === 'job' ? t('drawer.job') : t('drawer.instance')}
+                  {detail.kind === 'job'
+                    ? t('drawer.job')
+                    : detail.kind === 'array'
+                      ? t('drawer.array')
+                      : t('drawer.instance')}
                 </span>
                 <h2 id="detail-title">{detail.item.name}</h2>
-                <Status state={detail.item.state} />
+                {detail.kind !== 'array' && <Status state={detail.item.state} />}
               </div>
               <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
                 <X size={16} />
               </button>
             </header>
-            {detail.kind === 'job' ? (
+            {detail.kind === 'array' ? (
+              <ArrayDetail key={detail.item.id} jobs={detail.item.jobs} ctx={ctx} />
+            ) : detail.kind === 'job' ? (
               <JobDetail job={detail.item} ctx={ctx} />
             ) : (
               <InstanceDetail
