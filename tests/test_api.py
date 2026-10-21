@@ -1091,6 +1091,7 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "notification_failed",
     ]
     assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
     assert source["id"] not in {item["id"] for item in example["sources"]}

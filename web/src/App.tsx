@@ -576,7 +576,8 @@ export default function App() {
     } else if (item.action === 'instance') {
       const instance = data?.instances.find((instance) => instance.id === item.subject.id);
       if (instance) setDetail({ kind: 'instance', item: instance });
-    } else if (item.action === 'toolbox') navigate('toolbox');
+    } else if (item.action === 'notify') navigate('notify');
+    else if (item.action === 'toolbox') navigate('toolbox');
     else setHealthOpen(true);
   };
   const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;

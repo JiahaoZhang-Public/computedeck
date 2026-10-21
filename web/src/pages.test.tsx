@@ -81,6 +81,7 @@ const ctx = (input: Dashboard) =>
     query: '',
     attention: [],
     webPlugins: [],
+    tools: [],
     drivers: [],
     plugin: {},
     setGroup: () => {},

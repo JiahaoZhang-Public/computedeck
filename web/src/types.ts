@@ -251,7 +251,7 @@ export interface Attention {
   since: string | null;
   observed_at: string | null;
   next_attempt: string | null;
-  action: 'diagnose' | 'instance' | 'health' | 'toolbox';
+  action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
 export interface Dashboard {
   token?: string;
@@ -355,6 +355,7 @@ export interface DeckEvent {
     since?: string | null;
     events: DeckEvent[];
   };
+  delivery?: ('sent' | 'failed' | 'suppressed' | 'grouped' | 'dropped')[];
   type:
     | 'job.finished'
     | 'job.started'

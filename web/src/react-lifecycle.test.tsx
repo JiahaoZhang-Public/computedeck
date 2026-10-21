@@ -989,7 +989,9 @@ describe('visible dashboard polling', () => {
     hidden.mockReturnValue(false);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
+    expect(request).toHaveBeenCalledWith(
+      '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+    );
     request.mockClear();
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
@@ -1149,7 +1151,9 @@ describe('visible dashboard polling', () => {
     request.mockClear();
     data = { ...data, token: 'next-token' };
     await act(async () => vi.advanceTimersByTimeAsync(10000));
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
+    expect(request).toHaveBeenCalledWith(
+      '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+    );
     request.mockClear();
     await click('[role="switch"]');
     expect(request).toHaveBeenCalledWith('/dashboard?demo=true');
@@ -1366,7 +1370,9 @@ it.each([
     },
   ]);
   await render(<ActivityPanel demo={false} />);
-  expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
+  expect(request).toHaveBeenCalledWith(
+    '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+  );
   const summary = container.querySelector('summary')!;
   expect(summary.textContent).toContain(`sweep ×${count}`);
   expect(summary.textContent).toContain(t('notify.event.finished'));
@@ -1537,7 +1543,9 @@ it.each(['en', 'zh-CN'] as const)(
     ];
     request.mockResolvedValue(rows);
     await render(<ActivityPanel demo={false} sources={[source]} onOpen={vi.fn()} />);
-    expect(request).toHaveBeenCalledWith('/events?limit=12&demo=false&group=1&include=changes');
+    expect(request).toHaveBeenCalledWith(
+      '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+    );
     expect(container.querySelectorAll('.activity a')).toHaveLength(1);
     expect(container.querySelector('.activity a')?.getAttribute('href')).toBe(
       '#/sources?group=cluster-a',
@@ -1729,13 +1737,17 @@ it.each(['en', 'zh-CN'] as const)(
       );
       expect(tile?.querySelector('.stat-value')?.textContent).toBe(String(count));
     };
-    assertCounts(3);
+    assertCounts(4);
     expect(container.querySelector<HTMLDetailsElement>('.attention-muted')!.open).toBe(false);
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
       t('attention.acknowledged', { count: 2 }),
     );
     expect(container.querySelector('.attention-muted')?.textContent).toContain(
-      t('attention.snoozedUntil', { time: dateTime(data.attention!.at(-1)!.muted!.until) }),
+      t('attention.snoozedUntil', {
+        time: dateTime(
+          data.attention!.find((item) => item.muted?.state === 'snoozed')!.muted!.until,
+        ),
+      }),
     );
     const key = data.attention![0].key;
     await click('#attention > ul .attention-actions button');
@@ -1744,13 +1756,13 @@ it.each(['en', 'zh-CN'] as const)(
       { action: 'acknowledge', until: undefined, fingerprint: data.attention![0].fingerprint },
       'PUT',
     );
-    assertCounts(2);
+    assertCounts(3);
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
       t('attention.acknowledged', { count: 3 }),
     );
     await click('.attention-muted summary');
     await click('.attention-muted .attention-actions button');
-    assertCounts(3);
+    assertCounts(4);
     for (const until of ['1h', 'tomorrow']) {
       const selector = `#attention > ul .attention-actions button:nth-child(${until === '1h' ? 2 : 3})`;
       const button = container.querySelector<HTMLButtonElement>(selector)!;
@@ -1765,7 +1777,7 @@ it.each(['en', 'zh-CN'] as const)(
       expect(request.mock.calls.filter(([path]) => path.startsWith('/attention/'))).toHaveLength(
         writes,
       );
-      assertCounts(until === '1h' ? 3 : 2);
+      assertCounts(until === '1h' ? 4 : 3);
       await click(selector);
       expect(
         request.mock.calls.some(
@@ -1776,6 +1788,8 @@ it.each(['en', 'zh-CN'] as const)(
         ),
       ).toBe(true);
     }
+    assertCounts(2);
+    await click('#attention > ul .attention-actions button');
     assertCounts(1);
     await click('#attention > ul .attention-actions button');
     assertCounts(0);
@@ -1818,7 +1832,7 @@ it('keeps a failed acknowledgement visible and reports the error', async () => {
   });
   await render(<App />);
   await click('#attention > ul .attention-actions button');
-  expect(container.querySelector('#attention .count')?.textContent).toBe('3');
+  expect(container.querySelector('#attention .count')?.textContent).toBe('4');
   expect(container.textContent).toContain('Save failed');
   expect(
     container.querySelector<HTMLButtonElement>('#attention > ul .attention-actions button')
@@ -1864,7 +1878,101 @@ it.each(['en', 'zh-CN'] as const)(
       expect(container.textContent).toContain(
         action === 'clear' ? 'Save failed' : t('msg.attention_changed'),
       );
-      expect(container.querySelector('#attention .count')?.textContent).toBe('3');
+      expect(container.querySelector('#attention .count')?.textContent).toBe('4');
     }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'polls Notify only when on and visible in %s',
+  async (language) => {
+    setLocale(language);
+    const state = {
+      channels: [],
+      rules: [],
+      kinds: [],
+      event_types: [],
+      placeholders: [],
+      ai_ready: false,
+      log: [],
+    };
+    request.mockResolvedValue(state);
+    await render(<NotifyPage ctx={context('notify')} />);
+    request.mockResolvedValue({
+      ...state,
+      log: [{ id: 1, at: now.toISOString(), status: 'failed' }],
+    });
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(30000));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(t('notify.status.failed'));
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(request).not.toHaveBeenCalled();
+    hidden.mockReturnValue(false);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(request).toHaveBeenCalledTimes(1);
+    await render(<NotifyPage ctx={context('notify', false)} />);
+    request.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => root.render(null));
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows linked notification outcomes without inventing missing ones in %s',
+  async (language) => {
+    setLocale(language);
+    const row = {
+      id: 1,
+      type: 'source.recovered',
+      at: now.toISOString(),
+      source_id: 'a',
+      data: { source_name: 'Cluster A' },
+    };
+    request.mockResolvedValue([
+      { ...row, delivery: ['failed', 'sent', 'grouped', 'suppressed'] },
+      { ...row, id: 2 },
+    ]);
+    await render(<ActivityPanel demo={false} />);
+    const shown = container.querySelectorAll('.activity > li');
+    expect(shown[0].textContent).toContain(
+      t('activity.delivery', {
+        statuses: ['failed', 'sent', 'grouped', 'suppressed']
+          .map((status) => t(`notify.status.${status}` as Parameters<typeof t>[0]))
+          .join(t('common.listSeparator')),
+      }),
+    );
+    expect(shown[1].textContent).not.toContain(t('notify.status.sent'));
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'opens Notifications from its labelled channel warning in %s',
+  async (language) => {
+    setLocale(language);
+    window.history.replaceState(null, '', '/?demo=true');
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/dashboard')) return serverDemo();
+      if (path === '/settings') return { language };
+      if (path === '/health') return null;
+      return [];
+    });
+    await render(<App />);
+    const warning = [...container.querySelectorAll<HTMLButtonElement>('.attention-open')].find(
+      (item) => item.textContent?.includes('send_timeout'),
+    )!;
+    expect(warning.textContent).toContain(
+      t('msg.attention_notification_failed', {
+        channel: 'Team alerts',
+        error_code: 'send_timeout',
+      }),
+    );
+    expect(warning.querySelector('.dot.amber')).not.toBeNull();
+    await act(async () => warning.click());
+    expect(window.location.hash).toBe('#/notify');
   },
 );

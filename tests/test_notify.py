@@ -1601,3 +1601,154 @@ async def test_chinese_digest_punctuation_and_observation_window(store: Store) -
     assert "（失败；100_failed_0，100_failed_1）" in tail and "；eval-b" in tail
     assert "cluster-a:" not in tail
     assert "(" not in tail and ", " not in tail and "; " not in tail
+
+
+async def test_delivery_health_tracks_retry_restart_recovery_and_expiry(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+
+    async def fail(config: dict[str, Any], mail: Message) -> None:
+        raise SourceError("send_timeout", detail="https://example.com/private-token")
+
+    use_sender(monkeypatch, fail)
+    await notifier.deliver({"id": "r", "channels": ["team"]}, event())
+    [problem] = notifier.delivery_failures()
+    assert problem == {
+        "channel": "team",
+        "channel_name": "Team",
+        "error_code": "send_timeout",
+        "at": problem["at"],
+    }
+    assert "private-token" not in json.dumps(problem)
+    restarted = notify.Notifier(notifier.ctx)
+    assert restarted.delivery_failures() == [problem]
+    assert notify._recent_log(store) == []  # Pending retries are not terminal log rows.
+
+    async def success(config: dict[str, Any], mail: Message) -> None:
+        pass
+
+    use_sender(monkeypatch, success)
+    await restarted._attempt(("r", 7, "team"))
+    assert restarted.delivery_failures() == []
+    assert notify._recent_log(store)[0]["status"] == "sent"
+    notify._log(store, {"channel": "team", "status": "failed", "error": {"code": "send_failed"}})
+    assert restarted.delivery_failures()[0]["error_code"] == "send_failed"
+    store.db.execute("UPDATE notify_log SET at='2000-01-01T00:00:00+00:00'")
+    assert restarted.delivery_failures() == []
+
+
+def test_channel_health_ignores_removed_channels_and_clears_on_test_success(
+    notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    notify._log(
+        store,
+        {
+            "channel": "team",
+            "status": "failed",
+            "error": {"code": "credential_unavailable", "reference": "env:PRIVATE"},
+        },
+    )
+    assert notifier.delivery_failures()[0]["error_code"] == "credential_unavailable"
+    notify._log(store, {"channel": "team", "status": "sent", "test": True})
+    assert notifier.delivery_failures() == []
+    notify._log(store, {"channel": "team", "status": "failed", "error": "secret"})
+    assert notifier.delivery_failures()[0]["error_code"] == "send_failed"
+    notify._delete(store, "notify_channels", "team")
+    assert notifier.delivery_failures() == []
+
+
+def test_delivery_status_preserves_channels_rules_and_digest_members(store: Store) -> None:
+    rows = [{**event(), "id": key} for key in range(1, 5)]
+    assert notify.delivery_status(store, rows) == rows  # Notify was never enabled.
+    notify._prepare(store)
+    entries = [
+        {"event": 1, "events": [2, 3], "digest": 1, "rule": "r", "status": "grouped"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "a", "status": "failed"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "a", "status": "sent"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "b", "status": "failed"},
+        {"event": 3, "rule": "other", "status": "suppressed"},
+        {"event": 4, "status": "sent", "test": True},
+        {"status": "sent"},  # Old/unlinked records must not invent an association.
+    ]
+    for entry in entries:
+        notify._log(store, {**entry, "subject": "private", "error": {"detail": "secret"}})
+    store.db.execute("INSERT INTO notify_log(at, data) VALUES ('now', 'not json')")
+    result = notify.delivery_status(store, rows)
+    assert result[0]["delivery"] == ["failed", "grouped", "sent"]
+    assert result[1]["delivery"] == ["failed", "grouped", "sent"]
+    assert result[2]["delivery"] == ["failed", "grouped", "sent", "suppressed"]
+    assert result[3]["delivery"] == []
+    assert all("delivery" not in row for row in rows)
+    # A failure outside the displayed children still counts for the group.
+    group = {**rows[-1], "group": {"ids": [1, 2, 3, 4], "events": [rows[-1]]}}
+    [result] = notify.delivery_status(store, [group])
+    assert result["delivery"] == ["failed", "grouped", "sent", "suppressed"]
+    assert result["group"]["events"][0]["delivery"] == []
+
+
+def test_delivery_health_is_exposed_and_attention_clears_when_off(tmp_path: Path) -> None:
+    with TestClient(api.create_app(tmp_path, polling=False, plugins=[notify.plugin])) as client:
+        client.put("/api/toolbox/notify", json={"enabled": True}, headers=HEADERS)
+        store = Store(tmp_path / "computedeck.sqlite")
+        try:
+            add_channel(store)
+            notify._log(
+                store,
+                {
+                    "channel": "team",
+                    "status": "failed",
+                    "error": {"code": "credential_unavailable", "reference": "env:PRIVATE"},
+                },
+            )
+            health = client.get("/api/health").json()["plugins"]["notify"]
+            assert health["delivery_failures"][0]["channel_name"] == "Team"
+            [item] = client.get("/api/dashboard").json()["attention"]
+            assert item["kind"] == "notification_failed"
+            assert item["severity"] == "warn" and item["action"] == "notify"
+            assert item["subject"]["kind"] == "plugin"
+            assert item["message"]["error_code"] == "credential_unavailable"
+            assert "PRIVATE" not in json.dumps(item)
+            client.put("/api/toolbox/notify", json={"enabled": False}, headers=HEADERS)
+            assert client.get("/api/dashboard").json()["attention"] == []
+        finally:
+            store.db.close()
+
+
+@pytest.mark.parametrize("query", ["", "&group=1", "&id=1", "&range=30d", "&group=1&range=30d"])
+def test_activity_delivery_is_opt_in_and_never_uses_live_logs_for_demo(
+    tmp_path: Path, query: str
+) -> None:
+    with TestClient(api.create_app(tmp_path, polling=False, plugins=[])) as client:
+        store = Store(tmp_path / "computedeck.sqlite")
+        try:
+            store.add_events([stored_event()])
+            notify._prepare(store)
+            notify._log(store, {"event": 1, "rule": "r", "status": "suppressed"})
+            plain = client.get(f"/api/events?limit=10{query}").json()
+            result = client.get(f"/api/events?limit=10&delivery=true{query}").json()
+            assert all("delivery" not in row for row in plain)
+            assert result[0]["delivery"] == ["suppressed"]
+            assert [
+                {key: value for key, value in row.items() if key != "delivery"} for row in result
+            ] == plain
+            demo = client.get("/api/events?demo=true&delivery=true&limit=200&group=1").json()
+            statuses = {status for row in demo for status in row["delivery"]}
+            assert statuses == {"sent", "failed", "grouped", "suppressed"}
+            assert client.get("/api/events?delivery=true&id=999999").json() == []
+        finally:
+            store.db.close()
+
+
+def test_corrupt_queue_row_is_counted_once_across_health_and_delivery(
+    notifier: notify.Notifier, store: Store, caplog: pytest.LogCaptureFixture
+) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO notify_queue VALUES ('r', 7, 'team', 0, 0, 0, 'not json')")
+    assert notifier.delivery_failures() == []
+    assert store.unreadable_rows()["notify_queue"] == 1
+    assert notifier.start_due() == []
+    assert store.unreadable_rows()["notify_queue"] == 1
+    assert notifier.delivery_failures() == []
+    assert caplog.text.count("Skipped unreadable notify_queue row") == 1

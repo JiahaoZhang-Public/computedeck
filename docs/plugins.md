@@ -596,12 +596,12 @@ the service log for details.
 computed on read, with acknowledgement state stored separately and no new events. Each
 item has `key`, `kind`, `subject: {kind, id, name}`, `severity` (`error` or `warn`), a
 translatable `message`, all relevant `details`, nullable `since`, `observed_at` and
-`next_attempt` times, and an `action` (`diagnose`, `instance`, `health` or `toolbox`).
-Each item also has a `fingerprint` and a boolean `mutable` (false for service-loop faults
-and unreadable rows), plus nullable `muted`: `{state: "acknowledged" | "snoozed", at,
-until}`. `at` is the action time; `until` is the snooze expiry or null. All items remain
-in the list. The additive `attention_count` is the number with `muted == null`, used by
-the tile, badge and panel.
+`next_attempt` times, and an `action` (`diagnose`, `instance`, `health`, `toolbox` or
+`notify`). Each item also has a `fingerprint` and a boolean `mutable` (false for
+service-loop faults and unreadable rows), plus nullable `muted`: `{state: "acknowledged"
+| "snoozed", at, until}`. `at` is the action time; `until` is the snooze expiry or null.
+All items remain in the list. The additive `attention_count` is the number with `muted
+== null`, used by the tile, badge and panel.
 
 `PUT /api/attention/{key}` accepts `{action: "acknowledge" | "snooze" | "clear", until?:
 "1h" | "tomorrow", fingerprint?: string | null}` under the usual origin and
@@ -638,8 +638,9 @@ check `command` in the message; the UI displays the command.
 
 Kinds are `source_failed`, `source_stale`, `cluster_unavailable`,
 `cluster_degraded`, `capability_regressed`, `partial_data`, `instance_ssh_failed`,
-`service_loop_failed`, `unreadable_rows` and `plugin_error`. Plugin errors use the
-existing health report's `error` key; plugins do not raise attention items.
+`service_loop_failed`, `unreadable_rows`, `plugin_error` and `notification_failed`. Plugin
+errors use the existing health report's `error` key; Notify channel failures use its
+`delivery_failures` key, described below. There is no general plugin-raised attention API.
 A first collection failure produces a warning item; repeated failures or stale
 data escalate it to an error.
 Source rows gain `capabilities_seen`, the union of capabilities delivered by
@@ -653,6 +654,39 @@ drivers classify availability over GPU-capable nodes (unknown or positive GPU co
 Enabled toggles clear the collection error and retry count, resetting status to
 `ready` or `unconfigured`, clearing last success to establish a silent event baseline
 on the next collection. Current and seen capabilities are preserved.
+
+## Notification delivery status
+
+Notify health adds `delivery_failures`, a list of `{channel, channel_name, error_code,
+at}` for configured channels whose latest recorded attempt in the last 24 hours failed.
+It reads the retained 500 delivery-log rows and pending retries. Retry records now keep
+`last_attempt_at` and a code-only `last_error` in the existing queue JSON, so a restart
+keeps their warning. Older pending records without these fields remain unknown until
+another attempt. A later successful attempt (including Send test), removal of the channel,
+or expiry of the 24-hour window clears the warning. Switching Notify off hides it.
+No channel configuration, recipient address or error detail is copied into this list.
+
+The dashboard lifts these failures as `notification_failed` warning items, labelled as
+Notifications and linking to its page (`action: "notify"`). Their keys are
+`notification_failed:notify:<channel>`. `observed_at` is the latest failed attempt;
+`since` stays null because the start of the failure is unknown. The displayed error code
+participates in acknowledgement matching; channel renames and timestamps do not.
+This is specific to Notify, not a new plugin attention API.
+
+`GET /api/events?delivery=true` adds a `delivery` list of distinct recorded outcomes:
+`sent`, `failed`, `suppressed`, `grouped` and `dropped`. Default event reads are unchanged.
+The lookup uses existing log `event` IDs and digest sibling `events` IDs; it does not
+rewrite events or deliver new event types. Per rule/channel the newest outcome wins;
+different channels and rules may produce different outcomes for the same event.
+Grouped rows summarize all their IDs, including children omitted from the display cap,
+and displayed children carry their own outcomes. `grouped` means included in a digest,
+not successfully delivered; it may appear alongside `sent` or `failed`.
+
+Only retained, linked log records contribute. An absent/empty list means no retained
+outcome is known, not that nothing was sent. Test messages and records without an event
+ID do not attach to Activity. Example mode uses fictional outcomes only. No subjects,
+message bodies, channel settings or error details are added to the event response.
+No table, schema version or plugin API version changes are needed.
 
 ## Marketplaces
 

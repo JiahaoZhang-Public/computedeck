@@ -35,6 +35,7 @@ export interface Delivery {
   at: string;
   status: 'sent' | 'failed' | 'suppressed' | 'dropped' | 'grouped';
   count?: number;
+  event?: number;
   digest?: number;
   events?: number[];
   rule?: string;

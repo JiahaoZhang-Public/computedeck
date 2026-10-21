@@ -232,8 +232,9 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "notification_failed",
     ]
-    assert data["attention"][-1]["subject"]["id"] == "example:runpod:demo-pod"
+    assert data["attention"][-2]["subject"]["id"] == "example:runpod:demo-pod"
     pod = next(row for row in data["instances"] if row["id"] == "example:runpod:demo-pod")
     for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
         assert pod[metric] is None
@@ -323,5 +324,35 @@ def test_demo_contains_acknowledged_and_snoozed_items() -> None:
         "acknowledged",
         "snoozed",
     }
-    assert data["attention_count"] == 3
+    assert data["attention_count"] == 4
     assert all(item["mutable"] is True for item in data["attention"])
+
+
+def test_notification_warning_reopens_for_error_code_but_not_channel_label() -> None:
+    def status(code: str = "send_timeout", name: str = "Team") -> dict[str, Any]:
+        return {
+            "notify": {
+                "enabled": True,
+                "delivery_failures": [
+                    {
+                        "channel": "team",
+                        "channel_name": name,
+                        "error_code": code,
+                        "at": NOW.isoformat(),
+                    }
+                ],
+            }
+        }
+
+    [item] = derive([], plugin_status=status())
+    state = {
+        item["key"]: {
+            "fingerprint": item["fingerprint"],
+            "acknowledged_at": NOW.isoformat(),
+            "snooze_until": None,
+        }
+    }
+    [renamed] = derive([], plugin_status=status(name="New name"), state=state)
+    assert renamed["muted"]["state"] == "acknowledged"
+    [changed] = derive([], plugin_status=status(code="credential_unavailable"), state=state)
+    assert changed["muted"] is None

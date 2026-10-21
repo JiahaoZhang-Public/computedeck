@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { useVisibleInterval } from '../useVisibleInterval';
 import { errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { relativeTime } from '../domain';
@@ -403,9 +404,10 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
         .catch((reason) => setError(errorText(reason, 'error.service'))),
     [],
   );
-  useEffect(() => {
-    if (tool?.enabled) void load();
+  const poll = useCallback(() => {
+    if (tool?.enabled) return load();
   }, [tool?.enabled, load]);
+  useVisibleInterval(poll, 30000);
 
   if (!tool?.enabled)
     return (

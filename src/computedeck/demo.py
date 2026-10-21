@@ -436,7 +436,22 @@ def dashboard() -> dict[str, Any]:
     data["summary"] = summarize(data)
     data["history"] = demo_history(24, data)
     data["attention"] = attention.derive(
-        data, [drivers.describe(name) for name in drivers.names()], now=current
+        data,
+        [drivers.describe(name) for name in drivers.names()],
+        now=current,
+        plugin_status={
+            "notify": {
+                "enabled": True,
+                "delivery_failures": [
+                    {
+                        "channel": "example:team",
+                        "channel_name": "Team alerts",
+                        "error_code": "send_timeout",
+                        "at": (current - timedelta(minutes=3)).isoformat(),
+                    }
+                ],
+            }
+        },
     )
     # Example acknowledgement is isolated from the service's saved state.
     muted = {
@@ -444,6 +459,9 @@ def dashboard() -> dict[str, Any]:
         "instance_ssh_failed:example:runpod:demo-pod": timedelta(hours=1),
     }
     for item in data["attention"]:
+        if item["kind"] == "notification_failed":
+            item["subject"]["id"] = "example:notify"
+            item["key"] = "notification_failed:example:notify:team"
         if item["key"] not in muted:
             continue
         duration = muted[item["key"]]
@@ -665,3 +683,25 @@ def nodes() -> list[dict[str, Any]]:
             "error": None,
         }
     ]
+
+
+def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fictional notification outcomes, isolated from the live delivery log."""
+    result = []
+    for row in rows:
+        group = row.get("group")
+        if group:
+            children = delivery_status(group["events"])
+            statuses = sorted({status for child in children for status in child["delivery"]})
+            result.append({**row, "delivery": statuses, "group": {**group, "events": children}})
+            continue
+        statuses = []
+        if row["type"] == "job.finished":
+            if row["data"].get("job", {}).get("array_id"):
+                statuses = ["failed", "grouped"]
+            elif row["data"].get("outcome") == "unknown":
+                statuses = ["suppressed"]
+            else:
+                statuses = ["sent"]
+        result.append({**row, "delivery": statuses})
+    return result

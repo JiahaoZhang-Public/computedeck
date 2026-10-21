@@ -66,20 +66,21 @@ event baseline. Retained inventories do not override the cluster state reported 
 latest collection.
 
 Rows link to diagnosis (the last error and an explicit Test connection button), the
-instance, service health or Toolbox. Their times use existing observations: `since` is
-the last successful collection for a failing or stale source: no good data has arrived
-since then. It is null for all other cases. `observed_at` records the latest
-observation, shown as "Last seen": the collection that observed a source condition, the
-latest failed attempt for a source that never succeeded, an SSH check, or a background
-error report. Repeated observations do not imply a new incident onset. Unreadable rows
-and plugin health errors have neither time. Attention is derived on every dashboard read
-without an additional collection request. Acknowledge keeps an item quiet until its
-cause or severity changes. Snooze keeps it quiet for one hour or until the next midnight
-in the service host's timezone; a changed cause or severity also ends a snooze early.
-Names, observation times and free-text error output do not reopen items. A resolved item
-loses its saved acknowledgement after the next collection, machine check, attention
-action, source or machine edit/removal, or tool update. Unreadable acknowledgement rows
-are discarded during the same cleanup; dashboard reads never delete saved state.
+instance, service health, Toolbox or Notifications (channel delivery warnings). Their
+times use existing observations: `since` is the last successful collection for a failing
+or stale source: no good data has arrived since then. It is null for all other cases.
+`observed_at` records the latest observation, shown as "Last seen": the collection that
+observed a source condition, the latest failed attempt for a source that never
+succeeded, an SSH check, or a background error report. Repeated observations do not
+imply a new incident onset. Unreadable rows and plugin health errors have neither time.
+Attention is derived on every dashboard read without an additional collection request.
+Acknowledge keeps an item quiet until its cause or severity changes. Snooze keeps it
+quiet for one hour or until the next midnight in the service host's timezone; a changed
+cause or severity also ends a snooze early. Names, observation times and free-text error
+output do not reopen items. A resolved item loses its saved acknowledgement after the
+next collection, machine check, attention action, source or machine edit/removal, or
+tool update. Unreadable acknowledgement rows are discarded during the same cleanup;
+dashboard reads never delete saved state.
 
 The tile, badge and panel count only unmuted items. Muted items remain in the collapsed
 "Acknowledged (N)" group with Unmute and their snooze expiry, when applicable. This
@@ -349,3 +350,29 @@ requests `include=changes`; API event lists omit them unless requested explicitl
 添加、移除、工具和导入记录不显示字段列表。每次导入只生成一条带数量的摘要。
 暂停后立即恢复会保留两条记录。这些记录保留 30 天，不会触发通知或插件处理程序。
 语言和服务器名称偏好设置不产生记录。动态面板会请求 `include=changes`；API 默认不返回这些记录。
+
+## Notification delivery / 通知发送状态
+
+Notifications refreshes its recent-message log about every 30 seconds while the page is
+visible and the tool is on. A configured channel whose latest recorded attempt in the
+last 24 hours failed appears as a Notifications warning in Needs attention, with its
+channel label and last error code. Pending retries count too. Opening the warning goes
+to Notifications. A later successful attempt or test clears the warning; switching the
+tool off hides it. The time shown is the last failed attempt, not when the problem began.
+
+Activity shows recorded notification outcomes beside the event: Sent, Failed, Suppressed,
+Grouped or Dropped. Grouped means included in a digest, not delivery success; mixed
+outcomes can mean different rules or channels. Outcomes use the retained 500-row log,
+so a missing label means unknown. Activity reads these outcomes when it loads the rows;
+Notifications has the automatically refreshed delivery log. Example mode shows fictional
+outcomes and a failing Team alerts channel, without reading live deliveries.
+
+中文：任务提醒页面在可见且工具开启时，约每 30 秒刷新近期消息。已配置渠道在最近 24 小时内的
+最后一次发送尝试失败时，待处理列表显示带有“任务提醒”标签的警告，列出渠道名称和最后的错误代码，
+等待重试的失败也包括在内。点击警告进入任务提醒页面；之后发送或测试成功会清除警告，关闭工具会隐藏它。
+显示的时间是最后一次失败尝试的时间，不代表问题开始时间。
+
+动态在事件旁显示已记录的通知状态：已发送、失败、已抑制、已合并或已丢弃。已合并表示包含在摘要中，
+不代表发送成功；多个结果可能来自不同规则或渠道。状态来自保留的最近 500 条日志，未显示状态表示未知。
+动态加载记录时读取这些状态；任务提醒页面的发送日志会自动刷新。示例模式使用虚构状态和发送失败的
+Team alerts 渠道，不读取真实发送记录。

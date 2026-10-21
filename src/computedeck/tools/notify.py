@@ -19,7 +19,7 @@ import secrets
 import shlex
 import time
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -317,6 +317,62 @@ def _recent_log(store: Store, limit: int = 50) -> list[dict[str, Any]]:
     )
     entries = ((row[0], row[1], store.record("notify_log", row[0], row[2], {})) for row in rows)
     return [{"id": key, "at": at, **entry} for key, at, entry in entries if entry is not None]
+
+
+def _error_code(error: Any) -> str:
+    # Only the machine-readable code belongs on health/Activity, never error details.
+    code = error.get("code") if isinstance(error, dict) else None
+    return (
+        code
+        if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code)
+        else "send_failed"
+    )
+
+
+def delivery_status(store: Store, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate API copies using the retained log; absence is not a delivery verdict."""
+    if (
+        not rows
+        or not store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='notify_log'"
+        ).fetchone()
+    ):
+        return rows
+    wanted = {key for row in rows for key in row.get("group", {}).get("ids", [row["id"]])}
+    by_event: dict[int, set[str]] = {}
+    seen: set[tuple[Any, ...]] = set()
+    for entry in _recent_log(store, 500):
+        status = entry.get("status")
+        if entry.get("test") or status not in {
+            "sent",
+            "failed",
+            "suppressed",
+            "grouped",
+            "dropped",
+        }:
+            continue
+        ids = [entry.get("event"), *(entry.get("events") or [])]
+        for event_id in ids:
+            if not isinstance(event_id, int) or event_id <= 0 or event_id not in wanted:
+                continue
+            # Group reservations and channel outcomes are separate facts. A later
+            # success replaces an earlier failure only for this rule and channel.
+            key = (event_id, entry.get("rule"), entry.get("channel"), status == "grouped")
+            if key in seen:
+                continue
+            seen.add(key)
+            by_event.setdefault(event_id, set()).add(status)
+
+    def annotate(row: dict[str, Any]) -> dict[str, Any]:
+        group = row.get("group")
+        ids = group["ids"] if group else [row["id"]]
+        statuses = set().union(*(by_event.get(key, set()) for key in ids))
+        result = {**row, "delivery": sorted(statuses)}
+        if group:
+            result["group"] = {**group, "events": [annotate(child) for child in group["events"]]}
+        return result
+
+    return [annotate(row) for row in rows]
 
 
 def _new_id(name: str) -> str:
@@ -729,6 +785,38 @@ class Notifier:
     def channels(self) -> dict[str, dict[str, Any]]:
         return {row["id"]: row for row in _rows(self.store, "notify_channels")}
 
+    def delivery_failures(self) -> list[dict[str, Any]]:
+        """Channels whose latest recorded attempt in the last day failed."""
+        latest: dict[str, dict[str, Any]] = {}
+        cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        for entry in _recent_log(self.store, 500):
+            channel = entry.get("channel")
+            if channel and entry.get("status") in {"sent", "failed"}:
+                latest.setdefault(channel, entry)
+        for rule_id, event_id, channel_id, raw in self.store.db.execute(
+            "SELECT rule, event, channel, data FROM notify_queue"
+        ):
+            key = (rule_id, event_id, channel_id)
+            row = self.store.record("notify_queue", key, raw, {"entry": dict})
+            if not row or not row.get("last_attempt_at"):
+                continue
+            channel = row["entry"].get("channel")
+            at = row["last_attempt_at"]
+            if channel and at > latest.get(channel, {}).get("at", ""):
+                latest[channel] = {"at": at, "status": "failed", "error": row["last_error"]}
+        return [
+            {
+                "channel": channel_id,
+                "channel_name": channel["name"],
+                "error_code": _error_code(latest[channel_id].get("error")),
+                "at": latest[channel_id]["at"],
+            }
+            for channel_id, channel in self.channels().items()
+            if channel_id in latest
+            and latest[channel_id]["status"] == "failed"
+            and latest[channel_id]["at"] >= cutoff
+        ]
+
     def rules(self) -> list[dict[str, Any]]:
         return _rows(self.store, "notify_rules")
 
@@ -972,11 +1060,18 @@ class Notifier:
         elif retry:
             self.resting[key[2]] = time.time() + RETRY_DELAYS[0]
             if attempts <= len(RETRY_DELAYS):
+                data["last_error"] = {"code": _error_code(error)}
+                data["last_attempt_at"] = now()
                 with self.store.db:
                     self.store.db.execute(
-                        "UPDATE notify_queue SET attempts=?, due=? "
+                        "UPDATE notify_queue SET attempts=?, due=?, data=? "
                         "WHERE rule=? AND event=? AND channel=?",
-                        (attempts, time.time() + RETRY_DELAYS[attempts - 1], *key),
+                        (
+                            attempts,
+                            time.time() + RETRY_DELAYS[attempts - 1],
+                            json.dumps(data),
+                            *key,
+                        ),
                     )
                 return
         self._finish(
@@ -1150,6 +1245,7 @@ def setup(ctx: PluginContext) -> None:
             "queued": queued,
             "invalid_settings": {key: str(value)[:80] for key, value in invalid.items()},
             "last": log[0] if log else None,
+            "delivery_failures": notifier.delivery_failures(),
             "summary": {"en": en, "zh-CN": zh},
         }
 

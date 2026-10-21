@@ -44,7 +44,7 @@ export function ActivityPanel({
     const id = ++loadId.current;
     try {
       const rows = await api<DeckEvent[]>(
-        `/events?limit=${limit}&demo=${demo}&group=1&include=changes`,
+        `/events?limit=${limit}&demo=${demo}&group=1&include=changes&delivery=true`,
       );
       if (id === loadId.current) {
         setEvents(activityEvents(rows));
@@ -128,6 +128,15 @@ function ActivityRow({
           tool ? { ...event, data: { ...event.data, name: localized(tool.name) } } : event,
         )}
         {sourceLine && <small>{sourceLine}</small>}
+        {Boolean(event.delivery?.length) && (
+          <small>
+            {t('activity.delivery', {
+              statuses: event
+                .delivery!.map((status) => t(`notify.status.${status}`))
+                .join(t('common.listSeparator')),
+            })}
+          </small>
+        )}
         {fields.length > 0 && (
           <small>
             {t('event.change.fields', { fields: fields.join(t('common.listSeparator')) })}
@@ -288,6 +297,7 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
     demo: String(ctx.demo),
     group: '1',
     include: 'changes',
+    delivery: 'true',
     range,
   });
   if (category) params.set('category', category);
@@ -523,7 +533,7 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
   const load = useCallback(() => {
     const id = ++generation.current;
     return api<DeckEvent[]>(
-      `/events?demo=${ctx.demo}&include=changes&group=1&limit=50${seen !== null ? `&after_id=${seen ?? 0}` : ''}`,
+      `/events?demo=${ctx.demo}&include=changes&group=1&delivery=true&limit=50${seen !== null ? `&after_id=${seen ?? 0}` : ''}`,
     ).then(
       (result) => {
         if (generation.current === id) {

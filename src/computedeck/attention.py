@@ -50,8 +50,9 @@ def derive(
             for detail in (details or [])
             if isinstance(detail, dict)
         )
+        cause_params = {key: value for key, value in params.items() if key != "channel"}
         fingerprint = hashlib.sha256(
-            json.dumps([kind, severity, params, causes], sort_keys=True).encode()
+            json.dumps([kind, severity, cause_params, causes], sort_keys=True).encode()
         ).hexdigest()
         key = f"{kind}:{subject['id']}{suffix}"
         saved = (state or {}).get(key, {})
@@ -211,5 +212,18 @@ def derive(
                 "error",
                 details=[status["error"]],
                 action="toolbox",
+            )
+    notify = plugins.get("notify", {})
+    if notify.get("enabled"):
+        for failure in notify.get("delivery_failures", []):
+            add(
+                "notification_failed",
+                {"kind": "plugin", "id": "notify", "name": "Notifications"},
+                "warn",
+                suffix=f":{failure['channel']}",
+                channel=failure["channel_name"],
+                error_code=failure["error_code"],
+                observed_at=failure["at"],
+                action="notify",
             )
     return items

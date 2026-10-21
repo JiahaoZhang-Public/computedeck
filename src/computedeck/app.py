@@ -29,6 +29,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
+from .demo import delivery_status as demo_delivery_status
 from .errors import SourceError, message
 from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
 from .records import (
@@ -43,6 +44,7 @@ from .records import (
 )
 from .ssh_config import install_config, quote_path, render_config, write_config
 from .store import Store, now
+from .tools.notify import delivery_status
 
 logger = logging.getLogger("computedeck")
 # How long stopping waits for requests in flight, then for background work to end.
@@ -834,6 +836,7 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=200),
         demo: bool = False,
         group: bool = False,
+        delivery: bool = False,
         include: str | None = None,
         id: int | None = Query(default=None, ge=1, le=2**63 - 1),
         before_id: int | None = Query(default=None, ge=1, le=2**63 - 1),
@@ -847,18 +850,25 @@ def create_app(
         since: datetime | None = None,
         q: str | None = Query(default=None, max_length=64),
     ) -> list[dict[str, Any]]:
+        def with_delivery(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if not delivery:
+                return rows
+            return demo_delivery_status(rows) if demo else delivery_status(store(), rows)
+
         include_changes = include == "changes"
         if type and any(kind not in (*TYPES, *GAP_TYPES, *CHANGE_TYPES) for kind in type):
             raise HTTPException(422, message("event_type_unknown"))
         if id is not None:
             rows = demo_events() if demo else store().events(id - 1, 1)
-            return [
-                row
-                for row in rows
-                if row["id"] == id
-                and not row.get("silent")
-                and (include_changes or not row["type"].startswith("change."))
-            ]
+            return with_delivery(
+                [
+                    row
+                    for row in rows
+                    if row["id"] == id
+                    and not row.get("silent")
+                    and (include_changes or not row["type"].startswith("change."))
+                ]
+            )
         if since is not None:
             try:
                 since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
@@ -882,12 +892,14 @@ def create_app(
                 demo_events(), **filters, dashboard=demo_dashboard() if cluster_id else None
             )
             rows = group_events(rows) if group else rows
-            return [
-                row
-                for row in rows
-                if (before_id is None or row["id"] < before_id)
-                and (after_id is None or row["id"] > after_id)
-            ][:limit]
+            return with_delivery(
+                [
+                    row
+                    for row in rows
+                    if (before_id is None or row["id"] < before_id)
+                    and (after_id is None or row["id"] > after_id)
+                ][:limit]
+            )
         if not any(
             (
                 before_id is not None,
@@ -902,12 +914,16 @@ def create_app(
             )
         ):
             if group:
-                return group_events(
-                    store().recent_event_collections(limit, include_changes=include_changes)
-                )[:limit]
-            return store().recent_events(limit, include_changes=include_changes)
-        return store().query_events(
-            limit, before_id=before_id, after_id=after_id, group=group, **filters
+                return with_delivery(
+                    group_events(
+                        store().recent_event_collections(limit, include_changes=include_changes)
+                    )[:limit]
+                )
+            return with_delivery(store().recent_events(limit, include_changes=include_changes))
+        return with_delivery(
+            store().query_events(
+                limit, before_id=before_id, after_id=after_id, group=group, **filters
+            )
         )
 
     @app.post("/api/backup")
