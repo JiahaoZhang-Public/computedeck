@@ -533,7 +533,12 @@ def parse_failures(
             row = _job(job_id, job, state, source)
             row.update(
                 end=(end if terminal else end.replace(tzinfo=None)).isoformat(),
+                ended_at=end.isoformat() if end.tzinfo else None,
+                time_limit=_mapping(job.get("Resource_List")).get("walltime") or None,
+                log_path=job.get("Output_Path") or None,
                 exit_code=str(code),
+                exit_status=code if 0 <= code <= 256 else None,
+                exit_signal=code - 256 if code > 256 else None,
                 observed_at=observed_at,
             )
             if terminal:

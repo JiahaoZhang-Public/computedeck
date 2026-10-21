@@ -482,7 +482,11 @@ def parse_failures(
         job = _job(row, state, source, "bjobs -d")
         job.update(
             end=(end if terminal else end.replace(tzinfo=None)).isoformat(),
+            ended_at=end.isoformat() if end.tzinfo else None,
             exit_code=None if _blank(row.get("EXIT_CODE")) else row["EXIT_CODE"],
+            exit_status=integer(row.get("EXIT_CODE")),
+            exit_signal=None,
+            reason=None if _blank(reason) else reason,
             observed_at=observed_at,
         )
         failures[job["id"]] = job

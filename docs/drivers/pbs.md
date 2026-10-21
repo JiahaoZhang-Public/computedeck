@@ -103,6 +103,15 @@ Finished jobs (`F`, or `X` for subjobs) of the login user with a non-zero `Exit_
 
 `Exit_status` -29 (walltime exceeded) is shown as `TIMEOUT`, -27 and -26 (memory exceeded) as `OUT_OF_MEMORY`, everything else as `FAILED` with the status as `exit_code`. `end` is the server's local time, like Slurm's `End`.
 
+Failure rows also expose `ended_at` with the remote clock's offset while preserving
+`end`. Nonnegative `Exit_status` values up to 256 become `exit_status`; values above
+256 become `exit_signal = Exit_status - 256`. Negative scheduler codes keep their raw
+`exit_code` and have no program status. The drawer never interprets a raw 137 as OOM.
+
+`time_limit` reads `Resource_List.walltime` and `log_path` reads `Output_Path` from the
+same history document. Values are kept as reported, including the output path's `host:`
+prefix. Missing values are null; no extra command is run.
+
 If job history is not enabled, `qselect -H` selects nothing without an error; the driver checks `job_history_enable` first and reports `history_unavailable` instead of "no failures".
 
 ## Warnings

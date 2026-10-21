@@ -145,6 +145,7 @@ it('links to a failed attempt separately from the current job list', async () =>
   const failed = data.recent_failures![0];
   await render(`/?demo=true#/jobs?state=failed&failure=${encodeURIComponent(failed.id)}`);
   expect(container.querySelector('#detail-title')?.textContent).toBe(failed.name);
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.failureReason'));
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.nextStep'));
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain(failed.exit_code!);
 });
@@ -354,4 +355,92 @@ it('keeps compact element resources, waiting reasons and stale tags', async () =
       t('cloud.staleSince', { time: relativeTime(example.observed_at) }),
     );
   }
+});
+
+it.each(['job.failed', 'job.started', 'job.finished', 'job.ended'])(
+  'opens an Activity %s snapshot and restores its event URL after failure history expires',
+  async (type) => {
+    const failed = {
+      ...data.recent_failures![0],
+      state: 'FAILED',
+      exit_status: 127,
+      exit_signal: 0,
+      reason: null,
+      gpu_utilization: 80,
+    };
+    const event = {
+      id: 77,
+      type,
+      at: new Date().toISOString(),
+      source_id: failed.source_id,
+      data: { driver: 'slurm', outcome: 'failed', job: failed },
+    };
+    const original = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, ...args) =>
+      path.startsWith('/events') ? [event] : original(path, ...args),
+    );
+    await render('/?demo=true#/jobs');
+    const row = container.querySelector<HTMLButtonElement>('.activity-job')!;
+    expect(row).not.toBeNull();
+    await act(async () => row.click());
+    expect(routeParams().get('event')).toBe('77');
+    const drawer = container.querySelector('[role="dialog"]')!;
+    expect(drawer.textContent).toContain(failed.name);
+    expect(drawer.textContent).toContain(t('event.recordedJob'));
+    expect(drawer.querySelector('.drawer-metrics')).toBeNull();
+    if (type === 'job.ended')
+      expect(drawer.textContent).toContain(
+        t('event.lastSeenEnded', { time: relativeTime(failed.observed_at) }),
+      );
+    data = { ...data, recent_failures: [] };
+    // Fresh app instance proves this isn't an in-memory-only drawer.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render('/?demo=true#/jobs?event=77');
+    expect(container.querySelector('#detail-title')?.textContent).toBe(failed.name);
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/events?id=77&demo=true')).toBe(
+      true,
+    );
+    expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+  },
+);
+
+it('opens failure rows with no end time and only copies the inspection command', async () => {
+  const failure = { ...data.recent_failures![0], end: null };
+  data = { ...data, recent_failures: [failure] };
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  await render('/?demo=true#/jobs?state=failed');
+  const row = [...container.querySelectorAll<HTMLElement>('tr.clickable')].find((item) =>
+    item.textContent?.includes(failure.name),
+  )!;
+  expect(row).toBeDefined();
+  await act(async () =>
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+  );
+  expect(routeParams().get('failure')).toBe(failure.id);
+  const button = [...container.querySelectorAll<HTMLButtonElement>('.drawer button')].find((item) =>
+    item.textContent?.includes(t('failure.copyInspection')),
+  )!;
+  await act(async () => button.click());
+  expect(writeText).toHaveBeenCalledOnce();
+  expect(writeText.mock.calls[0][0]).toContain('sacct -j');
+  expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+});
+
+it('shows an unavailable event without accidentally opening a different attempt', async () => {
+  await render('/?demo=true#/jobs?event=999');
+  expect(container.querySelector('#detail-title')?.textContent).toBe(t('drawer.unavailable'));
+});
+
+it('keeps a live job with an optional null end on the live job route', async () => {
+  const live = { ...data.jobs[0], end: null };
+  data = { ...data, jobs: [live] };
+  await render('/?demo=true#/jobs?state=running');
+  const row = container.querySelector<HTMLElement>('tr.clickable')!;
+  await act(async () => row.click());
+  expect(routeParams().get('job')).toBe(live.id);
+  expect(routeParams().get('failure')).toBeNull();
+  expect(container.querySelector('#detail-title')?.textContent).toBe(live.name);
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('common.sampledAt'));
 });

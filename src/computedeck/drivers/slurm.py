@@ -57,6 +57,7 @@ _HISTORY_FIELDS = (
     "Elapsed",
     "End",
     "ExitCode",
+    "Timelimit",
 )
 _FINISHED_FIELDS = (*_HISTORY_FIELDS, "Submit", "Start")
 HISTORY_MARKER = "COMPUTEDECK_TERMINAL_HISTORY"
@@ -361,6 +362,7 @@ def parse_failures(
             continue
         if row["End"] in EMPTY:
             continue
+        exit_parts = re.fullmatch(r"(\d+):(\d+)", row["ExitCode"])
         array = re.fullmatch(r"(\d+)_(\d+)", row["JobID"])
         job_id = f"{source['cluster_id']}:{row['JobID']}"
         previous = failures.get(job_id)
@@ -384,11 +386,19 @@ def parse_failures(
             "cpu_count": integer(row["NCPUS"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
             "elapsed": row["Elapsed"],
+            "time_limit": None
+            if row["Timelimit"] in EMPTY | {"UNLIMITED", "Partition_Limit"}
+            else row["Timelimit"],
             "reason": None,
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
-            "end": job_time(row["End"]) if terminal else row["End"],
+            "end": job_time(row["End"])
+            if terminal
+            else re.sub(r"(?:Z|[+-]\d{2}:?\d{2})$", "", row["End"]),
+            "ended_at": job_time(row["End"]),
+            "exit_status": int(exit_parts[1]) if exit_parts else None,
+            "exit_signal": int(exit_parts[2]) if exit_parts else None,
             "submitted_at": job_time(row.get("Submit", "")),
             "started_at": job_time(row.get("Start", "")),
             "exit_code": None if row["ExitCode"] in EMPTY else row["ExitCode"],
@@ -592,6 +602,8 @@ class SlurmDriver:
             # https://slurm.schedmd.com/sacct.html
             history = shlex.join(
                 [
+                    "env",
+                    "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
                     "sacct",
                     "--noheader",
                     "--parsable2",

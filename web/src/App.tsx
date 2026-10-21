@@ -29,6 +29,7 @@ import type {
   Attention,
   CollectionNode,
   Dashboard,
+  DeckEvent,
   DriverInfo,
   Health,
   Instance,
@@ -40,6 +41,7 @@ import type {
 } from './types';
 import { arrayLabel, dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
+import { eventJob } from './events';
 import { api } from './api';
 import { groupsOf } from './groups';
 import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
@@ -84,7 +86,7 @@ type Modal =
   | { kind: 'ssh'; data: SSHConfig }
   | null;
 type Detail =
-  | { kind: 'job'; item: Job }
+  | { kind: 'job'; item: Job; event?: DeckEvent }
   | { kind: 'instance'; item: Instance }
   | { kind: 'array'; item: { id: string; name: string; jobs: Job[] } }
   | null;
@@ -158,8 +160,45 @@ export default function App() {
   const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const params = routeParams(hash);
+  const eventId = params.get('event');
+  const [selectedEvent, setSelectedEvent] = useState<{ demo: boolean; event: DeckEvent } | null>(
+    null,
+  );
+  const selected =
+    selectedEvent?.demo === demo && String(selectedEvent.event.id) === eventId
+      ? selectedEvent.event
+      : null;
+  const [eventResult, setEventResult] = useState<{
+    id: string;
+    demo: boolean;
+    status: 'error' | 'done';
+  } | null>(null);
+  const eventLoad =
+    eventResult?.id === eventId && eventResult.demo === demo ? eventResult.status : 'loading';
+  useEffect(() => {
+    if (!eventId || selected) return;
+    let cancelled = false;
+    void api<DeckEvent[]>(`/events?id=${encodeURIComponent(eventId)}&demo=${demo}`).then(
+      (rows) => {
+        if (cancelled) return;
+        if (rows[0]) setSelectedEvent({ demo, event: rows[0] });
+        setEventResult({ id: eventId, demo, status: 'done' });
+      },
+      () => {
+        if (!cancelled) setEventResult({ id: eventId, demo, status: 'error' });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, demo, selected]);
+  const historicalJob = selected ? eventJob(selected) : null;
   const detailId =
-    params.get('job') || params.get('failure') || params.get('instance') || params.get('array');
+    params.get('job') ||
+    params.get('failure') ||
+    params.get('instance') ||
+    params.get('array') ||
+    eventId;
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -174,31 +213,41 @@ export default function App() {
           (item) => item.array_id && `${item.cluster_id}:${item.array_id}` === params.get('array'),
         )
       : [];
-  const detail: Detail = job
-    ? { kind: 'job', item: job }
-    : instance
-      ? { kind: 'instance', item: instance }
-      : arrayJobs.length
-        ? {
-            kind: 'array',
-            item: {
-              id: params.get('array')!,
-              name: `${arrayJobs[0].name} ${arrayLabel(arrayJobs[0].array_id!)}`,
-              jobs: arrayJobs,
-            },
-          }
-        : null;
-  const setDetail = useCallback((next: Detail) => {
-    setRouteParams(
-      {
-        job: next?.kind === 'job' && !next.item.end ? next.item.id : null,
-        failure: next?.kind === 'job' && next.item.end ? next.item.id : null,
-        instance: next?.kind === 'instance' ? next.item.id : null,
-        array: next?.kind === 'array' ? next.item.id : null,
-      },
-      !!next,
-    );
-  }, []);
+  const detail: Detail =
+    historicalJob && selected
+      ? { kind: 'job', item: historicalJob, event: selected }
+      : job
+        ? { kind: 'job', item: job }
+        : instance
+          ? { kind: 'instance', item: instance }
+          : arrayJobs.length
+            ? {
+                kind: 'array',
+                item: {
+                  id: params.get('array')!,
+                  name: `${arrayJobs[0].name} ${arrayLabel(arrayJobs[0].array_id!)}`,
+                  jobs: arrayJobs,
+                },
+              }
+            : null;
+  const setDetail = useCallback(
+    (next: Detail) => {
+      const failure =
+        next?.kind === 'job' &&
+        (!!next.item.end || data?.recent_failures?.some((item) => item === next.item));
+      setRouteParams(
+        {
+          event: null,
+          job: next?.kind === 'job' && !failure ? next.item.id : null,
+          failure: next?.kind === 'job' && failure ? next.item.id : null,
+          instance: next?.kind === 'instance' ? next.item.id : null,
+          array: next?.kind === 'array' ? next.item.id : null,
+        },
+        !!next,
+      );
+    },
+    [data?.recent_failures],
+  );
   const closeDetail = useCallback(() => {
     if (window.history.state?.detail) window.history.back();
     else setDetail(null);
@@ -560,6 +609,13 @@ export default function App() {
         addInstance,
         showSSH,
         openJob: (item) => setDetail({ kind: 'job', item }),
+        openEvent: (event) => {
+          setSelectedEvent({ demo, event });
+          setRouteParams(
+            { event: String(event.id), job: null, failure: null, instance: null, array: null },
+            true,
+          );
+        },
         openArray: (item) => setDetail({ kind: 'array', item }),
         openInstance: (item) => setDetail({ kind: 'instance', item }),
         copy,
@@ -997,8 +1053,12 @@ export default function App() {
             aria-labelledby="detail-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 id="detail-title">{t('drawer.unavailable')}</h2>
-            <p>{t('drawer.unavailableHint')}</p>
+            <h2 id="detail-title">
+              {t(eventId && eventLoad === 'loading' ? 'chart.loading' : 'drawer.unavailable')}
+            </h2>
+            <p>
+              {t(eventId && eventLoad === 'error' ? 'event.loadError' : 'drawer.unavailableHint')}
+            </p>
             <button className="button" onClick={closeDetail}>
               {t('common.close')}
             </button>
@@ -1035,7 +1095,7 @@ export default function App() {
             {detail.kind === 'array' ? (
               <ArrayDetail key={detail.item.id} jobs={detail.item.jobs} ctx={ctx} />
             ) : detail.kind === 'job' ? (
-              <JobDetail job={detail.item} ctx={ctx} />
+              <JobDetail job={detail.item} ctx={ctx} event={detail.event} />
             ) : (
               <InstanceDetail
                 item={detail.item}

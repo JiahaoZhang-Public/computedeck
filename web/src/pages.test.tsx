@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
+import { jobReason } from './jobFacts';
+import { eventJob } from './events';
 import { ArrayDetail, InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
 import { FailuresTable, JobsTable } from './pages/shared';
-import type { Dashboard, Instance, Job, Source } from './types';
+import type { Dashboard, DeckEvent, Instance, Job, Source } from './types';
 
 const now = new Date().toISOString();
 const hourAgo = new Date(Date.now() - 3600_000).toISOString();
@@ -763,3 +765,103 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
     expect(html).toContain(t('jobs.lastKnownCount', { count: 1 }));
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows failure facts, known limits and log paths without live meters in %s',
+  (locale) => {
+    setLocale(locale);
+    const item = job('failed', {
+      state: 'FAILED',
+      end: null,
+      exit_code: '0:9',
+      exit_status: 0,
+      exit_signal: 9,
+      elapsed: '01:00:00',
+      time_limit: '02:00:00',
+      log_path: '/work/train.log',
+      gpu_utilization: 80,
+    });
+    const data = dash({ failure_history_observed_at: hourAgo });
+    const html = renderToStaticMarkup(<JobDetail job={item} ctx={ctx(data)} />);
+    expect(html).toContain(t('failure.sigkill'));
+    expect(html).toContain(t('failure.signalEvidence', { signal: 9 }));
+    expect(html).toContain(t('failure.ranLimit', { elapsed: '01:00:00', limit: '02:00:00' }));
+    expect(html).toContain('/work/train.log');
+    expect(html).toContain(t('failure.historyUpdated'));
+    expect(html).toContain(t('failure.copyInspection'));
+    expect(html).not.toContain('drawer-metrics');
+    for (const key of ['job.submitted', 'job.started', 'job.waiting', 'common.sampledAt'] as const)
+      expect(html).not.toContain(`<dt>${t(key)}</dt>`);
+    const reported = renderToStaticMarkup(
+      <JobDetail
+        job={{ ...item, state: 'OUT_OF_MEMORY', reason: 'TERM_MEMLIMIT: raw scheduler detail' }}
+        ctx={ctx(data)}
+      />,
+    );
+    expect(reported).toContain('TERM_MEMLIMIT: raw scheduler detail');
+    expect(reported).not.toContain('SIGKILL');
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps failure next steps and omits missing elapsed time in %s',
+  (locale) => {
+    setLocale(locale);
+    const context = ctx(dash({}));
+    for (const state of [
+      'OUT_OF_MEMORY',
+      'TIMEOUT',
+      'DEADLINE',
+      'NODE_FAIL',
+      'BOOT_FAIL',
+      'PREEMPTED',
+      'FAILED',
+    ]) {
+      const item = job('failure', { state, end: null, exit_code: '1:0', elapsed: '' });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
+      expect(html).toContain(t('job.failureReason'));
+      expect(html).toContain(t('job.nextStep'));
+      expect(html).toContain(jobReason(item, 'slurm')!.next);
+      const table = renderToStaticMarkup(
+        <FailuresTable jobs={[{ ...item, end: null, exit_code: '1:0' }]} groups={context.groups} />,
+      );
+      expect(table).not.toContain(t('failure.ran', { elapsed: '—' }));
+    }
+    for (const state of ['COMPLETED', 'CANCELLED', 'UNKNOWN']) {
+      expect(
+        renderToStaticMarkup(
+          <JobDetail job={job('ended', { state, end: hourAgo })} ctx={context} />,
+        ),
+      ).not.toContain(t('job.nextStep'));
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains unknown outcomes in full sentences and only offers useful inspection in %s',
+  (locale) => {
+    setLocale(locale);
+    for (const reason of ['outcomes_unavailable', 'outcome_not_reported'] as const) {
+      const event: DeckEvent = {
+        id: 1,
+        type: 'job.finished',
+        at: hourAgo,
+        source_id: 'a-alice',
+        data: { driver: 'slurm', outcome: 'unknown', outcome_reason: reason, job: job('ended') },
+      };
+      const html = renderToStaticMarkup(
+        <JobDetail job={eventJob(event)!} event={event} ctx={ctx(dash({}))} />,
+      );
+      expect(html).toContain(
+        t(
+          reason === 'outcomes_unavailable'
+            ? 'event.unknownUnavailable'
+            : 'event.unknownNotReported',
+        ),
+      );
+      expect(html.includes(t('failure.copyInspection'))).toBe(reason !== 'outcomes_unavailable');
+      expect(html.includes('sacct -j')).toBe(reason !== 'outcomes_unavailable');
+      expect(html).not.toContain(t('job.nextStep'));
+    }
+  },
+);

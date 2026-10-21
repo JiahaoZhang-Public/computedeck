@@ -1,5 +1,5 @@
 import { statusLabel } from './labels';
-import type { DeckEvent } from './types';
+import type { DeckEvent, Job } from './types';
 import { formatMessage, locale, t } from './i18n';
 import type { MessageKey } from './i18n';
 import { dateTime } from './domain';
@@ -166,4 +166,49 @@ export function eventTimeText(event: DeckEvent): string | null {
   if (!own && event.data.since)
     return timeRange(event.data.since, event.data.observed_at ?? event.at);
   return null;
+}
+
+/** An immutable event snapshot, with missing fields kept unknown. */
+export function eventJob(event: DeckEvent): Job | null {
+  const row = event.data.job;
+  if (!row?.id || !['job.started', 'job.finished', 'job.failed', 'job.ended'].includes(event.type))
+    return null;
+  const job: Job = {
+    source_id: event.source_id ?? '',
+    cluster_id: event.data.cluster_id ?? '',
+    name: row.id,
+    user: event.data.username ?? '',
+    account: '',
+    partition: null,
+    qos: null,
+    state: 'UNKNOWN',
+    gpu_count: null,
+    gpu_type: null,
+    cpu_count: null,
+    node: null,
+    elapsed: '',
+    reason: null,
+    gpu_utilization: null,
+    cpu_utilization: null,
+    memory_utilization: null,
+    observed_at: null,
+    ...row,
+    id: row.id,
+  };
+  if (event.type === 'job.finished') {
+    job.state =
+      event.data.state ?? (event.data.outcome === 'unknown' ? 'UNKNOWN' : (row.state ?? 'UNKNOWN'));
+    job.exit_code = event.data.exit_code === undefined ? row.exit_code : event.data.exit_code;
+    job.ended_at = event.data.ended_at;
+    if (event.data.outcome === 'unknown') {
+      job.end = null;
+      job.reason = null;
+    }
+  }
+  if (event.type === 'job.ended') {
+    job.state = 'UNKNOWN';
+    job.end = null;
+    job.ended_at = null;
+  }
+  return job;
 }

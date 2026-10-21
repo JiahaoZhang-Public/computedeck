@@ -36,7 +36,14 @@ References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 
 ## Terminal job history
 
-The existing 24-hour failure query and its raw `end` field are unchanged. A second,
+The 24-hour failure query now also requests offset-bearing times using
+`env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z`. Its additive `ended_at` retains the offset;
+the legacy `end` keeps its local-time text without an offset so existing event keys
+stay stable. `exit_status` and `exit_signal` split the raw `ExitCode` (`status:signal`),
+which is preserved. Missing or unrecognized values stay null. Both accounting queries
+read the long-standing `Timelimit` field into `time_limit`; `UNLIMITED`, `Partition_Limit`,
+empty and unknown values become null. No `StdOut` or `StdErr` fields are requested.
+A second,
 terminal-state `sacct` query runs in the same SSH call, separated by a marker. It includes
 COMPLETED, CANCELLED and all failure states, and reads Submit, Start and End under
 `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z`. Its window starts five minutes before the
@@ -49,4 +56,4 @@ remain read-only.
 Terminal records feed lifecycle events without enlarging the retained failure list.
 PBS and LSF use the offset from their existing remote clock for terminal timestamps;
 that current offset may differ across a daylight-saving transition. Their legacy
-failure-row `end` strings also remain unchanged. No extra SSH connection is added.
+failure-row `end` strings also remain unchanged, with `ended_at` carrying the offset. No extra SSH connection is added.

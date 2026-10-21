@@ -156,9 +156,16 @@ map to one `job.failed`, and all other outcomes to one `job.ended`. A handler th
 legacy rows remain readable and deliverable; cursors still use event IDs. `PLUGIN_API`
 and `WEB_API` remain 1.
 
+`GET /api/events?id=<positive integer>` returns a list containing that exact visible
+stored event, or an empty list when missing, expired or silent. With `demo=true` it
+reads only example events. The optional id takes precedence over grouping and leaves
+the default list response unchanged. The web uses it to restore `?event=<id>` job drawers.
+
 Drivers may supply `Batch.finished` as terminal history, separate from `Batch.failures`
 (the retained 24-hour failure list). Finished rows undergo the same row validation but
-are not copied into snapshots. Reconciliation retains only pending departures and recent
+are not copied into snapshots. `lifecycle_ended` records add an optional normalized
+`ended_at` to compare end instants across raw formats without changing event keys; old
+records fall back to an offset-bearing `end`. Reconciliation retains only pending departures and recent
 ending IDs/times in snapshot lists.
 
 ### Collection digests
@@ -264,6 +271,18 @@ Rules that keep the numbers honest:
 - Ids are `<cluster_id>:<id>`, so two logins on one cluster count a job once.
 - Fields shown as text (`name`, `user`, `qos`, `node`, `elapsed`, ...) are strings or
   `None`; numbers are stored as text, and a list or object rejects the whole batch.
+- Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
+  `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
+  heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,
+  negatives have no program status; LSF supplies a status; Kubernetes supplies the
+  container exit status and its explicit signal when present. `reason` retains the
+  scheduler reason, including LSF `EXIT_REASON`.
+- `ended_at` is the optional offset-bearing end time; legacy `end` retains its meaning
+  and event-key format. Optional text fields `time_limit` (duration as reported) and
+  `log_path` display only when supplied. Slurm supplies `Timelimit` (unlimited and
+  unspecified values are null), PBS supplies `Resource_List.walltime` and `Output_Path`
+  unchanged, and Kubernetes formats `spec.activeDeadlineSeconds` as an elapsed duration.
+  LSF does not request additional fields for limits or log paths.
 - Jobs and accounting rows may add `array_id` and `array_index` (text or `None`).
   Missing fields mean no known array membership; the web app never guesses from a job id.
   `array_id` is scheduler-local and grouped together with `cluster_id`; `array_index` is

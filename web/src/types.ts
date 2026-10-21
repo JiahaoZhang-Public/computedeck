@@ -113,6 +113,11 @@ export interface Job {
   started_at?: string | null;
   end?: string | null;
   exit_code?: string | null;
+  exit_status?: number | null;
+  exit_signal?: number | null;
+  ended_at?: string | null;
+  time_limit?: string | null;
+  log_path?: string | null;
   reason: string | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;
@@ -366,6 +371,7 @@ export interface DeckEvent {
     observed_at?: string;
     since?: string;
     source_name?: string;
+    driver?: string;
     cluster_id?: string;
     username?: string;
     job?: Partial<Job> & { exit_code?: string | null; end?: string | null };

@@ -593,3 +593,14 @@ def test_job_array_fields_follow_the_optional_text_contract(field: str) -> None:
     row[field] = ["123"]
     with pytest.raises(ValueError, match=f"Invalid collection text: {field}"):
         Batch(jobs=[row]).validate_rows()
+
+
+@pytest.mark.parametrize("field", ["exit_status", "exit_signal"])
+@pytest.mark.parametrize("value", [True, -1, 1.5, "9"])
+def test_exit_fields_require_nonnegative_integers(field, value) -> None:
+    from computedeck.drivers.base import validate_row
+
+    with pytest.raises(ValueError, match=field):
+        validate_row({"id": "cluster-a:1001", field: value})
+    for valid in (None, 0, 9, 127):
+        validate_row({"id": "cluster-a:1001", field: valid})

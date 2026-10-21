@@ -69,6 +69,7 @@ def sacct_line(**changes: str) -> str:
         "Elapsed": "01:02:03",
         "End": "2026-01-05T10:00:00",
         "ExitCode": "1:0",
+        "Timelimit": "02:00:00",
     }
     row.update(changes)
     return "|".join(row[field] for field in slurm._HISTORY_FIELDS)
@@ -392,7 +393,7 @@ def fake_cluster(
 ) -> Any:
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, command, options))
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             return job_line(UserName=SOURCE["username"]) + "\n"
         if failure is not None:
             raise failure
@@ -409,7 +410,7 @@ def fake_cluster(
             )
         if command.startswith("sacctmgr"):
             return "cluster-a|lab|alice||normal,debug,long\n"
-        if command.startswith("sacct"):
+        if " sacct " in command:
             return sacct_line() + "\n" + slurm.HISTORY_MARKER + "\n" + terminal_line()
         raise AssertionError(f"Unexpected command: {command}")
 
@@ -422,13 +423,13 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     calls: list[tuple[str, str, list[str] | None]] = []
 
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             calls.append((destination, command, options))
             return job_line(UserName=user, QOS="long") + "\n"
         if command.startswith("sacctmgr"):
             calls.append((destination, command, options))
             return f"cluster-a|lab|{user}||normal,debug,long\n"
-        if command.startswith("sacct"):
+        if " sacct " in command:
             calls.append((destination, command, options))
             return (
                 sacct_line(User=user)
@@ -465,12 +466,13 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
 
     assert all(dest == "cluster-a" and opts == ["-l", user] for dest, _, opts in calls)
     commands = [command for _, command, _ in calls]
-    squeue = next(command for command in commands if command.startswith("env SLURM_TIME_FORMAT="))
+    squeue = next(command for command in commands if " squeue " in command)
     assert f"--user={user}" in squeue
     assert "--array" in squeue
     assert squeue.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z squeue ")
     assert "SubmitTime" in squeue and "StartTime" in squeue
-    sacct = next(command for command in commands if command.startswith("sacct "))
+    sacct = next(command for command in commands if " sacct " in command)
+    assert sacct.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct ")
     assert f"--user={user}" in sacct
     assert "--allocations" in sacct and "--parsable2" in sacct
     # sacct needs both time bounds when filtering by state.
@@ -480,7 +482,6 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     assert {command.split()[0] for command in commands} == {
         "env",
         "scontrol",
-        "sacct",
         "sacctmgr",
     }
     for command in commands:
@@ -532,7 +533,7 @@ async def test_malformed_optional_output_becomes_a_warning(
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         if command == "scontrol -d show nodes -o":
             return "garbage\n"
-        if command.startswith("sacct"):
+        if " sacct " in command:
             return "1|2|3\n"
         return await healthy(destination, command, options)
 
@@ -814,7 +815,7 @@ async def test_upgrade_seeds_full_history_before_an_accounting_outage(
     run = fake_cluster([])
 
     async def ssh_run(alias: str, command: str, options: list[str] | None = None) -> str:
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             return ""
         if slurm.HISTORY_MARKER in command:
             history_calls.append(command)
@@ -868,3 +869,37 @@ def test_array_fields_on_queue_and_accounting_rows(
     assert len(rows) == 3
     for row in rows:
         assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize(
+    "code,status,signal",
+    [
+        ("0:9", 0, 9),
+        ("127:0", 127, 0),
+        ("0:125", 0, 125),
+        ("137", None, None),
+        ("Unknown", None, None),
+    ],
+)
+def test_failure_exit_fields_and_offset_preserve_raw_end(code, status, signal) -> None:
+    [row] = slurm.parse_failures(sacct_line(ExitCode=code, End="2026-01-05T10:00:00+0400"), SOURCE)
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (
+        None if code in slurm.EMPTY else code,
+        status,
+        signal,
+    )
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+    assert slurm.parse_failures(sacct_line(), SOURCE)[0]["ended_at"] is None
+
+
+@pytest.mark.parametrize(
+    "limit", ["02:00:00", "2-00:00:00", "UNLIMITED", "Partition_Limit", *sorted(slurm.EMPTY)]
+)
+@pytest.mark.parametrize("terminal", [False, True])
+def test_history_time_limit_is_known_or_null(limit, terminal) -> None:
+    line = terminal_line if terminal else sacct_line
+    [row] = slurm.parse_failures(line(Timelimit=limit), SOURCE, terminal=terminal)
+    assert row["time_limit"] == (limit if limit in {"02:00:00", "2-00:00:00"} else None)
+    with pytest.raises(SourceError, match="unexpected_output"):
+        slurm.parse_failures(line(Timelimit=limit).rsplit("|", 1)[0], SOURCE, terminal=terminal)

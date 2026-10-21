@@ -2039,6 +2039,28 @@ form > .form-error {
   padding: 7px 16px;
   font-size: 13px;
 }
+.activity-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.activity-job:hover .grow {
+  text-decoration: underline;
+}
+.failure-explanation code,
+.failure-inspection pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .activity li + li {
   border-top: 1px solid var(--border);
 }

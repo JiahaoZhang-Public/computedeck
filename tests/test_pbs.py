@@ -819,3 +819,35 @@ def test_array_fields_on_queue_and_history_rows(
     assert len(rows) == 3
     for row in rows:
         assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize(
+    "code,status,signal",
+    [
+        (1, 1, None),
+        (127, 127, None),
+        (137, 137, None),
+        (265, None, 9),
+        (-3, None, None),
+        (-29, None, None),
+    ],
+)
+def test_failure_exit_fields_preserve_pbs_codes(code, status, signal) -> None:
+    [row] = pbs.parse_failures(
+        history({"1001.pbs-server": finished(Exit_status=code)}, clock="2026-01-05T12:00:00+04:00"),
+        SOURCE,
+    )
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (str(code), status, signal)
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+
+
+@pytest.mark.parametrize("known", [False, True])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_failure_time_limit_and_output_path_use_existing_document(known, terminal) -> None:
+    job = finished(Resource_List={"walltime": "24:00:00"} if known else {})
+    if known:
+        job["Output_Path"] = "login01:/work/train/output.log"
+    [row] = pbs.parse_failures(history({"1001.pbs-server": job}), SOURCE, terminal=terminal)
+    assert row["time_limit"] == ("24:00:00" if known else None)
+    assert row["log_path"] == ("login01:/work/train/output.log" if known else None)

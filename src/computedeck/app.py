@@ -729,8 +729,14 @@ def create_app(
 
     @app.get("/api/events")
     async def recent_events(
-        limit: int = Query(default=50, ge=1, le=200), demo: bool = False, group: bool = False
+        limit: int = Query(default=50, ge=1, le=200),
+        demo: bool = False,
+        group: bool = False,
+        id: int | None = Query(default=None, ge=1),
     ) -> list[dict[str, Any]]:
+        if id is not None:
+            rows = demo_events() if demo else store().events(id - 1, 1)
+            return [row for row in rows if row["id"] == id and not row.get("silent")]
         if group:
             rows = demo_events() if demo else store().recent_event_collections(limit)
             return group_events(rows)[:limit]

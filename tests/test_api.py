@@ -1313,3 +1313,33 @@ def test_grouped_events_keep_interleaved_sources_types_and_collections(
     assert result[0]["group"]["ids"] == [15, 10, 5]
     assert result[1]["group"]["outcomes"] == {"completed": 2, "failed": 1}
     assert result[2]["group"]["outcomes"] == {}
+
+
+def test_event_id_lookup_is_exact_and_excludes_silent_rows(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": str(i),
+                "type": "job.failed",
+                "at": now(),
+                "silent": i == 2,
+                "data": {"job": {"id": f"cluster-a:{i}"}},
+            }
+            for i in range(1, 4)
+        ]
+    )
+    store.db.close()
+    [row] = client.get("/api/events?id=1").json()
+    assert row["id"] == 1 and row["data"]["job"]["id"] == "cluster-a:1"
+    assert client.get("/api/events?id=2").json() == []
+    assert client.get("/api/events?id=999").json() == []
+    assert client.get("/api/events?id=0").status_code == 422
+    assert client.get("/api/events?id=invalid").status_code == 422
+    demo = client.get("/api/events?demo=true").json()[0]
+    [row] = client.get(f"/api/events?demo=true&id={demo['id']}").json()
+    assert row["id"] == demo["id"] and row["type"] == demo["type"]

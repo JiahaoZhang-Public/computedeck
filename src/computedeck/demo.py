@@ -259,6 +259,9 @@ def dashboard() -> dict[str, Any]:
         "state": "OUT_OF_MEMORY",
         "end": (local_current - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:125",
+        "exit_status": 0,
+        "exit_signal": 125,
+        "ended_at": (current - timedelta(hours=5)).isoformat(),
     }
     timeout = {
         **_job(
@@ -268,6 +271,11 @@ def dashboard() -> dict[str, Any]:
         ),
         "end": (local_current - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:0",
+        "exit_status": 0,
+        "exit_signal": 0,
+        "ended_at": (current - timedelta(hours=2)).isoformat(),
+        "time_limit": "02:00:00",
+        "log_path": "/work/vision/logs/train.log",
     }
     instances = [
         {
@@ -534,11 +542,13 @@ def events() -> list[dict[str, Any]]:
                         "array_index": str(index),
                         "state": "FAILED",
                         "end": ended,
-                        "exit_code": "1:0",
+                        "exit_code": "0:9" if index == 0 else "1:0",
+                        "exit_status": 0 if index == 0 else 1,
+                        "exit_signal": 9 if index == 0 else 0,
                     },
                     "outcome": "failed",
                     "state": "FAILED",
-                    "exit_code": "1:0",
+                    "exit_code": "0:9" if index == 0 else "1:0",
                     "ended_at": ended,
                     "observed_at": (at - timedelta(minutes=40)).isoformat(),
                     "since": (at - timedelta(hours=3)).isoformat(),

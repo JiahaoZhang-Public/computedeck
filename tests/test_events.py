@@ -637,3 +637,88 @@ def test_group_time_uses_latest_child_time_not_highest_id() -> None:
     assert group["id"] == 3
     assert group["at"] == group["group"]["last_at"] == rows[0]["at"]
     assert group["group"]["first_at"] == rows[-1]["at"]
+
+
+def test_failure_normalized_end_sets_event_time_without_changing_its_key() -> None:
+    row = {**failure("9"), "ended_at": "2026-01-01T00:00:00+04:00"}
+    old = {"jobs": [job("9", "RUNNING")], "lifecycle_pending": []}
+    batch = Batch(jobs=[], failures=[row])
+    [event] = events.collected(SOURCE, old, batch, first=False)
+    assert event["at"] == event["data"]["ended_at"] == row["ended_at"]
+    assert event["key"] == f"job.finished:cluster-a:9:{row['end']}"
+    assert event["data"]["job"]["end"] == row["end"]
+    # A later terminal query adding the offset to `end` must not announce it again.
+    later = Batch(jobs=[], failures=[], finished=[{**row, "end": row["ended_at"]}])
+    assert events.collected(SOURCE, batch.snapshot(), later, first=False) == []
+
+
+def test_normalized_failure_end_cannot_resolve_a_newer_attempt() -> None:
+    old = {
+        "jobs": [{**job("9", "RUNNING"), "started_at": "2026-01-02T00:00:00+04:00"}],
+        "lifecycle_pending": [],
+    }
+    row = {**failure("9"), "ended_at": "2026-01-01T00:00:00+04:00"}
+    result = events.collected(SOURCE, old, Batch(jobs=[], failures=[row]), first=False)
+    assert result[0]["data"]["outcome"] == "unknown"
+
+
+@pytest.mark.parametrize("retained_failure", [False, True])
+@pytest.mark.parametrize("legacy_record", [False, True])
+def test_terminal_failure_is_not_announced_again_on_departure(
+    retained_failure, legacy_record
+) -> None:
+    queued = job("1", "COMPLETING")
+    terminal = {**failure("1"), "end": "2026-01-01T00:00:00+04:00"}
+    history = {**failure("1"), "ended_at": terminal["end"]}
+    first = Batch(jobs=[queued], failures=[history], finished=[terminal], capabilities=["history"])
+    rows = events.collected(SOURCE, {"jobs": [queued], "lifecycle_pending": []}, first, first=False)
+    old = first.snapshot()
+    assert old["lifecycle_ended"][0]["ended_at"] == terminal["end"]
+    if legacy_record:
+        old["lifecycle_ended"][0].pop("ended_at")
+    second = Batch(
+        jobs=[],
+        failures=[] if retained_failure else [history],
+        finished=[],
+        capabilities=["history"],
+    )
+    later = events.collected(SOURCE, old, second, first=False)
+    assert later == []
+    assert len(rows + later) == 1
+    assert rows[0]["key"] == f"job.finished:cluster-a:1:{terminal['end']}"
+    assert events.for_handler(rows[0], None)["type"] == "job.failed"
+    assert notify.matches(notify.migrate_rule({"events": ["job.failed"]}), rows[0])
+
+
+@pytest.mark.parametrize("legacy_record", [False, True])
+@pytest.mark.parametrize(
+    "end,expected", [("2025-12-31T20:00:00+00:00", 0), ("2026-01-01T01:00:00+04:00", 1)]
+)
+def test_normalized_end_deduplication_preserves_distinct_attempts(
+    legacy_record, end, expected
+) -> None:
+    terminal = {**failure("1"), "end": "2026-01-01T00:00:00+04:00"}
+    first = Batch(jobs=[], finished=[terminal])
+    events.collected(SOURCE, {"lifecycle_pending": []}, first, first=False)
+    old = first.snapshot()
+    if legacy_record:
+        old["lifecycle_ended"][0].pop("ended_at")
+    second = Batch(jobs=[], finished=[{**terminal, "end": end}])
+    rows = events.collected(SOURCE, old, second, first=False)
+    assert len(rows) == expected
+    if expected:
+        assert rows[0]["key"] == f"job.finished:cluster-a:1:{end}"
+        assert rows[0]["data"]["outcome"] == "failed"
+
+
+def test_legacy_naive_end_stays_conservative_but_same_raw_key_can_retry() -> None:
+    raw = failure("1")
+    first = Batch(jobs=[], failures=[raw])
+    [original] = events.collected(SOURCE, {"lifecycle_pending": []}, first, first=False)
+    old = first.snapshot()
+    old["lifecycle_ended"][0].pop("ended_at")
+    normalized = {**raw, "ended_at": raw["end"] + "+04:00"}
+    [retry] = events.collected(SOURCE, old, Batch(jobs=[], failures=[normalized]), first=False)
+    assert retry["key"] == original["key"]
+    changed_raw = {**normalized, "end": normalized["ended_at"]}
+    assert events.collected(SOURCE, old, Batch(jobs=[], finished=[changed_raw]), first=False) == []

@@ -90,6 +90,13 @@ ComputeDeck keeps limits in the shape of Slurm QoS records and compares each lim
 
 `exit_reason` with `TERM_RUNLIMIT` is shown as `TIMEOUT`, `TERM_MEMLIMIT` as `OUT_OF_MEMORY`, everything else as `FAILED`. Jobs killed by their owner or an administrator (`TERM_OWNER`, `TERM_ADMIN`, `TERM_FORCE_*`) are cancellations and are left out, as Slurm's `CANCELLED` jobs are. `end` is the cluster's local time, like Slurm's `End`.
 
+Failure rows preserve the full `EXIT_REASON` as `reason` and the raw `exit_code`.
+`exit_status` is its nonnegative integer value when known; no signal is inferred.
+`ended_at` adds the remote clock's offset without changing the legacy local `end`.
+The drawer shows the scheduler reason verbatim and offers a copy-only `bhist -l` command.
+Time limits and log paths are not collected: the optional field lists remain unchanged
+for compatibility with older LSF releases.
+
 ## Warnings
 
 | Code | Meaning |

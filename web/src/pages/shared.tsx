@@ -4,6 +4,7 @@ import type {
   Attention,
   CollectionNode,
   Dashboard,
+  DeckEvent,
   DriverInfo,
   FailedJob,
   Health,
@@ -22,6 +23,7 @@ import { t } from '../i18n';
 import type { PluginProps, WebPlugin } from '../plugins';
 import { arrayLabel, jobGpuResources, relativeTime } from '../domain';
 import type { JobArray } from '../domain';
+import { failureEnd } from '../failures';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { Chips, Empty, Status } from '../ui';
 
@@ -65,6 +67,7 @@ export type Ctx = {
   addInstance: () => void;
   showSSH: () => void;
   openJob: (job: Job) => void;
+  openEvent: (event: DeckEvent) => void;
   openArray: (array: JobArray) => void;
   openInstance: (item: Instance) => void;
   copy: (text: string) => Promise<void>;
@@ -439,13 +442,15 @@ export function FailuresTable({
               </td>
               <td data-label={t('jobs.col.result')}>
                 <Status state={job.state} />
-                <span className="sub">{jobReason(job, '')?.next}</span>
+                {job.elapsed && (
+                  <span className="sub">{t('failure.ran', { elapsed: job.elapsed })}</span>
+                )}
               </td>
               <td className="mono" data-label={t('jobs.col.exitCode')}>
                 {job.exit_code ?? '—'}
               </td>
-              <td title={job.end ?? ''} data-label={t('jobs.col.ended')}>
-                {jobTime(job.end)}
+              <td title={jobTime(job.ended_at || job.end)} data-label={t('jobs.col.ended')}>
+                {failureEnd(job)}
               </td>
             </tr>
           ))}

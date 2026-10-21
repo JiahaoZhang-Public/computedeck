@@ -1154,3 +1154,42 @@ def test_kubernetes_jobs_do_not_infer_arrays_from_names() -> None:
     [job] = kubernetes.parse_jobs([pod("1234_7")], SOURCE, {}, AT)
     assert job.get("array_id") is None
     assert job.get("array_index") is None
+
+
+@pytest.mark.parametrize("signal", [None, 9])
+@pytest.mark.parametrize("code", [137, -1])
+def test_failure_exit_status_does_not_infer_a_signal_from_137(signal, code) -> None:
+    state = terminated(code, "Error", ago(hours=3), ago(hours=2))
+    if signal is not None:
+        state["terminated"]["signal"] = signal
+    workload = pod(
+        "killed",
+        status={"phase": "Failed", "containerStatuses": [{"name": "train", "state": state}]},
+    )
+    [row] = kubernetes.parse_failures([workload], SOURCE, {}, AT)
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (
+        str(code),
+        code if code >= 0 else None,
+        signal,
+    )
+    assert row["reason"] == "Error"
+    assert row["ended_at"] == row["end"]
+
+
+@pytest.mark.parametrize("deadline,limit", [(None, None), (7200, "2:00:00"), (90061, "1-01:01:01")])
+def test_failure_time_limit_uses_pod_deadline(deadline, limit) -> None:
+    workload = pod(
+        "train",
+        status={
+            "phase": "Failed",
+            "containerStatuses": [
+                {"name": "train", "state": terminated(1, "Error", ago(hours=3), ago(hours=2))}
+            ],
+        },
+    )
+    if deadline is not None:
+        workload["spec"]["activeDeadlineSeconds"] = deadline
+    for parse in (kubernetes.parse_failures, kubernetes.parse_finished):
+        [row] = parse([workload], SOURCE, {}, AT)
+        assert row["time_limit"] == limit
+        assert row.get("log_path") is None

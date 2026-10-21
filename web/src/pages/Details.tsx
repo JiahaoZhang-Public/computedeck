@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
-import type { Instance, Job, SSHConfig } from '../types';
+import type { DeckEvent, Instance, Job, SSHConfig } from '../types';
+import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
@@ -148,21 +149,67 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
   );
 }
 
-export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
+export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: DeckEvent }) {
   const gpu = jobGpuResources(job);
-  const terms = jobTerms(
-    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ?? '',
-  );
-  const pending = job.state.toUpperCase() === 'PENDING';
-  const explanation = jobReason(
-    job,
-    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ?? '',
-  );
+  const driver =
+    event?.data.driver ??
+    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ??
+    '';
+  const terms = jobTerms(driver);
+  const failure = failureExplanation(job, driver);
+  const historical = !!event || !!job.end || !!failure;
+  const pending = !historical && job.state.toUpperCase() === 'PENDING';
+  const explanation = pending ? jobReason(job, driver) : null;
+  const nextStep = failure ? jobReason(job, driver)?.next : null;
+  const command =
+    historical && event?.data.outcome_reason !== 'outcomes_unavailable'
+      ? inspectionCommand(job, driver)
+      : null;
+  const unknownEnd =
+    event?.type === 'job.ended' ||
+    (event?.type === 'job.finished' && event.data.outcome === 'unknown');
+  const observed = event
+    ? (event.data.observed_at ??
+      job.observed_at ??
+      (['job.failed', 'job.ended'].includes(event.type) ? event.at : null))
+    : historical
+      ? ctx.data.failure_history_observed_at
+      : job.observed_at;
   return (
     <div className="drawer-body">
+      {event && <p className="panel-note">{t('event.recordedJob')}</p>}
+      {unknownEnd && (
+        <p className="callout">
+          {event?.type === 'job.ended'
+            ? t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })
+            : t(
+                event?.data.outcome_reason === 'outcomes_unavailable'
+                  ? 'event.unknownUnavailable'
+                  : 'event.unknownNotReported',
+              )}
+        </p>
+      )}
+      {failure && (
+        <div className="callout red failure-explanation">
+          <strong>{t('job.failureReason')}</strong>
+          {failure.summary && <p>{failure.summary}</p>}
+          {failure.evidence && <p>{failure.evidence}</p>}
+          {job.reason && (
+            <p>
+              {t('failure.reason')}: <code>{job.reason}</code>
+            </p>
+          )}
+          {nextStep && (
+            <>
+              <strong>{t('job.nextStep')}</strong>
+              <p>{nextStep}</p>
+            </>
+          )}
+        </div>
+      )}
       {explanation && (
         <div className="callout">
-          <strong>{t(pending ? 'job.reason' : 'job.failureReason')}</strong>
+          <strong>{t('job.reason')}</strong>
           <p>{explanation.summary}</p>
           {job.reason && <code>{job.reason}</code>}
           <strong>{t('job.nextStep')}</strong>
@@ -170,10 +217,10 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
         </div>
       )}
       <dl className="kv">
-        {job.end && (
+        {(job.ended_at || job.end) && (
           <div>
             <dt>{t('jobs.col.ended')}</dt>
-            <dd>{jobTime(job.end)}</dd>
+            <dd title={jobTime(job.ended_at || job.end)}>{failureEnd(job)}</dd>
           </div>
         )}
         {job.exit_code != null && (
@@ -192,7 +239,7 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
         </div>
         <div>
           <dt>{t('job.user')}</dt>
-          <dd>{job.user}</dd>
+          <dd>{job.user || '—'}</dd>
         </div>
         <div>
           <dt>{t(terms.account)}</dt>
@@ -222,34 +269,84 @@ export function JobDetail({ job, ctx }: { job: Job; ctx: Ctx }) {
           <dt>{t('job.node')}</dt>
           <dd className="mono">{job.node || '—'}</dd>
         </div>
+        {(!historical || job.submitted_at) && (
+          <div>
+            <dt>{t('job.submitted')}</dt>
+            <dd>{jobTime(job.submitted_at)}</dd>
+          </div>
+        )}
+        {(!historical || job.started_at) && (
+          <div>
+            <dt>{t('job.started')}</dt>
+            <dd>{jobTime(job.started_at)}</dd>
+          </div>
+        )}
+        {(!historical || (job.submitted_at && job.started_at)) && (
+          <div>
+            <dt>{t('job.waiting')}</dt>
+            <dd>{jobWaiting(job)}</dd>
+          </div>
+        )}
         <div>
-          <dt>{t('job.submitted')}</dt>
-          <dd>{jobTime(job.submitted_at)}</dd>
+          <dt>
+            {t(
+              historical && !unknownEnd && event?.type !== 'job.started'
+                ? 'failure.ranFor'
+                : 'jobs.col.elapsed',
+            )}
+          </dt>
+          <dd className="mono">
+            {pending
+              ? '—'
+              : job.elapsed && job.time_limit
+                ? t('failure.ranLimit', { elapsed: job.elapsed, limit: job.time_limit })
+                : job.elapsed || '—'}
+          </dd>
         </div>
+        {job.time_limit && !job.elapsed && (
+          <div>
+            <dt>{t('failure.limit')}</dt>
+            <dd>{job.time_limit}</dd>
+          </div>
+        )}
+        {job.log_path && (
+          <div>
+            <dt>{t('failure.logPath')}</dt>
+            <dd className="mono">{job.log_path}</dd>
+          </div>
+        )}
         <div>
-          <dt>{t('job.started')}</dt>
-          <dd>{jobTime(job.started_at)}</dd>
-        </div>
-        <div>
-          <dt>{t('job.waiting')}</dt>
-          <dd>{jobWaiting(job)}</dd>
-        </div>
-        <div>
-          <dt>{t('jobs.col.elapsed')}</dt>
-          <dd className="mono">{pending ? '—' : job.elapsed || '—'}</dd>
-        </div>
-        <div>
-          <dt>{t('common.sampledAt')}</dt>
-          <dd title={jobTime(job.observed_at)}>{relativeTime(job.observed_at)}</dd>
+          <dt>
+            {t(
+              event
+                ? 'event.observedAt'
+                : historical
+                  ? 'failure.historyUpdated'
+                  : 'common.sampledAt',
+            )}
+          </dt>
+          <dd title={jobTime(observed)}>{relativeTime(observed)}</dd>
         </div>
       </dl>
-      <Metrics
-        values={[
-          { label: 'GPU', value: job.gpu_utilization },
-          { label: 'CPU', value: job.cpu_utilization },
-          { label: t('common.memory'), value: job.memory_utilization },
-        ]}
-      />
+      {!historical && (
+        <Metrics
+          values={[
+            { label: 'GPU', value: job.gpu_utilization },
+            { label: 'CPU', value: job.cpu_utilization },
+            { label: t('common.memory'), value: job.memory_utilization },
+          ]}
+        />
+      )}
+      {command && (
+        <div className="failure-inspection">
+          <pre className="config-preview">{command}</pre>
+          <button className="button" onClick={() => void ctx.copy(command)}>
+            <Copy size={14} />
+            {t('failure.copyInspection')}
+          </button>
+          <p className="panel-note">{t('failure.copyOnly')}</p>
+        </div>
+      )}
     </div>
   );
 }

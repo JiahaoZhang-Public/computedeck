@@ -388,3 +388,14 @@ def test_demo_array_has_mixed_states_and_element_counts() -> None:
     assert {job["id"] for job in elements} <= set(data["summary"]["jobs"]["listed_ids"])
     assert len(data["summary"]["jobs"]["running_ids"]) >= 4
     assert len(data["summary"]["jobs"]["pending_ids"]) >= 25
+
+
+def test_demo_failure_details_include_normalized_exits_and_known_limits() -> None:
+    from computedeck.demo import events
+
+    failures = dashboard()["recent_failures"]
+    assert all(row["ended_at"] and isinstance(row["exit_signal"], int) for row in failures)
+    timeout = next(row for row in failures if row["state"] == "TIMEOUT")
+    assert timeout["time_limit"] == timeout["elapsed"]
+    assert timeout["log_path"]
+    assert any(row["data"].get("job", {}).get("exit_signal") == 9 for row in events())

@@ -77,6 +77,9 @@ TEXT_FIELDS = (
     "elapsed",
     "reason",
     "exit_code",
+    "ended_at",
+    "time_limit",
+    "log_path",
     "platform",
     "host",
     "username",
@@ -135,7 +138,7 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
     if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
         raise ValueError("Invalid collection port")
     _check_message(row.get("ssh_error"), "ssh_error")
-    for key in ("gpu_count", "gpu_allocated", "gpu_observed_count"):
+    for key in ("gpu_count", "gpu_allocated", "gpu_observed_count", "exit_status", "exit_signal"):
         value = row.get(key)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or value < 0

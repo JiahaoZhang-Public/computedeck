@@ -4,7 +4,14 @@ import type { DeckEvent } from '../types';
 import { api } from '../api';
 import { t } from '../i18n';
 import { relativeTime } from '../domain';
-import { activityEvents, eventText, eventTone, eventTimeTitle, eventTimeText } from '../events';
+import {
+  activityEvents,
+  eventJob,
+  eventText,
+  eventTone,
+  eventTimeTitle,
+  eventTimeText,
+} from '../events';
 import { Panel } from '../ui';
 
 /** What changed between collections: jobs that started, ended or failed, sources that broke. */
@@ -12,10 +19,12 @@ export function ActivityPanel({
   demo,
   limit = 12,
   token,
+  onOpen,
 }: {
   demo: boolean;
   limit?: number;
   token?: string;
+  onOpen?: (event: DeckEvent) => void;
 }) {
   const [events, setEvents] = useState<DeckEvent[] | null>(null);
   const loadId = useRef(0);
@@ -40,7 +49,7 @@ export function ActivityPanel({
       {events?.length ? (
         <ul className="activity">
           {events.map((event) => (
-            <ActivityRow key={event.id} event={event} />
+            <ActivityRow key={event.id} event={event} onOpen={onOpen} />
           ))}
         </ul>
       ) : (
@@ -50,7 +59,7 @@ export function ActivityPanel({
   );
 }
 
-function ActivityRow({ event }: { event: DeckEvent }) {
+function ActivityRow({ event, onOpen }: { event: DeckEvent; onOpen?: (event: DeckEvent) => void }) {
   const content = (
     <>
       <span className={`dot ${eventTone(event)}`} />
@@ -63,14 +72,25 @@ function ActivityRow({ event }: { event: DeckEvent }) {
       </time>
     </>
   );
-  if (!event.group) return <li>{content}</li>;
+  if (!event.group)
+    return (
+      <li>
+        {onOpen && eventJob(event) ? (
+          <button className="activity-job" onClick={() => onOpen(event)}>
+            {content}
+          </button>
+        ) : (
+          content
+        )}
+      </li>
+    );
   return (
     <li className="activity-group">
       <details>
         <summary>{content}</summary>
         <ul className="activity">
           {event.group.events.map((child) => (
-            <ActivityRow key={child.id} event={child} />
+            <ActivityRow key={child.id} event={child} onOpen={onOpen} />
           ))}
           {event.group.count > event.group.events.length && (
             <li>{t('event.more', { count: event.group.count - event.group.events.length })}</li>

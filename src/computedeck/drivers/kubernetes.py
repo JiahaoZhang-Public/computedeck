@@ -26,6 +26,7 @@ from .base import (
     DriverInfo,
     SourceError,
     cluster_state,
+    integer,
     message,
     now,
     options,
@@ -423,6 +424,7 @@ def _failure(pod: dict[str, Any]) -> dict[str, Any] | None:
             "state": failed_state(status),
             "end": max(ends),
             "exit_code": _exit_code(latest),
+            "exit_signal": integer(latest.get("signal")),
             "reason": _text(status.get("reason"))
             or _disruption(status)
             or _text(latest.get("reason")),
@@ -434,6 +436,7 @@ def _failure(pod: dict[str, Any]) -> dict[str, Any] | None:
         "state": "OUT_OF_MEMORY" if latest.get("reason") == "OOMKilled" else "FAILED",
         "end": last_end,
         "exit_code": _exit_code(latest),
+        "exit_signal": integer(latest.get("signal")),
         "reason": _text(latest.get("reason")),
         "started": _time(latest.get("startedAt")),
     }
@@ -458,11 +461,16 @@ def parse_failures(
         if job is None:
             continue
         started = failure["started"]
+        deadline = integer(_dict(pod.get("spec")).get("activeDeadlineSeconds"))
         job.update(
+            time_limit=elapsed(deadline) if deadline is not None else None,
             state=failure["state"],
             reason=failure["reason"],
             elapsed=elapsed((failure["end"] - started).total_seconds()) if started else "",
             end=failure["end"].isoformat(),
+            ended_at=failure["end"].isoformat(),
+            exit_status=integer(failure["exit_code"]),
+            exit_signal=failure["exit_signal"],
             exit_code=None if failure["exit_code"] is None else str(failure["exit_code"]),
         )
         failures[job["id"]] = job

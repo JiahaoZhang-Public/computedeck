@@ -16,7 +16,7 @@ async def test_lost_qos_queries_cannot_reuse_a_previous_verified_grant(
     queries_available = True
 
     async def run(alias, command, options=None):
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             return ""
         if command == "scontrol -d show nodes -o":
             return "NodeName=g1 State=IDLE CfgTRES=cpu=64,gres/gpu=8 AllocTRES= Partitions=gpu\n"
@@ -32,7 +32,7 @@ async def test_lost_qos_queries_cannot_reuse_a_previous_verified_grant(
             if queries_available:
                 return "cluster-a|lab|alice||normal\n"
             raise ssh.SSHError("Database temporarily unavailable")
-        if command.startswith("sacct"):
+        if " sacct " in command:
             return ""
         raise AssertionError(command)
 

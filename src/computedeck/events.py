@@ -136,7 +136,11 @@ def collected(
     for job_id, job in {**previous, **pending, **current}.items():
         reported = terminal.get(job_id)
         started = job_time(job.get("started_at"))
-        end = job_time(reported.get("end")) if reported else None
+        end = (
+            (job_time(reported.get("ended_at")) or job_time(reported.get("end")))
+            if reported
+            else None
+        )
         if started and end and datetime.fromisoformat(end) < datetime.fromisoformat(started):
             terminal.pop(job_id, None)
     waiting: list[dict[str, Any]] = []
@@ -187,13 +191,16 @@ def collected(
         held_silent = pending.get(job_id, {}).get("held_silent", False)
         job = {key: value for key, value in job.items() if key not in {"held_at", "held_silent"}}
         raw_end = None if job_id in unknown else job.get("end")
-        end = job_time(raw_end)
+        end = None if job_id in unknown else job_time(job.get("ended_at")) or job_time(raw_end)
         before = ended.get(job_id)
-        # Late or incomplete accounting must not announce the same ending again.
-        if before and (not end or not job_time(before.get("end"))):
-            # Keep retrying the same key if event insertion was interrupted after the
-            # snapshot write; an offset added later must not create a second key.
-            if not raw_end or raw_end != before.get("end"):
+        # Retry the same key, but never announce one ending in two raw formats.
+        if before and raw_end != before.get("end"):
+            previous_end = job_time(before.get("ended_at")) or job_time(before.get("end"))
+            if (
+                not end
+                or not previous_end
+                or datetime.fromisoformat(end) == datetime.fromisoformat(previous_end)
+            ):
                 continue
         outcome = "unknown" if job_id in unknown else str(job.get("state", "")).lower()
         if outcome not in OUTCOMES:
@@ -226,7 +233,7 @@ def collected(
                 },
             }
         )
-        ended[job_id] = {"id": job_id, "end": raw_end, "observed_at": at}
+        ended[job_id] = {"id": job_id, "end": raw_end, "ended_at": end, "observed_at": at}
     if gap:
         for event in events:
             event["data"]["since"] = source["last_success"]

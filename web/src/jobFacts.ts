@@ -29,6 +29,7 @@ const SLURM_REASONS: Record<string, string> = {
 const FAILURE_REASONS: Record<string, string> = {
   OUT_OF_MEMORY: 'memory',
   TIMEOUT: 'timeout',
+  DEADLINE: 'timeout',
   NODE_FAIL: 'nodeFailure',
   BOOT_FAIL: 'nodeFailure',
   PREEMPTED: 'preempted',

@@ -428,7 +428,8 @@ def test_failures_keep_own_exits_of_the_last_24_hours() -> None:
     assert timeout["end"] == "2026-01-05T11:00:00"
     assert (timeout["gpu_count"], timeout["cpu_count"], timeout["node"]) == (None, 4, "node003")
     assert failures[1]["gpu_count"] == 4
-    assert timeout["reason"] is None and timeout["observed_at"]
+    assert timeout["reason"] == "TERM_RUNLIMIT: job killed after reaching LSF run time limit"
+    assert timeout["observed_at"]
 
 
 def test_failure_history_framing() -> None:
@@ -817,3 +818,18 @@ def test_array_fields_on_queue_and_history_rows(
     assert len(rows) == 3
     for row in rows:
         assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize("code,status", [("1", 1), ("127", 127), ("137", 137), ("-", None)])
+def test_failure_exit_fields_and_reason(code, status) -> None:
+    [row] = lsf.parse_failures(
+        history(
+            failed(EXIT_CODE=code, EXIT_REASON="TERM_MEMLIMIT"), clock="2026-01-05T12:00:00+04:00"
+        ),
+        SOURCE,
+    )
+    assert row["exit_status"] == status
+    assert row["exit_signal"] is None
+    assert row["reason"] == "TERM_MEMLIMIT"
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
