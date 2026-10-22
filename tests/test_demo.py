@@ -572,8 +572,11 @@ def test_example_costs_have_provider_and_observed_starts_and_unpriced_instances(
         elif instance_lifecycle(item["state"]) == "held":
             assert item["seen_running_since"] < item["observed_at"]
     spend = data["summary"]["spend"]
-    assert spend["rates"] == {"USD": 1.04}
-    assert spend["priced"] == 2
+    assert spend["rates"] == {"USD": 1.04, "EUR": 0.4}
+    manual = next(i for i in data["instances"] if i["name"] == "dev-box")
+    assert manual["hourly_cost"] == 0.4 and manual["currency"] == "EUR"
+    assert next(i for i in data["instances"] if i["name"] == "build-box")["hourly_cost"] is None
+    assert spend["priced"] == 3
     assert {i["subject"]["id"]: i["reason"]["code"] for i in spend["unpriced"]} == {
         "example:runpod-secondary": "summary_source_failed",
         ec2["id"]: "summary_price_missing",

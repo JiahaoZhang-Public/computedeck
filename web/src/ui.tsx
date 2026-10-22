@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { ReactNode } from 'react';
 import type { Group } from './groups';
 import { initials } from './groups';
@@ -190,5 +191,63 @@ export function BrandMark({ size = 20 }: { size?: number }) {
         d="M42.12 2.15Q50.03 -2.12 57.96 2.09L93.35 20.85Q107.11 28.14 93.41 35.54L58.14 54.58Q50.24 58.85 42.30 54.64L6.91 35.89Q-6.85 28.60 6.85 21.20Z"
       />
     </svg>
+  );
+}
+
+export interface RankedItem {
+  key: string;
+  label: string;
+  value: number | null;
+  partial?: boolean;
+  group?: Group;
+  note?: string;
+}
+
+/** Known values rank first; unknown members keep Other a lower bound. */
+export function RankedBars({
+  items,
+  format = String,
+  limit = 8,
+  ordered = false,
+}: {
+  items: RankedItem[];
+  format?: (value: number) => string;
+  limit?: number;
+  ordered?: boolean;
+}) {
+  const sorted = ordered ? items : [...items].sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+  const rows = sorted.slice(0, limit);
+  const rest = sorted.slice(limit);
+  if (rest.length)
+    rows.push({
+      key: '__other',
+      label: t('usage.other'),
+      value: rest.every((item) => item.value == null)
+        ? null
+        : rest.reduce((sum, item) => sum + (item.value ?? 0), 0),
+      partial: rest.some((item) => item.partial || item.value == null),
+    });
+  const max = Math.max(0, ...rows.map((item) => item.value ?? 0));
+  return (
+    <ul className="ranked-bars">
+      {rows.map((item) => (
+        <li key={item.key}>
+          <span className="with-mark">
+            {!ordered && <GroupMark group={item.group} label={item.label} />}
+            <span>{item.label}</span>
+          </span>
+          <span
+            className={`ranked-track ${item.value == null || item.partial ? 'partial' : ''}`}
+            aria-hidden="true"
+          >
+            <i style={{ width: `${max ? ((item.value ?? 0) / max) * 100 : 0}%` }} />
+          </span>
+          <span className="ranked-value">
+            {item.value == null ? '—' : `${item.partial ? '≥ ' : ''}${format(item.value)}`}
+          </span>
+          {item.note && <span className="ranked-note">{item.note}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

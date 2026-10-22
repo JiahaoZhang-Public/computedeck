@@ -53,6 +53,15 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (path: string) => {
     let result: unknown = [];
     if (path.startsWith('/api/dashboard')) result = data;
+    else if (path.startsWith('/api/history'))
+      result = {
+        points: data.history,
+        rollups: {
+          start: new Date(Date.now() - 86400000).toISOString(),
+          end: new Date().toISOString(),
+          buckets: [],
+        },
+      };
     else if (path === '/api/marketplace') result = { marketplaces: [], plugins: [] };
     else if (path === '/api/settings') result = {};
     else if (path === '/api/health') result = { polling: true, plugins: {} };

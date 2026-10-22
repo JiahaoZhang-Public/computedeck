@@ -313,13 +313,9 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
     const html = renderToStaticMarkup(<OverviewPage ctx={context} />);
     const headings = [...html.matchAll(/<h2>([^<]*)/g)].map((match) => match[1]);
     expect(headings).toEqual(
-      [
-        t('overview.attention'),
-        t('overview.jobs'),
-        t('activity.title'),
-        t('overview.sources'),
-        t('chart.heading'),
-      ].map((heading) => heading.replaceAll('&', '&amp;')),
+      [t('overview.attention'), t('overview.jobs'), t('activity.title'), t('overview.sources')].map(
+        (heading) => heading.replaceAll('&', '&amp;'),
+      ),
     );
     expect(html.startsWith('<div class="stats">')).toBe(true);
     expect(html).toMatch(/class="[^"]*\bjobs-table\b[^"]*"/);
@@ -328,12 +324,14 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
     const groups = overviewGroupsTable(html);
     expect(groups).toContain('<strong>Cluster A</strong>');
     expect(html.indexOf('class="table jobs-table"')).toBeLessThan(html.indexOf(groups));
+    expect(html).toContain(`href="#/usage">${t('usage.view')}`);
+    expect(html).not.toContain('class="trend-chart"');
     expect(html).toContain(`href="#/jobs">${t('overview.allJobs')}`);
     if (demo) {
       expect(html).not.toContain('data-testid="overview-aside"');
     } else {
       expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(
-        html.indexOf(t('chart.heading')),
+        html.indexOf(t('usage.view')),
       );
     }
   });

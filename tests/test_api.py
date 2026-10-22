@@ -779,11 +779,11 @@ def test_unreadable_rows_do_not_stop_the_service_or_any_page(data_dir: Path) -> 
 
 def test_history_endpoint_bounds_and_demo(client: TestClient) -> None:
     assert client.get("/api/history?hours=0").status_code == 422
-    assert client.get("/api/history?hours=169").status_code == 422
+    assert client.get("/api/history?hours=721").status_code == 422
     assert client.get("/api/history").json() == {"hours": 24, "points": []}
     week = client.get("/api/history?hours=168&demo=true").json()
     assert week["hours"] == 168
-    assert len(week["points"]) == 337
+    assert len(week["points"]) == 334  # A two-hour example collection gap.
     data = client.get("/api/dashboard?demo=true").json()
     summary = data["summary"]
     early = week["points"][0]
@@ -1929,3 +1929,12 @@ def test_catchup_completion_is_visible_and_keeps_legacy_delivery(
     assert len(rows) == 1 and rows[0]["data"]["since"] == source["last_success"]
     assert rows[0]["type"] == "job.finished"
     assert events.for_handler(rows[0], frozenset(sdk.EVENT_TYPES))["type"] == "job.ended"
+
+
+def test_rollup_api_is_opt_in_and_demo_exercises_missing_days(client: TestClient) -> None:
+    assert "rollups" not in client.get("/api/history").json()
+    result = client.get("/api/history?hours=720&demo=true&rollup=1").json()
+    assert result["hours"] == 720
+    assert all("by_group" not in p for p in result["points"])
+    assert any(not b["observed_seconds"] for b in result["rollups"]["buckets"])
+    assert any(b["observed_seconds"] for b in result["rollups"]["buckets"])

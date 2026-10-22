@@ -629,8 +629,8 @@ in this observation window**, never a lower-bound claim about this run: polling 
 a stop and restart. An unobserved start remains unknown. Hand-added machines do not receive a stored observation window.
 When the source is stale, disabled, failed or lacks current instance data, estimates stop
 at its last successful collection and say **As of** with the local time. A missing
-observation time leaves cost unknown. Today, seven-day spend and history rollups belong
-to the later Usage & cost slice.
+observation time leaves cost unknown. Observed daily estimates are described under
+Usage & cost below.
 
 ## 运行费用估算
 
@@ -660,4 +660,69 @@ GPUhub API 文档未说明小时基础价格是每 GPU 还是每容器，因此�
 手动添加的机器不记录观测起始时间。连续两次观测必须均为运行状态，间隔不超过两倍采集周期；停止、状态未知、消失、时间倒退、平台
 报告重启或更长的间隔会重置窗口。轮询可能漏掉中间的停止和重启，因此这不是本次运行
 费用的下界。采集过期、失败、停用或缺少当前实例数据时，估算停在最后成功采集时间并
-显示「截至」；时间未知则费用未知。今日和七天费用及历史汇总留给后续「使用与费用」功能。
+显示「截至」；时间未知则费用未知。按观测历史汇总的每日费用见下方「用量与费用」。
+
+## Usage & cost: now and over range
+
+Usage & cost (`#/usage`) is the home of the allocation/utilization chart; Overview
+links to it. **Now** uses `summary.groups` for your GPUs in use and `summary.spend`
+for hourly rates by group, with currencies kept separate. The top eight groups are
+shown separately; Other retains any unknown members as a lower bound. Unknown values
+use an empty hatched track. Missing prices, uncertain lifecycle states and unavailable
+cloud connections remain named below the current figures. The daily-rate line is a
+projection, not a bill. Priced running instances open their drawers by keyboard or
+pointer and show the same per-run estimates as Cloud; no run detail is shown when
+the start is unknown. Disabled connections are excluded. Each heading names its
+currency once, and hourly units follow the viewer's language. A currency's bars omit
+groups with no rate in that currency and no unknown cost. Bars scale to the largest
+known value, including rates below one; all-zero or unknown tracks stay empty.
+
+**Over range** keeps `24h`, `7d` or `30d` in the URL; legacy `24` maps to 24h,
+while `72`, `3d` and `168` map to 7d so an offered chip is always selected. New history
+points retain the already-computed group figures, including known allocation,
+missing-source counts, currency rates and cost uncertainty. Raw points
+are kept for 30 days. Opt-in server rollups integrate these raw observations, never
+the chart's thinned points, using sample-and-hold until the next observation, capped
+at 30 minutes in every range. This uses the chart rule's floor at raw resolution,
+without its scaling for thinned points. The same observed hour therefore has the
+same GPU-hours, spend and coverage in every range. Nothing is extrapolated past
+the response time. Daily bars use the viewer's local calendar days;
+boundary hourly buckets are prorated, including timezone offsets and DST boundaries.
+
+Partial days show observation coverage; uncertain quantities show lower bounds or
+unknown. Before-upgrade days and days without collection read **Not recorded**, not
+zero. Coverage means collection time, not proof that every source or price was known.
+A difference within one second counts as full coverage to tolerate timestamp precision.
+GPU-hours show at most one decimal below 100 and none from 100 up; unknown totals omit
+the unit.
+Daily spend and the Today / Last 7 days totals are **estimated from hourly prices
+observed while ComputeDeck was collecting, not a bill**. The two headline totals use
+a fixed seven-day rollup, independent of the selected range. They exclude collection
+gaps and do not reconstruct provider billing, storage charges or prices before
+observation. They are separate from each instance's start-time-based estimate.
+The example includes two currencies, a collection gap and pre-upgrade history.
+
+## 用量与费用：当前与所选时间范围
+
+「用量与费用」（`#/usage`）集中展示用量趋势图，概览通过链接进入。「当前」直接读取
+服务端分组汇总，展示你使用中的 GPU 及每小时费用，不混合币种。前八组单独显示，
+「其他」包含未知项时仍标为下界；未知数值使用空的斜线条，并列出未测量或费用未知的
+对象。按当前费率推算的每日费用始终标注为预测、非账单。可通过键盘打开有价格的运行中
+实例详情；起始时间未知时不追加运行详情。停用的连接不参与统计。当前数据不受时间范围影响。
+标题仅显示一次币种，每小时单位随语言翻译。某币种的柱形图不显示既没有该币种单价、
+又没有未知费用的组。柱长以最大已知值为基准，即使单价小于 1；全零或未知时保持空条。
+
+「所选时间范围」将 `24h`、`7d`、`30d` 保存在 URL 中；旧链接 `24` 对应 24h，
+`72`、`3d`、`168` 对应 7d，始终选中一个范围按钮。原始历史保留
+30 天；服务端直接积分原始采样，不使用趋势图抽稀后的数据。每个采样保持到下一次采样，
+所有范围的上限均为 30 分钟，采用趋势图规则在原始分辨率下的下限，不使用抽稀后的
+范围缩放。因此同一小时在各范围的 GPU 小时、费用与覆盖率保持一致，且不超过响应时间。
+每日柱形图使用查看者的本地日期，边界小时按比例分摊，兼顾时区与夏令时边界。
+
+部分采集的日期显示观测覆盖率；缺失价格或用量显示下界或未知。升级前及未采集的日期
+显示「未记录」，不会填零。覆盖率只表示采集时长，不保证所有来源或价格均已知。
+一秒以内的时长差视为完整覆盖，以容忍时间戳精度差异。GPU 小时小于 100 时最多一位小数，
+达到 100 后不显示小数；未知总量不附单位。
+今日与最近七天的估算固定使用七天汇总，不随范围切换改变；这些数值仅来自采集期间观察到
+的小时价格，并非账单，不补算采集间断、存储费或采集前价格，与实例本次运行估算分开。
+示例包含两种币种、采集中断及升级前历史。

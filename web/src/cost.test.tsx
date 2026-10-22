@@ -154,9 +154,11 @@ describe.each(['en', 'zh-CN'] as const)('cost display in %s', (language) => {
     for (const state of ['desired_running', 'unknown', 'missing', 'stopped']) {
       item.state = state;
       expect(text(drawer())).toContain(t('cloud.priceWhenRunning', { price: money(0.69, 'USD') }));
-      expect(text(renderToStaticMarkup(<UsagePage ctx={ctx} />))).toContain(
-        t('cloud.priceWhenRunning', { price: money(0.69, 'USD') }),
-      );
+      expect(
+        parse(renderToStaticMarkup(<UsagePage ctx={ctx} />)).querySelectorAll(
+          '.usage-instances li',
+        ),
+      ).toHaveLength(0);
       for (const html of [drawer(), cloud()]) {
         expect(text(html)).not.toContain(t('cost.estimate', { cost: money(2.76, 'USD') }));
         expect(text(html)).not.toContain(t('cost.runningFor', { duration: runDuration(4) }));

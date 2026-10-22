@@ -121,7 +121,10 @@ The URL preserves view choices without storing credentials:
 - Activity: `#/activity?type=failed&range=7d&q=train`; `group` scopes a cluster or platform,
   and `job_filter` selects one job's history.
 - Planner: `#/plan?gpus=4&model=A100&hours=12`.
-- Cluster nodes: `#/resources?nodes=abnormal`; history uses `range=24`, `72` or `168`.
+- Cluster nodes: `#/resources?nodes=abnormal`.
+- Usage & cost: `#/usage?range=24h`, `7d` or `30d`; old numeric history ranges
+  (`24` → `24h`; `72`, `3d`, `168` → `7d`) map to offered chips. The range applies
+  to observed history, not current figures.
 - Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
 
 Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back

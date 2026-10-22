@@ -945,3 +945,31 @@ older snapshots mean unknown. When present and non-null, `gpus_observed_at` must
 timezone-aware ISO 8601 timestamp; rows with a timestamp without a timezone are rejected.
 See [the SSH driver](drivers/ssh.md#per-gpu-availability) for the memory-floor rule and
 timestamp semantics. No API or schema version changes.
+
+### Observed usage rollups (0.7)
+
+`GET /api/history?hours=24&rollup=1` adds `rollups` alongside the unchanged `hours`
+and `points` response. `hours` now accepts 1–720. Without `rollup=1`, the response
+shape stays unchanged. Dashboard history and its content token omit per-group data.
+No schema, plugin API or web API version changes are required.
+
+New stored history points add `by_group`, keyed exactly as `summary.groups`:
+`{allocated, known_allocated, unknown_allocation_sources, spend: {currency: rate},
+spend_unknown}`. `spend_unknown` is the count of unpriced subjects in that group.
+Raw history retention is 30 days; older rows without this field are not backfilled.
+
+`rollups` contains `start`, `end` and hourly `buckets`. Each bucket has `at`, `end`,
+`observed_seconds` (time with a post-upgrade breakdown) and `groups`. Each group has
+`gpu_hours` (nullable), `spend` (a currency-to-amount map), `observed_seconds`,
+`gpu_partial`, `spend_partial` and `spend_known`. The last flag distinguishes an
+observed zero rate from entirely unknown prices. Empty group maps and zero observed
+time mean not recorded, not zero usage. Partial flags cover both uncertain values
+and gaps within the bucket; clients must also account for missing buckets across
+larger ranges. Currency keys are never converted or combined.
+
+Integrals use raw, unthinned rows and include a preceding observation when it still
+covers the range boundary. Samples are held until the next point, the response time,
+or 1800 seconds, whichever comes first, independent of the requested range. The
+preceding-observation lookback uses the same 1800-second cap. Hourly
+buckets are UTC; daily displays use local dates and prorate boundary buckets.
+These are estimates over observed time, not billing records.

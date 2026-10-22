@@ -454,3 +454,25 @@ export interface Marketplaces {
   plugins: MarketPlugin[];
   policy_error: string | null;
 }
+
+/** Opt-in history rollups; absent from the dashboard poll. */
+export interface UsageRollups {
+  start: string;
+  end: string;
+  buckets: {
+    at: string;
+    end: string;
+    observed_seconds: number;
+    groups: Record<
+      string,
+      {
+        gpu_hours: number | null;
+        spend: Record<string, number>;
+        observed_seconds: number;
+        gpu_partial: boolean;
+        spend_partial: boolean;
+        spend_known: boolean;
+      }
+    >;
+  }[];
+}

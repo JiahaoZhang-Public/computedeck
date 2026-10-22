@@ -10,6 +10,7 @@ from .drivers.aws_ec2 import parse_instances as parse_ec2_instances
 from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
+from .history import group_history
 from .summary import fresh, freshness, summarize
 
 _SOURCES = [
@@ -121,7 +122,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
 
 
 def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """A smooth fictional trace, one point per 30 minutes, up to 7 days."""
+    """A smooth fictional trace, one point per 30 minutes, up to 30 days."""
     current = datetime.now(UTC).replace(second=0, microsecond=0)
     data = dashboard() if data is None else data
     summary = data["summary"]
@@ -134,8 +135,8 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
     unknown_machines = [
         i for i in data["instances"] if i.get("gpus") and i.get("gpu_allocated") is None
     ]
-    steps = min(hours, 168) * 2
-    points = []
+    steps = min(hours, 720) * 2
+    points: list[dict[str, Any]] = []
     for i in range(steps + 1):
         age = steps - i
         allocated = 14 + (4 if age % 48 < 32 else 0) + (4 if i % 96 > 60 else 0)
@@ -157,6 +158,17 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
                 "coverage_count": 12 if age % 48 > 16 else 18,
             }
         )
+    # A fictional upgrade ten days ago and a two-hour collection gap yesterday.
+    # Older points deliberately retain only their original fleet figures.
+    for point in points:
+        age_hours = (current - datetime.fromisoformat(point["at"])).total_seconds() / 3600
+        if age_hours <= 240:
+            point["by_group"] = group_history(summary)
+    points = [
+        p
+        for p in points
+        if not 26 < (current - datetime.fromisoformat(p["at"])).total_seconds() / 3600 < 28
+    ]
     points[-1].update(
         allocated_gpus=summary["allocated"],
         known_allocated_gpus=summary["known_allocated"],
@@ -570,8 +582,12 @@ def dashboard() -> dict[str, Any]:
         ),
     }
 
+    # A typed rental price demonstrates a second currency without mixing totals.
+    next(i for i in instances if i["name"] == "dev-box").update(hourly_cost=0.4, currency="EUR")
     data["summary"] = summarize(data)
-    data["history"] = demo_history(24, data)
+    data["history"] = [
+        {k: v for k, v in p.items() if k != "by_group"} for p in demo_history(24, data)
+    ]
     data["attention"] = attention.derive(
         data,
         [drivers.describe(name) for name in drivers.names()],

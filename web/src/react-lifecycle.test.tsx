@@ -20,6 +20,7 @@ import { dateTime, relativeTime } from './domain';
 import { driverInfo } from './drivers';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
+import { UsagePage } from './pages/Usage';
 import { NotifyPage } from './pages/Notify';
 import { ActivityPanel } from './pages/Activity';
 import { SourcesPage } from './pages/Sources';
@@ -322,41 +323,65 @@ describe('dashboard lifecycle', () => {
 });
 
 describe('history lifecycle', () => {
+  function historyResult(points: HistoryPoint[]) {
+    return {
+      points,
+      rollups: {
+        start: new Date(now.getTime() - 168 * 3600000).toISOString(),
+        end: now.toISOString(),
+        buckets: [],
+      },
+    };
+  }
+  function usageContext(demo = false): Ctx {
+    const data = dashboard('Cluster A');
+    return { data, groups: groupsOf(data), demo, locale: 'en' } as Ctx;
+  }
   it('ignores a previous range response and resets errors when selecting another range', async () => {
-    const threeDays = deferred<{ points: HistoryPoint[] }>();
-    const week = deferred<{ points: HistoryPoint[] }>();
-    request.mockImplementation((path) =>
-      path.includes('hours=72') ? threeDays.promise : week.promise,
-    );
-    await render(<HistoryPanel day={[sample(1)]} demo={false} />);
+    const day = deferred<ReturnType<typeof historyResult>>();
+    const week = deferred<ReturnType<typeof historyResult>>();
+    request.mockImplementation((path) => (path.includes('hours=24') ? day.promise : week.promise));
+    await render(<UsagePage ctx={usageContext()} />);
     await click('[role="tab"]:nth-child(2)');
-    await click('[role="tab"]:nth-child(3)');
-    await act(async () => week.resolve({ points: [sample(2), sample(3)] }));
+    await act(async () => week.resolve(historyResult([sample(2), sample(3)])));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
-    await act(async () => threeDays.reject(new Error('Old request failed')));
+    await act(async () => day.reject(new Error('Old request failed')));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
-    await click('[role="tab"]:nth-child(2)');
-    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.failed'));
     await click('[role="tab"]:nth-child(1)');
-    expect(container.querySelector('.chart-empty')).toBeNull();
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    expect(container.textContent).toContain(t('chart.failed'));
+    await click('[role="tab"]:nth-child(2)');
+    expect(container.textContent).not.toContain(t('chart.failed'));
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
   });
 
   it('does not display history from the previous demo mode while the new range loads', async () => {
-    const demo = deferred<{ points: HistoryPoint[] }>();
+    const demo = deferred<ReturnType<typeof historyResult>>();
     request.mockImplementation(async (path) =>
-      path.includes('demo=true') ? demo.promise : { points: [sample(2)] },
+      path.includes('demo=true') ? demo.promise : historyResult([sample(2)]),
     );
-    await render(<HistoryPanel day={[]} demo={false} />);
-    await click('[role="tab"]:nth-child(2)');
+    await render(<UsagePage ctx={usageContext()} />);
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
     await click('[role="tab"]:nth-child(2)');
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
-    await render(<HistoryPanel day={[]} demo={true} />);
+    await click('[role="tab"]:nth-child(2)');
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    await render(<UsagePage ctx={usageContext(true)} />);
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(0);
-    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.loading'));
-    await act(async () => demo.resolve({ points: [sample(3), sample(4)] }));
+    expect(container.textContent).toContain(t('chart.loading'));
+    await act(async () => demo.resolve(historyResult([sample(3), sample(4)])));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+  });
+
+  it('presents supplied points, empty text and note without fetching or range controls', async () => {
+    await render(
+      <HistoryPanel points={[]} hours={24} empty={t('chart.loading')} note={t('usage.demo')} />,
+    );
+    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.loading'));
+    expect(container.textContent).toContain(t('usage.demo'));
+    expect(container.querySelector('[role="tab"]')).toBeNull();
+    expect(request).not.toHaveBeenCalled();
+    await render(<HistoryPanel points={[sample(2)]} hours={24} />);
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
   });
 
   it('advances the time window without new data and stops its timer on unmount', async () => {

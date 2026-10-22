@@ -165,7 +165,7 @@ const en = {
   'nav.jobs': 'Jobs',
   'nav.clusters': 'Clusters',
   'nav.cloud': 'Cloud and machines',
-  'nav.usage': 'Usage',
+  'nav.usage': 'Usage & cost',
   'nav.settings': 'Settings',
   'nav.tools': 'Tools',
   'nav.demo': 'Example data',
@@ -623,6 +623,28 @@ const en = {
   'attention.lastSuccess': 'Last successful collection: {time}',
 
   // Usage
+  'usage.now': 'Now',
+  'usage.scope':
+    'All enabled connections and monitored machines; yours, not cluster-wide. Current figures do not change with the range.',
+  'usage.nowGpus': 'My GPUs in use now',
+  'usage.hourlyRate': '{price}/h',
+  'usage.spendNow': 'Spend rate now',
+  'usage.projection': '{amount}/day · {currency} at this rate — projection, not a bill',
+  'usage.overRange': 'Over range',
+  'usage.other': 'Other',
+  'usage.month': '30 d',
+  'usage.view': 'View usage trends and cost →',
+  'usage.retry': 'Retry',
+  'usage.notRecorded': 'Not recorded',
+  'usage.noSpend': 'No observed spend',
+  'usage.historyEstimate':
+    'Estimated from hourly prices observed while ComputeDeck was collecting, not a bill. Missing collection time is excluded; daily bars use your local time. Boundary hours are prorated.',
+  'usage.today': 'Today · estimated spend',
+  'usage.sevenDays': 'Last 7 days · estimated spend',
+  'usage.coverage': '{percent}% of this period observed',
+  'usage.gpuHours': 'My GPU-hours by group · daily',
+  'usage.gpuHourUnit': 'GPU-hours',
+  'usage.estimatedSpend': 'Estimated spend · daily',
   'usage.gpu': 'Average GPU utilization',
   'usage.gpuHint': '{count} GPUs with samples, weighted by GPU count',
   'usage.gpuHint.one': '{count} GPU with samples, weighted by GPU count',
@@ -632,10 +654,9 @@ const en = {
   'usage.demo': 'Example data.',
   'usage.historyNote':
     'From samples stored on {where}. Periods without samples are left empty, not counted as zero.',
-  'usage.prices': 'Instance prices',
   'usage.col.platform': 'Platform',
   'usage.pricesNote':
-    'Prices are for the whole instance per hour. Cloud and machines shows running-cost estimates, not bills; storage and other charges are excluded. Currencies are kept separate.',
+    'Current hourly rates cover enabled cloud connections and hand-added machines with a price. Per-instance run estimates are separate from observed history; neither is a bill.',
 
   // Settings
   'settings.sources': 'Data sources',
@@ -747,7 +768,6 @@ const en = {
   'chart.heading': 'GPU allocation and utilization',
   'chart.range': 'Time range',
   'chart.range.day': '24 h',
-  'chart.range.threeDays': '3 d',
   'chart.range.week': '7 d',
   'overview.waiting': 'Collecting for the first time',
   'overview.waitingHint':

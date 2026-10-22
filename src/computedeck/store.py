@@ -15,6 +15,7 @@ from . import drivers, nodes
 from .drivers.base import job_time, node_health_fields, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
+from .history import HOLD_SECONDS, group_history, rollup_history
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
@@ -973,7 +974,7 @@ class Store:
             if row is not None and timestamp(row["at"]) is None:
                 self._skip("history", at, "no valid at")
             elif row is not None:
-                rows.append(row)
+                rows.append({key: value for key, value in row.items() if key != "by_group"})
         if len(rows) <= max_points:
             return rows
         bucket = hours * 3600 / max_points
@@ -983,6 +984,19 @@ class Store:
             kept[index] = row
         # A sliding window can overlap an extra absolute bucket; keep the newest ones.
         return [kept[index] for index in sorted(kept)[-max_points:]]
+
+    def history_rollups(self, hours: int) -> dict[str, Any]:
+        end = datetime.now(UTC)
+        since = end - timedelta(hours=hours, seconds=HOLD_SECONDS)
+        points = []
+        for at, data in self.db.execute(
+            "SELECT at, data FROM history WHERE at >= ? AND at <= ? ORDER BY at",
+            (since.isoformat(), end.isoformat()),
+        ):
+            row = self._read("history", at, data, {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.append(row)
+        return rollup_history(points, hours, end=end)
 
     def record_history(self) -> None:
         dashboard = self.dashboard()
@@ -994,10 +1008,11 @@ class Store:
             "unknown_allocation_sources": summary["unknown_allocation_sources"],
             "gpu_utilization": summary["utilization"],
             "coverage_count": summary["covered"],
+            "by_group": group_history(summary),
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))
-            cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             self.db.execute("DELETE FROM history WHERE at < ?", (cutoff,))
 
     def backup(self, directory: Path, keep: int = 10) -> Path:
