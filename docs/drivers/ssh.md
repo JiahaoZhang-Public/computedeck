@@ -140,14 +140,29 @@ This does not change the separate process/memory rule for whether a GPU is free.
 
 ## Hosts managed by a scheduler
 
-The existing probe also reads the server address and port from `SSH_CONNECTION`;
-only that endpoint is retained, not the client's address or port. If it uniquely
-matches an explicit address of a collected scheduler node in the same collection
-context, the machine row says its GPUs are counted with that cluster. Hardware
+The existing probe also reads the server address and port from `SSH_CONNECTION`
+and the hostname from `os.uname().nodename`; the client's address and port are not
+retained. The address must uniquely match a collected scheduler node in the same
+collection context, and the probed short hostname must match the node name,
+Slurm `NodeHostName` or Kubernetes Hostname address, ignoring case. Both signals
+are required for every address, including private and shared ranges that separate
+networks can reuse. The machine row then says its GPUs are counted with that cluster. Hardware
 checks and readings remain available, but the host is not offered as an
 unscheduled free machine. Missing or ambiguous identity stays unmatched; names
 alone never match. See [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes)
 for address, port and freshness limits. There are no extra SSH or DNS calls.
+
+Changing an SSH source's connection clears its successful-collection time, so the
+retained row cannot link until the new connection succeeds. If it fails, the
+source is listed as unmeasured and the fleet total stays incomplete. A later
+failure with the connection unchanged keeps the previous identity.
+
+现有探测同时读取 `SSH_CONNECTION` 的服务端地址和端口，以及 `os.uname().nodename`
+的主机名，不保留客户端地址和端口。同一采集范围内的唯一 IP 匹配还必须有短主机名佐证，
+与节点名称、Slurm `NodeHostName` 或 Kubernetes Hostname 地址一致（忽略大小写）。
+所有地址都需要这两项证据，包括不同网络可能复用的私有与共享地址；不会增加 SSH 或 DNS
+调用。修改 SSH 数据源连接会清除成功采集时间并解除旧行的匹配，直到新连接采集成功。
+新连接失败时，该来源列为未测量，总量保持不完整；连接未变时的后续失败仍保留原身份。
 
 Slurm's `NodeAddr` often defaults to a hostname, and PBS `Mom` is usually a hostname;
 when the scheduler supplies only names, no match is made and the machine's GPU

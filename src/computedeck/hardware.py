@@ -24,6 +24,7 @@ def parse_probe(output: str) -> dict[str, Any]:
     return {
         **readings,
         "ssh_endpoint": ssh_endpoint(snapshot.get("ssh_connection")),
+        "host_name": snapshot.get("hostname"),
         "metrics_scope": "host_visible",
         "observed_at": now(),
         "ssh_status": "reachable",

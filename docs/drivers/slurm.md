@@ -78,7 +78,8 @@ Partition `AllowQos` matching is not part of this capacity check; QoS and access
 still apply separately in Where to run.
 
 Node rows retain IP-valued `NodeAddr` as `host_addresses` for matching SSH machines
-to scheduler nodes. `NodeName` and `NodeHostName` alone are not identity evidence;
+to scheduler nodes, and `NodeHostName` as `host_names` to corroborate an IP match
+with the probed hostname. `NodeName` and `NodeHostName` alone are not identity evidence;
 DNS-only addresses remain unmatched without a lookup. Matching does not change
 scheduler allocations or add a cluster query. See [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
 

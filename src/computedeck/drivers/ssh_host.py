@@ -54,6 +54,7 @@ _PROBE = textwrap.dedent(f"""\
         return done.stdout, None
 
     result = {{'ssh_connection': os.environ.get('SSH_CONNECTION'),
+              'hostname': os.uname().nodename,
               'cpu_utilization': None, 'memory_utilization': None, 'user': None,
               'gpu_tool': None, 'gpu': None, 'gpu_error': None, 'amd_memory': None,
               'apps': None, 'apps_error': None, 'owners': None}}
@@ -334,6 +335,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         **readings,
         "metrics_scope": "host_visible",
         "ssh_endpoint": ssh_endpoint(snapshot.get("ssh_connection")),
+        "host_name": snapshot.get("hostname"),
         # The user's own Host block is authoritative; no managed Host block is generated.
         "host": alias,
         "port": None,

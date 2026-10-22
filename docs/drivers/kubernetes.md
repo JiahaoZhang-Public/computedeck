@@ -120,7 +120,8 @@ Only nodes with GPUs are shown: nodes whose capacity or allocatable resources li
 - `partitions` holds the node pool label, if any.
 
 Node rows retain `status.addresses` entries of type InternalIP or ExternalIP as
-`host_addresses`. These can identify an SSH machine that is also a scheduler node;
+`host_addresses` and Hostname entries as `host_names`. An IP match also needs a
+matching probed short hostname to identify an SSH machine that is a scheduler node;
 Hostname labels alone never establish a match. No extra API call is made. See
 [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
 

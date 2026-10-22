@@ -600,6 +600,7 @@ def dashboard() -> dict[str, Any]:
             "host": "192.0.2.31",
             "ssh_alias": "cd-lab-workstation-node-console",
             "ssh_endpoint": {"host": "192.0.2.31", "port": 22},
+            "host_name": "a-gpu-01",
             "gpu_count": 4,
             "gpu_allocated": 2,
             "gpu_type": nodes[0]["gpu_type"],

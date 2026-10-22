@@ -31,3 +31,15 @@ def ssh_endpoint(connection: Any) -> dict[str, Any] | None:
         return None
     address, port = host_address(fields[2]), int(fields[3])
     return {"host": address, "port": port} if address and 0 < port <= 65535 else None
+
+
+def short_hostname(value: Any) -> str | None:
+    """A hostname corroborates an address; an IP written as a name does not."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip().rstrip(".").lower()
+    try:
+        ip_address(value)
+    except ValueError:
+        return value.split(".")[0] or None
+    return None

@@ -366,6 +366,7 @@ def test_nodes_report_allocatable_and_allocation_from_every_namespace() -> None:
     assert first == {
         "id": "cluster-a:gpu-node-01",
         "host_addresses": [],
+        "host_names": [],
         "source_id": "cluster-a-ml-team",
         "cluster_id": "cluster-a",
         "name": "gpu-node-01",

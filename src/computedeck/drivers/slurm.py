@@ -221,6 +221,7 @@ def parse_nodes(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "cluster_id": source["cluster_id"],
             "name": name,
             "host_addresses": [address] if (address := host_address(row.get("NodeAddr"))) else [],
+            "host_names": [row["NodeHostName"]] if row.get("NodeHostName") else [],
             "state": row.get("State", "unknown").lower(),
             "gpu_count": capacity,
             "gpu_allocated": allocated,

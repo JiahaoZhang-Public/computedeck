@@ -153,6 +153,7 @@ export interface LowUse {
 export interface Instance {
   same_node?: { id: string; name: string; cluster_id: string; cluster_name: string } | null;
   ssh_endpoint?: { host: string; port: number } | null;
+  host_name?: string | null;
   low_use?: LowUse;
   console_url?: string | null;
   gpu_utilization_max?: number | null;
@@ -195,6 +196,7 @@ export interface Instance {
 }
 export interface ComputeNode {
   host_addresses?: string[];
+  host_names?: string[];
   health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
   health_reason?: 'no_partition' | null;
   id: string;

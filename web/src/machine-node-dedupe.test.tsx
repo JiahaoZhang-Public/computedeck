@@ -74,6 +74,7 @@ describe.each(['en', 'zh-CN'] as const)('machine/node identity in %s', (locale) 
     const machine = data.instances.find((i) => i.name === 'lab-server')!;
     expect(machineOptions(data, { gpus: 1, gpuType: '', hours: null })).toHaveLength(1);
     machine.ssh_endpoint = { host: '192.0.2.31', port: 22 };
+    machine.host_name = 'a-gpu-01';
     const linked = serverDashboard(data);
     const item = linked.instances.find((i) => i.id === machine.id)!;
     expect(item.same_node?.name).toBe('a-gpu-01');
@@ -91,5 +92,24 @@ describe.each(['en', 'zh-CN'] as const)('machine/node identity in %s', (locale) 
     };
     expect(lowUseInstances([item])).toEqual([]);
     expect(linked.summary.unmeasured.some((r) => r.subject.id === item.id)).toBe(false);
+  });
+
+  it('keeps a different host on a reused address available as an unscheduled machine', () => {
+    setLocale(locale);
+    const { data, ctx } = fixture();
+    const machine = data.instances.find((i) => i.name === 'lab-server')!;
+    machine.ssh_endpoint = { host: '192.0.2.31', port: 22 };
+    machine.host_name = 'other-box';
+    const separate = serverDashboard(data);
+    const item = separate.instances.find((i) => i.id === machine.id)!;
+    expect(item.same_node).toBeUndefined();
+    expect(machineOptions(separate, { gpus: 1, gpuType: '', hours: null })).toHaveLength(1);
+    const page = element(renderToStaticMarkup(<CloudPage ctx={{ ...ctx, data: separate }} />));
+    const row = [...page.querySelectorAll('tbody tr')].find((r) =>
+      r.textContent?.includes(item.name),
+    )!;
+    expect(row.textContent).not.toContain(
+      t('instance.sameNode', { node: 'a-gpu-01', cluster: 'Cluster A' }),
+    );
   });
 });

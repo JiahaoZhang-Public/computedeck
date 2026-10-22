@@ -1099,10 +1099,21 @@ new event type, capability, attention kind, setting or route is introduced.
 ### Machine/node identity (0.7, additive)
 
 Node rows may carry `host_addresses: string[]`, explicit IP addresses reported by
-the scheduler. SSH-source and hand-added probe rows may carry
+the scheduler, and `host_names: string[]`, scheduler-reported hostnames in addition
+to the optional node `name`. SSH-source and hand-added probe rows may carry
 `ssh_endpoint: {host: string, port: int} | null`, the server endpoint read from the
-existing SSH session. Missing evidence means no match, not a guessed name match.
+existing SSH session, and `host_name: string | null`, its probed hostname.
+Matching requires both a unique IP and a case-insensitive short-hostname match;
+IP-valued names are not corroboration. Missing evidence means no match.
 Only hand-added machines and sources with driver `ssh` participate in matching.
+SSH sources must retain `last_success`; connection edits invalidate the old link.
+Nodes without a display name use their id in the resulting `same_node.name`.
+
+节点可附带 `host_addresses: string[]` 和 `host_names: string[]`（调度器报告的 IP 与
+主机名）；SSH 机器可附带 `ssh_endpoint` 和 `host_name: string | null`（探测主机名）。
+匹配必须同时满足唯一 IP 与忽略大小写的短主机名一致，IP 形式的名称不算佐证。
+缺少证据时不匹配；SSH 数据源必须保留 `last_success`，修改连接会使旧匹配失效。
+节点没有显示名称时，`same_node.name` 使用节点 id。
 
 Dashboard instance rows may gain
 `same_node: {id, name, cluster_id, cluster_name}` when exactly one collected node

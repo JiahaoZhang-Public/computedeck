@@ -930,6 +930,14 @@ already collected from Slurm (`NodeAddr`), PBS (`Mom`) or Kubernetes (InternalIP
 ExternalIP). No extra connection or DNS request is made. Names, SSH aliases, GPU
 models and manually typed endpoints alone never establish identity.
 
+An IP match also requires the hostname read by `os.uname().nodename` in that same
+probe to agree with the node name, Slurm `NodeHostName` or Kubernetes Hostname
+address. Comparison uses the short hostname (before the first dot), ignoring
+case; an IP written as a hostname is not a second signal. This applies to all
+addresses, including private IPv4, IPv6 ULA and shared CGNAT ranges, because
+different networks reached by one computer can reuse an address. Missing or
+different hostnames leave machines separate.
+
 A unique match within the same collection-node context is labelled on the machine
 row and drawer. Its measurements stay available and hardware checks still work,
 but its GPUs and utilization are excluded from fleet, group and login aggregates
@@ -940,6 +948,10 @@ paid low-use suggestions. A typed hourly price remains a separate expense.
 
 Retained node identity still applies during a cluster outage, so scheduler
 allocation stays unknown instead of being replaced with a host process count.
+An SSH-source row can link only while its source has a successful collection.
+Editing its connection clears that success and removes the retained row's link
+until collection succeeds again; failed collection keeps the total incomplete.
+A later failure on an unchanged connection keeps the previous identity.
 Pausing/removing the cluster or removing/changing the node address removes the
 match. Ambiguous addresses, missing identity in older snapshots, DNS-only node
 addresses, nonstandard SSH ports and loopback/link-local addresses stay unmatched.
@@ -961,6 +973,12 @@ scheduled readings.
 Kubernetes 的 InternalIP / ExternalIP 匹配，不增加连接或 DNS 请求。显示名称、SSH
 别名、GPU 型号及手动填写的连接地址本身都不能证明主机相同。
 
+IP 相同还必须由同次探测中 `os.uname().nodename` 读取的主机名佐证，匹配节点名称、
+Slurm 的 `NodeHostName` 或 Kubernetes 的 Hostname 地址。比较时取第一个点之前的
+短主机名并忽略大小写；把 IP 写成主机名不算第二项证据。此要求适用于所有地址，包括
+私有 IPv4、IPv6 ULA 和共享 CGNAT 地址，因为同一电脑访问的不同网络可能重复使用地址。
+主机名缺失或不一致时，机器保持独立计数。
+
 同一采集节点范围内的唯一匹配会显示在机器行和详情中。硬件读数和检查功能仍然保留，
 但不会重复计入总览、分组、登录级别的 GPU 与利用率统计，也不会重复计入新记录的历史。
 “我的 GPU 使用量”仍采用自己的调度任务分配量，节点容量和分配量则涵盖所有用户。
@@ -968,6 +986,8 @@ Kubernetes 的 InternalIP / ExternalIP 匹配，不增加连接或 DNS 请求。
 手动填写的小时价格仍作为独立费用计算。
 
 集群采集中断时，保留的节点身份仍有效，调度分配量保持未知，不会改用主机进程数。
+SSH 数据源只有保留成功采集记录时才能匹配。修改连接会清除该成功记录并解除旧行的匹配，
+直到新连接成功采集；采集失败时总量保持不完整。连接未改变时，后续失败仍保留原身份。
 暂停或删除集群、删除节点或更改节点地址后，匹配会消失。地址有歧义、旧快照缺少身份、
 节点仅提供 DNS 名称、非标准 SSH 端口、回环或链路本地地址均不匹配。LSF 目前没有
 提供明确地址。仅匹配端口 22，其他端口可能指向转发服务或容器。升级后刷新机器与集群

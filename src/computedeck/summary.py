@@ -5,7 +5,7 @@ from typing import Any
 
 from .drivers.base import node_health, requires_partition
 from .drivers.cloud import instance_lifecycle
-from .host_identity import host_address
+from .host_identity import host_address, short_hostname
 
 RUNNING = {"RUNNING", "R", "CONFIGURING", "CF", "COMPLETING", "CG"}
 PENDING = {"PENDING", "PD", "Q", "PEND", "QUEUED"}
@@ -427,7 +427,9 @@ def link_machine_nodes(data: dict[str, Any]) -> None:
     for item in data["instances"]:
         item.pop("same_node", None)
         source = sources.get(item["source_id"], {})
-        if not item.get("manual") and source.get("driver") != "ssh":
+        if not item.get("manual") and (
+            source.get("driver") != "ssh" or not source.get("last_success")
+        ):
             continue
         endpoint = item.get("ssh_endpoint")
         if not isinstance(endpoint, dict) or endpoint.get("port") != 22:
@@ -439,10 +441,17 @@ def link_machine_nodes(data: dict[str, Any]) -> None:
         if len(matches) != 1:
             continue
         node = next(iter(matches.values()))
+        # Separate networks can reuse an IP even on the same collection computer.
+        # Require an independently observed hostname as well, never a name alone.
+        hostname = short_hostname(item.get("host_name"))
+        values = node.get("host_names")
+        names = [node.get("name"), *(values if isinstance(values, list) else [])]
+        if not hostname or not any(hostname == short_hostname(name) for name in names):
+            continue
         cluster = sources[node["source_id"]]
         item["same_node"] = {
             "id": node["id"],
-            "name": node["name"],
+            "name": node.get("name") or node["id"],
             "cluster_id": cluster["cluster_id"],
             "cluster_name": cluster["name"],
         }

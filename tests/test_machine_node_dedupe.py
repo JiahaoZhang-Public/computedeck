@@ -1,19 +1,23 @@
 """Resolved SSH hosts count with their scheduler, across all summary scopes."""
 
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 
+from computedeck.app import create_app
 from computedeck.demo import dashboard
 from computedeck.drivers import kubernetes, pbs, slurm, ssh_host
 from computedeck.hardware import parse_probe
 from computedeck.host_identity import ssh_endpoint
 from computedeck.records import InstanceInput, instance_record, keep_instance_probe
 from computedeck.summary import summarize
+from tests.test_api import HEADERS, wait_until_idle
 from tests.test_ssh_host import SOURCE, probe_output
 from tests.test_summary import machine
 
@@ -33,6 +37,7 @@ def collected(store, add_source):
         host="unrelated-alias",
         port=22,
         ssh_endpoint={"host": "192.0.2.31", "port": 22},
+        host_name="gpu-01.example.test",
         gpu_allocated=6,
     )
     store.save_instance(item)
@@ -152,7 +157,9 @@ def test_ssh_source_matches_and_stale_duplicate_does_not_blank_totals(
 ):
     source = add_source(name="Host console", driver="ssh", ssh_alias="console")
     batch = ssh_host.parse_machine(
-        probe_output(ssh_connection=f"192.0.2.5 12345 {server_address} 22"), source, "console"
+        probe_output(ssh_connection=f"192.0.2.5 12345 {server_address} 22", hostname="gpu-01"),
+        source,
+        "console",
     )
     store.save_snapshot(source["id"], {"instances": batch.instances})
     for status in ("ready", "error"):
@@ -162,6 +169,119 @@ def test_ssh_source_matches_and_stale_duplicate_does_not_blank_totals(
         assert data["summary"]["allocated"] == 2
         assert data["summary"]["sources"][source["id"]]["allocated"] == 0
         assert not data["summary"]["unmeasured"]
+
+
+def test_ssh_alias_edit_and_failed_collection_remove_retained_link(
+    store, add_source, collected, tmp_path, monkeypatch
+):
+    source = add_source(name="Host console", driver="ssh", ssh_alias="console")
+    batch = ssh_host.parse_machine(
+        probe_output(ssh_connection="192.0.2.5 12345 192.0.2.31 22", hostname="gpu-01"),
+        source,
+        "console",
+    )
+    store.save_snapshot(source["id"], {"instances": batch.instances})
+    assert all(i.get("same_node") for i in store.dashboard()["instances"])
+
+    async def fail(self, edited):
+        assert edited["ssh_alias"] == "other-box"
+        raise ssh_host.SourceError("ssh_failed")
+
+    monkeypatch.setattr(ssh_host.SSHHostDriver, "collect", fail)
+    with TestClient(create_app(tmp_path, polling=False, plugins=[])) as client:
+        response = client.put(
+            f"/api/sources/{source['id']}", json={"ssh_alias": "other-box"}, headers=HEADERS
+        )
+        assert response.status_code == 200
+        assert response.json()["last_success"] is None
+        response = client.post("/api/refresh", json={"source_id": source["id"]}, headers=HEADERS)
+        assert response.status_code == 202
+        data = wait_until_idle(client)
+    retained = next(i for i in data["instances"] if i["source_id"] == source["id"])
+    assert retained["ssh_endpoint"] == batch.instances[0]["ssh_endpoint"]
+    assert "same_node" not in retained
+    failed = next(s for s in data["sources"] if s["id"] == source["id"])
+    assert failed["last_success"] is None
+    assert failed["status"] == "error"
+    missing = data["summary"]["unmeasured"]
+    assert [row["subject"]["id"] for row in missing] == [source["id"]]
+    assert missing[0]["reason"]["code"] == "summary_source_failed"
+    assert data["summary"]["allocated"] is None
+
+
+@pytest.mark.parametrize("address", ["10.128.0.2", "100.64.0.2", "fd00::2", "192.0.2.31"])
+@pytest.mark.parametrize("hostname", ["other-box", None, "", "10.128.0.2"])
+def test_shared_network_address_requires_independent_hostname(store, collected, address, hostname):
+    source, node, item = collected
+    store.save_snapshot(source["id"], {"nodes": [{**node, "host_addresses": [address]}]})
+    store.save_instance(
+        {**item, "ssh_endpoint": {"host": address, "port": 22}, "host_name": hostname}
+    )
+    data = store.dashboard()
+    assert not data["instances"][0].get("same_node")
+    assert data["summary"]["allocated"] == 8
+    assert data["summary"]["groups"]["platform:workstations"]["allocated"] == 6
+    store.record_history()
+    assert store.history(24)[-1]["allocated_gpus"] == 8
+
+
+@pytest.mark.parametrize("name", ["missing", None])
+def test_plugin_node_without_display_name_uses_id(store, collected, name):
+    source, node, _ = collected
+    node = {**node, "host_names": ["GPU-01.cluster.example.test."]}
+    if name == "missing":
+        node.pop("name")
+    else:
+        node["name"] = name
+    store.save_snapshot(source["id"], {"nodes": [node]})
+    data = store.dashboard()
+    assert data["instances"][0]["same_node"]["name"] == node["id"]
+    assert data["summary"]["allocated"] == 2
+
+
+@pytest.mark.parametrize("host_names", [5, True, {"gpu-01": 1}, "gpu-01"])
+def test_plugin_node_ignores_non_list_host_names(store, collected, host_names):
+    source, node, _ = collected
+    node = {**node, "name": "other-box", "host_names": host_names}
+    store.save_snapshot(source["id"], {"nodes": [node]})
+    data = store.dashboard()
+    assert "same_node" not in data["instances"][0]
+    assert data["summary"]["allocated"] == 8
+    assert data["summary"]["groups"]["platform:workstations"]["allocated"] == 6
+
+
+@pytest.mark.parametrize("driver", ["slurm", "kubernetes"])
+def test_scheduler_hostname_corroborates_address_when_node_name_differs(store, collected, driver):
+    source, _, _ = collected
+    if driver == "slurm":
+        nodes = slurm.parse_nodes(
+            "NodeName=display NodeAddr=192.0.2.31 NodeHostName=GPU-01.cluster.example.test "
+            "State=MIXED Partitions=gpu CfgTRES=gres/gpu=8 AllocTRES=gres/gpu=6",
+            source,
+        )
+    else:
+        nodes = kubernetes.parse_nodes(
+            [
+                {
+                    "metadata": {"name": "display"},
+                    "status": {
+                        "capacity": {"nvidia.com/gpu": "8"},
+                        "allocatable": {"nvidia.com/gpu": "8"},
+                        "addresses": [
+                            {"type": "InternalIP", "address": "192.0.2.31"},
+                            {"type": "Hostname", "address": "GPU-01.cluster.example.test"},
+                        ],
+                    },
+                }
+            ],
+            [],
+            source,
+        )
+    assert nodes[0]["host_names"] == ["GPU-01.cluster.example.test"]
+    store.save_snapshot(source["id"], {"nodes": nodes})
+    data = store.dashboard()
+    assert data["instances"][0]["same_node"]["name"] == "display"
+    assert data["summary"]["allocated"] == 2
 
 
 def test_probe_identity_is_cleared_on_endpoint_edit_and_missing_new_reading():
@@ -174,17 +294,24 @@ def test_probe_identity_is_cleared_on_endpoint_edit_and_missing_new_reading():
             username="alice",
         )
     )
-    old.update(parse_probe(probe_output(ssh_connection="192.0.2.5 12345 192.0.2.31 22")))
+    old.update(
+        parse_probe(probe_output(ssh_connection="192.0.2.5 12345 192.0.2.31 22", hostname="gpu-01"))
+    )
     renamed = {**old, "name": "Renamed"}
     renamed.pop("ssh_endpoint")
+    renamed.pop("host_name")
     keep_instance_probe(renamed, old)
     assert renamed["ssh_endpoint"] == old["ssh_endpoint"]
+    assert renamed["host_name"] == "gpu-01"
     changed = {**renamed, "host": "192.0.2.32"}
     changed.pop("ssh_endpoint")
+    changed.pop("host_name")
     keep_instance_probe(changed, old)
     assert "ssh_endpoint" not in changed
+    assert "host_name" not in changed
     old.update(parse_probe(probe_output()))
     assert old["ssh_endpoint"] is None
+    assert old["host_name"] is None
 
 
 @pytest.mark.parametrize(
@@ -223,6 +350,7 @@ def test_embedded_probe_reads_only_server_endpoint_from_existing_session():
     )
     result = parse_probe(done.stdout)
     assert result["ssh_endpoint"] == {"host": "192.0.2.31", "port": 22}
+    assert result["host_name"] == os.uname().nodename
     assert "192.0.2.5" not in json.dumps(result)
 
 
@@ -291,7 +419,7 @@ async def test_on_demand_check_of_linked_machine_still_collects_and_keeps_schedu
 
     async def run(destination, command, options):
         calls.append(destination)
-        return probe_output(ssh_connection="192.0.2.5 12345 192.0.2.31 22")
+        return probe_output(ssh_connection="192.0.2.5 12345 192.0.2.31 22", hostname="gpu-01")
 
     monkeypatch.setattr(ssh, "run", run)
     # A direct hand-added endpoint, while the display name remains different.

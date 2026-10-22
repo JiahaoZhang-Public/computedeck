@@ -580,6 +580,11 @@ def parse_nodes(
                 if entry.get("type") in ("InternalIP", "ExternalIP")
                 and (address := host_address(entry.get("address")))
             ],
+            "host_names": [
+                entry["address"]
+                for entry in _list(status.get("addresses"))
+                if entry.get("type") == "Hostname" and entry.get("address")
+            ],
             "state": node_state(node, capacity, allocated),
             "gpu_count": capacity,
             "gpu_allocated": allocated,
