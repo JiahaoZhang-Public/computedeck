@@ -39,13 +39,18 @@ A pending personal-limit wait (for example `QOSMaxGRESPerUser` or
 "Likely" estimate at "Possible". The explanation names the job and reason: the
 scheduler may count differently. A larger limit-held job does not trigger this cap,
 and stale or unknown relevant data is not treated as proof of a contradiction.
+GPU-limit waits only use a known matching job model when any finite per-model cap
+exists, because only the requested model's room was checked. Job-count and submit-count
+waits also require room under the corresponding collected `MaxJobsPU` or
+`MaxSubmitJobsPU`; a reached count limit never supplies contradiction evidence.
+CPU-limit waits are not used because CPU room is not evaluated.
 CPU-only running jobs do not make model-specific GPU use unknown. Queue reasons
-use the same translated class as job details when recognised, with the raw code on
-hover. Unrecognised reasons remain visible as reported.
+use short translated class labels, with the raw code on hover. Unrecognised reasons remain visible as reported.
 Duplicate sources for the same cluster and username merge per QoS, preferring current
 QoS-limit data, then current job data, then the latest successful collection.
 Jobs from either current source are deduplicated by their newest
-observation. Different usernames retain separate options.
+observation. An empty QoS list does not add a separate row if a twin lists QoS options.
+Different usernames retain separate options.
 
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.

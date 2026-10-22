@@ -16,8 +16,6 @@ const SLURM_REASONS: Record<string, string> = {
   QOSMaxCpuPerUserLimit: 'personalLimit',
   QOSMaxJobsPerUserLimit: 'personalLimit',
   QOSMaxSubmitJobPerUserLimit: 'personalLimit',
-  AssocMaxGRESPerUser: 'personalLimit',
-  AssocMaxCpuPerUserLimit: 'personalLimit',
   AssocMaxJobsLimit: 'personalLimit',
   AssocMaxSubmitJobLimit: 'personalLimit',
   QOSMaxGRESPerJob: 'requestLimit',

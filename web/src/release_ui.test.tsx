@@ -153,7 +153,7 @@ function page(html: string) {
 describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (locale) => {
   it('explains a contradiction and translates the queue class with the raw code on hover', () => {
     setLocale(locale);
-    const reason = 'QOSMaxSubmitJobPerUserLimit';
+    const reason = 'QOSMaxGRESPerUser';
     const root = page(renderPlan(source, [pending({ gpu_count: 1, reason })]));
     const row = root.querySelector('.plan-table tbody tr')!;
     expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
@@ -162,15 +162,38 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
     const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
     expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
-    expect(queue.textContent).toContain(t('job.explain.personalLimit'));
+    expect(queue.textContent).toContain(t('plan.queueReason.personalLimit'));
     expect(queue.textContent).not.toContain(reason);
     expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
   });
 
   it.each([
+    ['MaxJobsPU', 'QOSMaxJobsPerUserLimit', 'jobs'],
+    ['MaxSubmitJobsPU', 'QOSMaxSubmitJobPerUserLimit', 'submit'],
+  ] as const)('does not claim room when %s is reached', (key, reason, kind) => {
+    setLocale(locale);
+    const login = {
+      ...source,
+      qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', [key]: '1' } }],
+    };
+    const root = page(
+      renderPlan(login, [
+        pending({ id: 'running', state: 'RUNNING', gpu_count: 1 }),
+        pending({ gpu_count: 1, reason }),
+      ]),
+    );
+    const row = root.querySelector('.plan-table tbody tr')!;
+    expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(t('plan.verdict.limit'));
+    expect(row.textContent).toContain(
+      t(`plan.why.${kind}`, { limit: 1, used: kind === 'jobs' ? 1 : 2 }),
+    );
+    expect(row.textContent).not.toContain(t('plan.why.contradiction', { job: 'train', reason }));
+  });
+
+  it.each([
     ['slurm', 'SiteSpecificCode', null],
     ['pbs', 'Not Running: Insufficient amount of resource: ngpus', null],
-    ['slurm', 'Priority', 'job.explain.priority'],
+    ['slurm', 'Priority', 'plan.queueReason.priority'],
   ] as const)(
     'preserves reported %s reasons unless a class is recognised: %s',
     (driver, reason, key) => {
@@ -181,7 +204,7 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       expect(label.getAttribute('title')).toBe(reason);
       expect(label.textContent).toBe(key ? t(key) : reason);
       expect(queue.textContent).not.toContain(t('job.explain.unknown'));
-      if (key) expect(queue.textContent).not.toContain(reason);
+      if (key && t(key) !== reason) expect(queue.textContent).not.toContain(reason);
     },
   );
 

@@ -203,11 +203,10 @@ def dashboard() -> dict[str, Any]:
         capabilities_seen=["instances", "ssh_discovery", "ssh_probe"],
     )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
-    # Cluster A shows contradictory scheduler evidence: 1 GPU fits its 4-GPU room.
-    jobs[4]["reason"] = "QOSMaxGRESPerUser"
-    # Cluster B's long QoS has 8 GPUs left: this 16-GPU job cannot start first.
-    jobs[-1]["reason"] = "QOSMaxGRESPerUser"
     for job in jobs:
+        # Cluster A's 1-GPU wait fits its room; Cluster B's 16-GPU wait does not.
+        if job["name"] in {"llm-sft / ablation", "rl-agent / rollout"}:
+            job["reason"] = "QOSMaxGRESPerUser"
         if job["source_id"] == sources[1]["id"]:
             job["observed_at"] = sources[1]["last_success"]
     jobs.append(

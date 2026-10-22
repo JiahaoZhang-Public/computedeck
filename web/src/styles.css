@@ -1891,6 +1891,9 @@ form > .form-error {
 .plan-table .tag {
   white-space: normal;
 }
+.plan-table .num .sub {
+  white-space: normal;
+}
 .plan-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 220px));

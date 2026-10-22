@@ -1229,14 +1229,103 @@ describe('honest ranking', () => {
   });
 
   it.each([
-    'QOSMaxJobsPerUserLimit',
-    'QOSMaxSubmitJobPerUserLimit',
-    'AssocMaxGRESPerUser',
-    'AssocMaxJobsLimit',
-    'AssocMaxSubmitJobLimit',
-  ])('uses the personal-limit class for %s', (reason) => {
-    expect(estimate({ reason })).toMatchObject({ verdict: 'possible', contradiction: { reason } });
+    ['QOSMaxJobsPerUserLimit', 'MaxJobsPU', 1],
+    ['AssocMaxJobsLimit', 'MaxJobsPU', 1],
+    ['QOSMaxSubmitJobPerUserLimit', 'MaxSubmitJobsPU', 2],
+    ['AssocMaxSubmitJobLimit', 'MaxSubmitJobsPU', 2],
+  ] as const)('checks the matching count limit for %s', (reason, key, used) => {
+    const check = (cap: string | undefined, usage?: Record<string, string>) =>
+      estimate({ reason: `${reason} (details)` }, '', {
+        qos: [
+          {
+            ...source().qos[0],
+            limits: { MaxTRESPU: 'gres/gpu=8', ...(cap === undefined ? {} : { [key]: cap }) },
+            usage,
+          },
+        ],
+      });
+    expect(check(String(used + 1))).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason: `${reason} (details)` },
+    });
+    expect(check(String(used))).toMatchObject({ verdict: 'limit', contradiction: null });
+    for (const cap of [undefined, 'N'])
+      expect(check(cap)).toMatchObject({ verdict: 'likely', contradiction: null });
+    // Scheduler counts take precedence, in both directions.
+    expect(check(String(used + 1), { [key]: String(used + 1) })).toMatchObject({
+      verdict: 'limit',
+      contradiction: null,
+    });
+    expect(check(String(used), { [key]: '0' })).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason: `${reason} (details)` },
+    });
   });
+
+  it.each(['MaxJobsPU', 'MaxSubmitJobsPU'])('does not contradict a reached %s rule', (key) => {
+    for (const reason of [
+      'QOSMaxGRESPerUser',
+      'QOSMaxJobsPerUserLimit',
+      'QOSMaxSubmitJobPerUserLimit',
+    ]) {
+      expect(
+        estimate({ reason }, '', {
+          qos: [
+            {
+              ...source().qos[0],
+              limits: {
+                MaxTRESPU: 'gres/gpu=8',
+                MaxJobsPU: '10',
+                MaxSubmitJobsPU: '10',
+                [key]: '1',
+              },
+            },
+          ],
+        }),
+      ).toMatchObject({ verdict: 'limit', contradiction: null });
+    }
+  });
+
+  it.each(['QOSMaxCpuPerUserLimit', 'AssocMaxCpuPerUserLimit', 'AssocMaxGRESPerUser'])(
+    'does not infer room for unevaluated or undocumented reason %s',
+    (reason) => {
+      expect(estimate({ reason })).toMatchObject({ verdict: 'likely', contradiction: null });
+    },
+  );
+
+  it.each(['h100', null, 'a100,h100'])(
+    'does not test a %s wait against a different model headroom',
+    (gpu_type) => {
+      const [option] = planOptions(
+        {
+          sources: [
+            source({
+              qos: [
+                {
+                  ...source().qos[0],
+                  limits: {
+                    MaxTRESPU: 'gres/gpu=16,gres/gpu:h100=4',
+                  },
+                },
+              ],
+            }),
+          ],
+          nodes: [node('g1', { gpu_allocated: 0 })],
+          jobs: [
+            job('running', { gpu_type: 'h100', gpu_count: 4 }),
+            job('waiting', {
+              gpu_type,
+              state: 'PENDING',
+              gpu_count: 1,
+              reason: 'QOSMaxGRESPerUser',
+            }),
+          ],
+        },
+        { gpus: 2, gpuType: 'a100', hours: null },
+      );
+      expect(option).toMatchObject({ headroom: 12, verdict: 'likely', contradiction: null });
+    },
+  );
 
   it('does not infer a contradiction from stale, unrelated or unknown evidence', () => {
     for (const extra of [
@@ -1348,6 +1437,24 @@ describe('honest ranking', () => {
       verdict: 'likely',
     });
   });
+
+  it.each([false, true])(
+    'omits an empty twin QoS row regardless of freshness (%s)',
+    (emptyFirst) => {
+      const populated = source({ last_success: '2026-01-01T01:00:00Z' });
+      const empty = source({
+        id: 'empty-twin',
+        qos: [],
+        last_success: emptyFirst ? '2026-01-01T02:00:00Z' : null,
+      });
+      const options = planOptions({ sources: [empty, populated], nodes: [], jobs: [] }, ask);
+      expect(options.map((option) => option.qos).sort()).toEqual(['long', 'normal']);
+      const otherUser = { ...empty, username: 'bob' };
+      const separate = planOptions({ sources: [otherUser, populated], nodes: [], jobs: [] }, ask);
+      expect(separate.filter((option) => option.qos == null)).toHaveLength(1);
+      expect(planOptions({ sources: [empty], nodes: [], jobs: [] }, ask)[0].qos).toBeNull();
+    },
+  );
 
   it.each([false, true])(
     'merges twins per QoS, attributing jobs regardless of source order (%s)',

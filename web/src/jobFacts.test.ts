@@ -41,8 +41,8 @@ it('bounds waits by observation time and preserves unknown timestamps', () => {
 
 it.each([
   'QOSMaxSubmitJobPerUserLimit',
-  'AssocMaxGRESPerUser',
-  'AssocMaxCpuPerUserLimit',
+  'QOSMaxCpuPerUserLimit',
+  'AssocMaxJobsLimit',
   'AssocMaxSubmitJobLimit',
 ])('shares the personal-limit class for %s with the planner', (reason) => {
   for (const locale of ['en', 'zh-CN'] as const) {
@@ -53,3 +53,10 @@ it.each([
     });
   }
 });
+
+it.each(['AssocMaxGRESPerUser', 'AssocMaxCpuPerUserLimit'])(
+  'leaves undocumented reason %s unexplained',
+  (reason) => {
+    expect(jobReason({ state: 'PENDING', reason }, 'slurm')?.kind).toBe('unknown');
+  },
+);

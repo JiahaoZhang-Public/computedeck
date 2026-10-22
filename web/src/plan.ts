@@ -24,7 +24,8 @@ export interface PlanRequest {
 /**
  * - likely: enough visible free GPUs, known QoS headroom, and no QoS rule left unchecked.
  * - possible: free GPUs, but the QoS limit is unknown (or the other way round), or a QoS
- *   rule could not be checked.
+ *   rule could not be checked. A personal-limit wait that fits the collected room
+ *   also caps likely at possible.
  * - behind: your eligible queued GPUs leave too little headroom (an estimate, not FIFO).
  * - busy: not enough visible free GPUs right now, or the QoS's shared GPUs are taken.
  * - limit: your QoS limit is used up, or the request breaks a QoS rule.
@@ -85,7 +86,7 @@ export interface PlanOption {
   queuedForRoom: number | null;
   headroomAfterQueue: number | null;
   reasons: string[] | null;
-  /** A personal-limit wait that disagrees with the collected GPU headroom. */
+  /** A personal-limit wait that disagrees with the collected GPU or job-count room. */
   contradiction: { job: string; reason: string } | null;
   maxWallHours: number | null;
   nodesObservedAt: string | null;
@@ -357,6 +358,17 @@ export function planOptions(
   const seen = new Set<string>();
   const options: PlanOption[] = [];
   for (const source of sources) {
+    // An uncollected twin must not add a "no QoS" row beside this login's QoS rows.
+    if (
+      !source.qos.length &&
+      sources.some(
+        (other) =>
+          other.cluster_id === source.cluster_id &&
+          other.username === source.username &&
+          other.qos.length > 0,
+      )
+    )
+      continue;
     const cluster = capacity(
       nodes.filter((node) => node.cluster_id === source.cluster_id),
       request.gpuType,
@@ -483,24 +495,53 @@ export function planOptions(
         headroomAfterQueue = null;
         queuedForRoom = null;
       }
-      const typedRoom =
+      const rules = currentQos
+        ? qosRules(
+            currentQos,
+            request,
+            currentJobs ? { running, queued: pending } : null,
+            currentQos.usage ?? {},
+          )
+        : [];
+      const hasTypedCap =
         currentQos &&
         gpuTres(currentQos.limits?.MaxTRESPU).some(
-          (entry) => entry.model && entry.model === request.gpuType.toLowerCase(),
+          (entry) => entry.model && Number.isFinite(entry.value),
         );
       const contradictory =
-        currentJobs && !includesPending && headroom != null
-          ? eligible.find(
-              (job) =>
-                job.gpu_count != null &&
-                job.gpu_count <= headroom! &&
-                // A typed cap needs a known matching model; CPU-only jobs need no GPU room.
-                (!typedRoom ||
-                  job.gpu_count === 0 ||
+        currentJobs &&
+        !includesPending &&
+        headroom != null &&
+        !rules.some((rule) => ['jobs', 'submit'].includes(rule.kind) && rule.effect === 'limit')
+          ? eligible.find((job) => {
+              if (
+                job.gpu_count == null ||
+                job.gpu_count > headroom! ||
+                jobReason(job, source.driver)?.kind !== 'personalLimit'
+              )
+                return false;
+              const reason = (job.reason ?? '').split(/[ ,:(]/)[0];
+              if (reason === 'QOSMaxGRESPerUser')
+                // Only the requested model's room was checked, including other typed caps.
+                return (
+                  !hasTypedCap ||
                   (models(job.gpu_type).length === 1 &&
-                    models(job.gpu_type).includes(request.gpuType.toLowerCase()))) &&
-                jobReason(job, source.driver)?.kind === 'personalLimit',
-            )
+                    models(job.gpu_type).includes(request.gpuType.toLowerCase()))
+                );
+              const key =
+                reason === 'QOSMaxJobsPerUserLimit' || reason === 'AssocMaxJobsLimit'
+                  ? 'MaxJobsPU'
+                  : reason === 'QOSMaxSubmitJobPerUserLimit' || reason === 'AssocMaxSubmitJobLimit'
+                    ? 'MaxSubmitJobsPU'
+                    : null;
+              // CPU room is not evaluated. Count waits need the matching collected limit.
+              if (!key) return false;
+              const cap = countLimit(currentQos?.limits?.[key]);
+              const count =
+                countLimit(currentQos?.usage?.[key]) ??
+                (key === 'MaxJobsPU' ? running.length : running.length + pending.length);
+              return cap != null && count < cap;
+            })
           : undefined;
       const option = {
         source,
@@ -529,14 +570,7 @@ export function planOptions(
           : null,
         nodesObservedAt: cluster.observedAt,
         noMatchingGpus: cluster.noMatchingGpus,
-        rules: currentQos
-          ? qosRules(
-              currentQos,
-              request,
-              currentJobs ? { running, queued: pending } : null,
-              currentQos.usage ?? {},
-            )
-          : [],
+        rules,
       };
       options.push({
         ...option,

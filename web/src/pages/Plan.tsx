@@ -369,7 +369,9 @@ function OptionsTable({
                   </span>
                   {reason && (
                     <span className="sub" title={reason}>
-                      {explanation && explanation.kind !== 'unknown' ? explanation.summary : reason}
+                      {explanation && explanation.kind !== 'unknown'
+                        ? t(`plan.queueReason.${explanation.kind}` as MessageKey)
+                        : reason}
                     </span>
                   )}
                 </td>
