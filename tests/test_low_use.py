@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from computedeck import attention, demo
+from computedeck import attention, demo, drivers
 from computedeck.drivers.cloud import CloudDriver, provider_console_url
 from computedeck.low_use import low_use
 from computedeck.records import SettingsInput
@@ -291,6 +291,40 @@ def test_console_template_is_optional_and_encoded() -> None:
         "https://example.com/{id:10}",
     ):
         assert provider_console_url(template, "box", None) is None
+
+
+@pytest.mark.parametrize(
+    "template", [property(lambda self: "https://example.com"), lambda: None, 42]
+)
+def test_dashboard_ignores_non_string_driver_console_url(
+    store: Store, add_source: AddSource, monkeypatch: pytest.MonkeyPatch, template: object
+) -> None:
+    class PluginDriver:
+        name = "example-plugin"
+        kind = "cloud"
+
+        def __init__(self) -> None:
+            self.console_url = template
+
+    monkeypatch.setitem(drivers._DRIVERS, PluginDriver.name, PluginDriver())
+    source = add_source(driver="runpod")
+    source["driver"] = PluginDriver.name
+    store.save_source(source)
+    store.save_snapshot(source["id"], {"instances": [listed(source, NOW.isoformat())]})
+    # Plugin drivers can already use this attribute for something other than a URL.
+    assert store.dashboard()["instances"][0]["console_url"] is None
+
+
+@pytest.mark.parametrize(
+    "driver, expected",
+    [("runpod", "https://console.runpod.io"), ("vastai", "https://cloud.vast.ai/instances")],
+)
+def test_dashboard_uses_registered_driver_console_url(
+    store: Store, add_source: AddSource, driver: str, expected: str
+) -> None:
+    source = add_source(driver=driver)
+    store.save_snapshot(source["id"], {"instances": [listed(source, NOW.isoformat())]})
+    assert store.dashboard()["instances"][0]["console_url"] == expected
 
 
 def test_three_readings_are_required_even_with_a_long_interval() -> None:

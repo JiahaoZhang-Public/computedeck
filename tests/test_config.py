@@ -483,6 +483,16 @@ def test_import_enables_configured_source_before_first_collection(store: Store) 
     assert saved["failures"] == 0
 
 
+@pytest.mark.parametrize(
+    "settings",
+    [{}, {"low_use_threshold": 5}, {"low_use_window_minutes": 90}],
+)
+def test_export_omits_default_low_use_settings(store: Store, settings: dict[str, int]) -> None:
+    store.save_settings(settings)
+    exported = tomllib.loads(config.export(store))
+    assert {key: exported[key] for key in exported if key.startswith("low_use_")} == settings
+
+
 def test_low_use_settings_round_trip(store: Store) -> None:
     store.save_settings({"low_use_threshold": 5, "low_use_window_minutes": 90})
     exported = config.export(store)

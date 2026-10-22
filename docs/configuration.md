@@ -208,7 +208,9 @@ Settings → Low GPU use controls two service-wide settings, shared by viewers:
 | `low_use_window_minutes` | 60 (minutes) | Integer 30–360 |
 
 `GET /api/settings` returns them; `PUT /api/settings` accepts either independently.
-Configuration export and import preserve both settings. Changes recompute hints from
+Configuration export includes these settings only when they differ from their defaults,
+so default exports remain importable by 0.6. Import leaves omitted settings unchanged;
+non-default values round-trip. Changes recompute hints from
 recorded readings. They do not enable any new collection or SSH checks. At least three
 consecutive measurements must cover the chosen window, with no gap exceeding twice the
 collection interval. A deliberately quiet inference
@@ -217,6 +219,7 @@ seven days. See [sustained low GPU use](metrics.md#sustained-low-gpu-use) for co
 
 中文：“设置 → GPU 低利用率”提供服务端共享设置：利用率阈值 `low_use_threshold` 默认 10%，
 范围为整数 1–50；窗口 `low_use_window_minutes` 默认 60 分钟，范围为整数 30–360。
+配置导出仅包含非默认值，使默认配置仍可导入 0.6；导入时未指定的设置保持不变。
 更改后按已有读数重新计算，不会开启新的采集或 SSH 检查。至少需要 3 次连续测量覆盖窗口，
 相邻间隔不得超过采集周期的两倍。对于有意保持低负载的推理服务，可在“待处理”中确认或暂缓。
 读数保留 7 天。

@@ -302,9 +302,9 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
     }
 
 
-def provider_console_url(template: str | None, instance_id: str, region: str | None) -> str | None:
+def provider_console_url(template: object, instance_id: str, region: str | None) -> str | None:
     """Expand only encoded id/region placeholders in an HTTPS console link."""
-    if not template:
+    if not isinstance(template, str) or not template:
         return None
     try:
         if any(

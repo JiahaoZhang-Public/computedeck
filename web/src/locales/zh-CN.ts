@@ -29,9 +29,9 @@ const zhCN: Record<keyof typeof en, string> = {
   'lowUse.saved': '已保存低利用率设置。',
   'lowUse.saveError': '无法保存低利用率设置。',
   'msg.instance_low_use':
-    '在 {duration} 内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
+    '在 {duration}内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
   'msg.attention_instance_low_use':
-    '{name}：在 {duration} 内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
+    '{name}：在 {duration}内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
 
   'msg.attention_source_failed': '{name}：采集失败',
   'msg.attention_source_stale': '{name}：数据过期',

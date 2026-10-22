@@ -97,6 +97,10 @@ describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) =>
       expect(lowUseText(workstation())).toContain(duration);
       const hint = ctx.data.attention!.find((a) => a.kind === 'instance_low_use')!;
       expect(formatMessage({ ...hint.message, minutes })).toContain(duration);
+      if (language === 'zh-CN') {
+        expect(lowUseText(workstation())).toContain(`${duration}内`);
+        expect(formatMessage({ ...hint.message, minutes })).toContain(`${duration}内`);
+      }
     },
   );
   it('filters Cloud through the URL and updates when a new server result clears the hint', async () => {
@@ -158,6 +162,26 @@ describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) =>
     ctx.data.sources.find((source) => source.id === item.source_id)!.driver = 'example-plugin';
     expect(drawer(item).textContent).not.toContain(t('lowUse.providerMissing'));
   });
+  it.each([false, true])('offers manual monitoring guidance only when off (%s)', (monitoring) => {
+    const item = workstation();
+    item.monitoring = monitoring;
+    item.low_use = { ...item.low_use!, state: 'unknown', reason: 'coverage' };
+    expect(drawer(item).textContent).toContain(t('lowUse.coverage', { minutes: 60 }));
+    expect(drawer(item).textContent!.includes(t('lowUse.monitor'))).toBe(!monitoring);
+  });
+  it.each(['runpod', 'lambda', 'aws-ec2', 'gpuhub'])(
+    'offers reading guidance for %s only when the reason supports it',
+    (driver) => {
+      const item = ctx.data.instances.find((i) => i.name === 'sd-inference')!;
+      ctx.data.sources.find((source) => source.id === item.source_id)!.driver = driver;
+      for (const reason of ['no_reading', 'coverage', 'stale', 'not_running'] as const) {
+        item.low_use = { ...item.low_use!, state: 'unknown', reason };
+        expect(drawer(item).textContent!.includes(t('lowUse.providerMissing'))).toBe(
+          reason !== 'not_running',
+        );
+      }
+    },
+  );
   it('saves validated numeric settings and keeps example mode read-only', async () => {
     vi.mocked(api).mockResolvedValue({});
     await act(async () => root.render(<SettingsPage ctx={ctx} />));

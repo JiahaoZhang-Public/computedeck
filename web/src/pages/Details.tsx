@@ -584,8 +584,11 @@ export function InstanceDetail({
                 minutes: ctx.data.low_use_settings?.window_minutes ?? 60,
               })}{' '}
               {item.manual
-                ? t('lowUse.monitor')
-                : ['runpod', 'lambda', 'aws-ec2', 'gpuhub'].includes(source?.driver ?? '')
+                ? !item.monitoring && t('lowUse.monitor')
+                : ['runpod', 'lambda', 'aws-ec2', 'gpuhub'].includes(source?.driver ?? '') &&
+                    ['no_reading', 'coverage', 'stale'].includes(
+                      item.low_use?.reason ?? 'no_reading',
+                    )
                   ? t('lowUse.providerMissing')
                   : ''}
             </p>

@@ -266,6 +266,11 @@ def export(store: Store) -> str:
     lines = ["# ComputeDeck configuration. Import with: computedeck import FILE", ""]
     settings = store.settings()
     for key in DEFAULT_SETTINGS:
+        if (
+            key in {"low_use_threshold", "low_use_window_minutes"}
+            and settings[key] == DEFAULT_SETTINGS[key]
+        ):
+            continue
         if settings.get(key) is not None:
             lines.append(f"{key} = {_value(settings[key])}")
     for node in store.nodes():
