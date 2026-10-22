@@ -496,6 +496,12 @@ const en = {
   'job.cpus': 'CPU cores',
   'job.node': 'Nodes',
 
+  'job.queue.priorityReported': 'The scheduler reports a priority wait.',
+  'job.queue.front':
+    'No other eligible jobs ahead in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
+  'job.queue.fairshareNotCollected': 'Fair-share: — · Not collected yet.',
+  'job.queue.fairshareFailed':
+    'Fair-share: — · Could not be read, or not used by this scheduler’s priority policy.',
   'job.queue.ahead':
     'About {count} jobs ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
   'job.queue.ahead.one':

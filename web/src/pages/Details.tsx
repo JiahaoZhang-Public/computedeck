@@ -256,7 +256,11 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       {explanation && (
         <div className="callout">
           <strong>{t('job.reason')}</strong>
-          <p>{explanation.summary}</p>
+          <p>
+            {driver === 'slurm' && explanation.kind === 'priority' && job.queue?.length
+              ? t('job.queue.priorityReported')
+              : explanation.summary}
+          </p>
           {job.reason && <code>{job.reason}</code>}
           {driver === 'slurm' && ['priority', 'resources'].includes(explanation.kind) && (
             <>
@@ -264,8 +268,10 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                 job.queue.map(({ partition, ahead, ties }) => (
                   <p key={partition}>
                     {t(
-                      explanation.kind === 'resources' && ahead === 0 && ties === 0
-                        ? 'job.queue.resources'
+                      ahead === 0 && ties === 0
+                        ? explanation.kind === 'resources'
+                          ? 'job.queue.resources'
+                          : 'job.queue.front'
                         : ties
                           ? 'job.queue.range'
                           : 'job.queue.ahead',
@@ -290,7 +296,13 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                       account: job.account,
                       factor: job.fairshare.toFixed(2),
                     })
-                  : t('job.queue.fairshareUnknown')}
+                  : t(
+                      job.fairshare === undefined
+                        ? 'job.queue.fairshareNotCollected'
+                        : job.queue_unknown === 'failed'
+                          ? 'job.queue.fairshareFailed'
+                          : 'job.queue.fairshareUnknown',
+                    )}
               </p>
             </>
           )}

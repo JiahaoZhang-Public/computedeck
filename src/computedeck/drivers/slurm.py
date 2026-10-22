@@ -394,7 +394,9 @@ def queue_positions(
 _QUEUE_CONFIG: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
 
 
-async def collect_queue(batch: Batch, source: dict[str, Any], associations: str) -> None:
+async def collect_queue(
+    batch: Batch, source_id: str, alias: str, username: str, associations: str
+) -> None:
     jobs = [
         job
         for job in batch.jobs or []
@@ -404,9 +406,8 @@ async def collect_queue(batch: Batch, source: dict[str, Any], associations: str)
         return
     for job in jobs:
         job.update(queue=None, fairshare=None, queue_unknown="failed")
-    alias, username = source["ssh_alias"], source["username"]
     options = ["-l", username]
-    key = (source["id"], alias, username)
+    key = (source_id, alias, username)
     cached = _QUEUE_CONFIG.get(key)
     try:
         if cached and time.monotonic() - cached[0] < 3600:
@@ -710,7 +711,7 @@ class SlurmDriver:
             grants = association_qos(associations, username)
         except (RuntimeError, TimeoutError):
             pass
-        await collect_queue(batch, source, associations)
+        await collect_queue(batch, source["id"], alias, username, associations)
         if grants is None:
             # A database can cover multiple clusters. The controller's cluster name,
             # not the display name or SSH alias, scopes the optional database query.

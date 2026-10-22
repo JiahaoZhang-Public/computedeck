@@ -404,9 +404,11 @@ Rules that keep the numbers honest:
   `ahead` to `ahead + ties`. Other users' ids are never persisted. Missing fields on
   older snapshots stay unknown. These are optional JSON additions with no new
   capability, event, schema version or plugin API version.
-  `queue`, `fairshare` and `queue_unknown` are reserved job keys with these shapes;
-  shared row validation enforces them for every driver. Store scheduler queue names in
-  `partition`, never `queue`; also use `qos` when the queue carries limits, as PBS and LSF do.
+  Including `queue_unknown` opts a row into validation of all three queue-estimate
+  fields. Rows without that key retain their existing plugin-defined `queue` and
+  `fairshare` values (for example, `queue: "batch"` or `fairshare: 45.0`). The web
+  drawer displays these estimates only for Slurm jobs. Use `partition` for scheduler
+  queue names shown in the web app, and `qos` for queues carrying limits, as PBS and LSF do.
 - Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
   `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
   heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,

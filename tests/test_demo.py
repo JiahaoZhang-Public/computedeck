@@ -646,3 +646,15 @@ def test_demo_shows_queue_estimates_and_explicit_unknowns() -> None:
     assert any(job["fairshare"] == 0.12 for job in waiting)
     assert {job["queue_unknown"] for job in waiting} == {None, "failed"}
     assert all("queue" not in job for job in jobs if job not in waiting)
+
+
+def test_demo_pending_array_siblings_count_as_ties() -> None:
+    waiting = [
+        job
+        for job in dashboard()["jobs"]
+        if job.get("array_id") == "48300" and job["state"] == "PENDING"
+    ]
+    for job in waiting:
+        if job["queue"] is not None:
+            earlier = sum(int(other["array_index"]) < int(job["array_index"]) for other in waiting)
+            assert job["queue"] == [{"partition": "gpu", "ahead": 0, "ties": earlier}]

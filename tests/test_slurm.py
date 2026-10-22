@@ -3,7 +3,7 @@
 All sample outputs are hand-written from the documented formats and use fictional data.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -998,7 +998,7 @@ def test_queue_positions_reject_unrecognized_output(output: str) -> None:
 
 
 @pytest.fixture
-def queue_cluster(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def queue_cluster(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     """Optional queue steps on top of the existing normal collection fixture."""
     slurm._QUEUE_CONFIG.clear()
     state: dict[str, Any] = {
@@ -1027,7 +1027,8 @@ def queue_cluster(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return value
 
     monkeypatch.setattr(ssh, "run", run)
-    return state
+    yield state
+    slurm._QUEUE_CONFIG.clear()
 
 
 async def test_queue_collection_keeps_only_counts_and_own_ids(
@@ -1206,4 +1207,27 @@ def test_queue_fields_are_validated_before_storage(fields) -> None:
     from computedeck.drivers.base import validate_row
 
     with pytest.raises(ValueError):
-        validate_row({"id": "cluster-a:42", **fields})
+        validate_row({"id": "cluster-a:42", "queue_unknown": None, **fields})
+
+
+@pytest.mark.parametrize("kind", ["jobs", "nodes", "instances", "failures", "finished"])
+def test_plugin_queue_fields_without_slurm_opt_in_remain_compatible(kind, tmp_path) -> None:
+    from computedeck.drivers.base import Batch
+
+    row = {
+        "id": "cluster-a:42",
+        "source_id": "cluster-a-alice",
+        "state": "PENDING",
+        "queue": "batch",
+        "fairshare": 45.0,
+    }
+    batch = Batch(**{kind: [row]})
+    batch.validate_rows()
+    assert getattr(batch, kind) == [row]
+    # Finished rows are transient; all other row kinds also survive stored snapshots.
+    if kind != "finished":
+        store = Store(tmp_path / "plugin.sqlite3")
+        store.save_snapshot("cluster-a-alice", {kind: getattr(batch, kind)})
+        saved = store.snapshot("cluster-a-alice")[kind]
+        assert len(saved) == 1
+        assert {key: saved[0][key] for key in row} == row

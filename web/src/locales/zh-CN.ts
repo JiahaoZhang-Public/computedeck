@@ -468,6 +468,11 @@ const zhCN: Record<keyof typeof en, string> = {
   'job.cpus': 'CPU 核数',
   'job.node': '节点',
 
+  'job.queue.priorityReported': '调度器报告该作业正在等待优先级调度。',
+  'job.queue.front':
+    '在分区 {partition} 中，前方没有其他符合调度条件的作业（估计；资源预留、抢占和回填调度可能改变顺序）。',
+  'job.queue.fairshareNotCollected': '公平共享因子：— · 尚未采集。',
+  'job.queue.fairshareFailed': '公平共享因子：— · 无法读取，或调度器的优先级策略未使用此因子。',
   'job.queue.ahead':
     '在分区 {partition} 中，你的作业前方约有 {count} 个作业（估计；资源预留、抢占和回填调度可能改变顺序）。',
   'job.queue.ahead.one':

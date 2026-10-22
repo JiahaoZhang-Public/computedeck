@@ -136,30 +136,32 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
         if not isinstance(row["partitions"], list):
             raise ValueError("Invalid collection text: partitions")
         row["partitions"] = [_text(item, "partitions") for item in row["partitions"]]
-    if row.get("queue_unknown") not in (None, "private_data", "failed"):
-        raise ValueError("Invalid collection queue_unknown")
-    queue = row.get("queue")
-    if queue is not None:
-        if not isinstance(queue, list):
-            raise ValueError("Invalid collection queue")
-        for position in queue:
-            if (
-                not isinstance(position, dict)
-                or not isinstance(position.get("partition"), str)
-                or not position["partition"]
-                or any(
-                    isinstance(position.get(key), bool)
-                    or not isinstance(position.get(key), int)
-                    or position[key] < 0
-                    for key in ("ahead", "ties")
-                )
-            ):
-                raise ValueError("Invalid collection queue position")
-    factor = row.get("fairshare")
-    if factor is not None and (
-        isinstance(factor, bool) or not isinstance(factor, int | float) or not 0 <= factor <= 1
-    ):
-        raise ValueError("Invalid collection fairshare")
+    # Only rows opting into Slurm queue estimates use these field shapes.
+    if "queue_unknown" in row:
+        if row.get("queue_unknown") not in (None, "private_data", "failed"):
+            raise ValueError("Invalid collection queue_unknown")
+        queue = row.get("queue")
+        if queue is not None:
+            if not isinstance(queue, list):
+                raise ValueError("Invalid collection queue")
+            for position in queue:
+                if (
+                    not isinstance(position, dict)
+                    or not isinstance(position.get("partition"), str)
+                    or not position["partition"]
+                    or any(
+                        isinstance(position.get(key), bool)
+                        or not isinstance(position.get(key), int)
+                        or position[key] < 0
+                        for key in ("ahead", "ties")
+                    )
+                ):
+                    raise ValueError("Invalid collection queue position")
+        factor = row.get("fairshare")
+        if factor is not None and (
+            isinstance(factor, bool) or not isinstance(factor, int | float) or not 0 <= factor <= 1
+        ):
+            raise ValueError("Invalid collection fairshare")
     port = row.get("port")
     if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
         raise ValueError("Invalid collection port")

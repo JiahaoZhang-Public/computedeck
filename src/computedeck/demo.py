@@ -315,13 +315,13 @@ def dashboard() -> dict[str, Any]:
             reason=("Resources" if index < 25 else "Priority") if state == "PENDING" else None,
         )
         if state == "PENDING":
-            # Resources waits include both the front (element 5) and jobs behind it.
+            # Pending array siblings share priority; earlier elements count as ties.
             element.update(
                 queue=[
                     {
                         "partition": "gpu",
-                        "ahead": 20 if index >= 25 else index - 5,
-                        "ties": index - 23 if index >= 25 else 0,
+                        "ahead": 0,
+                        "ties": index - 5,
                     }
                 ],
                 fairshare=0.12,
