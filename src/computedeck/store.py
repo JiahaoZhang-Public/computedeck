@@ -21,6 +21,7 @@ from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
 from .summary import manual_state as manual_state
+from .wait_history import summarize_waits, supports_wait_history, wait_sample
 
 SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -155,6 +156,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS snapshots (source_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS history (at TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS job_wait_samples (
+                source_id TEXT NOT NULL, job_id TEXT NOT NULL, started_at TEXT NOT NULL,
+                ended_at TEXT NOT NULL, data TEXT NOT NULL,
+                PRIMARY KEY (source_id, job_id, started_at)
+            );
             CREATE TABLE IF NOT EXISTS instance_samples (
                 instance_id TEXT NOT NULL, at TEXT NOT NULL,
                 gpu_util REAL NOT NULL, gpu_util_max REAL, origin TEXT NOT NULL,
@@ -759,7 +765,13 @@ class Store:
 
     def save_source(self, source: dict[str, Any]) -> None:
         stored = {key: value for key, value in source.items() if key not in {"kind", "stale"}}
+        previous = self.source(source["id"])
         with self.db:
+            if previous and any(
+                (previous.get(key) or None) != (source.get(key) or None)
+                for key in ("driver", "cluster_id", "username", "ssh_alias", "options", "node")
+            ):
+                self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source["id"],))
             self.db.execute(
                 "INSERT INTO sources VALUES (?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -771,9 +783,33 @@ class Store:
         with self.db:
             deleted = self.db.execute("DELETE FROM sources WHERE id=?", (source_id,)).rowcount
             self.db.execute("DELETE FROM snapshots WHERE source_id=?", (source_id,))
+            self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source_id,))
         self._repaired("sources", source_id)
         self._repaired("snapshots", source_id)
         return deleted == 1
+
+    def record_job_waits(self, source: dict[str, Any], jobs: list[dict[str, Any]]) -> None:
+        """Retain only usable own-accounting times from normal finished-job collection."""
+        if not supports_wait_history(source):
+            return
+        current = datetime.now(UTC)
+        cutoff = (current - timedelta(days=30)).isoformat()
+        with self.db:
+            for job in jobs:
+                sample = wait_sample(job, source)
+                if sample is None or not cutoff <= sample["ended_at"] <= current.isoformat():
+                    continue
+                self.db.execute(
+                    "INSERT OR REPLACE INTO job_wait_samples VALUES (?, ?, ?, ?, ?)",
+                    (
+                        source["id"],
+                        sample["id"],
+                        sample["started_at"],
+                        sample["ended_at"],
+                        json.dumps(sample),
+                    ),
+                )
+            self.db.execute("DELETE FROM job_wait_samples WHERE ended_at < ?", (cutoff,))
 
     def save_snapshot(self, source_id: str, snapshot: dict[str, Any]) -> None:
         for rows in snapshot.values():
@@ -1096,6 +1132,14 @@ class Store:
         }
 
         data["summary"] = summarize({**data, **observations})
+        wait_samples = [
+            json.loads(row[0])
+            for row in self.db.execute(
+                "SELECT data FROM job_wait_samples WHERE ended_at >= ?",
+                ((current - timedelta(days=30)).isoformat(),),
+            )
+        ]
+        data["wait_history"] = summarize_waits(sources, wait_samples, now=current)
         return data
 
     def history(self, hours: int, max_points: int = 600) -> list[dict[str, Any]]:
@@ -1153,6 +1197,7 @@ class Store:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))
             cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             self.db.execute("DELETE FROM history WHERE at < ?", (cutoff,))
+            self.db.execute("DELETE FROM job_wait_samples WHERE ended_at < ?", (cutoff,))
             self.db.execute(
                 "DELETE FROM instance_samples WHERE at < ?",
                 ((datetime.now(UTC) - timedelta(days=7)).isoformat(),),

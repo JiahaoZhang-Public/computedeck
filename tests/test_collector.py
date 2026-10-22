@@ -1285,3 +1285,70 @@ async def test_ssh_source_checks_preserve_the_window_and_acknowledgement(
     assert usage["since"] == before["since"]
     low_hint = next(i for i in collector.attention_items() if i["kind"] == "instance_low_use")
     assert low_hint["muted"]["state"] == "acknowledged"
+
+
+@pytest.mark.parametrize("accounting", [True, False])
+async def test_wait_history_uses_only_own_finished_accounting_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    accounting: bool,
+) -> None:
+    source = add_source(fresh=False)
+    current = datetime.now(UTC)
+    completed = {
+        "id": f"{source['cluster_id']}:42",
+        "source_id": source["id"],
+        "cluster_id": source["cluster_id"],
+        "user": source["username"],
+        "state": "COMPLETED",
+        "gpu_count": 1,
+        "qos": "normal",
+        "partition": "gpu",
+        "submitted_at": (current - timedelta(hours=3)).isoformat(),
+        "started_at": (current - timedelta(hours=2)).isoformat(),
+        "ended_at": (current - timedelta(hours=1)).isoformat(),
+        "observed_at": current.isoformat(),
+    }
+
+    def collect(_: dict[str, Any]) -> Batch:
+        return Batch(
+            jobs=[{**completed, "id": f"{source['cluster_id']}:running", "state": "RUNNING"}],
+            failures=[{**completed, "id": f"{source['cluster_id']}:failure", "state": "FAILED"}],
+            finished=[
+                completed,
+                {**completed, "id": f"{source['cluster_id']}:other", "user": "bob"},
+            ],
+            capabilities=["jobs", "history"] if accounting else ["jobs"],
+        )
+
+    calls = use_driver(monkeypatch, collect)
+    await collector.collect(source["id"])
+    await collector.collect(source["id"])
+    assert len(calls) == 2
+    rows = store.db.execute("SELECT job_id FROM job_wait_samples").fetchall()
+    assert rows == ([(completed["id"],)] if accounting else [])
+    result = store.dashboard()["wait_history"][source["id"]]
+    assert result["status"] == ("available" if accounting else "unavailable")
+    if accounting:
+        assert result["buckets"][0]["samples"] == 1
+
+
+async def test_wait_history_does_not_keep_a_repointed_collection(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+) -> None:
+    source = add_source()
+    calls = []
+    monkeypatch.setattr(store, "record_job_waits", lambda *args: calls.append(args))
+
+    def collect(collected: dict[str, Any]) -> Batch:
+        store.save_source({**collected, "ssh_alias": "other-login"})
+        return Batch(finished=[], capabilities=["history"])
+
+    use_driver(monkeypatch, collect)
+    await collector.collect(source["id"])
+    assert calls == []

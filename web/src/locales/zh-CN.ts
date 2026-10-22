@@ -2,6 +2,23 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'wait.unsupported': '— · 此调度器的记账记录不提供你的已结束作业可用的提交、开始和结束时间。',
+  'wait.ownOnly': '等待历史仅涵盖此登录自己的作业。',
+  'wait.line': '你的作业通常等待多久：{value}',
+  'wait.partition': '分区：{partition}',
+  'wait.title': '你的作业通常等待多久',
+  'wait.note': '不是预测。基于最近 30 天采集到的已结束作业，包含所有 GPU 型号。',
+  'wait.scope': '队列 / QoS：{qos} · 分区：{partition}',
+  'wait.bucket': 'GPU 数量分组：{gpus}',
+  'wait.range': '{low} – {high}（第 25–75 百分位，{count} 个作业）',
+  'wait.insufficient': '— · 历史不足（{count} 个作业）。',
+  'wait.insufficient.one': '— · 历史不足（{count} 个作业）。',
+  'wait.unavailable': '— · 此登录的作业记账历史不可用。',
+  'wait.notCollected': '— · 尚未采集等待历史。',
+  'wait.unknownGpus': '— · GPU 数量未知，无法匹配历史分组。',
+  'wait.asOf': '记账历史最近采集于：{time}',
+  'wait.asOfUnknown': '记账历史采集时间未知。',
+  'wait.seconds': '{count} 秒',
   'lowUse.busy': '最近一次 GPU 读数达到或超过 {threshold}%。',
   'lowUse.title': 'GPU 低利用率',
   'lowUse.duration.hours': '{count} 小时',

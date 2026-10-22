@@ -566,6 +566,7 @@ def _unavailable(code: str, error: BaseException) -> dict[str, Any]:
 
 
 class SlurmDriver:
+    supports_wait_history: ClassVar[bool] = True
     name: ClassVar[str] = "slurm"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cluster"
     info: ClassVar[DriverInfo] = DriverInfo(

@@ -826,3 +826,79 @@ Resources 作业仅在该分区的前方作业数和同优先级作业数均为�
 保留的旧观测也不会被当作新数据。集群隐藏队列、读取失败或列表中找不到作业时，展示“—”并解释原因，
 不会填成零。没有队列字段的旧快照显示“尚未采集”。因子缺失或调度策略未使用它时也展示“—”。
 只保留队列汇总数量，不保存或记录其他用户的作业 ID。
+
+## Typical wait from your job history
+
+Where to run and a waiting job's drawer show “Typical wait for your jobs”, explicitly
+labelled “Not a prediction”. The range is the 25th–75th percentile of submit-to-start
+seconds from this login's own finished accounting records ending in the last 30 days
+(a rolling 30 × 24 hours, selected by job end time).
+At least eight samples are required in the matching group. With fewer, the value is
+“— · Not enough history (n jobs)”. Missing accounting and history not yet collected
+have their own explanations, as does a driver that cannot supply usable accounting times.
+The drawer shows the accounting collection time in local time;
+stale history does not advance to the present or change planner verdicts or ranking.
+
+Groups are separate for each cluster, username, queue/QoS, partition and GPU-count
+bucket: 0, 1, 2, 3–4, 5–8, 9–16, and so on, doubling the upper bound. GPU models are
+pooled and the UI says so. Same-account twin logins share samples, deduplicated by
+job id and actual start time. Repeated polls do not increase the count; a new attempt
+with a different start can count again. Quartiles use linear interpolation at
+`(n - 1) × 0.25` and `(n - 1) × 0.75`. A zero wait is valid. A job cancelled before
+starting, an unknown GPU count, missing or timezone-free timestamps, or times out of
+order cannot supply a sample. Failed jobs that did start can supply one.
+
+Where to run has no partition selector, so it shows each observed partition separately
+for the selected QoS and count bucket, with partition labels only when several rows
+need distinguishing. Each option uses one compact wait line. The non-prediction note
+and oldest relevant accounting age appear once per panel, with the absolute time on
+hover. The best card puts waits after the ranking comparison; the drawer puts them
+after the scheduler reason and queue position. Durations use whole hours/minutes,
+rounded to the nearest minute, or seconds for sub-minute waits. The drawer matches
+the job's partition(s),
+showing insufficient history for any without samples. It never borrows another
+login's, QoS's, partition's or GPU-count bucket's range.
+
+History accumulates after upgrading from the existing normal terminal-history query;
+there is no additional accounting query or 30-day backfill. Collection gaps and the
+scheduler's own retention can leave jobs unobserved. Slurm already provides aware
+Submit/Start/End fields. PBS terminal records apply the remote clock offset to all
+three times and are supported too. LSF and Kubernetes are not yet supported: LSF
+keeps naive submit/start text, and Kubernetes lacks complete terminal times and
+reliable login ownership. Plugin drivers must explicitly opt in. Unsupported drivers
+get an explanation rather than a permanent zero-sample message. A supported driver
+whose accounting is not readable reports unavailable instead. Only own-job identifiers,
+grouping
+fields and timestamps are retained locally, for 30 days; the dashboard sends aggregates.
+Deleting or repointing a login clears its retained samples; pausing it preserves them.
+
+## 根据你的作业历史展示通常等待时间
+
+“在哪里运行”和等待中的作业详情展示“你的作业通常等待多久”，并明确标注“不是预测”。
+范围取自此登录自己的已结束作业记账记录，计算提交至实际开始的时长，按作业结束时间筛选
+最近滚动的 30 × 24 小时。匹配分组至少有 8 个样本才显示第 25–75 百分位及作业数；
+不足时显示“— · 历史不足（n 个作业）”。驱动不支持等待历史、记账不可用和尚未采集分别说明。最近一次记账
+采集时间以本地时间展示；旧历史不会随当前时间延长，也不影响规划结论或排序。
+
+按集群、用户名、队列/QoS、分区及 GPU 数量分组：0、1、2、3–4、5–8、9–16，
+之后上界依次翻倍。分组包含所有 GPU 型号，界面明确说明。同集群同用户名的重复登录共享
+样本，以作业 ID 和实际开始时间去重；重复采集不增加数量，重新运行且开始时间不同的尝试
+可以另计。百分位在排序后的 `(n - 1) × 0.25` 和 `(n - 1) × 0.75` 处线性插值。
+零等待有效。未开始就取消、GPU 数量未知、时间缺失或没有时区、时间顺序错误的作业不计入；
+实际开始后失败的作业可以计入。
+
+“在哪里运行”没有分区选择器，因此按分区分别展示当前 QoS 和 GPU 数量分组的历史，
+仅在有多个分区需要区分时显示分区名。每个选项使用紧凑的一行；“不是预测”及最早的相关
+记账采集时间每个面板只显示一次，悬停可查看绝对时间。最佳估计卡片先展示排序比较，
+再展示等待历史；作业详情先展示调度器原因和队列位置，再展示历史。时长四舍五入到整分钟，
+以小时和分钟表示；不足一分钟时显示秒。
+作业详情匹配该作业的各个分区，没有样本的分区单独说明历史不足。不会借用其他登录、QoS、
+分区或 GPU 数量分组的数据。
+
+升级后利用原有的正常终态历史采集逐步积累，不新增记账查询，也不回查完整 30 天。
+采集中断和调度器自身的保留期可能造成缺失。Slurm 已提供带时区的提交、开始、结束时间；
+PBS 的终态记录也为三个时间应用远程时钟偏移，因此支持此估计。LSF 和 Kubernetes
+暂不支持：LSF 的提交/开始时间没有时区，Kubernetes 缺少完整的终态时间及可靠的登录归属。
+插件驱动须显式选择支持。不支持的驱动会给出专门说明，不再永久显示零样本。支持此功能但
+当前记账不可读的来源则说明不可用。本地只保留自己的作业标识、分组字段和时间戳 30 天，
+仪表盘仅返回汇总。删除登录或修改其连接身份会清除相应样本；暂停登录保留样本。

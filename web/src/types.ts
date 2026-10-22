@@ -291,6 +291,8 @@ export interface Attention {
   action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
 export interface Dashboard {
+  /** Own finished-job wait aggregates; older services omit this field. */
+  wait_history?: Record<string, WaitHistory>;
   low_use_settings?: { threshold: number; window_minutes: number };
   token?: string;
   attention?: Attention[];
@@ -310,6 +312,19 @@ export interface Dashboard {
   recent_failures?: FailedJob[];
   failure_history_sources?: string[];
   failure_history_observed_at?: string | null;
+}
+export interface WaitHistory {
+  status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
+  observed_at: string | null;
+  buckets: {
+    qos: string | null;
+    partition: string | null;
+    gpu_min: number;
+    gpu_max: number;
+    samples: number;
+    p25_seconds: number | null;
+    p75_seconds: number | null;
+  }[];
 }
 export interface SSHConfig {
   config: string;

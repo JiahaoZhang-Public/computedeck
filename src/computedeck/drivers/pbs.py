@@ -558,6 +558,7 @@ def _unknown_gpus(rows: list[dict[str, Any]], *keys: str) -> bool:
 
 
 class PbsDriver:
+    supports_wait_history: ClassVar[bool] = True
     name: ClassVar[str] = "pbs"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cluster"
     info: ClassVar[DriverInfo] = DriverInfo(

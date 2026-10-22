@@ -167,6 +167,8 @@ class Collector:
             )
             # Write only a successful collection. Failures preserve last good snapshots.
             self.store.save_snapshot(source_id, batch.snapshot())
+            if batch.finished is not None and "history" in batch.capabilities:
+                self.store.record_job_waits(source, batch.finished)
             source.update(
                 status="ready",
                 last_success=now(),

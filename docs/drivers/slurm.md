@@ -190,3 +190,22 @@ and a positive `PriorityWeightFairShare`. Missing factors are null, never invent
 zeroes; a measured zero remains valid. The drawer gives the 0–1 scale and explains
 that recent use lowers the factor. Its sample age is the job's collection time.
 PBS, LSF and Kubernetes queue estimates are deferred.
+
+## Typical waits from accounting
+
+Normal collection already reads the login's own finished allocations with `sacct
+--allocations --user=<username>` and offset-bearing Submit, Start and End fields.
+ComputeDeck now retains usable submit-to-start observations for 30 days, grouped by
+cluster, username, QoS, partition and GPU-count bucket. Where to run and pending-job
+drawers show a 25th–75th percentile range only with at least eight samples, always as
+“typical wait for your jobs, not a prediction”. Slurm and PBS explicitly support
+this through the optional driver class attribute `supports_wait_history = True`.
+LSF, Kubernetes and plugins without that opt-in show an unsupported-history
+explanation. Smaller samples and unreadable accounting are explained separately. This does not use other users' queue rows or change ranking.
+
+There is no extra SSH call or expanded lookback: samples accumulate from the existing
+terminal query after upgrading, with its existing outage and retention limitations.
+Jobs lacking an actual start, valid ordered aware timestamps or a known GPU count are
+excluded. Repeated observations of the same job/start count once. See
+[wait-history semantics](../metrics.md#typical-wait-from-your-job-history) for buckets,
+percentile interpolation and coverage limitations.

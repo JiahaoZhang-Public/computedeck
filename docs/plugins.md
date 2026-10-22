@@ -1031,3 +1031,56 @@ Only HTTPS templates with `{id}` and `{region}` placeholders are supported; both
 are URL-encoded and the id is the provider id without the source's cluster prefix.
 The dashboard exposes the expanded `instances[].console_url`, or null. Existing drivers
 need no change. The drawer only opens a link; it sends no provider mutation.
+
+### Own-job wait history (0.7)
+
+`GET /api/dashboard` adds optional `wait_history`, keyed by cluster source id:
+
+```typescript
+{
+  status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
+  observed_at: string | null; // latest accounting-capable login collection, ISO time
+  buckets: {
+    qos: string | null;
+    partition: string | null;
+    gpu_min: number;
+    gpu_max: number;
+    samples: number;
+    p25_seconds: number | null;
+    p75_seconds: number | null;
+  }[];
+}
+```
+
+Cluster drivers opt in with `supports_wait_history: ClassVar[bool] = True`. The
+optional class attribute is not required by the driver protocol; absent or non-true
+values mean unsupported. Opt in only when `Batch.finished` provides the login’s own
+terminal accounting with timezone-aware submit, start and end times (including
+successful jobs). Slurm and PBS opt in; LSF and Kubernetes do not yet. Plugins are
+unsupported by default, so incomplete or failure-only history never masquerades as
+an empty sample. Unsupported sources return `status: "unsupported"`, no buckets and
+a null observation time, with their own UI explanation.
+
+For opted-in drivers, the service computes aggregates from `Batch.finished` only
+when the batch has `history`. Each sample must match the source's `cluster_id` and
+`username` and carry
+`submitted_at`, `started_at`, `ended_at` with timezone offsets, in that order, plus a
+known nonnegative integer `gpu_count`. Unknown values are excluded, not filled with
+zero. No new job field or query is required. Individual missing or invalid times are
+still excluded on supported drivers. An unreadable accounting capability remains
+`unavailable`, distinct from unsupported drivers and insufficient sample counts.
+Older dashboards may omit `wait_history`.
+
+The window is 30 days by completion time. Buckets are 0, 1, 2, 3–4, 5–8, 9–16, etc.,
+separate per cluster/user/QoS/partition. Same-account twins share deduplicated job/start
+observations. Percentiles use inclusive linear interpolation and are null below eight
+samples. `observed_at` remains the collection time even when stale. A currently
+unavailable history capability suppresses the displayed range, although unexpired
+samples are retained for recovery. No job identifiers or individual job times appear
+in these aggregates.
+
+The new `job_wait_samples` table is created with `CREATE TABLE IF NOT EXISTS`, with
+30-day retention. It stores only own-job identifiers, grouping fields and timestamps;
+no names, paths or other users' jobs. Source deletion or connection-identity edits
+clear that source's samples. Schema, plugin and web API versions are unchanged; no
+new event type, capability, attention kind, setting or route is introduced.

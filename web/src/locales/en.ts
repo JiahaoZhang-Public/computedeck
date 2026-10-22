@@ -1,5 +1,24 @@
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'wait.unsupported':
+    '— · This scheduler’s accounting does not report usable submit, start and end times for your finished jobs.',
+  'wait.ownOnly': 'Wait history covers only this login’s own jobs.',
+  'wait.line': 'Typical wait for your jobs: {value}',
+  'wait.partition': 'Partition: {partition}',
+  'wait.title': 'Typical wait for your jobs',
+  'wait.note':
+    'Not a prediction. Collected finished jobs from the last 30 days, across GPU models.',
+  'wait.scope': 'Queue / QoS: {qos} · Partition: {partition}',
+  'wait.bucket': 'GPU-count bucket: {gpus}',
+  'wait.range': '{low} – {high} (25th–75th percentile, {count} jobs)',
+  'wait.insufficient': '— · Not enough history ({count} jobs).',
+  'wait.insufficient.one': '— · Not enough history ({count} job).',
+  'wait.unavailable': '— · Accounting history is unavailable for this login.',
+  'wait.notCollected': '— · Wait history has not been collected yet.',
+  'wait.unknownGpus': '— · GPU count is unknown; no history bucket can be matched.',
+  'wait.asOf': 'Accounting last collected: {time}',
+  'wait.asOfUnknown': 'Accounting collection time unknown.',
+  'wait.seconds': '{count} s',
   'lowUse.busy': 'The latest GPU reading is at or above {threshold}%.',
   'lowUse.title': 'Low GPU use',
   'lowUse.duration.hours': '{count} h',

@@ -27,6 +27,7 @@ import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
 import { InstanceRunCost, JobsTable } from './shared';
+import { WaitHistory } from '../WaitHistory';
 
 export function SSHConfigView({
   config,
@@ -186,10 +187,8 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
 
 export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: DeckEvent }) {
   const gpu = jobGpuResources(job);
-  const driver =
-    event?.data.driver ??
-    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ??
-    '';
+  const source = ctx.data.sources.find((source) => source.id === job.source_id);
+  const driver = event?.data.driver ?? source?.driver ?? '';
   const terms = jobTerms(driver);
   const failure = failureExplanation(job, driver);
   const historical = !!event || !!job.end || !!failure;
@@ -310,6 +309,17 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
           <p>{explanation.next}</p>
         </div>
       )}
+      {pending &&
+        (source?.username === job.user && source.cluster_id === job.cluster_id ? (
+          <WaitHistory
+            history={ctx.data.wait_history?.[job.source_id]}
+            qos={job.qos}
+            partition={job.partition}
+            gpus={job.gpu_count}
+          />
+        ) : (
+          <p className="wait-history">{t('wait.ownOnly')}</p>
+        ))}
       <dl className="kv">
         {(job.ended_at || job.end) && (
           <div>

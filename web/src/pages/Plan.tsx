@@ -14,6 +14,7 @@ import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Chips, Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
 import type { Job, NodeSummary } from '../types';
+import { WaitHistory, WaitHistoryNote } from '../WaitHistory';
 
 const TONES: Record<Verdict, string> = {
   likely: 'green',
@@ -351,6 +352,13 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             {visible[1] && (
               <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
             )}
+            <WaitHistory
+              compact
+              history={data.wait_history?.[best.source.id]}
+              qos={best.qos}
+              gpus={request.gpus}
+            />
+            <WaitHistoryNote histories={[data.wait_history?.[best.source.id]]} relative />
           </div>
         </Panel>
       )}
@@ -391,6 +399,14 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               }
             />
           )}
+          {visible.length > 0 && (
+            <div className="panel-note">
+              <WaitHistoryNote
+                histories={visible.map((o) => data.wait_history?.[o.source.id])}
+                relative
+              />
+            </div>
+          )}
           <p className="panel-note">{t('plan.note')}</p>
         </Panel>
       )}
@@ -404,6 +420,12 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             submissions={submissions}
             fromJob={fromJob}
           />
+          <div className="panel-note">
+            <WaitHistoryNote
+              histories={denied.map((o) => data.wait_history?.[o.source.id])}
+              relative
+            />
+          </div>
         </details>
       )}
       {hasMachines && (
@@ -568,6 +590,12 @@ function OptionsTable({
                     {verdictLabel(option, request)}
                   </span>
                   {why && <span className="sub plan-why">{why}</span>}
+                  <WaitHistory
+                    compact
+                    history={ctx.data.wait_history?.[option.source.id]}
+                    qos={option.qos}
+                    gpus={request.gpus}
+                  />
                   <PlanExplanation option={option} request={request} />
                   <SubmitCopy result={submissions.get(option.key)!} ctx={ctx} />
                 </td>

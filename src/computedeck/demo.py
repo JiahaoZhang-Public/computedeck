@@ -13,6 +13,7 @@ from .drivers.ssh_host import parse_machine
 from .history import group_history
 from .low_use import low_use
 from .summary import fresh, freshness, summarize
+from .wait_history import summarize_waits, wait_sample
 
 _SOURCES = [
     # id, label, driver, cluster_id, username
@@ -669,6 +670,31 @@ def dashboard() -> dict[str, Any]:
         )
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
     data["summary"] = summarize(data)
+    # Accounting-shaped own jobs show a range, a small sample and missing accounting.
+    wait_samples = []
+    for source, count, gpus in ((sources[0], 12, 1), (sources[2], 3, 16)):
+        for index in range(count):
+            wait_ended = current - timedelta(days=index + 1)
+            wait_started = wait_ended - timedelta(hours=1)
+            sample = wait_sample(
+                {
+                    "id": f"{source['cluster_id']}:wait-{index}",
+                    "cluster_id": source["cluster_id"],
+                    "user": source["username"],
+                    "qos": "normal" if gpus == 1 else "long",
+                    "partition": "gpu",
+                    "gpu_count": gpus,
+                    "submitted_at": (
+                        wait_started - timedelta(minutes=10 * (index + 1))
+                    ).isoformat(),
+                    "started_at": wait_started.isoformat(),
+                    "ended_at": wait_ended.isoformat(),
+                },
+                source,
+            )
+            assert sample is not None
+            wait_samples.append(sample)
+    data["wait_history"] = summarize_waits(sources, wait_samples, now=current)
     data["history"] = [
         {k: v for k, v in p.items() if k != "by_group"} for p in demo_history(24, data)
     ]
