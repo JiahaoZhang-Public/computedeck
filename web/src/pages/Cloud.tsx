@@ -26,19 +26,6 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
       matches(query, item.name, item.gpu_type, item.ssh_alias, item.host, item.platform),
   );
   const spend = (group === 'all' ? data.summary : data.summary.groups[group])?.spend;
-  const hasSpendScope =
-    data.sources.some(
-      (source) =>
-        source.kind === 'cloud' &&
-        source.driver !== 'ssh' &&
-        (group === 'all' || source.cluster_id === group),
-    ) ||
-    data.instances.some(
-      (item) =>
-        item.manual &&
-        item.hourly_cost != null &&
-        (group === 'all' || instanceGroupKey(item, data.sources) === group),
-    );
   const hasApiSource = data.sources.some((source) => source.kind === 'cloud');
   return (
     <>
@@ -54,7 +41,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
         </div>
       </div>
       <Panel title={t('cloud.instances')} count={instances.length}>
-        {spend && hasSpendScope && (
+        {spend?.applies && (
           <div className="panel-note">
             <strong>{t('cost.now')}</strong>{' '}
             {Object.entries(spend.rates).length

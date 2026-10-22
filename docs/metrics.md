@@ -596,7 +596,8 @@ For cloud API sources, missing prices or currencies, uncertain lifecycles and un
 listings are still named with links and reasons. Known totals read **≥** when that coverage
 is incomplete; unknown totals show **—**. If nothing priced is running and no cost is
 unknown, the note says **No priced instance running**. The note is hidden in scopes with
-neither a cloud API source nor a hand-added machine with a typed price. Each currency has
+neither an enabled cloud API source nor a hand-added machine with a typed price.
+The server supplies this visibility decision as `summary.spend.applies`. Each currency has
 its own hourly total. A supplied zero price remains a known zero.
 
 Rows have one compact platform/state line: **up 3 d 4 h** for a provider start or
@@ -615,20 +616,23 @@ EC2's [`LaunchTime`](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_
 for running instances. Invalid or timezone-free values are unknown. EC2 has no collected
 price, so it shows the start without a cost. Vast.ai's `start_date` is not used because its
 reset-on-restart semantics have not been confirmed. Lambda, GPUhub and SSH sources do not
-supply a provider start in this slice.
+supply a provider start in this slice. GPUhub prices are used only for single-GPU
+containers: its API reference does not specify whether the hourly base price is per
+GPU or per container. Multi-GPU containers and those with unknown GPU counts stay
+unpriced pending confirmation (see [GPUhub](drivers/gpuhub.md)).
 
 When no provider start is known, `seen_running_since` gives the contiguous observation
 window. It carries only between held observations at most two source intervals apart;
 a stop, uncertain state, disappearance, backwards time, observed provider restart or
-longer gap resets it. The drawer says **over the 3 d 4 h ComputeDeck saw it running**, never a
-lower-bound claim about this run: polling can miss a stop and restart. An unobserved
-start remains unknown. Hand-added machines do not receive a stored observation window.
+longer gap resets it. The drawer says **3 d 4 h since ComputeDeck first saw it running
+in this observation window**, never a lower-bound claim about this run: polling can miss
+a stop and restart. An unobserved start remains unknown. Hand-added machines do not receive a stored observation window.
 When the source is stale, disabled, failed or lacks current instance data, estimates stop
 at its last successful collection and say **As of** with the local time. A missing
 observation time leaves cost unknown. Today, seven-day spend and history rollups belong
 to the later Usage & cost slice.
 
-### 运行费用估算
+## 运行费用估算
 
 「云与机器」的当前费用来自所选分组的 `summary.spend`，不受文字搜索筛选影响。
 服务端统一计算全局、分组及各登录的结果。仅计入已启用且采集有效、状态为
@@ -640,8 +644,8 @@ to the later Usage & cost slice.
 
 云 API 实例缺少单价或币种、运行状态未知或采集不可用时，仍列出名称、原因和链接；
 已知金额显示 **≥**，全部费用未知时显示 **—**。没有已知单价的实例运行且没有未知费用时，
-显示「当前无已知单价的实例运行」。所选范围内既无云 API 数据源，也无填写单价的手动
-机器时，隐藏整条费用说明。各币种分别汇总，绝不相加；明确填写的零单价按已知零处理。
+显示「当前无已知单价的实例运行」。所选范围内既无已启用的云 API 数据源，也无填写单价的手动
+机器时，隐藏整条费用说明；该显示条件由服务端 `summary.spend.applies` 统一提供。各币种分别汇总，绝不相加；明确填写的零单价按已知零处理。
 
 行中仅保留一条平台与状态信息，追加「已运行 3 天 4 小时」或「已观测运行 2 小时」，
 费用已知时再追加「≈ 金额」；未知部分不显示占位符。面板说明及详情注明「估算，非账单」，
@@ -649,8 +653,10 @@ to the later Usage & cost slice.
 小时单价属于整个实例；GPU 数量已知且大于零时另列每 GPU 小时的近似价格。估算使用当前单价乘以时长，不还原历史
 价格变动，也不包含存储及其他费用；详情中仅在显示费用估算时附上此说明。
 RunPod 和 EC2 使用平台记录的本次启动时间；EC2 没有采集单价，因此只显示起始时间。其他平台在本阶段仅使用连续观测窗口。
+GPUhub API 文档未说明小时基础价格是每 GPU 还是每容器，因此仅使用单 GPU 容器的价格；
+多 GPU 或 GPU 数未知的容器单价保持未知，等待确认（见 [GPUhub](drivers/gpuhub.md)）。
 
-缺少平台启动时间时，详情显示「在 ComputeDeck 观测到运行的 3 天 4 小时内」。
+缺少平台启动时间时，详情显示「距 ComputeDeck 在本次观测窗口首次看到运行已过 3 天 4 小时」。
 手动添加的机器不记录观测起始时间。连续两次观测必须均为运行状态，间隔不超过两倍采集周期；停止、状态未知、消失、时间倒退、平台
 报告重启或更长的间隔会重置窗口。轮询可能漏掉中间的停止和重启，因此这不是本次运行
 费用的下界。采集过期、失败、停用或缺少当前实例数据时，估算停在最后成功采集时间并

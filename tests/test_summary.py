@@ -631,6 +631,7 @@ def test_spend_rates_are_scoped_partial_and_never_mix_currencies(store, add_sour
     )
     data = store.dashboard()
     spend = data["summary"]["spend"]
+    assert spend["applies"] is True
     assert spend["rates"] == {"USD": 2, "EUR": 2}
     assert spend["priced"] == 4
     assert {i["subject"]["id"]: i["reason"]["code"] for i in spend["unpriced"]} == {
@@ -644,6 +645,7 @@ def test_spend_rates_are_scoped_partial_and_never_mix_currencies(store, add_sour
     assert store.dashboard()["summary"]["spend"]["rates"] == {"USD": 5, "EUR": 2}
     store.save_instance(machine(hourly_cost=3, currency="USD", ssh_status="error"))
     spend = store.dashboard()["summary"]["spend"]
+    assert spend["applies"] is True
     assert spend["rates"] == {"USD": 2, "EUR": 2}
     assert spend["unpriced"][-1]["reason"]["code"] == "summary_lifecycle_unknown"
 
@@ -685,6 +687,7 @@ def test_spend_excludes_unavailable_sources(changes, reason) -> None:
         ],
     }
     spend = summarize(data)["spend"]
+    assert spend["applies"] is source["enabled"]
     assert spend["rates"] == {}
     assert spend["priced"] == 0
     assert [item["reason"]["code"] for item in spend["unpriced"]] == ([reason] if reason else [])
@@ -735,10 +738,16 @@ def test_manual_spend_requires_a_typed_price(store, hourly_cost, changes) -> Non
     store.save_instance(machine(hourly_cost=hourly_cost, currency="USD", **changes))
     spend = store.dashboard()["summary"]["spend"]
     if hourly_cost is None:
-        assert spend == {"rates": {}, "priced": 0, "unpriced": []}
+        assert spend == {"applies": False, "rates": {}, "priced": 0, "unpriced": []}
     elif not changes:
-        assert spend == {"rates": {"USD": hourly_cost}, "priced": 1, "unpriced": []}
+        assert spend == {
+            "applies": True,
+            "rates": {"USD": hourly_cost},
+            "priced": 1,
+            "unpriced": [],
+        }
     else:
+        assert spend["applies"] is True
         assert spend["rates"] == {}
         assert spend["priced"] == 0
         assert spend["unpriced"] == [
@@ -777,9 +786,10 @@ def test_ssh_source_is_outside_spend_but_cloud_plugins_are_not(changes) -> None:
             },
         ],
     }
-    assert summarize(data)["spend"] == {"rates": {}, "priced": 0, "unpriced": []}
+    assert summarize(data)["spend"] == {"applies": False, "rates": {}, "priced": 0, "unpriced": []}
     source["driver"] = "example-cloud-plugin"
     spend = summarize(data)["spend"]
+    assert spend["applies"] is source["enabled"]
     assert spend["rates"] == {}
     assert spend["priced"] == 0
     assert len(spend["unpriced"]) == 1

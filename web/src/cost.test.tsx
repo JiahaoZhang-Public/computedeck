@@ -1,17 +1,23 @@
 // @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dateTime, money, runDuration } from './domain';
 import { statusLabel } from './labels';
 import { groupsOf } from './groups';
 import { setLocale, t } from './i18n';
 import { CloudPage } from './pages/Cloud';
 import { InstanceDetail } from './pages/Details';
+import { UsagePage } from './pages/Usage';
 import type { Ctx } from './pages/shared';
 import { serverDashboard, serverDemo } from './test-server';
 
+let demo: ReturnType<typeof serverDemo>;
+beforeAll(() => {
+  demo = serverDemo();
+});
+
 function fixture() {
-  const data = serverDemo();
+  const data = structuredClone(demo);
   const item = data.instances.find((i) => i.name === 'sd-inference')!;
   const source = data.sources.find((s) => s.id === item.source_id)!;
   data.instances = [item];
@@ -21,9 +27,9 @@ function fixture() {
   item.started_at = '2026-01-01T00:00:00Z';
   item.seen_running_since = '2026-01-01T02:00:00Z';
   source.last_success = '2026-01-01T03:00:00Z';
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date('2026-01-01T04:00:00Z'));
   data.summary = serverDashboard(data).summary;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-01-01T04:00:00Z'));
   const ctx = {
     data,
     groups: groupsOf(data),
@@ -144,10 +150,13 @@ describe.each(['en', 'zh-CN'] as const)('cost display in %s', (language) => {
 
   it('shows unknown cost and conditional pricing for uncertain or stopped instances', () => {
     setLocale(language);
-    const { item, drawer, cloud } = fixture();
+    const { item, ctx, drawer, cloud } = fixture();
     for (const state of ['desired_running', 'unknown', 'missing', 'stopped']) {
       item.state = state;
       expect(text(drawer())).toContain(t('cloud.priceWhenRunning', { price: money(0.69, 'USD') }));
+      expect(text(renderToStaticMarkup(<UsagePage ctx={ctx} />))).toContain(
+        t('cloud.priceWhenRunning', { price: money(0.69, 'USD') }),
+      );
       for (const html of [drawer(), cloud()]) {
         expect(text(html)).not.toContain(t('cost.estimate', { cost: money(2.76, 'USD') }));
         expect(text(html)).not.toContain(t('cost.runningFor', { duration: runDuration(4) }));
@@ -226,11 +235,21 @@ describe.each(['en', 'zh-CN'] as const)('cost display in %s', (language) => {
     expect(text(cloud())).toContain(t('cost.now'));
   });
 
+  it('hides spend for disabled-only sources in both fleet and group views', () => {
+    setLocale(language);
+    const { source, data, ctx, cloud } = fixture();
+    source.enabled = false;
+    ctx.data = serverDashboard(data);
+    expect(text(cloud())).not.toContain(t('cost.now'));
+    ctx.group = source.cluster_id;
+    expect(text(cloud())).not.toContain(t('cost.now'));
+  });
+
   it('shows the new example provider states and keeps hand-added rows compact', () => {
     setLocale(language);
-    const data = serverDemo();
+    const data = structuredClone(demo);
     const observedPod = data.instances.find((item) => item.name === 'batch-inference')!;
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(Date.parse(observedPod.seen_running_since!) + 2 * 3600000));
     const ctx = {
       data,

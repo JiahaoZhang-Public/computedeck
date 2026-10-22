@@ -200,10 +200,9 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     )
     rates: dict[str, float] = {}
     priced = 0
+    spend_sources = [s for s in sources if s["kind"] == "cloud" and s.get("driver") != "ssh"]
     unpriced = [
-        _missing(s, "source", _source_reason(s))
-        for s in sources
-        if s["kind"] == "cloud" and s.get("driver") != "ssh" and not fresh(s, "instances")
+        _missing(s, "source", _source_reason(s)) for s in spend_sources if not fresh(s, "instances")
     ]
     # Choose among current observations before deduplicating twin cloud logins.
     spend_instances = _unique(
@@ -313,7 +312,12 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     # Preserve history's source count for provider rows; manual machines have no source.
     instance_sources = {i["id"]: i["id"] if i.get("manual") else i["source_id"] for i in instances}
     return {
-        "spend": {"rates": rates, "priced": priced, "unpriced": unpriced},
+        "spend": {
+            "applies": bool(spend_sources or spend_instances),
+            "rates": rates,
+            "priced": priced,
+            "unpriced": unpriced,
+        },
         "allocated": None if unmeasured else known_allocated,
         "known_allocated": known_allocated,
         "unknown_allocation_sources": len(

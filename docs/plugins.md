@@ -631,9 +631,12 @@ hand-added machines) and `sources[source_id]`:
 
 `unknown_allocation_sources` retains the history coverage count: provider instances
 share their login's missing count; unmeasured hand-added machines count individually.
-`spend` is additive at all three scopes: `{rates: {currency: hourly_total}, priced: n,
-unpriced: [{subject, reason}]}`. Rates include only held instances from fresh enabled
-cloud API sources, including third-party `CloudDriver` plugins. A hand-added machine takes
+`spend` is additive at all three scopes: `{applies: boolean, rates: {currency: hourly_total}, priced: n,
+unpriced: [{subject, reason}]}`. `applies` is true when the scope has an enabled cloud API
+source or eligible instance rows (including hand-added machines with a typed price).
+Consumers use this flag to show the spend note, even for an empty cloud listing;
+disabled-only, SSH-only and unpriced-manual-only scopes have `applies: false`. Rates include
+only held instances from fresh enabled cloud API sources, including third-party `CloudDriver` plugins. A hand-added machine takes
 part only when `hourly_cost` is not `None` (zero is a typed price): `manual_state()` running
 counts it; any other state produces `summary_lifecycle_unknown`. Hand-added machines without
 a typed price are neither counted nor listed. The built-in `ssh` driver's rows and sources

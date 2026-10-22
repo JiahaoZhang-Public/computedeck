@@ -54,17 +54,19 @@ def container_instance(deployment: dict[str, Any], container: dict[str, Any]) ->
     info = container.get("info") or {}
     # info also carries the root password; it is never read.
     host, port, user = ssh_command(info.get("ssh_command") if isinstance(info, dict) else None)
-    # Container base price in USD * 1000 per container-hour, not per GPU:
+    # Base price in USD * 1000 ($/hr on the container object); the reference does
+    # not say per GPU or per container. Only one-GPU containers are unambiguous.
     # https://docs.gpuhub.com/api-reference/api-elastic-deployment#8-list-containers
     price = number(container.get("price"))
+    gpu_count = integer(container.get("gpu_num"))
     label = deployment.get("name") or deployment.get("uuid") or "deployment"
     return CloudInstance(
         id=uuid,
         name=f"{label} · {uuid[-8:]}",
         state=STATES.get(str(container.get("status")), "unknown"),
-        gpu_count=integer(container.get("gpu_num")),
+        gpu_count=gpu_count,
         gpu_type=container.get("gpu_name") or None,
-        hourly_cost=None if price is None else price / 1000,
+        hourly_cost=price / 1000 if price is not None and gpu_count == 1 else None,
         ssh_host=host,
         ssh_port=port,
         ssh_user=user,

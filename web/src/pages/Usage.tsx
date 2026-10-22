@@ -64,7 +64,11 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
                     </td>
                     <td className="num" data-label={t('cloud.col.price')}>
                       {runningPrice(item) == null
-                        ? '—'
+                        ? item.hourly_cost == null
+                          ? '—'
+                          : t('cloud.priceWhenRunning', {
+                              price: money(item.hourly_cost, item.currency),
+                            })
                         : `${money(runningPrice(item), item.currency)}/h`}
                     </td>
                   </tr>

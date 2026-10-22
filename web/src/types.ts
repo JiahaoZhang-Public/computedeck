@@ -222,7 +222,12 @@ export interface NodeSummary {
   ratio: number | null;
 }
 export interface Summary {
-  spend?: { rates: Record<string, number>; priced: number; unpriced: Unmeasured[] };
+  spend?: {
+    applies?: boolean;
+    rates: Record<string, number>;
+    priced: number;
+    unpriced: Unmeasured[];
+  };
   allocated: number | null;
   known_allocated: number | null;
   unknown_allocation_sources: number;

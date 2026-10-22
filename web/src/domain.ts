@@ -159,7 +159,7 @@ export function runningHours(item: Instance, source?: Source, now = Date.now()) 
   const since = runningSince(item);
   if (!since) return null;
   const current = source ? sourceHasData(source, 'instances') : false;
-  const asOf = current ? null : (source?.last_success ?? (item.manual ? item.observed_at : null));
+  const asOf = current ? null : (source?.last_success ?? null);
   const end = current ? now : asOf ? Date.parse(asOf) : NaN;
   const hours = (Math.min(end, now) - Date.parse(since.at)) / 3600000;
   return Number.isFinite(hours) && hours >= 0 ? { ...since, hours, asOf } : null;
