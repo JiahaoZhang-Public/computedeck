@@ -151,21 +151,23 @@ function page(html: string) {
 }
 
 describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (locale) => {
-  it('explains a contradiction and translates the queue class with the raw code on hover', () => {
-    setLocale(locale);
-    const reason = 'QOSMaxGRESPerUser';
-    const root = page(renderPlan(source, [pending({ gpu_count: 1, reason })]));
-    const row = root.querySelector('.plan-table tbody tr')!;
-    expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
-      t('plan.verdict.possible'),
-    );
-    expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
-    const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
-    expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
-    expect(queue.textContent).toContain(t('plan.queueReason.personalLimit'));
-    expect(queue.textContent).not.toContain(reason);
-    expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
-  });
+  it.each(['QOSMaxGRESPerUser', 'QOSMaxJobsPerUserLimit', 'AssocMaxJobsLimit'])(
+    'explains %s and translates the queue class with the raw code on hover',
+    (reason) => {
+      setLocale(locale);
+      const root = page(renderPlan(source, [pending({ gpu_count: 1, reason })]));
+      const row = root.querySelector('.plan-table tbody tr')!;
+      expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
+        t('plan.verdict.possible'),
+      );
+      expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
+      const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
+      expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
+      expect(queue.textContent).toContain(t('plan.queueReason.personalLimit'));
+      expect(queue.textContent).not.toContain(reason);
+      expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
+    },
+  );
 
   it.each([
     ['MaxJobsPU', 'QOSMaxJobsPerUserLimit', 'jobs'],

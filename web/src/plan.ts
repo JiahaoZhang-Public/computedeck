@@ -1,5 +1,5 @@
 import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
-import { jobReason } from './jobFacts';
+import { reasonCode, reasonKind } from './jobFacts';
 import {
   holdsAllocation,
   PENDING_STATES,
@@ -394,7 +394,7 @@ export function planOptions(
         (Date.parse(job.observed_at ?? '') || 0) - (Date.parse(previous?.observed_at ?? '') || 0);
       if (!previous || age > 0 || (age === 0 && job.source_id === source.id)) mine.set(job.id, job);
     }
-    const currentJobs = sourceHasData(source, 'jobs');
+    const currentJobs = twins.size > 0;
     const qosList: (QosLimit | null)[] = source.qos.length ? source.qos : [null];
     for (const qos of qosList) {
       const key = JSON.stringify([source.cluster_id, source.username, qos?.name ?? null]);
@@ -514,33 +514,29 @@ export function planOptions(
         headroom != null &&
         !rules.some((rule) => ['jobs', 'submit'].includes(rule.kind) && rule.effect === 'limit')
           ? eligible.find((job) => {
+              const reason = reasonCode(job.reason);
               if (
                 job.gpu_count == null ||
                 job.gpu_count > headroom! ||
-                jobReason(job, source.driver)?.kind !== 'personalLimit'
+                reasonKind(reason, source.driver) !== 'personalLimit'
               )
                 return false;
-              const reason = (job.reason ?? '').split(/[ ,:(]/)[0];
               if (reason === 'QOSMaxGRESPerUser')
                 // Only the requested model's room was checked, including other typed caps.
                 return (
-                  !hasTypedCap ||
-                  (models(job.gpu_type).length === 1 &&
-                    models(job.gpu_type).includes(request.gpuType.toLowerCase()))
+                  job.gpu_count > 0 &&
+                  (!hasTypedCap ||
+                    (models(job.gpu_type).length === 1 &&
+                      models(job.gpu_type).includes(request.gpuType.toLowerCase())))
                 );
-              const key =
-                reason === 'QOSMaxJobsPerUserLimit' || reason === 'AssocMaxJobsLimit'
-                  ? 'MaxJobsPU'
-                  : reason === 'QOSMaxSubmitJobPerUserLimit' || reason === 'AssocMaxSubmitJobLimit'
-                    ? 'MaxSubmitJobsPU'
-                    : null;
-              // CPU room is not evaluated. Count waits need the matching collected limit.
-              if (!key) return false;
-              const cap = countLimit(currentQos?.limits?.[key]);
-              const count =
-                countLimit(currentQos?.usage?.[key]) ??
-                (key === 'MaxJobsPU' ? running.length : running.length + pending.length);
-              return cap != null && count < cap;
+              // Count waits can reflect uncollected association or partition QoS limits.
+              // CPU room is not evaluated.
+              return [
+                'QOSMaxJobsPerUserLimit',
+                'AssocMaxJobsLimit',
+                'QOSMaxSubmitJobPerUserLimit',
+                'AssocMaxSubmitJobLimit',
+              ].includes(reason);
             })
           : undefined;
       const option = {

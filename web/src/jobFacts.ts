@@ -39,11 +39,18 @@ const FAILURE_REASONS: Record<string, string> = {
   FAILED: 'failed',
 };
 
+export function reasonCode(reason: string | null | undefined) {
+  return (reason ?? '').split(/[ ,:(]/)[0];
+}
+
+export function reasonKind(code: string, driver: string) {
+  return (driver === 'slurm' ? SLURM_REASONS[code] : undefined) ?? 'unknown';
+}
+
 export function jobReason(job: Pick<Job, 'state' | 'reason'>, driver: string) {
   const state = job.state.toUpperCase();
-  const code = (job.reason ?? '').split(/[ ,:(]/)[0];
   const kind = PENDING_STATES.includes(state)
-    ? ((driver === 'slurm' ? SLURM_REASONS[code] : undefined) ?? 'unknown')
+    ? reasonKind(reasonCode(job.reason), driver)
     : FAILURE_REASONS[state];
   if (!kind) return null;
   return {

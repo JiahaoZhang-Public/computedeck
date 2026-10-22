@@ -1233,7 +1233,7 @@ describe('honest ranking', () => {
     ['AssocMaxJobsLimit', 'MaxJobsPU', 1],
     ['QOSMaxSubmitJobPerUserLimit', 'MaxSubmitJobsPU', 2],
     ['AssocMaxSubmitJobLimit', 'MaxSubmitJobsPU', 2],
-  ] as const)('checks the matching count limit for %s', (reason, key, used) => {
+  ] as const)('caps %s unless a collected count rule already binds', (reason, key, used) => {
     const check = (cap: string | undefined, usage?: Record<string, string>) =>
       estimate({ reason: `${reason} (details)` }, '', {
         qos: [
@@ -1250,7 +1250,10 @@ describe('honest ranking', () => {
     });
     expect(check(String(used))).toMatchObject({ verdict: 'limit', contradiction: null });
     for (const cap of [undefined, 'N'])
-      expect(check(cap)).toMatchObject({ verdict: 'likely', contradiction: null });
+      expect(check(cap)).toMatchObject({
+        verdict: 'possible',
+        contradiction: { reason: `${reason} (details)` },
+      });
     // Scheduler counts take precedence, in both directions.
     expect(check(String(used + 1), { [key]: String(used + 1) })).toMatchObject({
       verdict: 'limit',
@@ -1267,6 +1270,8 @@ describe('honest ranking', () => {
       'QOSMaxGRESPerUser',
       'QOSMaxJobsPerUserLimit',
       'QOSMaxSubmitJobPerUserLimit',
+      'AssocMaxJobsLimit',
+      'AssocMaxSubmitJobLimit',
     ]) {
       expect(
         estimate({ reason }, '', {
@@ -1284,6 +1289,27 @@ describe('honest ranking', () => {
         }),
       ).toMatchObject({ verdict: 'limit', contradiction: null });
     }
+  });
+
+  it.each(['', 'a100'])('ignores zero-GPU GRES waits for %s', (model) => {
+    expect(estimate({ gpu_count: 0, gpu_type: null }, model)).toMatchObject({
+      headroom: 4,
+      queuedForRoom: 0,
+      verdict: 'likely',
+      contradiction: null,
+    });
+  });
+
+  it.each([
+    'QOSMaxJobsPerUserLimit',
+    'QOSMaxSubmitJobPerUserLimit',
+    'AssocMaxJobsLimit',
+    'AssocMaxSubmitJobLimit',
+  ])('retains a zero-GPU job as evidence for %s without a collected count cap', (reason) => {
+    expect(estimate({ reason, gpu_count: 0, gpu_type: null })).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason },
+    });
   });
 
   it.each(['QOSMaxCpuPerUserLimit', 'AssocMaxCpuPerUserLimit', 'AssocMaxGRESPerUser'])(
@@ -1381,6 +1407,50 @@ describe('honest ranking', () => {
       verdict: 'likely',
     });
   });
+
+  it.each([false, true])(
+    'uses current twin jobs when the kept QoS source lacks current jobs (%s)',
+    (reverse) => {
+      const limits = source({
+        capabilities: ['nodes', 'qos_limits', 'qos_access'],
+        qos: [source().qos[0]],
+      });
+      const jobs = source({
+        id: 'second-alice',
+        capabilities: ['jobs'],
+        qos: [source().qos[0]],
+      });
+      const sources = [limits, jobs];
+      const options = planOptions(
+        {
+          sources: reverse ? sources.reverse() : sources,
+          nodes: [node('g1')],
+          jobs: [
+            job('stale-running', { gpu_count: 8 }),
+            job('running', { source_id: jobs.id }),
+            job('waiting', {
+              source_id: jobs.id,
+              state: 'PENDING',
+              gpu_count: 1,
+              reason: 'AssocMaxJobsLimit',
+            }),
+          ],
+        },
+        ask,
+      );
+      expect(options).toHaveLength(1);
+      expect(options[0]).toMatchObject({
+        source: { id: limits.id },
+        used: 4,
+        headroom: 4,
+        queued: 1,
+        queuedGpus: 1,
+        headroomAfterQueue: 3,
+        contradiction: { job: 'train', reason: 'AssocMaxJobsLimit' },
+        verdict: 'possible',
+      });
+    },
+  );
 
   it.each([0, 1, null])(
     'keeps zero-GPU running jobs out of typed use, preserving unknowns (%s)',

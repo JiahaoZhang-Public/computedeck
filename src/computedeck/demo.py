@@ -204,8 +204,11 @@ def dashboard() -> dict[str, Any]:
     )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
     for job in jobs:
-        # Cluster A's 1-GPU wait fits its room; Cluster B's 16-GPU wait does not.
-        if job["name"] in {"llm-sft / ablation", "rl-agent / rollout"}:
+        # Cluster A waits on an uncollected association cap despite its GPU room.
+        if job["name"] == "llm-sft / ablation":
+            job["reason"] = "AssocMaxJobsLimit"
+        # Cluster B's 16-GPU wait does not fit its GPU room.
+        if job["name"] == "rl-agent / rollout":
             job["reason"] = "QOSMaxGRESPerUser"
         if job["source_id"] == sources[1]["id"]:
             job["observed_at"] = sources[1]["last_success"]

@@ -1,9 +1,23 @@
 import { afterEach, expect, it } from 'vitest';
-import { jobReason, jobTime, jobWaiting } from './jobFacts';
+import { jobReason, jobTime, jobWaiting, reasonCode, reasonKind } from './jobFacts';
 import { setLocale, t } from './i18n';
 import type { Job } from './types';
 
 afterEach(() => setLocale('en'));
+
+it.each([' (details)', ',details', ':details', ' details', ''])(
+  'uses the same reason classification with suffix %s',
+  (suffix) => {
+    const reason = `AssocMaxJobsLimit${suffix}`;
+    expect(reasonCode(reason)).toBe('AssocMaxJobsLimit');
+    expect(reasonKind(reasonCode(reason), 'slurm')).toBe('personalLimit');
+    expect(jobReason({ state: 'PENDING', reason }, 'slurm')?.kind).toBe(
+      reasonKind(reasonCode(reason), 'slurm'),
+    );
+    expect(reasonKind(reasonCode(reason), 'pbs')).toBe('unknown');
+    expect(reasonKind(reasonCode(null), 'slurm')).toBe('unknown');
+  },
+);
 
 it.each(['en', 'zh-CN'] as const)('explains scheduler limits and next steps in %s', (locale) => {
   setLocale(locale);

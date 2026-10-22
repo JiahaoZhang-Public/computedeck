@@ -307,11 +307,15 @@ def test_demo_queue_waits_show_both_contradictory_and_larger_limit_held_jobs() -
     data = dashboard()
     queued = [job for job in data["jobs"] if job["state"] == "PENDING"]
     assert queued
-    limit_held = [job for job in queued if job["reason"] == "QOSMaxGRESPerUser"]
+    limit_held = [
+        job for job in queued if job["reason"] in {"QOSMaxGRESPerUser", "AssocMaxJobsLimit"}
+    ]
     assert len(limit_held) == 2
     for job in limit_held:
         source = next(source for source in data["sources"] if source["id"] == job["source_id"])
         qos = next(qos for qos in source["qos"] if qos["name"] == job["qos"])
+        if job["reason"] == "AssocMaxJobsLimit":
+            assert "MaxJobsPU" not in qos["limits"]
         limit = int(qos["limits"]["MaxTRESPU"].removeprefix("gres/gpu="))
         used = sum(
             running["gpu_count"]

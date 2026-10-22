@@ -676,7 +676,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.why.behind.one':
     '若你的排队作业先启动，可用额度预计减少 {queued} 张 GPU，剩余约 {left} 张。实际调度顺序可能不同。',
   'plan.why.contradiction':
-    '{job} 因 {reason} 等待，但采集的数据仍显示有余量；调度器的计数可能与此不同。',
+    '{job} 因 {reason} 等待，但采集的数据仍显示有 GPU 余量；调度器的计数可能不同，也可能存在未采集到的限制。',
   'plan.why.queueUnknown': '你的可调度排队作业所需 GPU 数未知，估计无法计入这部分需求。',
   'plan.queueReason.priority': '优先级',
   'plan.queueReason.resources': '资源',

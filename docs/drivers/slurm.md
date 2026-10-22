@@ -37,19 +37,25 @@ These are estimates, not a queue position or a guarantee that Slurm will start t
 A pending personal-limit wait (for example `QOSMaxGRESPerUser` or
 `AssocMaxJobsLimit`) whose known GPU request fits the collected headroom caps a
 "Likely" estimate at "Possible". The explanation names the job and reason: the
-scheduler may count differently. A larger limit-held job does not trigger this cap,
-and stale or unknown relevant data is not treated as proof of a contradiction.
+scheduler may count differently or enforce limits that were not collected. A larger
+limit-held job does not trigger this cap, and stale or unknown relevant data is not
+treated as proof of a contradiction.
 GPU-limit waits only use a known matching job model when any finite per-model cap
 exists, because only the requested model's room was checked. Job-count and submit-count
-waits also require room under the corresponding collected `MaxJobsPU` or
-`MaxSubmitJobsPU`; a reached count limit never supplies contradiction evidence.
-CPU-limit waits are not used because CPU room is not evaluated.
+waits (`QOSMaxJobsPerUserLimit`, `QOSMaxSubmitJobPerUserLimit`, `AssocMaxJobsLimit`,
+`AssocMaxSubmitJobLimit`) still cap the estimate when QoS count limits are missing or
+unlimited. Association limits are separate from QoS `MaxJobsPU` / `MaxSubmitJobsPU`
+and are not collected; a wait can also reflect an uncollected partition QoS limit.
+Any collected jobs or submit rule already at its limit prevents contradiction evidence.
+Zero-GPU GRES waits and CPU-limit waits are not used because their resource headroom
+is not evaluated.
 CPU-only running jobs do not make model-specific GPU use unknown. Queue reasons
 use short translated class labels, with the raw code on hover. Unrecognised reasons remain visible as reported.
 Duplicate sources for the same cluster and username merge per QoS, preferring current
 QoS-limit data, then current job data, then the latest successful collection.
 Jobs from either current source are deduplicated by their newest
-observation. An empty QoS list does not add a separate row if a twin lists QoS options.
+observation, even when the retained QoS source's job list is not current. An empty
+QoS list does not add a separate row if a twin lists QoS options.
 Different usernames retain separate options.
 
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
