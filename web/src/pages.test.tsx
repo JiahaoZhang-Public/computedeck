@@ -373,8 +373,36 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     }
     const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
     expect(clusters).toContain(t('clusters.onDemand'));
-    expect(clusters).toContain('IDLE+CLOUD+POWERED_DOWN');
+    expect(clusters).toContain('IDLE+\u200bCLOUD+\u200bPOWERED_DOWN');
     expect(clusters).toContain(t('summary.allocation', { allocated: 2, usable: 8 }));
+  });
+
+  it.each(['ALLOCATED+CLOUD+POWERING_UP', 'MIXED+POWER_DOWN'])(
+    'keeps the working node %s labelled with its scheduler state',
+    (state) => {
+      setLocale(locale);
+      const data = clusterData([state, 'mixed']);
+      data.nodes[0].gpu_allocated = state.startsWith('ALLOCATED') ? 8 : 3;
+      const context = ctx(data);
+      const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
+      expect(html).not.toContain(t('clusters.onDemand'));
+      expect(html).toContain(state.replaceAll('+', '+\u200b'));
+      expect(html).toContain(
+        t('summary.allocation', {
+          allocated: data.nodes[0].gpu_allocated + 2,
+          usable: 16,
+        }),
+      );
+    },
+  );
+
+  it('explains why an idle Slurm node without a partition is unavailable', () => {
+    setLocale(locale);
+    const data = clusterData(['IDLE']);
+    data.nodes[0].partitions = [];
+    const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
+    expect(html).toContain(t('clusters.noPartition'));
+    expect(html).toContain('<small class="sub muted">IDLE</small>');
   });
 
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {

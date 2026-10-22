@@ -36,15 +36,18 @@ These are estimates, not a queue position or a guarantee that Slurm will start t
 
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.
-Usable/free GPU counts exclude nodes with no partition, FUTURE/ERROR nodes, powered-down
-nodes and power transitions (including powering up). Power-saving flags alone do not
-make a node unhealthy or the cluster unavailable, but they are not free capacity now.
-A partitioned power-saving node without a fault is shown as "Available on demand",
-with or without CLOUD. These GPUs are counted separately from usable and unavailable
-capacity. On-demand nodes count as healthy in the cluster's availability ratio; a
+Usable/free GPU counts exclude nodes with no partition and FUTURE/ERROR state tokens.
+DYNAMIC_FUTURE is a separate flag and does not make an idle node unavailable.
+A partitioned power-saving node with an idle, free or empty base state and no fault
+is shown as "Available on demand", with or without CLOUD. Nodes with assigned work
+(allocated, mixed, completing or job-busy) remain usable even with power flags,
+so their allocations still count while booting or awaiting power-down. On-demand GPUs
+are counted separately from usable and unavailable capacity. On-demand nodes count as healthy in the cluster's availability ratio; a
 cluster entirely at rest stays available with zero free GPUs. DOWN, reserved or
 otherwise faulty nodes keep their unavailable classification, even with power flags.
-The node table retains the scheduler's raw state alongside the on-demand label.
+The node table retains the scheduler's raw state alongside the on-demand label or
+"Not in any partition" reason. Where to run counts on-demand GPUs for the requested
+model only, with no count shown when the matching count or model is unknown.
 Partition `AllowQos` matching is not part of this capacity check; QoS and access checks
 still apply separately in Where to run.
 

@@ -597,7 +597,7 @@ hand-added machines) and `sources[source_id]`:
   `observed_at` is the oldest contributing observation.
   Only enabled, current inventories contribute.
   Each dashboard node has `health: "usable" | "unavailable" | "on_demand" | "unknown"`.
-  `on_demand` is an additive state for non-faulty Slurm power-saving nodes (with or
+  `on_demand` is an additive state for non-faulty resting Slurm power-saving nodes (with or
   without CLOUD) and PBS provisioning/sleep/wait-provisioning nodes. `nodes.on_demand`
   counts their GPUs (null when their count is unknown), separately from `usable`
   and `unavailable`; they contribute no `unallocated` GPUs. These three capacity
@@ -605,7 +605,11 @@ hand-added machines) and `sources[source_id]`:
   On-demand nodes count as healthy for cluster status and never as `abnormal` nodes.
   Slurm nodes with empty or missing `partitions` are unavailable; other drivers do
   not require a Slurm partition. Faults, including FUTURE/ERROR, always take
-  precedence over power-saving flags.
+  precedence over power-saving flags. FUTURE/ERROR match whole state tokens;
+  DYNAMIC_FUTURE alone is not a fault. Nodes with assigned work keep `health: "usable"`
+  and their allocation even with power flags. Dashboard nodes also carry the additive
+  `health_reason: "no_partition" | null`, explaining missing Slurm membership without
+  requiring consumers to infer the scheduler rule.
   The server supplies this shared classification; web consumers should use `health`
   rather than interpreting the raw scheduler state.
 - `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the

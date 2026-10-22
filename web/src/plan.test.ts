@@ -1140,3 +1140,33 @@ it.each([
     expect(option.verdict).not.toBe('likely');
   }
 });
+
+it.each([
+  { gpu_type: 'A100', gpu_count: 8, gpuType: 'H100', expected: 0 },
+  { gpu_type: 'A100', gpu_count: 8, gpuType: 'a100', expected: 8 },
+  { gpu_type: null, gpu_count: 8, gpuType: 'h100', expected: null },
+  { gpu_type: 'h100', gpu_count: null, gpuType: 'h100', expected: null },
+  { gpu_type: 'a100,h100', gpu_count: 8, gpuType: 'h100', expected: null },
+  { gpu_type: null, gpu_count: 8, gpuType: '', expected: 8 },
+  { gpu_type: null, gpu_count: null, gpuType: '', expected: null },
+])(
+  'counts on-demand GPUs only for the requested model: %s',
+  ({ gpu_type, gpu_count, gpuType, expected }) => {
+    const options = planOptions(
+      {
+        sources: [source()],
+        nodes: [
+          node('resting', {
+            state: 'IDLE+CLOUD+POWERED_DOWN',
+            gpu_type,
+            gpu_count,
+            gpu_allocated: 0,
+          }),
+        ],
+        jobs: [],
+      },
+      { gpus: 1, gpuType, hours: null },
+    );
+    for (const option of options) expect(option.onDemandGpus).toBe(expected);
+  },
+);

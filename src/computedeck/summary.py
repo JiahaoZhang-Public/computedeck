@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .drivers.base import node_health
+from .drivers.base import node_health, requires_partition
 from .drivers.cloud import instance_lifecycle
 
 RUNNING = {"RUNNING", "R", "CONFIGURING", "CF", "COMPLETING", "CG"}
@@ -307,7 +307,7 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
                 for n in data["nodes"]
                 if n["source_id"] in by_id and fresh(by_id[n["source_id"]], "nodes")
             ],
-            partition_sources={s["id"] for s in sources if s["driver"] == "slurm"},
+            partition_sources={s["id"] for s in sources if requires_partition(s)},
         ),
         "jobs": {
             **(

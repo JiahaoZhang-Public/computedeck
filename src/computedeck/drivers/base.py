@@ -170,18 +170,40 @@ def node_health(
     # Inspect faults before power flags: DOWN+CLOUD+POWERED_DOWN is still a fault.
     power = re.search(r"power(?:ed|ing)?_(?:down|up)", state, re.I)
     base = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
-    if partitions == [] or re.search(
-        r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|"
-        r"reserved|unknown|future|error|\*",
-        base,
-        re.I,
+    if (
+        partitions == []
+        or re.search(
+            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|"
+            r"reserved|unknown|\*",
+            base,
+            re.I,
+        )
+        or {"future", "error"}.intersection(state.lower().split("+"))
     ):
         return "unavailable"
-    if power or re.search(r"provisioning|sleep", state, re.I):
+    # Work already assigned to a node keeps its allocation, including while booting.
+    if re.search(r"mixed|alloc|completing|busy|job", state, re.I):
+        return "usable"
+    if (power and base.lower().split("+", 1)[0] in {"idle", "free", ""}) or re.search(
+        r"provisioning|sleep", state, re.I
+    ):
         return "on_demand"
     if re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
         return "usable"
     return "unknown"
+
+
+def requires_partition(source: dict[str, Any]) -> bool:
+    return source.get("driver") == "slurm"
+
+
+def node_health_fields(node: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """Dashboard classification and its actionable reason, shared with example data."""
+    partitions = node.get("partitions", []) if requires_partition(source) else None
+    return {
+        "health": node_health(node.get("state", ""), partitions=partitions),
+        "health_reason": "no_partition" if partitions == [] else None,
+    }
 
 
 def cluster_state(

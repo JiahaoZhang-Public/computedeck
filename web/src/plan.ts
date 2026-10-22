@@ -68,6 +68,8 @@ export interface PlanOption {
   qos: string | null;
   /** Unallocated GPUs of the requested model on healthy visible nodes. */
   freeGpus: number | null;
+  /** On-demand GPUs of the requested model; null when the count or model is unknown. */
+  onDemandGpus: number | null;
   /** Free GPUs are a lower bound because matching capacity is partly unmeasured. */
   freeGpusPartial: boolean;
   /** The most free GPUs of that model on one node; fewer than requested means multi-node. */
@@ -154,6 +156,13 @@ function capacity(nodes: ComputeNode[], gpuType: string, requestedGpus: number) 
         node.gpu_count != null &&
         (!gpuType || !!node.gpu_type),
     );
+  const onDemand = gpuNodes.filter((node) => node.health === 'on_demand');
+  const onDemandUnknown = onDemand.some(
+    (node) =>
+      (matchesModel(node, gpuType) && node.gpu_count == null) ||
+      (gpuType &&
+        (!node.gpu_type || (matchesModel(node, gpuType) && models(node.gpu_type).length > 1))),
+  );
   const knownFree = known.reduce((a, b) => a + b, 0);
   const partial =
     known.length < free.length ||
@@ -165,6 +174,12 @@ function capacity(nodes: ComputeNode[], gpuType: string, requestedGpus: number) 
     );
   return {
     matchingNodes: usable.length,
+    onDemandGpus:
+      !nodes.length || onDemandUnknown
+        ? null
+        : onDemand
+            .filter((node) => matchesModel(node, gpuType))
+            .reduce((sum, node) => sum + (node.gpu_count ?? 0), 0),
     freeGpus: partial
       ? knownFree >= requestedGpus
         ? knownFree
@@ -441,6 +456,7 @@ export function planOptions(
           : ('unknown' as const),
         qos: qos?.name ?? null,
         freeGpus: cluster.freeGpus,
+        onDemandGpus: cluster.onDemandGpus,
         freeGpusPartial: cluster.freeGpusPartial,
         largestNodeFree: cluster.largestNodeFree,
         matchingNodes: cluster.matchingNodes,

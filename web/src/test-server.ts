@@ -15,7 +15,7 @@ import json, sys
 from computedeck.summary import PENDING, RUNNING, summarize, summarize_nodes
 from computedeck import attention, drivers
 from datetime import datetime, UTC
-from computedeck.drivers.base import cluster_state, node_health
+from computedeck.drivers.base import cluster_state, node_health, node_health_fields
 request = json.load(sys.stdin)
 if 'demo' in request:
     from computedeck.demo import dashboard
@@ -34,7 +34,7 @@ else:
     data = request['data']
     for node in data['nodes']:
         source = next((s for s in data['sources'] if s['id'] == node['source_id']), {})
-        node['health'] = node_health(node['state'], partitions=node.get('partitions', []) if source.get('driver') == 'slurm' else None)
+        node.update(node_health_fields(node, source))
     data['summary'] = summarize(data)
     data.setdefault('attention', attention.derive(data, [drivers.describe(name) for name in drivers.names()], now=datetime.now(UTC)))
     result = data

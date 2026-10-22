@@ -68,6 +68,35 @@ function renderPlan(login: Source, jobs: Job[] = []) {
 afterEach(() => setLocale('en'));
 
 describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) => {
+  it('shows a complete on-demand sentence after the reason, only for the selected model', async () => {
+    setLocale(locale);
+    const context = planContext(source);
+    context.data.nodes[0].state = 'IDLE+CLOUD+POWERED_DOWN';
+    context.data = serverDashboard(context.data);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const previous = window.location.href;
+    try {
+      window.history.replaceState(null, '', '#/plan?model=A100');
+      await act(async () => root.render(<PlanPage ctx={context} />));
+      const sentence = t('plan.why.onDemand', { count: 4 });
+      const row = container.querySelector('.plan-table tbody tr')!;
+      expect(row.textContent).toContain(`${t('plan.why.busy', { free: 0 })} ${sentence}`);
+      expect(sentence).toMatch(/[.。]$/);
+      await act(async () => {
+        window.history.replaceState(null, '', '#/plan?model=H100');
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(container.textContent).not.toContain(sentence);
+      expect(container.textContent).not.toContain(t('summary.onDemand', { count: 4 }));
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      window.history.replaceState(null, '', previous);
+    }
+  });
+
   it('explains degradation without saying a known QoS limit is unknown', () => {
     setLocale(locale);
     const html = renderPlan({ ...source, cluster_state: 'degraded' });

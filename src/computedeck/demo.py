@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import attention, drivers
-from .drivers.base import cluster_state, node_health
+from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .summary import fresh, freshness, summarize
 
 _SOURCES = [
@@ -405,17 +405,20 @@ def dashboard() -> dict[str, Any]:
     nodes.extend(
         {
             **nodes[0],
-            "id": f"example:cluster-a:a-cloud-{i:02}",
-            "name": f"a-cloud-{i:02}",
+            "id": f"example:cluster-a:{name}",
+            "name": name,
             "state": state,
             "partitions": partitions,
             "gpu_allocated": 0,
             "cpu_allocated": 0,
         }
-        for i, (state, partitions) in enumerate(
-            [("IDLE+CLOUD+POWERED_DOWN", ["gpu"]), ("IDLE", []), ("FUTURE", ["gpu"])], 1
-        )
+        for name, state, partitions in [
+            ("a-cloud-01", "IDLE+CLOUD+POWERED_DOWN", ["gpu"]),
+            ("a-spare-01", "IDLE", []),
+            ("a-future-01", "FUTURE", ["gpu"]),
+        ]
     )
+    source_by_id = {source["id"]: source for source in sources}
     for node in nodes:
         if node["cluster_id"] == "example:cluster-b":
             if node["name"] in {"b-gpu-07", "b-gpu-08"}:
@@ -426,12 +429,12 @@ def dashboard() -> dict[str, Any]:
                 )
             elif node["name"] == "b-gpu-02":
                 node["gpu_allocated"] = 8  # The 8-GPU running example job is on this node.
-        node["health"] = node_health(node["state"], partitions=node["partitions"])
+        node.update(node_health_fields(node, source_by_id[node["source_id"]]))
     for source in sources:
         if source["kind"] == "cluster":
             source["cluster_state"] = cluster_state(
                 [n for n in nodes if n["cluster_id"] == source["cluster_id"]],
-                require_partition=source["driver"] == "slurm",
+                require_partition=requires_partition(source),
             )
     array_failures = []
     for index in range(60):

@@ -435,6 +435,13 @@ def test_gpu_outage_is_not_hidden_by_cpu_nodes_or_unknown_gpu_counts() -> None:
         ("DOWN+CLOUD+POWERED_DOWN", ["gpu"], "unavailable"),
         ("IDLE+CLOUD+POWERING_UP", ["gpu"], "on_demand"),
         ("IDLE+POWERING_DOWN", ["gpu"], "on_demand"),
+        ("ALLOCATED+CLOUD+POWERING_UP", ["gpu"], "usable"),
+        ("MIXED+POWER_DOWN", ["gpu"], "usable"),
+        ("COMPLETING+POWER_DOWN", ["gpu"], "usable"),
+        ("job-busy+sleep", None, "usable"),
+        ("POWERING_UP", ["gpu"], "on_demand"),
+        ("IDLE+DYNAMIC_FUTURE", ["gpu"], "usable"),
+        ("IDLE+ERROR", ["gpu"], "unavailable"),
         ("FUTURE", ["gpu"], "unavailable"),
         ("ERROR", ["gpu"], "unavailable"),
         ("provisioning", None, "on_demand"),
@@ -489,6 +496,7 @@ def test_node_membership_and_power_in_dashboard(store, add_source, driver):
         "unavailable",
         *(["on_demand"] * 3),
     ]
+    assert data["nodes"][1]["health_reason"] == ("no_partition" if driver == "slurm" else None)
     expected_usable = 8 if driver == "slurm" else 16
     for scope in [
         data["summary"],
@@ -555,3 +563,36 @@ def test_power_saving_cluster_is_healthy_but_not_free(store, add_source, state):
     )
     # Even a non-faulty power-saving node needs a Slurm partition.
     assert node_health(state, partitions=[]) == "unavailable"
+
+
+@pytest.mark.parametrize("state", ["ALLOCATED+CLOUD+POWERING_UP", "MIXED+POWER_DOWN"])
+def test_power_flags_keep_assigned_work_in_capacity(store, add_source, state):
+    source = add_source(capabilities=["jobs", "nodes"])
+    allocation = 8 if state.startswith("ALLOCATED") else 3
+    rows = [
+        {
+            "id": f"cluster-a:node-{i}",
+            "source_id": source["id"],
+            "cluster_id": source["cluster_id"],
+            "name": f"node-{i}",
+            "state": value,
+            "partitions": ["gpu"],
+            "gpu_count": 8,
+            "gpu_allocated": allocated,
+        }
+        for i, (value, allocated) in enumerate([(state, allocation), ("mixed", 2)])
+    ]
+    store.save_snapshot(source["id"], {"nodes": rows})
+    data = store.dashboard()
+    assert all(node["health"] == "usable" for node in data["nodes"])
+    for scope in [
+        data["summary"],
+        data["summary"]["groups"][source["cluster_id"]],
+        data["summary"]["sources"][source["id"]],
+    ]:
+        summary = scope["nodes"]
+        assert summary["allocated"] == allocation + 2
+        assert summary["usable"] == 16
+        assert summary["unallocated"] == 16 - allocation - 2
+        assert summary["on_demand"] == 0
+    assert cluster_state(rows, require_partition=True) == "available"

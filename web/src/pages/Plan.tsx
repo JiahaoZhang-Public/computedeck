@@ -80,7 +80,6 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
       t('summary.capacity', { usable: nodes.usable ?? '—', unavailable: nodes.unavailable ?? '—' }),
     );
   }
-  if (nodes.on_demand) parts.push(t('summary.onDemand', { count: nodes.on_demand }));
   const { rule } = option;
   const ruleText = rule && RULES[rule.kind][rule.effect];
   const reason = key[option.verdict];
@@ -100,6 +99,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
         model: request.gpuType,
       }),
     );
+  if (option.onDemandGpus) parts.push(t('plan.why.onDemand', { count: option.onDemandGpus }));
   if (
     option.largestNodeFree != null &&
     option.freeGpus != null &&

@@ -496,7 +496,10 @@ def test_demo_shows_on_demand_and_partitionless_nodes():
     on_demand = [n for n in data["nodes"] if n["health"] == "on_demand"]
     assert len(on_demand) == 1
     assert on_demand[0]["partitions"] == ["gpu"]
-    assert any(n["state"] == "IDLE" and n["partitions"] == [] for n in data["nodes"])
+    spare = next(n for n in data["nodes"] if n["name"] == "a-spare-01")
+    assert spare["state"] == "IDLE" and spare["partitions"] == []
+    assert spare["health_reason"] == "no_partition"
+    assert next(n for n in data["nodes"] if n["name"] == "a-future-01")["state"] == "FUTURE"
     summary = data["summary"]["groups"]["example:cluster-a"]["nodes"]
     assert summary["on_demand"] == 4
     assert summary["unavailable"] == 8

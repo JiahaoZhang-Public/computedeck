@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import job_time, node_health, validate_row
+from .drivers.base import job_time, node_health_fields, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
@@ -908,12 +908,7 @@ class Store:
         observations["instances"].extend(manual)
         history = self.history(24)
         for node in nodes.values():
-            node["health"] = node_health(
-                node.get("state", ""),
-                partitions=node.get("partitions", [])
-                if source_by_id.get(node["source_id"], {}).get("driver") == "slurm"
-                else None,
-            )
+            node.update(node_health_fields(node, source_by_id.get(node["source_id"], {})))
         data = {
             "mode": "live",
             **freshness(sources),

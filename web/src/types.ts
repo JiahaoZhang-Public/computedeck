@@ -165,6 +165,7 @@ export interface Instance {
 }
 export interface ComputeNode {
   health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
+  health_reason?: 'no_partition' | null;
   id: string;
   source_id: string;
   cluster_id: string;
