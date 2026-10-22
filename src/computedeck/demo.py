@@ -314,6 +314,22 @@ def dashboard() -> dict[str, Any]:
             qos="long",
             reason=("Resources" if index < 25 else "Priority") if state == "PENDING" else None,
         )
+        if state == "PENDING":
+            # Resources waits include both the front (element 5) and jobs behind it.
+            element.update(
+                queue=[
+                    {
+                        "partition": "gpu",
+                        "ahead": 20 if index >= 25 else index - 5,
+                        "ties": index - 23 if index >= 25 else 0,
+                    }
+                ],
+                fairshare=0.12,
+                queue_unknown=None,
+            )
+            # One element disappeared between the own-job and partition queries.
+            if index == 29:
+                element.update(queue=None, queue_unknown="failed")
         jobs.append(element)
     local_current = current.astimezone().replace(tzinfo=None)
     failure = {

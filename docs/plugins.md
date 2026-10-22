@@ -396,6 +396,14 @@ Rules that keep the numbers honest:
   and must not be interpreted in the viewer's timezone. Missing fields on older rows
   mean unknown. A pending Slurm `StartTime` is an estimate, not an actual start, and is
   not stored as `started_at`.
+- Slurm pending jobs with Priority or Resources reasons may add `queue` (a list of
+  `{partition, ahead, ties}`, or `None`), `fairshare` (a number from 0 to 1, or `None`),
+  and `queue_unknown` (`private_data`, `failed`, or `None`). `ahead` and `ties` are
+  nonnegative integers: eligible earlier rows with unequal and equal priority,
+  respectively, in that partition's scheduler order. The drawer shows the range
+  `ahead` to `ahead + ties`. Other users' ids are never persisted. Missing fields on
+  older snapshots stay unknown. These are optional JSON additions with no new
+  capability, event, schema version or plugin API version.
 - Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
   `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
   heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,

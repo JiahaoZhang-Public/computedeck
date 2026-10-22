@@ -2,6 +2,7 @@
 
 ## 0.7.0 (unreleased)
 
+- Explain Slurm Priority and Resources waits with per-partition queue estimates and account fair-share when available. Hidden or unreadable queues stay unknown; only counts are retained, never other users' job ids.
 - Detect sustained low GPU use from actual readings with a configurable threshold and window, a three-reading minimum, per-GPU maxima and bounded gaps. Show acknowledgeable hints, covered-duration cost estimates only when priced, Cloud filters and a paid-instance pointer in Where to run. Explain unknown coverage and offer provider console links without stopping anything or adding automatic checks.
 
 - Make Usage & cost the home of usage trends, with ranked current GPU use and hourly spend, separate currencies and labelled daily projections. Add observed daily GPU-hours and spend, today and seven-day estimates, 24-hour / seven-day / 30-day URL ranges, labelled spans and coverage for partial days, lower bounds for uncertain totals, labels for removed groups and explicit not-recorded history. Failed GPU measurements remain unknown, and paused sources leave missing time. Example usage stays consistent across ranges. Integrate raw observations with bounded gaps; keep group breakdowns out of dashboard polls and retain history for 30 days.

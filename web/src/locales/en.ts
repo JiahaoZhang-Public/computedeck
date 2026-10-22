@@ -496,6 +496,20 @@ const en = {
   'job.cpus': 'CPU cores',
   'job.node': 'Nodes',
 
+  'job.queue.ahead':
+    'About {count} jobs ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
+  'job.queue.ahead.one':
+    'About {count} job ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
+  'job.queue.range':
+    'About {count} to {max} jobs ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
+  'job.queue.resources': 'Next in line in partition {partition}; waiting for nodes to free up.',
+  'job.queue.fairshare':
+    'Your fair-share in account {account}: {factor} (0 to 1; recent use lowers it).',
+  'job.queue.private': 'Queue estimate: — · The cluster hides other users’ jobs.',
+  'job.queue.failed': 'Queue estimate: — · The value could not be read.',
+  'job.queue.fairshareUnknown':
+    'Fair-share: — · Not available, or not used by this scheduler’s priority policy.',
+
   // Clusters
   'clusters.empty': 'No clusters',
   'clusters.emptyHint':
@@ -1028,6 +1042,7 @@ const en = {
   'msg.probe_failed': 'SSH check failed',
   'msg.probe_in_progress': 'A check of this instance is already running',
   'msg.qos_unavailable': 'QoS limits unavailable',
+  'msg.queue_unavailable': 'Queue estimate unavailable',
   'msg.request_failed': 'The API request failed',
   'msg.source_exists': 'This login is already configured for that cluster',
   'msg.source_not_found': 'Source not found',

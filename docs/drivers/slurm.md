@@ -142,3 +142,47 @@ Neither copied format includes notes. Uniform known node capacity permits an exa
 multi-node split; other layouts remain manual. This is not a submission or an access check.
 See [request copying](../metrics.md#copying-requests-and-reusing-job-shapes)
 for the evidence, rounding and preset rules.
+
+## Queue estimates and fair-share
+
+Only when your own jobs are PENDING for `Priority` or `Resources`, normal collection
+also reads the pending queue in their partitions:
+
+```text
+squeue -h --array --local -P -t PD -p <partitions> --sort=-p,i -o '%Q|%P|%i|%r'
+```
+
+As documented by [squeue](https://slurm.schedmd.com/squeue.html), `-P` lists a job
+separately for each partition; the sort uses scheduler order, including partition
+priority. A single pass counts earlier rows waiting on Priority or Resources.
+Held jobs, dependencies and limit waits are excluded. Earlier equal-priority rows
+become `ties`, separate from `ahead`; the drawer shows `ahead` to `ahead + ties`.
+Reservations, preemption and backfill can change the order. Resources waits say they
+are next in line and waiting for nodes to free up only when both `ahead` and `ties`
+are zero for that partition; otherwise they show the same count or range as Priority
+waits. Neither message predicts a start time or changes Where-to-run rankings.
+
+Other users' job ids exist only in the transient query/parser input: they are never
+stored, logged, returned in the dashboard or included in warnings. Only counts per
+partition are kept on your jobs. The existing own-job query fields are unchanged.
+If a job is missing from any requested partition, the output is unrecognized, or the
+step fails, its queue stays null. A generic `queue_unavailable` warning is added only
+when attempted work fails, without remote error text. It creates no capability gap or
+attention item.
+
+`scontrol show config` has a 15-second timeout and its successful settings are cached
+in process for one hour per source and SSH identity. Missing `PriorityType` or
+`PrivateData` prevents a queue estimate. `PriorityWeightFairShare` is optional: a
+missing weight leaves fair-share unknown without preventing queue counts, including
+on `priority/basic` clusters, which do not print priority weights.
+`PrivateData=jobs` (or `all`) suppresses the partition query entirely
+and explains that the cluster hides other users' jobs. The queue query also has a
+15-second timeout. Neither extra query runs when there are no eligible waits.
+
+Fair-share uses the last value on `SharesRaw/Norm/Level/Factor=` in the association
+output already collected for this login, keyed by Account. Conflicting account
+factors remain unknown. A value is shown only for `PriorityType=priority/multifactor`
+and a positive `PriorityWeightFairShare`. Missing factors are null, never invented
+zeroes; a measured zero remains valid. The drawer gives the 0–1 scale and explains
+that recent use lowers the factor. Its sample age is the job's collection time.
+PBS, LSF and Kubernetes queue estimates are deferred.

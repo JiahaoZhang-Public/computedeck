@@ -787,3 +787,40 @@ GPUhub 在此不提供利用率，只能通过按需硬件检查获取单次读�
 支持确认和暂缓。同一低利用率时段积累更多读数不会重新提醒；新的时段或阈值、窗口变化会重新提醒。
 费用按观测覆盖时长乘以当前整实例每小时标价，明确标为估算值，非账单，也不声称是历史计费或可节省费用。
 供应商控制台链接仅打开供应商网站，ComputeDeck 不会停止实例。
+
+## Slurm queue estimates
+
+For your PENDING jobs waiting on Priority or Resources, the job drawer uses the
+partition queue from normal collection. “About N jobs ahead” is an estimate, not a
+start-time prediction: reservations, preemption and backfill can change the order.
+Only earlier Priority/Resources rows count; held, dependency and limit waits do not.
+Earlier equal-priority rows form an uncertainty range, shown as N to N+T, and each
+partition is shown separately. Resources waits say they are next in line, waiting
+for nodes to free up, only when that partition has zero jobs ahead and zero ties.
+Otherwise they show the same count or range as Priority waits. These facts do not
+affect resource ranking.
+
+The fair-share line is your account's factor from 0 to 1; recent use lowers it. It is
+shown only when Slurm reports a factor and uses multifactor priority with a positive
+`PriorityWeightFairShare`. An absent weight leaves fair-share unknown but does not
+prevent queue estimates. Both values refer to the drawer's displayed sample time, including
+retained older observations. Hidden queues, unreadable output and jobs missing from
+the listing show “—” with a reason, never an invented zero. Fair-share that is missing
+or not used by the policy also shows “—”. Only aggregate queue counts are retained;
+other users' job ids are never stored or logged. See the
+[Slurm driver](drivers/slurm.md#queue-estimates-and-fair-share) for the queries and limits.
+
+## Slurm 队列估计
+
+对于因 Priority 或 Resources 等待的 PENDING 作业，作业详情展示正常采集所得的分区队列。
+“前方约有 N 个作业”是估计，不是启动时间预测；资源预留、抢占和回填调度都可能改变顺序。
+只计算前方因 Priority 或 Resources 等待的作业，不计挂起、依赖或配额限制中的作业。
+前方优先级相同的作业单独形成 N 至 N+T 的范围，多分区分别展示。
+Resources 作业仅在该分区的前方作业数和同优先级作业数均为零时，说明已排到前列、等待节点释放资源；
+否则和 Priority 作业一样显示数量或范围。这些信息不改变资源推荐排名。
+
+公平共享因子属于你的账户，范围 0 至 1，近期使用量越多则越低。仅当 Slurm 报告该因子、
+使用 multifactor 优先级且 `PriorityWeightFairShare` 大于零时展示。权重缺失时因子保持未知，
+但仍可计算队列估计。队列和因子都对应详情中显示的采样时间，
+保留的旧观测也不会被当作新数据。集群隐藏队列、读取失败或列表中找不到作业时，展示“—”并解释原因，
+不会填成零。因子缺失或调度策略未使用它时也展示“—”。只保留队列汇总数量，不保存或记录其他用户的作业 ID。

@@ -468,6 +468,19 @@ const zhCN: Record<keyof typeof en, string> = {
   'job.cpus': 'CPU 核数',
   'job.node': '节点',
 
+  'job.queue.ahead':
+    '在分区 {partition} 中，你的作业前方约有 {count} 个作业（估计；资源预留、抢占和回填调度可能改变顺序）。',
+  'job.queue.ahead.one':
+    '在分区 {partition} 中，你的作业前方约有 {count} 个作业（估计；资源预留、抢占和回填调度可能改变顺序）。',
+  'job.queue.range':
+    '在分区 {partition} 中，你的作业前方约有 {count} 至 {max} 个作业（估计；资源预留、抢占和回填调度可能改变顺序）。',
+  'job.queue.resources': '在分区 {partition} 中已排到前列，等待节点释放资源。',
+  'job.queue.fairshare':
+    '你在账户 {account} 中的公平共享因子：{factor}（范围 0 至 1；近期使用量越多，因子越低）。',
+  'job.queue.private': '队列估计：— · 集群隐藏了其他用户的作业。',
+  'job.queue.failed': '队列估计：— · 无法读取该值。',
+  'job.queue.fairshareUnknown': '公平共享因子：— · 数据不可用，或调度器的优先级策略未使用此因子。',
+
   'clusters.empty': '没有集群',
   'clusters.emptyHint': '添加一个集群登录身份并填写 SSH Host 别名。查询只读，使用你自己的账户。',
   'clusters.add': '添加集群',
@@ -961,6 +974,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'msg.probe_failed': 'SSH 检查失败',
   'msg.probe_in_progress': '这个实例正在检查中',
   'msg.qos_unavailable': 'QoS 上限不可用',
+  'msg.queue_unavailable': '队列估计不可用',
   'msg.request_failed': 'API 请求失败',
   'msg.source_exists': '这个集群已配置过该登录身份',
   'msg.source_not_found': '找不到来源',

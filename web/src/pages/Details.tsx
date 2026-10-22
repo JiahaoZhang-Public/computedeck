@@ -258,6 +258,38 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
           <strong>{t('job.reason')}</strong>
           <p>{explanation.summary}</p>
           {job.reason && <code>{job.reason}</code>}
+          {driver === 'slurm' && ['priority', 'resources'].includes(explanation.kind) && (
+            <>
+              {job.queue?.length ? (
+                job.queue.map(({ partition, ahead, ties }) => (
+                  <p key={partition}>
+                    {t(
+                      explanation.kind === 'resources' && ahead === 0 && ties === 0
+                        ? 'job.queue.resources'
+                        : ties
+                          ? 'job.queue.range'
+                          : 'job.queue.ahead',
+                      { partition, count: ahead, max: ahead + ties },
+                    )}
+                  </p>
+                ))
+              ) : (
+                <p>
+                  {t(
+                    job.queue_unknown === 'private_data' ? 'job.queue.private' : 'job.queue.failed',
+                  )}
+                </p>
+              )}
+              <p>
+                {job.fairshare != null
+                  ? t('job.queue.fairshare', {
+                      account: job.account,
+                      factor: job.fairshare.toFixed(2),
+                    })
+                  : t('job.queue.fairshareUnknown')}
+              </p>
+            </>
+          )}
           <strong>{t('job.nextStep')}</strong>
           <p>{explanation.next}</p>
         </div>

@@ -120,6 +120,9 @@ export interface Job {
   time_limit?: string | null;
   log_path?: string | null;
   reason: string | null;
+  queue?: { partition: string; ahead: number; ties: number }[] | null;
+  fairshare?: number | null;
+  queue_unknown?: 'private_data' | 'failed' | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;
   memory_utilization: number | null;

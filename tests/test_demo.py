@@ -631,3 +631,18 @@ def test_example_history_omits_a_machine_only_group_before_it_was_added() -> Non
             sum(g["unknown_allocation_sources"] for g in groups.values())
             == point["unknown_allocation_sources"]
         )
+
+
+def test_demo_shows_queue_estimates_and_explicit_unknowns() -> None:
+    from computedeck.drivers.base import validate_row
+
+    jobs = dashboard()["jobs"]
+    waiting = [job for job in jobs if job["reason"] in {"Priority", "Resources"}]
+    assert waiting
+    for job in waiting:
+        validate_row(job)
+    assert any(job["queue"] and job["queue"][0]["ties"] > 0 for job in waiting)
+    assert any(job["reason"] == "Resources" and job["queue"] for job in waiting)
+    assert any(job["fairshare"] == 0.12 for job in waiting)
+    assert {job["queue_unknown"] for job in waiting} == {None, "failed"}
+    assert all("queue" not in job for job in jobs if job not in waiting)
