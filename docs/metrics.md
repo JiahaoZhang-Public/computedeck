@@ -172,12 +172,22 @@ the event is labelled as an observation. Activity sorts the fetched page by even
 The Failed tab still reads the existing 24-hour failure list. Kubernetes container
 failures remain in that list while a pod is running. When the pod disappears without a
 terminal record, its last observed container failure supplies the ending, unless it
-predates the job start. A reported terminal outcome takes precedence.
+predates the job start. A reported terminal outcome takes precedence. Container failures
+also retain their `job.failed` notifications while the pod is running or when it later
+succeeds. Pre-upgrade Activity rows remain visible alongside new endings.
+
+After an observation gap, completed, cancelled and unknown endings remain visible and
+deliverable; Notify groups catch-up messages. Only the upgrade baseline stays silent.
+When accounting cannot cover the full unobserved period, unknown outcomes explain that
+lookback limit instead of implying the scheduler has not reported the job.
 
 中文：动态为每次作业结束显示一条记录，优先使用调度器报告的结果与带时区的结束时间。
 没有记账能力时会明确说明结果不可用；有历史能力时等待下一次成功的记账采集，记账中断期间最多等待 24 小时。悬停可查看观测延迟，
 未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。
 Kubernetes Pod 运行期间的容器失败保留在失败列表中；Pod 消失且没有终态记录时，使用此前观测到的容器失败作为结果，但不使用早于作业开始的失败。已有终态记录优先。
+Pod 运行中或最终成功时，此前的容器失败仍产生 `job.failed` 通知；升级前的动态记录继续显示。
+观测中断后的完成、取消和未知结果仍可见并发送通知，由任务提醒合并补收消息；仅升级基线保持静默。
+记账窗口无法覆盖完整空档时，未知结果会说明历史查询范围的限制。
 
 ## Exploring activity / 浏览动态
 
@@ -247,8 +257,10 @@ a gap longer than both one hour and two collection intervals.
 
 A separate row says that ComputeDeck was not running or the computer was asleep when
 more than five minutes pass between service heartbeats. Source gaps covered by that
-service gap are suppressed. These are Activity records, never Notify alerts; plugins
-must explicitly subscribe to `source.gap` or `service.gap`. Cloud and SSH-host sources
+service gap are suppressed unless a known history window leaves part of the unobserved
+period unchecked. In that case the source warning remains alongside the service gap.
+An unknown history window adds no coverage boundary, so the covering service gap is shown
+alone. These are Activity records, never Notify alerts; plugins must explicitly subscribe to `source.gap` or `service.gap`. Cloud and SSH-host sources
 do not produce source gap events.
 
 中文：作业来源长时间未被观测时，动态显示灰色空档记录，并以绝对时间标明两次观测之间的完整区间。
@@ -260,7 +272,9 @@ LSF 受可读取的 `CLEAN_PERIOD` 限制，最多 24 小时；Kubernetes 无法
 例如，每日采集的来源超过 24 小时 15 分钟后才显示空档；历史窗口为一小时且每 10 分钟采集时，超过一小时后显示。
 历史窗口未知或历史不可用时，空档必须同时超过一小时和两个采集间隔才会显示。
 服务心跳间隔超过五分钟时，会单独说明 ComputeDeck 未运行或电脑处于睡眠状态，
-被该服务空档覆盖的来源空档不再单独显示。这些记录只出现在动态中，不触发 Notify 通知；
+被服务空档覆盖的来源空档通常不再单独显示；如果已知记账窗口无法覆盖完整的未观测区间，
+仍保留来源空档以说明无法检查的历史。窗口未知时没有额外的覆盖边界信息，仅显示覆盖该区间的服务空档。
+这些记录只出现在动态中，不触发 Notify 通知；
 插件需明确订阅 `source.gap` 或 `service.gap`。云来源和 SSH 主机不生成来源空档事件。
 
 ## Understanding a failure
@@ -331,7 +345,7 @@ node or pending reason, run or wait time, and a stale tag when needed.
 The first 50 are shown, with **Show next 50** and
 **Show all** controls. Opening an element uses its existing job drawer; Back returns to the
 array. The drawer follows membership on each poll, and explains when the array is no longer
-listed. It does not run scheduler commands. Failure-history rows remain individual jobs.
+listed. It does not run scheduler commands. The Failed table lists array elements individually.
 
 作业页和总览把同一集群、同一数组中至少两个已列出的元素合并为一行。先按标签、集群和
 搜索条件筛选，再分组，因此摘要只包含匹配的元素；仅匹配一个元素时仍显示普通作业行。
@@ -351,12 +365,13 @@ Slurm 显示“分区”和“QoS”，PBS 和 LSF 仅显示一个“队列”�
 状态、占用或请求的 GPU、节点或等待原因、运行或等待时长，以及必要的过期标记。
 先显示 50 个，可“再显示 50 个”
 或“显示全部”。打开元素进入原有作业抽屉，返回可回到数组。每次轮询更新成员，数组不再列出时
-明确提示；不执行调度器命令。失败历史仍逐作业显示。
+明确提示；不执行调度器命令。失败表目前逐个列出数组元素。
 
 ## Activity collection groups / 动态采集合并
 
 Activity collapses three or more events of the same type and source collected together.
-Expand a row to see the newest 50 events and their outcomes, followed by “and N more”
+Expand a row to see up to 50 events, prioritizing failures, then unknown outcomes,
+then other events (newest ID first within each class), followed by “and N more”
 for larger groups. Totals, names, outcome counts, failure indicators and time ranges
 cover the entire group, with failures first and a red dot if any child failed. Known job times
 always take precedence: children retain their own end/start times, and a group whose
@@ -367,8 +382,8 @@ Unknown times keep their observation-time labels, including on group rows when a
 child lacks its own time, even without a collection gap. Grouping does not change job
 or failure totals.
 
-动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看最新
-50 个事件及结果，更多事件显示为“另有 N 个事件”。合并行的总数、名称、结果数量
+动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看最多
+50 个事件及结果，依次优先显示失败、未知和其他结果，同类按事件 ID 从新到旧排列，更多事件显示为“另有 N 个事件”。合并行的总数、名称、结果数量
 （失败优先）、失败标记及时间范围仍涵盖全部事件，含失败事件时显示红点。
 已知作业时间优先：子事件显示自身结束或开始时间；全部子事件时间已知时，合并行显示
 最早至最晚时间。只有时间未知的补收事件及包含这些事件的合并行，才显示上次成功采集
@@ -418,7 +433,9 @@ tool off hides it. The time shown is the last failed attempt, not when the probl
 
 Activity shows recorded notification outcomes beside the event: Sent, Failed, Suppressed,
 Grouped or Dropped. Grouped means included in a digest, not delivery success; mixed
-outcomes can mean different rules or channels. Outcomes use the retained 500-row log,
+outcomes can mean different rules or channels. Channel delivery results are shown on
+the digest leader and aggregate row; siblings show Grouped rather than implying each
+had a separate message. Suppressed siblings retain the rate-limit status. Outcomes use the retained 500-row log,
 so a missing label means unknown. Activity reads these outcomes when it loads the rows;
 Notifications has the automatically refreshed delivery log. Example mode shows fictional
 outcomes and a failing Team alerts channel, without reading live deliveries.
@@ -429,6 +446,7 @@ outcomes and a failing Team alerts channel, without reading live deliveries.
 显示的时间是最后一次失败尝试的时间，不代表问题开始时间。
 
 动态在事件旁显示已记录的通知状态：已发送、失败、已抑制、已合并或已丢弃。已合并表示包含在摘要中，
-不代表发送成功；多个结果可能来自不同规则或渠道。状态来自保留的最近 500 条日志，未显示状态表示未知。
+不代表发送成功；多个结果可能来自不同规则或渠道。摘要首条事件和汇总行显示消息发送结果，
+其余事件仅显示“已合并”，避免误以为每个事件都单独发送了消息；限流事件仍显示“已抑制”。状态来自保留的最近 500 条日志，未显示状态表示未知。
 动态加载记录时读取这些状态；任务提醒页面的发送日志会自动刷新。示例模式使用虚构状态和发送失败的
 Team alerts 渠道，不读取真实发送记录。

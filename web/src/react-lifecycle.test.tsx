@@ -24,7 +24,7 @@ import { NotifyPage } from './pages/Notify';
 import { ActivityPanel } from './pages/Activity';
 import { SourcesPage } from './pages/Sources';
 import { EMPTY_RULE } from './notify';
-import { OUTCOME_LABELS } from './events';
+import { changeFieldLabel, OUTCOME_LABELS } from './events';
 import type { Ctx } from './pages/shared';
 import type { Dashboard, DeckEvent, HistoryPoint, Tool } from './types';
 
@@ -1331,7 +1331,7 @@ it.each(['en', 'zh-CN'] as const)('shows saved Notify outcome filters in %s', as
   );
   const label = t('notify.event.finished');
   expect(summaries).toContain(
-    `${t('notify.rule.filteredOutcomes', { event: label, outcomes: EMPTY_RULE.outcomes!.map((outcome) => t(OUTCOME_LABELS[outcome])).join(', ') })} → Team`,
+    `${t('notify.rule.filteredOutcomes', { event: label, outcomes: EMPTY_RULE.outcomes!.map((outcome) => t(OUTCOME_LABELS[outcome])).join(t('common.listSeparator')) })} → Team`,
   );
   expect(summaries).toContain(`${label} → Team`);
 });
@@ -1684,7 +1684,9 @@ it.each(['en', 'zh-CN'] as const)(
     await render(<ActivityPanel demo={false} />);
     const rendered = [...container.querySelectorAll('.activity > li')];
     const changed = (fields: string[]) =>
-      t('event.change.fields', { fields: fields.join(language === 'en' ? ', ' : '、') });
+      t('event.change.fields', {
+        fields: fields.map(changeFieldLabel).join(t('common.listSeparator')),
+      });
     for (const [index, fields] of [
       [0, ['credential', 'options']],
       [3, ['interval_minutes', 'options']],
@@ -1762,12 +1764,20 @@ it.each(['en', 'zh-CN'] as const)(
       'PUT',
     );
     assertCounts(3);
+    expect(document.activeElement?.id).toBe('attention');
+    expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+      t('attention.acknowledgedToast'),
+    );
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
       t('attention.acknowledged', { count: 3 }),
     );
     await click('.attention-muted summary');
     await click('.attention-muted .attention-actions button');
     assertCounts(4);
+    expect(document.activeElement?.id).toBe('attention');
+    expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+      t('attention.unmutedToast'),
+    );
     for (const until of ['1h', 'tomorrow']) {
       const selector = `#attention > ul .attention-actions button:nth-child(${until === '1h' ? 2 : 3})`;
       const button = container.querySelector<HTMLButtonElement>(selector)!;
@@ -1784,6 +1794,10 @@ it.each(['en', 'zh-CN'] as const)(
       );
       assertCounts(until === '1h' ? 4 : 3);
       await click(selector);
+      expect(document.activeElement?.id).toBe('attention');
+      expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+        t('attention.snoozedToast'),
+      );
       expect(
         request.mock.calls.some(
           ([path, body, method]) =>
@@ -1819,8 +1833,20 @@ it.each(['en', 'zh-CN'] as const)(
     await render(<App />);
     const controls = container.querySelectorAll<HTMLButtonElement>('.attention-actions button');
     expect(controls.length).toBeGreaterThan(0);
+    const notes = container.querySelectorAll('#attention #attention-demo-note');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].textContent).toBe(t('toast.demoReadOnly'));
+    expect(
+      container.querySelector('#attention')!.textContent!.split(t('toast.demoReadOnly')),
+    ).toHaveLength(2);
     for (const control of controls) {
       expect(control.disabled).toBe(true);
+      const descriptions = control.getAttribute('aria-describedby')!.split(' ');
+      expect(descriptions).toHaveLength(2);
+      expect(descriptions[1]).toBe('attention-demo-note');
+      expect(document.getElementById(descriptions[0])).toBe(
+        control.closest('li')!.querySelector('strong'),
+      );
       await act(async () => control.click());
     }
     expect(request.mock.calls.some(([path]) => path.startsWith('/attention/'))).toBe(false);
@@ -1968,12 +1994,12 @@ it.each(['en', 'zh-CN'] as const)(
     });
     await render(<App />);
     const warning = [...container.querySelectorAll<HTMLButtonElement>('.attention-open')].find(
-      (item) => item.textContent?.includes('send_timeout'),
+      (item) => item.textContent?.includes(t('msg.send_timeout')),
     )!;
     expect(warning.textContent).toContain(
       t('msg.attention_notification_failed', {
         channel: 'Team alerts',
-        error_code: 'send_timeout',
+        error_code: t('msg.send_timeout'),
       }),
     );
     expect(warning.querySelector('.dot.amber')).not.toBeNull();

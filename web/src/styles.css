@@ -2974,7 +2974,7 @@ td.wrap {
   max-width: 100%;
 }
 .activity-day {
-  margin: 16px 0 4px;
+  margin: 16px 16px 4px;
   font-size: 13px;
   color: var(--text-3);
 }
@@ -2989,4 +2989,33 @@ td.wrap {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
+}
+
+.activity-arrivals:has(button),
+.activity-feed-action {
+  margin: 8px 16px;
+}
+.table.jobs-table .num {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.jobs-table .num .sub {
+  white-space: normal;
+}
+.array-states {
+  flex-wrap: wrap;
+  max-width: 8rem;
+}
+@media (max-width: 560px) {
+  .page-activity .activity-filters .chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+  }
+  .page-activity .activity-filters .chips button,
+  .attention-actions .button {
+    min-height: 44px;
+    white-space: normal;
+  }
 }

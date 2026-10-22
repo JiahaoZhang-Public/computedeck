@@ -143,7 +143,11 @@ def test_demo_scenario_has_failures_staleness_and_a_capability_gap() -> None:
     assert gap["warnings"][0]["code"] == "history_unavailable"
     assert gap["id"] not in data["failure_history_sources"]
     assert not any(item["subject"]["id"] == gap["id"] for item in data["attention"])
-    assert {failure["state"] for failure in data["recent_failures"]} == {"OUT_OF_MEMORY", "TIMEOUT"}
+    assert {failure["state"] for failure in data["recent_failures"]} == {
+        "OUT_OF_MEMORY",
+        "TIMEOUT",
+        "FAILED",
+    }
     assert all(failure["end"] and failure["exit_code"] for failure in data["recent_failures"])
 
 
@@ -473,3 +477,15 @@ def test_demo_changes_match_existing_subjects_and_contain_no_setting_values() ->
         else:
             assert row["data"]["action"] == "added"
             assert row["data"]["fields"] == ["external_id", "host", "name", "platform"]
+
+
+def test_array_failure_history_matches_activity_and_coverage() -> None:
+    data = dashboard()
+    failed = {row["id"]: row for row in data["recent_failures"]}
+    array_events = [row for row in events() if row["data"].get("job", {}).get("array_id")]
+    assert len(array_events) == 60
+    for event in array_events:
+        job = failed[event["data"]["job"]["id"]]
+        assert job["source_id"] in data["failure_history_sources"]
+        assert job["state"] == event["data"]["state"] == "FAILED"
+        assert job["end"] == event["data"]["ended_at"]

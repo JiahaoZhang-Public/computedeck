@@ -374,7 +374,7 @@ function ArrayRow({
         —
       </td>
       <td data-label={t('jobs.col.state')}>
-        <span className="tags">
+        <span className="tags array-states">
           {array.running > 0 && (
             <span className="tag">{t('jobs.array.running', { count: array.running })}</span>
           )}

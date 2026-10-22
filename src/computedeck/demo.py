@@ -418,6 +418,26 @@ def dashboard() -> dict[str, Any]:
             source["cluster_state"] = cluster_state(
                 [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
             )
+    array_failures = []
+    for index in range(60):
+        ended = (current - timedelta(minutes=45 + index)).isoformat()
+        array_failures.append(
+            {
+                **_job(
+                    index,
+                    ("example:cluster-b-alice", "train-sweep", "FAILED", 1, None, None, "00:10:00"),
+                    observed,
+                ),
+                "id": f"example:cluster-b:48200_{index}",
+                "array_id": "48200",
+                "array_index": str(index),
+                "end": ended,
+                "ended_at": ended,
+                "exit_code": "0:9" if index == 0 else "1:0",
+                "exit_status": 0 if index == 0 else 1,
+                "exit_signal": 9 if index == 0 else 0,
+            }
+        )
     data = {
         "mode": "demo",
         "sources": sources,
@@ -429,7 +449,7 @@ def dashboard() -> dict[str, Any]:
         "refreshing": True,
         "collecting": [sources[1]["id"]],
         **freshness(sources),
-        "recent_failures": [timeout, failure],
+        "recent_failures": [timeout, failure, *array_failures],
         "failure_history_sources": [source["id"] for source in sources if fresh(source, "history")],
         "failure_history_observed_at": min(
             source["last_success"] for source in sources if fresh(source, "history")
@@ -482,7 +502,7 @@ def events() -> list[dict[str, Any]]:
     data = dashboard()
     sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
-    timeout, oom = data["recent_failures"]
+    timeout, oom = data["recent_failures"][:2]
     at = datetime.now(UTC).replace(second=0, microsecond=0)
 
     def context(source_id: str | None) -> dict[str, Any]:
@@ -614,29 +634,18 @@ def events() -> list[dict[str, Any]]:
                 if extra["outcome"] == "completed"
                 else extra["job"].get("exit_code"),
             )
-    for index in range(60):
-        ended = (at - timedelta(minutes=45 + index)).isoformat()
+    for index, job in enumerate(data["recent_failures"][2:]):
         rows.append(
             (
                 "job.finished",
-                "example:cluster-b-alice",
+                job["source_id"],
                 45 + index,
                 {
-                    "job": {
-                        "id": f"example:cluster-b:48200_{index}",
-                        "name": "train-sweep",
-                        "array_id": "48200",
-                        "array_index": str(index),
-                        "state": "FAILED",
-                        "end": ended,
-                        "exit_code": "0:9" if index == 0 else "1:0",
-                        "exit_status": 0 if index == 0 else 1,
-                        "exit_signal": 9 if index == 0 else 0,
-                    },
+                    "job": job,
                     "outcome": "failed",
                     "state": "FAILED",
-                    "exit_code": "0:9" if index == 0 else "1:0",
-                    "ended_at": ended,
+                    "exit_code": job["exit_code"],
+                    "ended_at": job["ended_at"],
                     "observed_at": (at - timedelta(minutes=40)).isoformat(),
                     "since": (at - timedelta(hours=3)).isoformat(),
                 },
@@ -701,7 +710,11 @@ def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         statuses = []
         if row["type"] == "job.finished":
             if row["data"].get("job", {}).get("array_id"):
-                statuses = ["failed", "grouped"]
+                statuses = (
+                    ["failed", "grouped"]
+                    if row["data"]["job"].get("array_index") == "0"
+                    else ["grouped"]
+                )
             elif row["data"].get("outcome") == "unknown":
                 statuses = ["suppressed"]
             else:

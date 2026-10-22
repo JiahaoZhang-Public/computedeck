@@ -43,6 +43,29 @@ const CHANGE_LABELS: Record<string, Record<string, MessageKey>> = {
   'change.import': { imported: 'event.change.import' },
 };
 
+const FIELD_LABELS: Record<string, MessageKey> = {
+  name: 'source.form.name',
+  cluster_id: 'source.form.cluster',
+  interval_minutes: 'source.form.interval',
+  enabled: 'source.form.enabled',
+  node_id: 'source.form.node',
+  ssh_alias: 'source.form.sshAliasLabel',
+  username: 'job.user',
+  host: 'instance.form.host',
+  port: 'instance.form.port',
+  platform: 'instance.form.platform',
+  external_id: 'instance.form.externalId',
+  gpu_count: 'instance.form.gpuCount',
+  gpu_type: 'instance.form.gpuType',
+  hourly_cost: 'instance.form.price',
+  currency: 'instance.form.currency',
+  options: 'event.change.options',
+};
+
+export function changeFieldLabel(field: string): string {
+  return FIELD_LABELS[field] ? t(FIELD_LABELS[field]) : field;
+}
+
 export type EventTone = 'green' | 'amber' | 'red' | 'gray';
 
 /** One line describing an event, in the current language. */
@@ -57,7 +80,9 @@ export function eventText(event: DeckEvent): string {
     });
   }
   if (event.group) {
-    const names = event.group.names.map(({ name, count }) => `${name} ×${count}`).join(', ');
+    const names = event.group.names
+      .map(({ name, count }) => `${name} ×${count}`)
+      .join(t('common.listSeparator'));
     const labels: Record<string, MessageKey> = {
       'job.started': 'notify.event.started',
       'job.finished': 'notify.event.finished',
@@ -114,7 +139,7 @@ export function eventText(event: DeckEvent): string {
       const outcome = t(OUTCOME_LABELS[event.data.outcome ?? 'unknown'] ?? 'event.outcome.unknown');
       const text = t('event.jobFinished', { job: name, outcome });
       return event.data.outcome === 'unknown'
-        ? `${text} · ${t(event.data.outcome_reason === 'outcomes_unavailable' ? 'event.outcomesUnavailable' : 'event.outcomeNotReported')}`
+        ? `${text} · ${t(event.data.outcome_reason === 'outcomes_unavailable' ? 'event.outcomesUnavailable' : event.data.outcome_reason === 'outside_lookback' ? 'event.outsideLookback' : 'event.outcomeNotReported')}`
         : text;
     }
     case 'job.ended':
@@ -142,7 +167,11 @@ export function eventTone(event: DeckEvent): EventTone {
             eventTone({ ...event, group: undefined, data: { outcome } }),
           )
         : event.group.events.map(eventTone);
-    return tones.includes('red') ? 'red' : tones.includes('green') ? 'green' : 'gray';
+    return tones.includes('red')
+      ? 'red'
+      : tones.length > 0 && tones.every((tone) => tone === 'green')
+        ? 'green'
+        : 'gray';
   }
   if (event.type === 'job.finished') {
     if (event.data.outcome === 'completed') return 'green';
@@ -154,17 +183,9 @@ export function eventTone(event: DeckEvent): EventTone {
   return 'gray';
 }
 
-/** Hide old duplicate ending rows once this source uses reconciled endings. */
+/** Retain pre-upgrade endings alongside new reconciled events. */
 export function activityEvents(events: DeckEvent[]): DeckEvent[] {
-  const sources = new Set(
-    events.filter((event) => event.type === 'job.finished').map((event) => event.source_id),
-  );
-  return events
-    .filter(
-      (event) =>
-        !(['job.failed', 'job.ended'].includes(event.type) && sources.has(event.source_id)),
-    )
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return [...events].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
 export function eventTimeTitle(event: DeckEvent): string {
@@ -218,6 +239,8 @@ export function eventTimeText(event: DeckEvent): string | null {
   if (own && event.type === 'job.finished') return t('event.endedAt', { time: eventClock(own) });
   if (!own && event.data.since)
     return timeRange(event.data.since, event.data.observed_at ?? event.at);
+  if (!own)
+    return t('event.observedShort', { time: eventClock(event.data.observed_at ?? event.at) });
   return null;
 }
 

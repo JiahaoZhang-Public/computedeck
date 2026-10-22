@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { api } from '../api';
 import type { Attention, Summary } from '../types';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
@@ -136,6 +136,11 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
         />
       </div>
       <Panel title={t('overview.attention')} count={issues} id="attention" tabIndex={-1}>
+        {ctx.demo && ctx.attention.some((item) => item.mutable !== false) && (
+          <p className="panel-note" id="attention-demo-note">
+            {t('toast.demoReadOnly')}
+          </p>
+        )}
         {ctx.attention.some((item) => !item.muted) ? (
           <ul className="attention">
             {ctx.attention
@@ -230,6 +235,7 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
 }
 
 function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
+  const labelId = useId();
   const [busy, setBusy] = useState(false);
   async function update(action: 'acknowledge' | 'snooze' | 'clear', until?: '1h' | 'tomorrow') {
     setBusy(true);
@@ -239,6 +245,16 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
         { action, until, ...(action === 'clear' ? {} : { fingerprint: item.fingerprint }) },
         'PUT',
       );
+      ctx.notify(
+        t(
+          action === 'acknowledge'
+            ? 'attention.acknowledgedToast'
+            : action === 'snooze'
+              ? 'attention.snoozedToast'
+              : 'attention.unmutedToast',
+        ),
+      );
+      document.getElementById('attention')?.focus();
     } catch (error) {
       ctx.notify(errorText(error, 'error.save'), 'error');
     } finally {
@@ -251,7 +267,7 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
       <button className="attention-open" onClick={() => ctx.openAttention(item)}>
         <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
         <span>
-          <strong>{attentionText(item, ctx.tools)}</strong>
+          <strong id={labelId}>{attentionText(item, ctx.tools)}</strong>
           {item.details.map((detail, index) => (
             <small key={index}>{formatMessage(detail)}</small>
           ))}
@@ -298,6 +314,7 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
             <button
               className="button small"
               disabled={busy || ctx.demo}
+              aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
               onClick={() => void update('clear')}
             >
               {t('attention.unmute')}
@@ -307,7 +324,8 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
               <button
                 className="button small"
                 disabled={busy || ctx.demo}
-                title={t('attention.untilChanges')}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
+                title={t('attention.acknowledgeHint')}
                 onClick={() => void update('acknowledge')}
               >
                 {t('attention.acknowledge')}
@@ -315,6 +333,7 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
               <button
                 className="button small"
                 disabled={busy || ctx.demo}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
                 onClick={() => void update('snooze', '1h')}
               >
                 {t('attention.oneHour')}
@@ -322,6 +341,7 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
               <button
                 className="button small"
                 disabled={busy || ctx.demo}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
                 onClick={() => void update('snooze', 'tomorrow')}
               >
                 {t('attention.tomorrow')}

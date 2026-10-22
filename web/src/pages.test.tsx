@@ -800,7 +800,9 @@ it.each(['en', 'zh-CN'] as const)(
         ctx={ctx(data)}
       />,
     );
-    expect(reported).toContain('TERM_MEMLIMIT: raw scheduler detail');
+    expect(reported).toContain(
+      `${locale === 'en' ? 'Scheduler reason:' : '调度器原因：'} <code>TERM_MEMLIMIT: raw scheduler detail</code>`,
+    );
     expect(reported).not.toContain('SIGKILL');
   },
 );

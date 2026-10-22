@@ -373,7 +373,8 @@ export interface DeckEvent {
     fields?: string[];
     counts?: { sources: number; nodes: number; instances: number };
     outcome?: string;
-    outcome_reason?: 'outcomes_unavailable' | 'outcome_not_reported' | null;
+    failure_announced?: boolean;
+    outcome_reason?: 'outcomes_unavailable' | 'outcome_not_reported' | 'outside_lookback' | null;
     state?: string | null;
     exit_code?: string | null;
     submitted_at?: string | null;

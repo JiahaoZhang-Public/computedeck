@@ -143,5 +143,8 @@ export function attentionText(item: Attention, tools: Pick<Tool, 'id' | 'name'>[
       name = tool ? localized(tool.name) : t('health.plugin');
     }
   }
-  return formatMessage({ ...item.message, name });
+  const message = { ...item.message, name, error_code: item.message.error_code };
+  if (item.kind === 'notification_failed' && typeof message.error_code === 'string')
+    message.error_code = formatMessage({ code: message.error_code });
+  return formatMessage(message);
 }

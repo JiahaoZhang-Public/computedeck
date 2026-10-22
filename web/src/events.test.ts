@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   eventText,
+  changeFieldLabel,
   eventTone,
   OUTCOME_LABELS,
   activityEvents,
@@ -80,7 +81,7 @@ describe('reconciled job endings', () => {
       ).not.toContain(t('event.observedStartTime'));
     },
   );
-  it('labels end and observation times and suppresses the old pair for migrated sources', () => {
+  it('labels end times and retains pre-upgrade history for migrated sources', () => {
     const row = event('job.finished', {
       outcome: 'completed',
       ended_at: '2026-01-01T00:00:00Z',
@@ -93,6 +94,8 @@ describe('reconciled job endings', () => {
     );
     const old = { ...event('job.failed', {}), source_id: 'cluster-b' };
     expect(activityEvents([event('job.ended', {}), event('job.failed', {}), row, old])).toEqual([
+      event('job.ended', {}),
+      event('job.failed', {}),
       row,
       old,
     ]);
@@ -431,3 +434,47 @@ describe('user changes', () => {
     }
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'visibly labels individual observation times in %s',
+  (language) => {
+    setLocale(language);
+    for (const type of ['job.started', 'job.finished']) {
+      const row = event(type, {});
+      expect(eventTimeText(row)).toBe(t('event.observedShort', { time: dateTime(row.at) }));
+    }
+    expect(
+      eventText(event('job.finished', { outcome: 'unknown', outcome_reason: 'outside_lookback' })),
+    ).toContain(t('event.outsideLookback'));
+    setLocale('en');
+  },
+);
+
+it('uses a neutral tone for mixed unknown and completed groups', () => {
+  const row: DeckEvent = {
+    ...event('job.finished', {}),
+    group: {
+      count: 60,
+      ids: [],
+      first_at: '',
+      last_at: '',
+      names: [],
+      events: [],
+      outcomes: { unknown: 59, completed: 1 },
+    },
+  };
+  expect(eventTone(row)).toBe('gray');
+  row.group!.outcomes = { completed: 60 };
+  expect(eventTone(row)).toBe('green');
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'translates known changed fields and retains unknown ones in %s',
+  (language) => {
+    setLocale(language);
+    expect(changeFieldLabel('interval_minutes')).toBe(t('source.form.interval'));
+    expect(changeFieldLabel('options')).toBe(t('event.change.options'));
+    expect(changeFieldLabel('custom_setting')).toBe('custom_setting');
+    setLocale('en');
+  },
+);

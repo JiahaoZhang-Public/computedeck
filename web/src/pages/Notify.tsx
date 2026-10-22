@@ -491,7 +491,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                                 .map((outcome) =>
                                   OUTCOME_LABELS[outcome] ? t(OUTCOME_LABELS[outcome]) : outcome,
                                 )
-                                .join(', '),
+                                .join(t('common.listSeparator')),
                             })
                           : label;
                       })

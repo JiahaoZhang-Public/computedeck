@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { DeckEvent, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
@@ -7,6 +7,7 @@ import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
   arrayField,
+  groupArrays,
   instanceAllocation,
   jobGpuResources,
   listedJobs,
@@ -96,18 +97,34 @@ function Metrics({ values }: { values: { label: string; value: number | null | u
 
 /** The drawer follows the full listed array on each poll, independently of page filters. */
 export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
+  const listRef = useRef<HTMLDivElement>(null);
   const [limit, setLimit] = useState(50);
   const terms = jobTerms(
     ctx.data.sources.find((source) => source.id === jobs[0].source_id)?.driver ?? '',
   );
+  const array = groupArrays(jobs).find((row) => 'jobs' in row);
   const user = arrayField(jobs, 'user');
   const qos = arrayField(jobs, 'qos');
   const partition = arrayField(jobs, 'partition');
   const fact = ({ value, mixed }: ReturnType<typeof arrayField>) =>
     mixed ? t('jobs.array.mixed') : value || '—';
   return (
-    <div className="drawer-body array-detail">
+    <div
+      className="drawer-body array-detail"
+      ref={listRef}
+      tabIndex={-1}
+      aria-label={t('jobs.array.elements', { count: jobs.length })}
+    >
       <p>{t('jobs.array.elements', { count: jobs.length })}</p>
+      {array && 'jobs' in array && (
+        <p>
+          {[
+            t('jobs.array.running', { count: array.running }),
+            t('jobs.array.pending', { count: array.pending }),
+            t('jobs.array.other', { count: array.other }),
+          ].join(t('common.listSeparator'))}
+        </p>
+      )}
       <dl className="kv">
         <div>
           <dt>{t('job.cluster')}</dt>
@@ -138,10 +155,22 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
       />
       {jobs.length > limit && (
         <div className="drawer-actions">
-          <button className="button" onClick={() => setLimit(limit + 50)}>
+          <button
+            className="button"
+            onClick={() => {
+              listRef.current?.focus();
+              setLimit(limit + 50);
+            }}
+          >
             {t('jobs.array.showMore')}
           </button>
-          <button className="button" onClick={() => setLimit(Infinity)}>
+          <button
+            className="button"
+            onClick={() => {
+              listRef.current?.focus();
+              setLimit(Infinity);
+            }}
+          >
             {t('jobs.array.showAll')}
           </button>
         </div>
@@ -186,7 +215,9 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
               {t(
                 event.data.outcome_reason === 'outcomes_unavailable'
                   ? 'event.unknownUnavailable'
-                  : 'event.unknownNotReported',
+                  : event.data.outcome_reason === 'outside_lookback'
+                    ? 'event.outsideLookback'
+                    : 'event.unknownNotReported',
               )}
             </>
           )}
@@ -199,7 +230,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
           {failure.evidence && <p>{failure.evidence}</p>}
           {job.reason && (
             <p>
-              {t('failure.reason')}: <code>{job.reason}</code>
+              {t('failure.reasonLabel')} <code>{job.reason}</code>
             </p>
           )}
           {nextStep && (

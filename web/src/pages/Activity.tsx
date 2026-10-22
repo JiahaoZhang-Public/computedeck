@@ -6,6 +6,7 @@ import { formatMessage, locale, localized, t } from '../i18n';
 import { dateTime, relativeTime } from '../domain';
 import {
   activityEvents,
+  changeFieldLabel,
   eventJob,
   eventText,
   eventTone,
@@ -139,7 +140,9 @@ function ActivityRow({
         )}
         {fields.length > 0 && (
           <small>
-            {t('event.change.fields', { fields: fields.join(t('common.listSeparator')) })}
+            {t('event.change.fields', {
+              fields: fields.map(changeFieldLabel).join(t('common.listSeparator')),
+            })}
           </small>
         )}
       </span>
@@ -309,7 +312,7 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <Panel>
-        <div className="activity-filters">
+        <div className="toolbar activity-filters">
           <Chips
             label={t('activity.eventType')}
             value={category}
@@ -377,6 +380,7 @@ function ActivityFeed({
   clear: () => void;
 }) {
   const [rows, setRows] = useState<DeckEvent[] | null>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
   const [fresh, setFresh] = useState<DeckEvent[]>([]);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -456,11 +460,21 @@ function ActivityFeed({
           {t('common.loading')}
         </p>
       )}
-      {count > 0 && (
-        <button className="button" onClick={() => void load('reload')} disabled={busy}>
-          {t('activity.new', { count: `${fresh.length === 200 ? '≥ ' : ''}${count}` })}
-        </button>
-      )}
+      <div className="activity-arrivals" aria-live="polite">
+        {count > 0 && (
+          <button
+            className="button"
+            onClick={() => {
+              feedRef.current?.focus();
+              void load('reload');
+            }}
+            disabled={busy}
+          >
+            {t('activity.new', { count: `${fresh.length === 200 ? '≥ ' : ''}${count}` })}
+            <span aria-hidden="true"> ↑</span>
+          </button>
+        )}
+      </div>
       {rows?.length === 0 && (
         <p className="panel-note">
           {t(
@@ -485,26 +499,35 @@ function ActivityFeed({
           )}
         </p>
       )}
-      {[...days]
-        .sort(([, a], [, b]) => Date.parse(b[0].at) - Date.parse(a[0].at))
-        .map(([day, events]) => (
-          <section key={day}>
-            <h3 className="activity-day">{day}</h3>
-            <ul className="activity">
-              {events.map((event) => (
-                <ActivityRow
-                  key={event.id}
-                  event={event}
-                  sources={ctx.data.sources}
-                  tools={ctx.tools}
-                  ctx={ctx}
-                />
-              ))}
-            </ul>
-          </section>
-        ))}
+      <div ref={feedRef} tabIndex={-1} aria-label={t('activity.title')}>
+        {[...days]
+          .sort(([, a], [, b]) => Date.parse(b[0].at) - Date.parse(a[0].at))
+          .map(([day, events]) => (
+            <section key={day}>
+              <h3 className="activity-day">{day}</h3>
+              <ul className="activity">
+                {events.map((event) => (
+                  <ActivityRow
+                    key={event.id}
+                    event={event}
+                    sources={ctx.data.sources}
+                    tools={ctx.tools}
+                    ctx={ctx}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+      </div>
       {more && (
-        <button className="button" disabled={busy} onClick={() => void load('older')}>
+        <button
+          className="button activity-feed-action"
+          disabled={busy}
+          onClick={() => {
+            feedRef.current?.focus();
+            void load('older');
+          }}
+        >
           {t(busy ? 'common.loading' : 'activity.older')}
         </button>
       )}
@@ -515,6 +538,7 @@ function ActivityFeed({
 const seenKey = 'computedeck.activity.seen';
 
 export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
+  const allActivity = useRef<HTMLAnchorElement>(null);
   // Undefined means storage works but nothing has been marked; null means seen state is off.
   const [seen, setSeen] = useState<number | null | undefined>(() => {
     if (ctx.demo) return null;
@@ -560,6 +584,7 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
     const newest = Math.max(...rows.map((event) => event.id));
     try {
       localStorage.setItem(seenKey, String(newest));
+      allActivity.current?.focus();
       setSeen(newest);
       setRows(null);
     } catch {
@@ -587,13 +612,14 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
               {t('activity.markSeen')}
             </button>
           )}
-          <a className="link" href={routeHash('activity')}>
+          <a ref={allActivity} className="link" href={routeHash('activity')}>
             {t('activity.all')}
           </a>
         </div>
       }
     >
       {error && <ActivityError retry={load} />}
+      {ctx.demo && <p className="panel-note">{t('toast.demoReadOnly')}</p>}
       {shown.length ? (
         <ul className="activity">
           {shown.map((event) => (

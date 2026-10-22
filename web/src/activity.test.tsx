@@ -70,7 +70,7 @@ async function render(node: ReactNode) {
 }
 async function click(text: string) {
   const button = [...container.querySelectorAll('button')].find(
-    (item) => item.textContent === text,
+    (item) => item.textContent?.replace(/ ↑$/, '') === text,
   );
   expect(button, text).toBeDefined();
   await act(async () => button!.click());
@@ -133,6 +133,7 @@ it('pages older rows and holds new rows behind a pill until clicked', async () =
   request.mockResolvedValue([event(101), ...initial]);
   await click(t('activity.new', { count: '1' }));
   expect(container.textContent).toContain('train-101');
+  expect(document.activeElement?.getAttribute('aria-label')).toBe(t('activity.title'));
 });
 
 it('restores URL filters, debounces search, and ignores obsolete requests', async () => {
@@ -178,7 +179,7 @@ it.each(['older', 'reload'] as const)(
     const label = mode === 'older' ? t('activity.older') : t('activity.new', { count: '1' });
     for (const text of [t('activity.older'), t('activity.new', { count: '1' })]) {
       const button = [...container.querySelectorAll('button')].find(
-        (item) => item.textContent === text,
+        (item) => item.textContent?.replace(/ ↑$/, '') === text,
       );
       expect(button?.disabled).toBe(false);
     }
@@ -304,6 +305,7 @@ it('keeps per-viewer seen state only after an explicit mark and adds no timer po
   expect(request.mock.calls.length).toBe(count);
   await click(t('activity.markSeen'));
   expect(localStorage.getItem('computedeck.activity.seen')).toBe('5');
+  expect(document.activeElement?.textContent).toBe(t('activity.all'));
   expect(container.querySelector('h2')?.textContent).toBe(t('activity.sinceSeen'));
   expect(container.textContent).toContain(t('activity.seenEmpty'));
 });
@@ -368,7 +370,7 @@ it.each(['en', 'zh-CN'] as const)(
 );
 
 it.each(['en', 'zh-CN'] as const)(
-  'hides legacy endings across days and in the teaser while preserving other sources in %s',
+  'preserves legacy endings across days and in the teaser after an upgrade in %s',
   async (language) => {
     setLocale(language);
     const rows: DeckEvent[] = [
@@ -379,14 +381,14 @@ it.each(['en', 'zh-CN'] as const)(
     ];
     request.mockResolvedValue(rows);
     await render(<ActivityPage ctx={context()} />);
-    expect(container.querySelectorAll('.activity-day')).toHaveLength(1);
+    expect(container.querySelectorAll('.activity-day')).toHaveLength(3);
     for (const view of [<ActivityPage ctx={context()} />, <ActivityTeaser ctx={context()} />]) {
       await render(view);
-      expect(container.querySelectorAll('.activity > li')).toHaveLength(2);
+      expect(container.querySelectorAll('.activity > li')).toHaveLength(4);
       expect(container.textContent).toContain('train-4');
       expect(container.textContent).toContain('train-1');
-      expect(container.textContent).not.toContain('train-3');
-      expect(container.textContent).not.toContain('train-2');
+      expect(container.textContent).toContain('train-3');
+      expect(container.textContent).toContain('train-2');
     }
   },
 );

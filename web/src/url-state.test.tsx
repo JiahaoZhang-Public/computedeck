@@ -217,7 +217,11 @@ it.each(['en', 'zh-CN'] as const)(
       )!;
     await act(async () => button('jobs.array.showMore').click());
     expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(100);
-    await act(async () => button('jobs.array.showAll').click());
+    await act(async () => {
+      button('jobs.array.showAll').focus();
+      button('jobs.array.showAll').click();
+    });
+    expect(document.activeElement).toBe(container.querySelector('.array-detail'));
     expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(110);
     await act(async () => container.querySelector<HTMLElement>('.drawer .clickable')!.click());
     expect(routeParams().get('job')).toBe(data.jobs[0].id);

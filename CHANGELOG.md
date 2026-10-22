@@ -14,6 +14,8 @@
 - Show recorded notification delivery outcomes beside Activity rows and warn about failing channels in Needs attention. Refresh the Notifications log automatically while its page is visible.
 - Preserve hand-added machines' SSH checks across edits and imports when the connection is unchanged. Give specific connection-failure guidance, retry transient timeouts and closed connections once, and keep machine checks separate from collection concurrency.
 - Avoid duplicate refreshes when returning to the app and stop fast polling when the requested collections finish. Offer Add source in the health panel once an authenticated, loaded dashboard confirms there are no sources.
+- Preserve pre-upgrade Activity history and catch-up endings, recover short failures reported late, and retain Kubernetes container-failure notifications. Keep `sdk.EVENT_TYPES` at its 0.5 set and interpret old Notify rules without rewriting them. Mixed digests and expanded Activity groups prioritize failures; long outages explain unchecked accounting history.
+- Make observation times visible on touch screens, announce attention actions and retain keyboard focus, improve phone controls and numeric table layout, and keep example array failures consistent across views.
 - Keep plugin API, web API and database schema versions unchanged. New event types require explicit subscriptions; existing plugin handlers keep receiving legacy job endings. Event filters, grouped reads, change history and notification delivery status are opt-in API additions.
 
 ## 0.5.1 (2026-10-20)
