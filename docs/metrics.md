@@ -728,3 +728,62 @@ The example includes two currencies, a collection gap and pre-upgrade history. I
 今日与最近七天的估算固定使用最近七天的数据，不随范围切换改变；这些数值仅来自采集期间观察到
 的小时价格，并非账单，不补算采集间断、存储费或采集前价格，与实例本次运行估算分开。
 示例包含两种币种、采集中断及升级前历史。每个点的分组 GPU 数量之和与曲线的已知用量一致，分组在采集失败时才变为未知。来源空档从最后一次成功采集开始；未探测机器仅在添加后计入未知用量，未知 GPU 读数仅从其观测时间开始计入。仅包含尚未添加机器的组不会出现在更早的采样中。
+
+## Sustained low GPU use
+
+Low GPU use is an observation hint, not a claim that a machine is idle or safe to stop.
+The default threshold is strictly below 10% over at least 60 minutes. At least three
+actual readings must cover that window, every mean and available per-GPU maximum must
+stay below the threshold, and no gap may exceed twice the expected collection interval.
+SSH-source instances use the source's collection interval even when checks add readings
+in between. Other probe readings use the existing ten-minute probe interval. The reported
+duration ends at the last reading; it never extends through unobserved time. SSH collections
+and probes share one measurement family and preserve the window and its acknowledgement.
+Provider readings are a separate family: probing a Vast.ai instance restarts its window,
+as does returning to provider readings. A failed probe records nothing and preserves prior
+samples; gaps and stale readings end coverage when measurements stop. A high reading clears
+the hint; old or insufficient readings mean unknown. Lifecycle changes, known provider
+restarts, changed endpoints and incomplete checks break the window. SSH readings must cover every listed GPU; a low mean with one
+busy GPU cannot qualify. CPU-only machines do not qualify.
+
+Coverage comes from Vast.ai's provider utilization, normal SSH-source collections and
+hardware probes. Vast.ai values say **provider reading**: the provider does not document
+its sampling window or how it combines GPUs. SSH sources have no listed price, so their
+hints contain duration only. Hand-added machines with monitoring enabled are probed on
+the existing schedule and can include a typed price. RunPod, Lambda, EC2 and GPUhub do
+not provide utilization here; their on-demand checks contribute individual readings,
+never an assumed continuous duration. No periodic provider SSH checks are added.
+
+Cloud and machines shows low-use duration, filters low-use and insufficient-reading
+rows through `?use=low|unknown`, and explains missing coverage in the drawer. Where to run
+links to this list when a low-use instance has a positive known price. Needs attention
+uses the same server result and supports acknowledgement and snoozing. More readings
+in the same low-use period do not reopen an acknowledgement; a new period or changed
+threshold/window does. When priced, the hint multiplies the covered span by the current
+whole-instance hourly price and labels it an estimate, not a bill. It is not historical
+billing and makes no claim about savings. Provider console links open the provider's
+site; ComputeDeck never stops an instance.
+
+## 持续低 GPU 利用率
+
+低利用率是一项观测提示，不表示机器闲置或可以安全停止。默认要求至少 3 次实际读数覆盖
+60 分钟，每次平均利用率及可读取的单卡最大利用率均严格低于 10%，相邻读数间隔不超过
+采集周期的两倍。SSH 来源的实例始终使用该来源的采集周期，期间的硬件检查只会缩短读数间隔；
+其他硬件检查使用现有的 10 分钟周期。持续时间截至最后一次读数，不延伸到未观测时段。
+SSH 常规采集与硬件检查属于同一测量类别，交替进行不会中断窗口或清除确认状态。
+供应商读数属于独立类别：对 Vast.ai 实例进行硬件检查，或随后恢复供应商读数，都会重启窗口。
+检查失败不记录读数，也不删除已有样本；测量停止后，由间隔和过期规则结束覆盖。
+读数升高会清除提示，读数过旧或不足则为未知。
+生命周期变化、已知的供应商重启、端点变化及不完整检查会中断窗口。SSH 读数必须覆盖全部
+已知 GPU，不能用平均值掩盖某张繁忙 GPU。纯 CPU 机器不会产生提示。
+
+覆盖范围包括 Vast.ai 的供应商读数、SSH 来源的常规采集和硬件检查。Vast.ai 未说明采样窗口
+或多卡聚合方式，因此明确标为“供应商读数”。SSH 来源没有标价，只显示持续时间。手动添加且
+启用监控的机器沿用现有检查周期，填写价格后也可显示估算费用。RunPod、Lambda、EC2 和
+GPUhub 在此不提供利用率，只能通过按需硬件检查获取单次读数；不会新增供应商实例的自动 SSH 检查。
+
+“云与机器”通过 `?use=low|unknown` 筛选低利用率或读数不足的实例，抽屉说明覆盖不足的原因。
+“在哪里运行”在存在标价大于零的低利用率实例时提供列表链接。“待处理”使用同一个服务端结果，
+支持确认和暂缓。同一低利用率时段积累更多读数不会重新提醒；新的时段或阈值、窗口变化会重新提醒。
+费用按观测覆盖时长乘以当前整实例每小时标价，明确标为估算值，非账单，也不声称是历史计费或可节省费用。
+供应商控制台链接仅打开供应商网站，ComputeDeck 不会停止实例。

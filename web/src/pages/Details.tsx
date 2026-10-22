@@ -13,6 +13,7 @@ import {
   instanceAllocation,
   jobGpuResources,
   listedJobs,
+  lowUseText,
   money,
   PENDING_STATES,
   relativeTime,
@@ -566,6 +567,39 @@ export function InstanceDetail({
           <dd>{relativeTime(item.observed_at)}</dd>
         </div>
       </dl>
+      {item.gpu_count !== 0 && (
+        <section>
+          <h3>{t('lowUse.title')}</h3>
+          {item.low_use?.state === 'low' ? (
+            <p>{lowUseText(item, ctx.data.low_use_settings)}</p>
+          ) : item.low_use?.state === 'busy' ? (
+            <p className="panel-note">
+              {t('lowUse.busy', { threshold: ctx.data.low_use_settings?.threshold ?? 10 })}
+            </p>
+          ) : (
+            <p className="panel-note">
+              {t('lowUse.unknown')}
+              {' · '}
+              {t(`lowUse.${item.low_use?.reason ?? 'no_reading'}`, {
+                minutes: ctx.data.low_use_settings?.window_minutes ?? 60,
+              })}{' '}
+              {item.manual
+                ? t('lowUse.monitor')
+                : ['runpod', 'lambda', 'aws-ec2', 'gpuhub'].includes(source?.driver ?? '')
+                  ? t('lowUse.providerMissing')
+                  : ''}
+            </p>
+          )}
+          {item.low_use?.origin === 'provider' && item.low_use.state !== 'low' && (
+            <p className="panel-note">{t('lowUse.provider')}</p>
+          )}
+        </section>
+      )}
+      {item.console_url?.startsWith('https://') && (
+        <a className="link" href={item.console_url} target="_blank" rel="noreferrer">
+          {t('lowUse.console')}
+        </a>
+      )}
       <GpuDetails item={item} />
       <Metrics
         values={[

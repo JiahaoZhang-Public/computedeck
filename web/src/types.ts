@@ -139,7 +139,18 @@ export interface GpuRow {
   in_use?: boolean | null;
   processes_omitted?: number;
 }
+export interface LowUse {
+  state: 'low' | 'busy' | 'unknown';
+  since: string | null;
+  covered_minutes: number;
+  samples: number;
+  origin: 'provider' | 'probe' | 'source' | null;
+  reason: 'no_reading' | 'not_running' | 'stale' | 'coverage' | null;
+}
 export interface Instance {
+  low_use?: LowUse;
+  console_url?: string | null;
+  gpu_utilization_max?: number | null;
   started_at?: string | null;
   seen_running_since?: string | null;
   gpus?: GpuRow[] | null;
@@ -277,6 +288,7 @@ export interface Attention {
   action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
 export interface Dashboard {
+  low_use_settings?: { threshold: number; window_minutes: number };
   token?: string;
   attention?: Attention[];
   attention_count?: number;
@@ -316,6 +328,8 @@ export interface Health {
   plugins?: Record<string, Record<string, unknown>>;
 }
 export interface Settings {
+  low_use_threshold: number;
+  low_use_window_minutes: number;
   language: string;
   server_name: string | null;
 }

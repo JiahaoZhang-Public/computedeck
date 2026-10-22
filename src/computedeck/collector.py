@@ -18,7 +18,7 @@ from .store import PROBE_INTERVAL, Store, manual_state, now
 logger = logging.getLogger("computedeck")
 # Settings whose change means an in-flight result belongs to an old connection.
 CONNECTION_KEYS = ("ssh_alias", "enabled", "credential", "username", "options", "node")
-PERCENTAGES = ("gpu_utilization", "cpu_utilization", "memory_utilization")
+PERCENTAGES = ("gpu_utilization", "gpu_utilization_max", "cpu_utilization", "memory_utilization")
 # What a check may change on an instance a source lists. The source stays the authority for
 # its inventory, its GPUs in use and when it was listed.
 LISTED_PROBE_FIELDS = ("ssh_status", "ssh_error", "gpu_observed_count", *PERCENTAGES)
@@ -307,6 +307,7 @@ class Collector:
                         ):
                             raise ProbeConflict("endpoint_changed") from None
             current = persist({**result, "ssh_error": None})
+            self.store.record_instance_sample(current, result, result.get("observed_at") or attempt)
             self.store.record_history()
         except ProbeConflict:
             raise

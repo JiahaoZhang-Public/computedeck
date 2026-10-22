@@ -18,7 +18,9 @@ A provider only says where its API is and turns its own rows into CloudInstance:
 
 import asyncio
 import re
+from string import Formatter
 from typing import Any, ClassVar, Literal
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -142,6 +144,7 @@ class Api:
 class CloudDriver:
     """Subclass and set the class attributes; implement ``instances`` (and ``account``)."""
 
+    console_url: ClassVar[str | None] = None
     kind: ClassVar[Literal["cluster", "cloud"]] = "cloud"
     name: ClassVar[str]
     label: ClassVar[Text]
@@ -297,3 +300,22 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
         "observed_at": observed,
         "ssh_status": "unverified",
     }
+
+
+def provider_console_url(template: str | None, instance_id: str, region: str | None) -> str | None:
+    """Expand only encoded id/region placeholders in an HTTPS console link."""
+    if not template:
+        return None
+    try:
+        if any(
+            field not in {None, "id", "region"} or spec or conversion
+            for _, field, spec, conversion in Formatter().parse(template)
+        ):
+            return None
+        url = template.format(id=quote(instance_id, safe=""), region=quote(region or "", safe=""))
+        parts = urlsplit(url)
+        if parts.scheme == "https" and parts.hostname and not parts.username and not parts.password:
+            return url
+    except ValueError:
+        pass
+    return None

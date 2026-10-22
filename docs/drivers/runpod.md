@@ -20,3 +20,8 @@ prices. No separate billing request is made.
 - HTTP 429 follows the shared provider retry/backoff handling. Old listings remain
   visible, but are excluded from current totals and their cost estimates stop at the
   last successful collection.
+
+RunPod listings provide no GPU utilization. A hardware check contributes one actual
+reading to low-use detection; a single reading never establishes a duration. No automatic
+provider SSH checks are added. The drawer explains this coverage and offers an
+[Open provider console](https://console.runpod.io) link, without any stop operation.

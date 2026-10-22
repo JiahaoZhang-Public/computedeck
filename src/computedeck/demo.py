@@ -11,6 +11,7 @@ from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
 from .history import group_history
+from .low_use import low_use
 from .summary import fresh, freshness, summarize
 
 _SOURCES = [
@@ -629,6 +630,28 @@ def dashboard() -> dict[str, Any]:
 
     # A typed rental price demonstrates a second currency without mixing totals.
     next(i for i in instances if i["name"] == "dev-box").update(hourly_cost=0.4, currency="EUR")
+    data["low_use_settings"] = {"threshold": 10, "window_minutes": 60}
+    for item in instances:
+        # The monitored, priced workstation has seven real-shaped probe readings.
+        readings = (
+            [
+                {
+                    "at": (
+                        datetime.fromisoformat(observed) - timedelta(minutes=10 * n)
+                    ).isoformat(),
+                    "gpu_util": 4,
+                    "gpu_util_max": 4,
+                    "origin": "probe",
+                }
+                for n in range(6, -1, -1)
+            ]
+            if item["name"] == "dev-box"
+            else []
+        )
+        item["low_use"] = low_use(
+            item, readings, now=current, interval_minutes=10, threshold=10, window_minutes=60
+        )
+        item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
     data["summary"] = summarize(data)
     data["history"] = [
         {k: v for k, v in p.items() if k != "by_group"} for p in demo_history(24, data)

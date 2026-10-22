@@ -76,6 +76,7 @@ def parse_pods(pods: list[dict[str, Any]], source: dict[str, Any]) -> list[dict[
 
 
 class RunPodDriver(CloudDriver):
+    console_url: ClassVar[str | None] = "https://console.runpod.io"
     name: ClassVar[str] = "runpod"
     label: ClassVar[dict[str, str]] = {"en": "RunPod", "zh-CN": "RunPod"}
     description: ClassVar[dict[str, str]] = {

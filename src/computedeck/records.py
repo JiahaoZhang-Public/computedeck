@@ -87,6 +87,8 @@ class SettingsInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     language: Literal["en", "zh-CN"] | None = None
     server_name: str | None = Field(default=None, max_length=80)
+    low_use_threshold: int = Field(default=10, ge=1, le=50, strict=True)
+    low_use_window_minutes: int = Field(default=60, ge=30, le=360, strict=True)
 
 
 def source_record(body: SourceInput) -> dict[str, Any]:

@@ -6,7 +6,6 @@ import {
   gpuMatchesModel,
   holdsAllocation,
   PENDING_STATES,
-  instanceLifecycle,
   gpuTres,
   qosGpuLimit,
   qosGpuUsed,
@@ -654,17 +653,9 @@ export function gpuModels(nodes: ComputeNode[], instances: Instance[] = []) {
   ].sort();
 }
 
-/** Cloud instances you already pay for that are almost idle; not machines added by hand. */
-export function idleInstances(instances: Instance[], threshold = 10) {
-  return instances.filter(
-    (item) =>
-      !item.manual &&
-      item.metrics_scope !== 'host_visible' &&
-      instanceLifecycle(item.state) === 'held' &&
-      item.gpu_utilization != null &&
-      item.gpu_utilization < threshold &&
-      (item.gpu_count ?? 0) > 0,
-  );
+/** Paid resources with sustained low use, as measured by the server. */
+export function lowUseInstances(instances: Instance[]) {
+  return instances.filter((item) => item.low_use?.state === 'low' && (item.hourly_cost ?? 0) > 0);
 }
 
 /** Separate current GPU samples from otherwise eligible machines missing a recent sample. */

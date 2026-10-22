@@ -232,9 +232,15 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "instance_low_use",
         "notification_failed",
     ]
-    assert data["attention"][-2]["subject"]["id"] == "example:runpod:demo-pod"
+    assert (
+        next(item for item in data["attention"] if item["kind"] == "instance_ssh_failed")[
+            "subject"
+        ]["id"]
+        == "example:runpod:demo-pod"
+    )
     pod = next(row for row in data["instances"] if row["id"] == "example:runpod:demo-pod")
     for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
         assert pod[metric] is None
@@ -324,7 +330,7 @@ def test_demo_contains_acknowledged_and_snoozed_items() -> None:
         "acknowledged",
         "snoozed",
     }
-    assert data["attention_count"] == 4
+    assert data["attention_count"] == 5
     assert all(item["mutable"] is True for item in data["attention"])
 
 

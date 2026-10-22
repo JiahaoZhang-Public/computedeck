@@ -6,10 +6,10 @@ import { Clock3, Copy, Plus, X } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { dateTime, money, relativeTime, sourceHasData, uniqueNodes } from '../domain';
+import { dateTime, relativeTime, sourceHasData, uniqueNodes } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES } from '../planExplanation';
-import { gpuModels, idleInstances, machineOptions, machineSamples, planOptions } from '../plan';
+import { gpuModels, lowUseInstances, machineOptions, machineSamples, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Chips, Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -202,7 +202,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     machines.map((option) => option.instance),
   );
   const hasMachines = data.sources.some((source) => source.driver === 'ssh');
-  const idle = idleInstances(data.instances);
+  const lowUse = lowUseInstances(data.instances);
   const hasClusters = data.sources.some((source) => source.kind === 'cluster');
   return (
     <>
@@ -463,29 +463,10 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           )}
         </Panel>
       )}
-      {idle.length > 0 && (
-        <Panel title={t('plan.idle')} count={idle.length}>
-          <ul className="rows">
-            {idle.map((item) => (
-              <li key={item.id}>
-                <div className="grow">
-                  <strong>{item.name}</strong>
-                  <span className="sub">
-                    {item.platform} · {item.gpu_count} × {item.gpu_type || 'GPU'} ·{' '}
-                    {t('plan.idleUtil', { value: Math.round(item.gpu_utilization ?? 0) })}
-                  </span>
-                </div>
-                <span className="muted">
-                  {item.hourly_cost == null ? '' : `${money(item.hourly_cost, item.currency)}/h`}
-                </span>
-                <button className="button small" onClick={() => ctx.openInstance(item)}>
-                  {t('plan.open')}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="panel-note">{t('plan.idleNote')}</p>
-        </Panel>
+      {lowUse.length > 0 && (
+        <a className="link" href="#/cloud?use=low">
+          {t('lowUse.pointer', { count: lowUse.length })}
+        </a>
       )}
     </>
   );

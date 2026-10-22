@@ -52,3 +52,17 @@ The driver has no options.
 - The SSH endpoint follows the official CLI's `ssh-url` logic, including its rule that the proxy port is one higher for Jupyter launch modes. Neither is documented in the API reference. The proxy hosts are shared, so accept the host key with a normal `ssh` login first.
 - `dph_total` is the instance's listed total price per hour. Whether it changes to the storage-only charge while an instance is stopped is not documented.
 - Pages are fetched one second apart, so a large account takes several seconds per collection.
+
+## Sustained low GPU use
+
+Each actual `gpu_util` reading contributes to the low-use observation window. At least
+three readings must cover the configured window without gaps longer than twice the
+source interval, and every reading must stay below the threshold. The UI labels these
+as **provider readings** because the API does not document their sampling window or
+multi-GPU aggregation. It does not claim that every individual GPU was idle. Missing
+readings or lifecycle changes break coverage. Known `dph_total` prices can produce a
+labelled estimate over the covered span at the current price, not a bill.
+
+The drawer links to the [Vast.ai Instances console](https://cloud.vast.ai/instances),
+as described in the [provider's instance guide](https://github.com/vast-ai/docs/blob/main/guides/instances/manage-instances.mdx).
+No stop operation is performed by ComputeDeck.

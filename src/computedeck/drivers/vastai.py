@@ -159,6 +159,7 @@ async def _page(client: httpx.AsyncClient, token: str, params: dict[str, str]) -
 
 
 class VastAIDriver:
+    console_url: ClassVar[str | None] = "https://cloud.vast.ai/instances"
     name: ClassVar[str] = "vastai"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cloud"
     info: ClassVar[DriverInfo] = DriverInfo(

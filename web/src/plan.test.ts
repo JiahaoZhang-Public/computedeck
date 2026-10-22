@@ -1,6 +1,6 @@
 import { serverClusterState, serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
-import { comparePlans, gpuModels, idleInstances, planOptions, wallHours } from './plan';
+import { comparePlans, gpuModels, lowUseInstances, planOptions, wallHours } from './plan';
 import { planFactors } from './planExplanation';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
 
@@ -268,22 +268,33 @@ describe('where to run', () => {
   });
 });
 
-describe('idle cloud GPUs', () => {
-  it('lists running instances with low measured utilization only', () => {
-    const base = { gpu_count: 1, gpu_utilization: 3, state: 'running' } as Instance;
-    const rows = idleInstances([
-      { ...base, id: 'a' },
-      { ...base, id: 'b', gpu_utilization: null },
-      { ...base, id: 'c', gpu_utilization: 60 },
-      { ...base, id: 'd', state: 'stopped' },
-      // A machine added by hand is not a cloud GPU being billed.
-      { ...base, id: 'e', manual: true },
-      { ...base, id: 'reported', state: 'reported_running' },
-      { ...base, id: 'starting', state: 'desired_running' },
-      { ...base, id: 'stopping', state: 'desired_stopped' },
-      { ...base, id: 'unknown', state: 'unknown' },
-    ]);
-    expect(rows.map((row) => row.id)).toEqual(['a', 'reported']);
+describe('paid resources with sustained low use', () => {
+  it('uses server low-use state and a positive price, including hand-added machines', () => {
+    const base = {
+      gpu_count: 1,
+      gpu_utilization: 3,
+      state: 'running',
+      hourly_cost: 1,
+      low_use: {
+        state: 'low',
+        since: null,
+        covered_minutes: 60,
+        samples: 7,
+        origin: 'probe',
+        reason: null,
+      },
+    } as Instance;
+    expect(
+      lowUseInstances([
+        { ...base, id: 'a' },
+        { ...base, id: 'manual', manual: true },
+        { ...base, id: 'unpriced', hourly_cost: null },
+        { ...base, id: 'free', hourly_cost: 0 },
+        { ...base, id: 'single', low_use: undefined },
+        { ...base, id: 'unknown', low_use: { ...base.low_use!, state: 'unknown' } },
+        { ...base, id: 'busy', low_use: { ...base.low_use!, state: 'busy' } },
+      ]).map((row) => row.id),
+    ).toEqual(['a', 'manual']);
   });
 });
 

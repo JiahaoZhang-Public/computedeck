@@ -302,6 +302,9 @@ def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[d
         "gpu_type": ", ".join(dict.fromkeys(row["name"] for row in gpus or [] if row["name"]))
         or None,
         "gpu_utilization": sum(observed) / len(observed) if observed else None,
+        "gpu_utilization_max": max(observed)
+        if observed and len(observed) == len(gpus or [])
+        else None,
         "gpu_observed_count": len(observed),
         "cpu_utilization": _percent(snapshot.get("cpu_utilization")),
         "memory_utilization": _percent(snapshot.get("memory_utilization")),

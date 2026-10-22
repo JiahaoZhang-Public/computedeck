@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { freeGpuIndexes } from './domain';
 import { groupsOf } from './groups';
 import { setLocale, t } from './i18n';
-import { gpuModels, idleInstances, machineOptions, machineSamples } from './plan';
+import { gpuModels, lowUseInstances, machineOptions, machineSamples } from './plan';
 import { PlanPage } from './pages/Plan';
 import { InstanceDetail } from './pages/Details';
 import { UnmeasuredLinks } from './pages/UnmeasuredLinks';
@@ -231,8 +231,8 @@ describe('SSH machine planning', () => {
       gpus: item.gpus!.map((gpu) => ({ ...gpu, in_use: false })),
     });
     expect(machineOptions(data, request).map((option) => option.free)).toEqual([4, 1]);
-    expect(idleInstances(data.instances)).toEqual([]);
-    expect(idleInstances([{ ...item, metrics_scope: undefined }])).toHaveLength(1);
+    expect(lowUseInstances(data.instances)).toEqual([]);
+    expect(lowUseInstances([{ ...item, metrics_scope: undefined }])).toEqual([]);
   });
 });
 

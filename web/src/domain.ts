@@ -1,4 +1,4 @@
-import { locale, t } from './i18n';
+import { formatMessage, locale, t } from './i18n';
 import type {
   ComputeNode,
   Dashboard,
@@ -349,4 +349,18 @@ export function freeGpuIndexes(instance: Instance, model: string) {
   return (instance.gpus ?? [])
     .filter((gpu) => gpu.in_use === false && gpuMatchesModel(gpu, model))
     .flatMap((gpu) => (gpu.index == null ? [] : [gpu.index]));
+}
+
+export function lowUseText(item: Instance, settings = { threshold: 10, window_minutes: 60 }) {
+  const usage = item.low_use;
+  if (!usage || usage.state !== 'low') return '';
+  return formatMessage({
+    code: 'instance_low_use',
+    threshold: settings.threshold,
+    minutes: usage.covered_minutes,
+    samples: usage.samples,
+    origin: usage.origin,
+    currency: item.currency,
+    cost: item.hourly_cost == null ? null : (item.hourly_cost * usage.covered_minutes) / 60,
+  });
 }

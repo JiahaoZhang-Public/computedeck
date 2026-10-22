@@ -13,16 +13,23 @@ from typing import Any
 
 from . import drivers, nodes
 from .drivers.base import job_time, node_health_fields, validate_row
-from .drivers.cloud import instance_lifecycle
+from .drivers.cloud import instance_lifecycle, provider_console_url
 from .errors import SourceError, checked
 from .history import HOLD_SECONDS, group_history, rollup_history
+from .low_use import low_use
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
 from .summary import manual_state as manual_state
 
 SCHEMA_VERSION = 2
-DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "language": "en",
+    "server_name": None,
+    "low_use_threshold": 10,
+    "low_use_window_minutes": 60,
+}
+LOW_USE_SETTINGS = {"low_use_threshold": (1, 50), "low_use_window_minutes": (30, 360)}
 # What an SSH check of a provider-listed instance leaves for the next listing to keep.
 PROBE_RESULT = ("ssh_status", "ssh_error", "last_probe_attempt")
 logger = logging.getLogger("computedeck")
@@ -148,6 +155,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS snapshots (source_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS history (at TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS instance_samples (
+                instance_id TEXT NOT NULL, at TEXT NOT NULL,
+                gpu_util REAL NOT NULL, gpu_util_max REAL, origin TEXT NOT NULL,
+                PRIMARY KEY (instance_id, at)
+            );
             CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,6 +275,11 @@ class Store:
                 if setting is not None:
                     self._skip("meta", key, "unsupported value")
                 continue
+            if name in LOW_USE_SETTINGS:
+                minimum, maximum = LOW_USE_SETTINGS[name]
+                if type(setting) is not int or not minimum <= setting <= maximum:
+                    self._skip("meta", key, "unsupported value")
+                    continue
             result[name] = setting
         return result
 
@@ -271,6 +288,10 @@ class Store:
             for key, value in changes.items():
                 if key not in DEFAULT_SETTINGS:
                     raise ValueError(f"Unknown setting: {key}")
+                if key in LOW_USE_SETTINGS:
+                    minimum, maximum = LOW_USE_SETTINGS[key]
+                    if type(value) is not int or not minimum <= value <= maximum:
+                        raise ValueError(f"Invalid setting: {key}")
                 self.db.execute(
                     "INSERT OR REPLACE INTO meta VALUES (?, ?)",
                     (f"setting:{key}", json.dumps(value)),
@@ -803,10 +824,66 @@ class Store:
             snapshot = {**snapshot, "instances": [*listed, *missing]}
         merged.update(snapshot)
         with self.db:
+            if "instances" in snapshot:
+                for row in snapshot["instances"]:
+                    before = previous.get(row["id"], {})
+                    if any(
+                        row.get(key) != before.get(key)
+                        for key in ("state", "started_at", "host", "port", "username")
+                    ):
+                        self.db.execute(
+                            "DELETE FROM instance_samples WHERE instance_id=?", (row["id"],)
+                        )
+                    if source and source["driver"] in {"vastai", "ssh"} and row["id"] in seen:
+                        self._record_instance_sample(
+                            row,
+                            row,
+                            "source" if source["driver"] == "ssh" else "provider",
+                            row.get("observed_at"),
+                        )
             self.db.execute(
                 "INSERT OR REPLACE INTO snapshots VALUES (?, ?)", (source_id, json.dumps(merged))
             )
         self._repaired("snapshots", source_id)
+
+    def _record_instance_sample(
+        self, instance: dict[str, Any], reading: dict[str, Any], origin: str, at: str | None
+    ) -> None:
+        utilization = reading.get("gpu_utilization")
+        maximum = reading.get("gpu_utilization_max")
+        eligible = (
+            instance_lifecycle(instance.get("state")) == "held" and instance.get("gpu_count") != 0
+        )
+        complete = origin == "provider" or (
+            maximum is not None
+            and reading.get("gpu_count") is not None
+            and reading.get("gpu_observed_count") == reading["gpu_count"]
+            and (instance.get("gpu_count") is None or reading["gpu_count"] >= instance["gpu_count"])
+        )
+        valid_util = (
+            isinstance(utilization, int | float)
+            and not isinstance(utilization, bool)
+            and 0 <= utilization <= 100
+        )
+        valid_max = maximum is None or (
+            isinstance(maximum, int | float)
+            and not isinstance(maximum, bool)
+            and 0 <= maximum <= 100
+        )
+        if not eligible or not complete or not valid_util or not valid_max or not timestamp(at):
+            # An actual check without complete readings breaks the observation window.
+            self.db.execute("DELETE FROM instance_samples WHERE instance_id=?", (instance["id"],))
+            return
+        self.db.execute(
+            "INSERT OR REPLACE INTO instance_samples VALUES (?, ?, ?, ?, ?)",
+            (instance["id"], at, utilization, maximum, origin),
+        )
+
+    def record_instance_sample(
+        self, instance: dict[str, Any], reading: dict[str, Any], at: str
+    ) -> None:
+        with self.db:
+            self._record_instance_sample(instance, reading, "probe", at)
 
     def manual_instances(self) -> list[dict[str, Any]]:
         result = []
@@ -848,7 +925,22 @@ class Store:
                     )
 
     def save_instance(self, instance: dict[str, Any]) -> None:
+        old = next((row for row in self.manual_instances() if row["id"] == instance["id"]), {})
         with self.db:
+            if any(
+                old.get(key) != instance.get(key)
+                for key in (
+                    "host",
+                    "port",
+                    "username",
+                    "identity_file",
+                    "existing_alias",
+                    "monitoring",
+                )
+            ):
+                self.db.execute(
+                    "DELETE FROM instance_samples WHERE instance_id=?", (instance["id"],)
+                )
             self.db.execute(
                 "INSERT OR REPLACE INTO instances VALUES (?, ?)",
                 (instance["id"], json.dumps(instance)),
@@ -929,11 +1021,58 @@ class Store:
         ]
         instances.update({item["id"]: item for item in manual})
         observations["instances"].extend(manual)
+        settings = self.settings()
+        current = datetime.now(UTC)
+        samples: dict[str, list[dict[str, Any]]] = {}
+        for iid, at, util, maximum, origin in self.db.execute(
+            "SELECT instance_id, at, gpu_util, gpu_util_max, origin FROM instance_samples "
+            "WHERE at >= ? ORDER BY at",
+            ((current - timedelta(days=7)).isoformat(),),
+        ):
+            samples.setdefault(iid, []).append(
+                {"at": at, "gpu_util": util, "gpu_util_max": maximum, "origin": origin}
+            )
+        for item in instances.values():
+            source = source_by_id.get(item.get("source_id"), {})
+            item["console_url"] = None
+            if source:
+                try:
+                    template = getattr(drivers.get(source["driver"]), "console_url", None)
+                except SourceError:
+                    template = None
+                item["console_url"] = provider_console_url(
+                    template,
+                    item["id"].removeprefix(source["cluster_id"] + ":"),
+                    item.get("region"),
+                )
+            readings = samples.get(item["id"], [])
+            if (source and not source["enabled"]) or (
+                item.get("manual") and not item.get("monitoring")
+            ):
+                readings = []
+            origin = readings[-1]["origin"] if readings else None
+            interval = (
+                PROBE_INTERVAL.total_seconds() / 60
+                if origin == "probe" and source.get("driver") != "ssh"
+                else source.get("interval_minutes", 10)
+            )
+            item["low_use"] = low_use(
+                item,
+                readings,
+                now=current,
+                interval_minutes=interval,
+                threshold=settings["low_use_threshold"],
+                window_minutes=settings["low_use_window_minutes"],
+            )
         history = self.history(24)
         for node in nodes.values():
             node.update(node_health_fields(node, source_by_id.get(node["source_id"], {})))
         data = {
             "mode": "live",
+            "low_use_settings": {
+                "threshold": settings["low_use_threshold"],
+                "window_minutes": settings["low_use_window_minutes"],
+            },
             **freshness(sources),
             "collecting": [],
             "sources": sources,
@@ -1014,6 +1153,10 @@ class Store:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))
             cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             self.db.execute("DELETE FROM history WHERE at < ?", (cutoff,))
+            self.db.execute(
+                "DELETE FROM instance_samples WHERE at < ?",
+                ((datetime.now(UTC) - timedelta(days=7)).isoformat(),),
+            )
 
     def backup(self, directory: Path, keep: int = 10) -> Path:
         """Write a consistent copy; then remove all but the newest ``keep`` copies."""

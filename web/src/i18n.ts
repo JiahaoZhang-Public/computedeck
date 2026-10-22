@@ -79,6 +79,18 @@ export function hasKey(key: string): key is MessageKey {
   return key in en;
 }
 
+/** Compact low-use duration, rounded down and omitting zero parts. */
+export function lowUseDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remainder = Math.floor(minutes % 60);
+  return [
+    hours ? t('lowUse.duration.hours', { count: hours }) : '',
+    remainder || !hours ? t('lowUse.duration.minutes', { count: remainder }) : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 /** Render a server message (or a legacy plain string) in the current language. */
 export function formatMessage(value: Message | string | null | undefined): string {
   if (!value) return '';
@@ -87,6 +99,23 @@ export function formatMessage(value: Message | string | null | undefined): strin
   const params: Params = {};
   for (const [name, param] of Object.entries(value))
     if (typeof param === 'string' || typeof param === 'number') params[name] = param;
+  if (value.code === 'attention_instance_low_use' || value.code === 'instance_low_use') {
+    params.duration = lowUseDuration(Number(value.minutes));
+    params.origin_note = value.origin === 'provider' ? ` · ${t('lowUse.provider')}` : '';
+    params.cost_note = '';
+    if (typeof value.cost === 'number' && typeof value.currency === 'string') {
+      let cost: string;
+      try {
+        cost = new Intl.NumberFormat(current, {
+          style: 'currency',
+          currency: value.currency,
+        }).format(value.cost);
+      } catch {
+        cost = `${value.cost.toFixed(2)} ${value.currency}`;
+      }
+      params.cost_note = t('lowUse.cost', { cost });
+    }
+  }
   const text = hasKey(key) ? t(key, params) : value.code;
   return value.detail && !text.includes(value.detail) ? `${text}: ${value.detail}` : text;
 }

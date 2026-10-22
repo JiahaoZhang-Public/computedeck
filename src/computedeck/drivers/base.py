@@ -150,6 +150,7 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
         "cpu_count",
         "cpu_allocated",
         "gpu_utilization",
+        "gpu_utilization_max",
         "cpu_utilization",
         "memory_utilization",
         "hourly_cost",

@@ -2,6 +2,37 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'lowUse.busy': '最近一次 GPU 读数达到或超过 {threshold}%。',
+  'lowUse.title': 'GPU 低利用率',
+  'lowUse.duration.hours': '{count} 小时',
+  'lowUse.duration.minutes': '{count} 分钟',
+  'lowUse.short': '低利用率持续 {duration}',
+  'lowUse.filter': '低利用率 ≥ {minutes} 分钟',
+  'lowUse.unknownFilter': '读数不足',
+  'lowUse.unknown': '低利用率：未知',
+  'lowUse.coverage': '连续读数还不足。至少需要 3 次读数覆盖 {minutes} 分钟，且中间没有较长间隔。',
+  'lowUse.stale': '读数已中断或过期。在新的观测窗口完成前，低利用率未知。',
+  'lowUse.not_running': '尚未确认实例正在运行。',
+  'lowUse.no_reading': '没有完整的 GPU 利用率读数。',
+  'lowUse.providerMissing':
+    '此供应商 API 不提供 GPU 利用率。可检查硬件获取读数；单次读数无法说明持续低利用率。',
+  'lowUse.monitor': '可检查硬件，或在编辑中启用监控以定期收集读数。',
+  'lowUse.provider': '供应商读数',
+  'lowUse.cost': ' · 按当前标价估算 ≈ {cost} · 估算值，非账单',
+  'lowUse.console': '打开供应商控制台',
+  'lowUse.pointer': '{count} 个付费实例 GPU 利用率较低，可考虑在那里运行',
+  'lowUse.pointer.one': '{count} 个付费实例 GPU 利用率较低，可考虑在那里运行',
+  'lowUse.settingsHint':
+    '提示仅使用实测读数，至少 3 次，间隔不超过采集周期的两倍。低利用率可能是有意的，可确认或稍后提醒。不会新增自动检查。',
+  'lowUse.threshold': 'GPU 利用率阈值（%）',
+  'lowUse.window': '观测窗口（分钟）',
+  'lowUse.saved': '已保存低利用率设置。',
+  'lowUse.saveError': '无法保存低利用率设置。',
+  'msg.instance_low_use':
+    '在 {duration} 内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
+  'msg.attention_instance_low_use':
+    '{name}：在 {duration} 内的全部 {samples} 次读数中，GPU 利用率均低于 {threshold}%{origin_note}{cost_note}',
+
   'msg.attention_source_failed': '{name}：采集失败',
   'msg.attention_source_stale': '{name}：数据过期',
   'msg.attention_cluster_unavailable': '{name}：集群不可用',
@@ -901,9 +932,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.emptyDisabled': '启用一个集群登录身份后即可比较。',
   'plan.note':
     '这是根据上次采集的估计。排队数量不含被挂起、等待依赖、指定开始时间或数组任务并发限制的作业。预留、优先级、分区和公平共享仍可能让作业等待，不同 QoS 的上限也不能相加。',
-  'plan.idle': '几乎空闲、仍在运行的云 GPU',
-  'plan.idleUtil': 'GPU 利用率 {value}%',
-  'plan.idleNote': '这些实例已经在计费。利用率是整台机器的最近一次快照。',
   'plan.open': '详情',
 
   'msg.cluster_connection_required': '集群登录身份需要 SSH 别名和用户名',

@@ -3,7 +3,7 @@
 import asyncio
 from collections import Counter
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -462,7 +462,21 @@ def test_a_probe_update_the_listing_could_not_read_is_not_saved(store: Store) ->
     pod = {"id": "runpod:a", "source_id": "s", "state": "running", "host": "192.0.2.1"}
     store.save_snapshot("s", {"instances": [pod]})
     store.update_cloud_metrics("runpod:a", {"host": "192.0.2.1"}, {"gpu_count": -1})
-    assert store.dashboard()["instances"] == [{**pod, "seen_running_since": None}]
+    assert store.dashboard()["instances"] == [
+        {
+            **pod,
+            "seen_running_since": None,
+            "console_url": None,
+            "low_use": {
+                "state": "unknown",
+                "since": None,
+                "covered_minutes": 0,
+                "samples": 0,
+                "origin": None,
+                "reason": "no_reading",
+            },
+        }
+    ]
     assert store.unreadable_rows() == {}
 
 
@@ -1088,3 +1102,186 @@ async def test_machine_endpoint_changed_during_retry_is_not_checked_again(
     assert len(calls) == 1
     assert store.manual_instances()[0]["ssh_status"] == "unverified"
     assert not collector.probes
+
+
+@pytest.mark.parametrize("manual", [False, True])
+async def test_actual_probes_record_maximum_without_changing_provider_inventory(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, manual: bool
+) -> None:
+    import json
+
+    from computedeck.drivers.ssh_host import MARKER
+    from computedeck.hardware import parse_probe
+
+    instance = (
+        manual_instance(store, gpu_count=2, monitoring=True)
+        if manual
+        else {
+            "id": "runpod:pod1",
+            "source_id": "runpod-runpod",
+            "state": "reported_running",
+            "host": "192.0.2.5",
+            "port": 22005,
+            "username": "root",
+            "gpu_count": 2,
+        }
+    )
+    if not manual:
+        store.save_snapshot("runpod-runpod", {"instances": [instance]})
+
+    async def probe(row: dict[str, Any]) -> dict[str, Any]:
+        return parse_probe(
+            MARKER
+            + json.dumps(
+                {
+                    "gpu_tool": "nvidia-smi",
+                    "gpu": "0, GPU-aaaa, A100, 0, 0, 81920\n1, GPU-bbbb, A100, 18, 2000, 81920\n",
+                    "apps": "",
+                    "owners": "",
+                    "user": "alice",
+                }
+            )
+        )
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    await collector.probe(instance["id"])
+    sample = store.db.execute(
+        "SELECT gpu_util, gpu_util_max, origin FROM instance_samples"
+    ).fetchone()
+    assert sample == (9, 18, "probe")
+    row = store.dashboard()["instances"][0]
+    assert row["gpu_utilization_max"] == 18
+    assert row["low_use"]["state"] == "busy"
+    if not manual:
+        assert row["state"] == "reported_running" and row["gpu_count"] == 2
+        assert "gpus" not in row and "gpus_observed_at" not in row
+
+    async def failed(row: dict[str, Any]) -> dict[str, Any]:
+        raise SourceError("ssh_authentication")
+
+    monkeypatch.setattr(collector_module, "probe_instance", failed)
+    with pytest.raises(SourceError):
+        await collector.probe(instance["id"])
+    assert store.db.execute("SELECT count(*) FROM instance_samples").fetchone()[0] == 1
+    assert store.dashboard()["instances"][0]["low_use"]["state"] == (
+        "unknown" if manual else "busy"
+    )
+
+
+def test_low_use_ack_survives_retention_but_clears_when_the_condition_resolves(
+    collector: Collector, store: Store
+) -> None:
+    instance = manual_instance(store, gpu_count=2, monitoring=True)
+    current = datetime.now(UTC)
+    instance.update(
+        ssh_status="reachable",
+        observed_at=current.isoformat(),
+        gpu_utilization=3,
+        gpu_utilization_max=4,
+        gpu_observed_count=2,
+    )
+    store.save_instance(instance)
+    held = {**instance, "state": "running"}
+    for age in range(70, -1, -10):
+        store.record_instance_sample(held, instance, (current - timedelta(minutes=age)).isoformat())
+    [hint] = collector.attention_items()
+    assert hint["kind"] == "instance_low_use"
+    store.set_attention_state(
+        hint["key"],
+        {
+            "fingerprint": hint["fingerprint"],
+            "acknowledged_at": now(),
+            "snooze_until": None,
+        },
+    )
+    # Trimming the oldest sample changes since but leaves a fully covered low window.
+    with store.db:
+        store.db.execute(
+            "DELETE FROM instance_samples WHERE at=?",
+            ((current - timedelta(minutes=70)).isoformat(),),
+        )
+    collector.clear_resolved_attention()
+    assert collector.attention_items()[0]["muted"]["state"] == "acknowledged"
+    store.record_instance_sample(held, {**instance, "gpu_utilization_max": 80}, current.isoformat())
+    collector.clear_resolved_attention()
+    assert store.attention_state() == {}
+    assert collector.attention_items() == []
+    store.record_instance_sample(held, instance, current.isoformat())
+    assert collector.attention_items()[0]["muted"] is None
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_ssh_source_checks_preserve_the_window_and_acknowledgement(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    fails: bool,
+) -> None:
+    source = add_source(driver="ssh", interval_minutes=30)
+    current = datetime.now(UTC)
+    row = {
+        "id": "lab:server",
+        "source_id": source["id"],
+        "name": "Lab server",
+        "state": "running",
+        "host": "lab-server",
+        "existing_alias": True,
+        "gpu_count": 2,
+        "gpu_observed_count": 2,
+        "gpu_utilization": 1,
+        "gpu_utilization_max": 2,
+        "ssh_status": "reachable",
+    }
+    for age in [70, 40, 10]:
+        row["observed_at"] = (current - timedelta(minutes=age)).isoformat()
+        store.save_snapshot(source["id"], {"instances": [dict(row)]})
+    for age in [55, 25]:
+        store.record_instance_sample(row, row, (current - timedelta(minutes=age)).isoformat())
+    before = store.dashboard()["instances"][0]["low_use"]
+    assert (before["state"], before["samples"], before["origin"]) == ("low", 5, "source")
+    [hint] = collector.attention_items()
+    store.set_attention_state(
+        hint["key"],
+        {
+            "fingerprint": hint["fingerprint"],
+            "acknowledged_at": now(),
+            "snooze_until": None,
+        },
+    )
+    samples_before = list(store.db.execute("SELECT * FROM instance_samples ORDER BY at"))
+
+    async def probe(instance: dict[str, Any]) -> dict[str, Any]:
+        if fails:
+            raise SourceError("ssh_authentication")
+        return {**row, "observed_at": now()}
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    if fails:
+        with pytest.raises(SourceError):
+            await collector.probe(row["id"])
+        assert (
+            list(store.db.execute("SELECT * FROM instance_samples ORDER BY at")) == samples_before
+        )
+    else:
+        await collector.probe(row["id"])
+    usage = store.dashboard()["instances"][0]["low_use"]
+    assert usage["state"] == "low"
+    assert usage["since"] == before["since"]
+    assert usage["samples"] == (5 if fails else 6)
+    assert usage["origin"] == ("source" if fails else "probe")
+    low_hint = next(i for i in collector.attention_items() if i["kind"] == "instance_low_use")
+    assert low_hint["fingerprint"] == hint["fingerprint"]
+    assert low_hint["muted"]["state"] == "acknowledged"
+
+    store.save_snapshot(source["id"], {"instances": [{**row, "observed_at": now()}]})
+    collector.clear_resolved_attention()
+    usage = store.dashboard()["instances"][0]["low_use"]
+    assert (usage["state"], usage["samples"], usage["origin"]) == (
+        "low",
+        6 if fails else 7,
+        "source",
+    )
+    assert usage["since"] == before["since"]
+    low_hint = next(i for i in collector.attention_items() if i["kind"] == "instance_low_use")
+    assert low_hint["muted"]["state"] == "acknowledged"

@@ -122,3 +122,18 @@ ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2;
 Pasting it opens an SSH shell with the selected GPU settings; run your command in that shell.
 Copying runs nothing and reserves no GPU. Hand-added machines
 remain outside this panel because their probes do not retain per-GPU lists.
+
+## Sustained low GPU use
+
+Collections and hardware probes return `gpu_utilization_max` only when utilization is
+readable on every GPU. Low-use hints require at least three complete readings covering
+the configured window, with both the mean and maximum below the threshold and no gap
+longer than twice the source's collection interval, including when a manual check supplies
+the latest reading. Collections and checks share one measurement family, so interleaving
+them preserves the window, sample count and acknowledgement. The displayed origin remains
+that of the latest reading. Failed checks preserve existing samples until gap/stale rules
+end coverage; an actual reading with an unreadable GPU still breaks the window. Provider
+readings are a separate family: a probe of a Vast.ai instance restarts its window.
+SSH-source hints contain duration only because the source has no listed hourly price.
+Hand-added monitored machines use the same measurement rule and may have a typed price.
+This does not change the separate process/memory rule for whether a GPU is free.

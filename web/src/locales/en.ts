@@ -1,5 +1,38 @@
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'lowUse.busy': 'The latest GPU reading is at or above {threshold}%.',
+  'lowUse.title': 'Low GPU use',
+  'lowUse.duration.hours': '{count} h',
+  'lowUse.duration.minutes': '{count} m',
+  'lowUse.short': 'Low use {duration}',
+  'lowUse.filter': 'Low use ≥ {minutes} min',
+  'lowUse.unknownFilter': 'Not enough readings',
+  'lowUse.unknown': 'Low use: unknown',
+  'lowUse.coverage':
+    'Not enough consecutive readings yet. At least 3 must cover {minutes} minutes without large gaps.',
+  'lowUse.stale':
+    'Readings stopped or are too old. Low use is unknown until a new observation window is covered.',
+  'lowUse.not_running': 'The instance is not confirmed running.',
+  'lowUse.no_reading': 'No complete GPU utilization readings are available.',
+  'lowUse.providerMissing':
+    'This provider API reports no GPU utilization. Check hardware to take a reading; one reading cannot establish sustained low use.',
+  'lowUse.monitor': 'Check hardware or enable monitoring in Edit to collect readings regularly.',
+  'lowUse.provider': 'provider reading',
+  'lowUse.cost': ' · ≈ {cost} at the current listed price · estimate, not a bill',
+  'lowUse.console': 'Open provider console',
+  'lowUse.pointer': '{count} paid instances with low GPU use — consider running there',
+  'lowUse.pointer.one': '{count} paid instance with low GPU use — consider running there',
+  'lowUse.settingsHint':
+    'Hints use measured readings only, with at least 3 readings and no gap longer than twice the collection interval. Low use may be intentional; acknowledge or snooze the hint. No automatic checks are added.',
+  'lowUse.threshold': 'GPU threshold (%)',
+  'lowUse.window': 'Observation window (minutes)',
+  'lowUse.saved': 'Low-use settings saved.',
+  'lowUse.saveError': 'Could not save low-use settings.',
+  'msg.instance_low_use':
+    'GPU under {threshold}% at all {samples} readings over {duration}{origin_note}{cost_note}',
+  'msg.attention_instance_low_use':
+    '{name}: GPU under {threshold}% at all {samples} readings over {duration}{origin_note}{cost_note}',
+
   'msg.attention_source_failed': '{name}: collection failed',
   'msg.attention_source_stale': '{name}: data is stale',
   'msg.attention_cluster_unavailable': '{name}: cluster unavailable',
@@ -963,10 +996,6 @@ const en = {
   'plan.emptyDisabled': 'Enable a cluster login to compare where a job could start.',
   'plan.note':
     'An estimate from the last collection. The queue excludes held jobs and jobs waiting for dependencies, a begin time or an array task limit. Reservations, priorities, partitions and fair-share can still delay a job, and limits of different QoS do not add up.',
-  'plan.idle': 'Running cloud GPUs that are almost idle',
-  'plan.idleUtil': '{value}% GPU utilization',
-  'plan.idleNote':
-    'You already pay for these. Utilization is the latest snapshot of the whole machine.',
   'plan.open': 'Details',
 
   // Server messages (msg.<code>)

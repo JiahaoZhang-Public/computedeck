@@ -1769,7 +1769,7 @@ it.each(['en', 'zh-CN'] as const)(
       );
       expect(tile?.querySelector('.stat-value')?.textContent).toBe(String(count));
     };
-    assertCounts(4);
+    assertCounts(5);
     expect(container.querySelector<HTMLDetailsElement>('.attention-muted')!.open).toBe(false);
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
       t('attention.acknowledged', { count: 2 }),
@@ -1788,7 +1788,7 @@ it.each(['en', 'zh-CN'] as const)(
       { action: 'acknowledge', until: undefined, fingerprint: data.attention![0].fingerprint },
       'PUT',
     );
-    assertCounts(3);
+    assertCounts(4);
     expect(document.activeElement?.id).toBe('attention');
     expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
       t('attention.acknowledgedToast'),
@@ -1798,7 +1798,7 @@ it.each(['en', 'zh-CN'] as const)(
     );
     await click('.attention-muted summary');
     await click('.attention-muted .attention-actions button');
-    assertCounts(4);
+    assertCounts(5);
     expect(document.activeElement?.id).toBe('attention');
     expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
       t('attention.unmutedToast'),
@@ -1817,7 +1817,7 @@ it.each(['en', 'zh-CN'] as const)(
       expect(request.mock.calls.filter(([path]) => path.startsWith('/attention/'))).toHaveLength(
         writes,
       );
-      assertCounts(until === '1h' ? 4 : 3);
+      assertCounts(until === '1h' ? 5 : 4);
       await click(selector);
       expect(document.activeElement?.id).toBe('attention');
       expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
@@ -1832,6 +1832,8 @@ it.each(['en', 'zh-CN'] as const)(
         ),
       ).toBe(true);
     }
+    assertCounts(3);
+    await click('#attention > ul .attention-actions button');
     assertCounts(2);
     await click('#attention > ul .attention-actions button');
     assertCounts(1);
@@ -1888,7 +1890,7 @@ it('keeps a failed acknowledgement visible and reports the error', async () => {
   });
   await render(<App />);
   await click('#attention > ul .attention-actions button');
-  expect(container.querySelector('#attention .count')?.textContent).toBe('4');
+  expect(container.querySelector('#attention .count')?.textContent).toBe('5');
   expect(container.textContent).toContain('Save failed');
   expect(
     container.querySelector<HTMLButtonElement>('#attention > ul .attention-actions button')
@@ -1934,7 +1936,7 @@ it.each(['en', 'zh-CN'] as const)(
       expect(container.textContent).toContain(
         action === 'clear' ? 'Save failed' : t('msg.attention_changed'),
       );
-      expect(container.querySelector('#attention .count')?.textContent).toBe('4');
+      expect(container.querySelector('#attention .count')?.textContent).toBe('5');
     }
   },
 );

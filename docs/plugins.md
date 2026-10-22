@@ -978,3 +978,43 @@ or 1800 seconds, whichever comes first, independent of the requested range. The
 preceding-observation lookback uses the same 1800-second cap. Hourly
 buckets are UTC; daily displays use local dates and prorate boundary buckets.
 These are estimates over observed time, not billing records.
+
+### Low GPU use additions (0.7)
+
+API and schema versions stay unchanged. `instance_samples` is created with
+`CREATE TABLE IF NOT EXISTS` and retains seven days of actual utilization readings:
+`instance_id`, `at`, `gpu_util`, nullable `gpu_util_max`, and `origin`
+(`provider`, `source`, or `probe`). Polls and fleet history never create samples.
+
+Dashboard instances gain optional `gpu_utilization_max` and a derived `low_use` object:
+
+```json
+{"state":"low","since":"2026-01-01T00:00:00+00:00","covered_minutes":60,"samples":7,"origin":"probe","reason":null}
+```
+
+`state` is `low`, `busy` (latest reading at/above threshold), or `unknown`.
+`since` and `origin` may be null. Unknown `reason` is `no_reading`, `not_running`,
+`stale`, or `coverage`. Low requires at least three complete, consecutive readings
+covering the configured window, below the threshold at both mean and available maximum.
+`source` and `probe` share one SSH measurement family for continuity and acknowledgement;
+`low_use.origin` still reports the latest reading's actual origin. SSH-source instances use
+the source interval for all their readings. Switching between the SSH and `provider`
+families starts a new window (including a probe of a Vast.ai instance). Lifecycle, endpoint
+or known provider-run changes also restart it. Failed probes preserve samples and rely on
+gap/stale rules; incomplete actual readings still break coverage. The dashboard also returns
+`low_use_settings: {threshold, window_minutes}`. Settings adds
+`low_use_threshold` (integer 1–50, default 10) and `low_use_window_minutes`
+(integer 30–360, default 60). Incomplete readings remain unknown.
+
+`instance_low_use` is a warn-level, acknowledgeable attention kind with an instance
+subject and action. Its message code is `attention_instance_low_use`; parameters include
+threshold, window, sample count, covered minutes, origin and optional estimated cost/currency.
+It is a current condition, not a new event or plugin notification. Growing duration and
+cost preserve acknowledgement of the same streak. A new streak or changed detection
+settings reopens it.
+
+Cloud drivers can optionally declare `console_url: ClassVar[str | None] = None`.
+Only HTTPS templates with `{id}` and `{region}` placeholders are supported; both values
+are URL-encoded and the id is the provider id without the source's cluster prefix.
+The dashboard exposes the expanded `instances[].console_url`, or null. Existing drivers
+need no change. The drawer only opens a link; it sends no provider mutation.

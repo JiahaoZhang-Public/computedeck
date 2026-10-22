@@ -44,7 +44,12 @@ def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None
     path = tmp_path / "data" / "computedeck.sqlite"
     store = Store(path)
     assert store.sources() == []
-    assert store.settings() == {"language": "en", "server_name": None}
+    assert store.settings() == {
+        "language": "en",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     data = store.dashboard()
     assert data["mode"] == "live"
     assert data["sources"] == data["jobs"] == data["nodes"] == data["instances"] == []
@@ -60,13 +65,23 @@ def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None
 
 def test_settings_persist_and_reject_unknown_keys(tmp_path: Path) -> None:
     store = Store(tmp_path / "computedeck.sqlite")
-    assert store.save_settings({"language": "zh-CN"}) == {"language": "zh-CN", "server_name": None}
+    assert store.save_settings({"language": "zh-CN"}) == {
+        "language": "zh-CN",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     store.save_settings({"server_name": "Lab server"})
     with pytest.raises(ValueError, match="Unknown setting"):
         store.save_settings({"theme": "dark"})
     store.db.close()
     reopened = Store(tmp_path / "computedeck.sqlite")
-    assert reopened.settings() == {"language": "zh-CN", "server_name": "Lab server"}
+    assert reopened.settings() == {
+        "language": "zh-CN",
+        "server_name": "Lab server",
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     reopened.db.close()
 
 
@@ -508,7 +523,20 @@ def test_reopening_bad_snapshot_preserves_good_rows(tmp_path: Path) -> None:
         )
     store.db.close()
     reopened = Store(path)
-    assert reopened.dashboard()["instances"] == [good]
+    assert reopened.dashboard()["instances"] == [
+        {
+            **good,
+            "console_url": None,
+            "low_use": {
+                "state": "unknown",
+                "since": None,
+                "covered_minutes": 0,
+                "samples": 0,
+                "origin": None,
+                "reason": "no_reading",
+            },
+        }
+    ]
     reopened.record_history()
     reopened.save_snapshot("source", {"instances": [good]})
     assert reopened.snapshot("source") == {"instances": [{**good, "seen_running_since": None}]}
@@ -584,7 +612,12 @@ def test_an_unreadable_row_is_skipped_logged_and_counted(
         assert [source["id"] for source in dashboard["sources"]] == [good["id"]]
         assert [row["id"] for row in dashboard["instances"]] == ["manual:lab-box"]
         assert [node["id"] for node in store.nodes()] == ["gateway"]
-        assert store.settings() == {"language": "en", "server_name": None}
+        assert store.settings() == {
+            "language": "en",
+            "server_name": None,
+            "low_use_threshold": 10,
+            "low_use_window_minutes": 60,
+        }
         assert store.plugin_settings("chat") == {}
         assert [event["key"] for event in store.recent_events()] == ["ok"]
         store.history(24)

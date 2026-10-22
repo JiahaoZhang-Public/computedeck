@@ -258,3 +258,11 @@ async def test_probe_classifies_connection_errors(monkeypatch, error, code) -> N
         await hardware.probe_instance({"host": "192.0.2.10", "port": 22, "username": "root"})
     assert caught.value.code == code
     assert caught.value.detail == (str(error) or None)
+
+
+def test_gpu_maximum_is_known_only_with_all_gpu_utilizations() -> None:
+    partial = hardware.parse_probe(probe_output())
+    assert partial["gpu_utilization_max"] is None
+    result = hardware.parse_probe(probe_output(gpu=GPUS.replace("[N/A]", "0")))
+    assert result["gpu_utilization"] == 40
+    assert result["gpu_utilization_max"] == 80

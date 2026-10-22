@@ -623,17 +623,44 @@ def test_probe_failure_is_reported_and_recorded(
 
 
 def test_settings_api(client: TestClient) -> None:
-    assert client.get("/api/settings").json() == {"language": "en", "server_name": None}
+    assert client.get("/api/settings").json() == {
+        "language": "en",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     response = client.put(
-        "/api/settings", json={"language": "zh-CN", "server_name": "Lab server"}, headers=HEADERS
+        "/api/settings",
+        json={
+            "language": "zh-CN",
+            "server_name": "Lab server",
+            "low_use_threshold": 10,
+            "low_use_window_minutes": 60,
+        },
+        headers=HEADERS,
     )
     assert response.status_code == 200
-    assert response.json() == {"language": "zh-CN", "server_name": "Lab server"}
+    assert response.json() == {
+        "language": "zh-CN",
+        "server_name": "Lab server",
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     partial = client.put("/api/settings", json={"server_name": "GPU box"}, headers=HEADERS)
-    assert partial.json() == {"language": "zh-CN", "server_name": "GPU box"}
+    assert partial.json() == {
+        "language": "zh-CN",
+        "server_name": "GPU box",
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     for invalid in ({"language": "xx"}, {"theme": "dark"}, {"server_name": "x" * 81}):
         assert client.put("/api/settings", json=invalid, headers=HEADERS).status_code == 422
-    assert client.get("/api/settings").json() == {"language": "zh-CN", "server_name": "GPU box"}
+    assert client.get("/api/settings").json() == {
+        "language": "zh-CN",
+        "server_name": "GPU box",
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     assert client.get("/api/health").json()["server_name"] == "GPU box"
 
 
@@ -1091,6 +1118,7 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "instance_low_use",
         "notification_failed",
     ]
     assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
@@ -1938,3 +1966,27 @@ def test_rollup_api_is_opt_in_and_demo_exercises_missing_days(client: TestClient
     assert all("by_group" not in p for p in result["points"])
     assert any(not b["observed_seconds"] for b in result["rollups"]["buckets"])
     assert any(b["observed_seconds"] for b in result["rollups"]["buckets"])
+
+
+def test_low_use_settings_api(client: TestClient) -> None:
+    response = client.put(
+        "/api/settings",
+        json={"low_use_threshold": 5, "low_use_window_minutes": 120},
+        headers=HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["low_use_threshold"] == 5
+    assert client.get("/api/dashboard").json()["low_use_settings"] == {
+        "threshold": 5,
+        "window_minutes": 120,
+    }
+    for values in (
+        {"low_use_threshold": 0},
+        {"low_use_threshold": 51},
+        {"low_use_threshold": True},
+        {"low_use_window_minutes": 29},
+        {"low_use_window_minutes": 361},
+        {"low_use_window_minutes": None},
+    ):
+        assert client.put("/api/settings", json=values, headers=HEADERS).status_code == 422
+    assert client.get("/api/settings").json()["low_use_window_minutes"] == 120

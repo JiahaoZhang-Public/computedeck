@@ -2,6 +2,8 @@
 
 ## 0.7.0 (unreleased)
 
+- Detect sustained low GPU use from actual readings with a configurable threshold and window, a three-reading minimum, per-GPU maxima and bounded gaps. Show acknowledgeable hints, covered-duration cost estimates only when priced, Cloud filters and a paid-instance pointer in Where to run. Explain unknown coverage and offer provider console links without stopping anything or adding automatic checks.
+
 - Make Usage & cost the home of usage trends, with ranked current GPU use and hourly spend, separate currencies and labelled daily projections. Add observed daily GPU-hours and spend, today and seven-day estimates, 24-hour / seven-day / 30-day URL ranges, labelled spans and coverage for partial days, lower bounds for uncertain totals, labels for removed groups and explicit not-recorded history. Failed GPU measurements remain unknown, and paused sources leave missing time. Example usage stays consistent across ranges. Integrate raw observations with bounded gaps; keep group breakdowns out of dashboard polls and retain history for 30 days.
 
 - Show running-since and cost-so-far estimates on cloud rows and machine drawers, with provider starts distinguished from ComputeDeck observation windows. Freeze old estimates at the last successful collection. Show current whole-instance hourly totals per currency, naming missing prices and collection gaps; partial totals read “≥”. Leave GPUhub prices unknown for multi-GPU containers or unknown GPU counts because the API reference does not specify whether its $/hr base price is per GPU or per container.

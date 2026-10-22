@@ -1,6 +1,7 @@
 import { Copy, Plus } from 'lucide-react';
+import { useRouteParam } from '../useRouteParam';
 import { findGroup, instanceGroupKey } from '../groups';
-import { t } from '../i18n';
+import { lowUseDuration, t } from '../i18n';
 import {
   costThisRun,
   money,
@@ -11,7 +12,7 @@ import {
   sourceHasData,
 } from '../domain';
 import { statusLabel } from '../labels';
-import { Empty, GroupMark, Meter, Panel, Status } from '../ui';
+import { Chips, Empty, GroupMark, Meter, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
 import { GroupFilter, SearchBox } from './shared';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
@@ -20,11 +21,20 @@ import { matches, where } from './util';
 export function CloudPage({ ctx }: { ctx: Ctx }) {
   const { data, group, query, remote, groups } = ctx;
   const clouds = groups.filter((item) => item.kind === 'cloud');
-  const instances = data.instances.filter(
+  const [use, setUse] = useRouteParam('use', 'all');
+  const scoped = data.instances.filter(
     (item) =>
       (group === 'all' || instanceGroupKey(item, data.sources) === group) &&
       matches(query, item.name, item.gpu_type, item.ssh_alias, item.host, item.platform),
   );
+  const low = scoped.filter((item) => item.low_use?.state === 'low');
+  const unknown = scoped.filter(
+    (item) =>
+      item.low_use?.state === 'unknown' &&
+      item.low_use.reason !== 'not_running' &&
+      item.gpu_count !== 0,
+  );
+  const instances = use === 'low' ? low : use === 'unknown' ? unknown : scoped;
   const spend = (group === 'all' ? data.summary : data.summary.groups[group])?.spend;
   const hasApiSource = data.sources.some((source) => source.kind === 'cloud');
   return (
@@ -41,6 +51,22 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
         </div>
       </div>
       <Panel title={t('cloud.instances')} count={instances.length}>
+        <div className="low-use-filters">
+          <Chips
+            value={use}
+            onChange={setUse}
+            label={t('lowUse.title')}
+            options={[
+              { value: 'all', label: t('filter.all'), count: scoped.length },
+              {
+                value: 'low',
+                label: t('lowUse.filter', { minutes: data.low_use_settings?.window_minutes ?? 60 }),
+                count: low.length,
+              },
+              { value: 'unknown', label: t('lowUse.unknownFilter'), count: unknown.length },
+            ]}
+          />
+        </div>
         {spend?.applies && (
           <div className="panel-note">
             <strong>{t('cost.now')}</strong>{' '}
@@ -138,6 +164,16 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           )}
                       </td>
                       <td data-label={t('cloud.col.utilization')}>
+                        {item.low_use?.state === 'low' && (
+                          <span className="sub tag amber">
+                            {t('lowUse.short', {
+                              duration: lowUseDuration(item.low_use.covered_minutes),
+                            })}
+                          </span>
+                        )}
+                        {item.low_use?.origin === 'provider' && (
+                          <span className="sub">{t('lowUse.provider')}</span>
+                        )}
                         <span className="util-pair">
                           <small>GPU</small>
                           <Meter value={item.gpu_utilization} />
@@ -203,10 +239,10 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
           </div>
         ) : (
           <Empty
-            title={query ? t('cloud.empty.query') : t('cloud.empty')}
-            text={query ? undefined : t('cloud.emptyHint')}
+            title={query || use !== 'all' ? t('cloud.empty.query') : t('cloud.empty')}
+            text={query || use !== 'all' ? undefined : t('cloud.emptyHint')}
             action={
-              query || ctx.demo ? undefined : (
+              query || use !== 'all' || ctx.demo ? undefined : (
                 <button className="button primary" onClick={ctx.addInstance}>
                   <Plus size={14} /> {t('cloud.add')}
                 </button>

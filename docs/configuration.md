@@ -197,3 +197,26 @@ notification delivery. See [Needs attention](metrics.md#needs-attention).
 
 确认和暂缓保存在服务端，所有查看者共享。“直到明天”在服务主机时区的次日零点到期。
 总览的“标为已读”独立保存在当前浏览器，不会确认故障或影响通知发送。
+
+## Low GPU use hints
+
+Settings → Low GPU use controls two service-wide settings, shared by viewers:
+
+| Setting | Default | Allowed values |
+| --- | --- | --- |
+| `low_use_threshold` | 10 (%) | Integer 1–50 |
+| `low_use_window_minutes` | 60 (minutes) | Integer 30–360 |
+
+`GET /api/settings` returns them; `PUT /api/settings` accepts either independently.
+Configuration export and import preserve both settings. Changes recompute hints from
+recorded readings. They do not enable any new collection or SSH checks. At least three
+consecutive measurements must cover the chosen window, with no gap exceeding twice the
+collection interval. A deliberately quiet inference
+server can be acknowledged or snoozed in Needs attention. Readings are retained for
+seven days. See [sustained low GPU use](metrics.md#sustained-low-gpu-use) for coverage.
+
+中文：“设置 → GPU 低利用率”提供服务端共享设置：利用率阈值 `low_use_threshold` 默认 10%，
+范围为整数 1–50；窗口 `low_use_window_minutes` 默认 60 分钟，范围为整数 30–360。
+更改后按已有读数重新计算，不会开启新的采集或 SSH 检查。至少需要 3 次连续测量覆盖窗口，
+相邻间隔不得超过采集周期的两倍。对于有意保持低负载的推理服务，可在“待处理”中确认或暂缓。
+读数保留 7 天。
