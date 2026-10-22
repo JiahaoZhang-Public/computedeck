@@ -513,3 +513,10 @@ def test_demo_shows_on_demand_and_partitionless_nodes():
     assert summary["on_demand"] == 4
     assert summary["unavailable"] == 8
     assert summary["usable"] == 32
+
+
+def test_demo_planner_includes_an_unknown_runtime_limit() -> None:
+    source = next(row for row in dashboard()["sources"] if row["id"] == "example:cluster-a-bob")
+    debug = next(qos for qos in source["qos"] if qos["name"] == "debug")
+    assert "MaxWallPJ" not in debug["limits"]
+    assert debug["access"] == "verified"

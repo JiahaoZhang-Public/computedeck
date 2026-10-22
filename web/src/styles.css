@@ -1882,6 +1882,36 @@ form > .form-error {
   padding: 14px 18px;
   overflow-wrap: anywhere;
 }
+.plan-comparison {
+  flex-basis: 100%;
+  margin: 0;
+}
+.plan-explanation {
+  margin-top: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.plan-explanation summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.plan-factors {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.plan-factors > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.plan-factors dt {
+  font-weight: 600;
+}
+.plan-factors dd {
+  margin: 4px 0 0;
+}
 .plan-best strong {
   flex-basis: 100%;
 }

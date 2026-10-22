@@ -5,8 +5,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { groupsOf } from './groups';
+import { dateTime } from './domain';
 import { setLocale, t } from './i18n';
-import { planOptions } from './plan';
+import { comparePlans, planOptions } from './plan';
+import { planComparison, planFactors } from './planExplanation';
 import { PlanPage } from './pages/Plan';
 import type { Ctx } from './pages/shared';
 import type { Dashboard, Job, QosLimit, Source } from './types';
@@ -222,7 +224,7 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
         })),
       }),
     );
-    expect(root.querySelector('details')).toBeNull();
+    expect(root.querySelector('details.panel')).toBeNull();
     expect(root.querySelectorAll('.plan-table tbody tr')).toHaveLength(2);
     const note = t('plan.accessNote', { source: 'Cluster A · alice' });
     expect(
@@ -347,8 +349,8 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
         qos: [{ ...source.qos[0], name: 'denied', access: 'not_associated' }, source.qos[0]],
       }),
     );
-    expect(root.querySelector('details')!.textContent).toContain('denied');
-    expect(root.querySelector('details')!.hasAttribute('open')).toBe(false);
+    expect(root.querySelector('details.panel')!.textContent).toContain('denied');
+    expect(root.querySelector('details.panel')!.hasAttribute('open')).toBe(false);
     expect(root.querySelector('.plan-best')!.textContent).toContain('normal');
     expect(root.querySelector('.plan-best')!.textContent).not.toContain('denied');
   });
@@ -403,3 +405,163 @@ it.each(['en', 'zh-CN'] as const)(
     expect(best.textContent).toContain(t('plan.best.free', { count: '≥ 3' }));
   },
 );
+
+describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale) => {
+  it('offers all seven factors on every option, including denied options, with source and age', () => {
+    setLocale(locale);
+    const login = {
+      ...source,
+      qos: [
+        ...source.qos,
+        { ...source.qos[0], name: 'restricted', access: 'not_associated' as const },
+      ],
+    };
+    const ctx = planContext(login);
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const options = planOptions(ctx.data, { gpus: 1, gpuType: '', hours: null });
+    const details = root.querySelectorAll<HTMLDetailsElement>('details.plan-explanation');
+    expect(details).toHaveLength(options.length);
+    for (const panel of details) {
+      expect(panel.open).toBe(false);
+      expect(panel.querySelector('summary')!.textContent).toBe(t('plan.explanation'));
+      expect(panel.querySelectorAll('dt')).toHaveLength(7);
+      for (const field of panel.querySelectorAll('dd')) {
+        expect(field.textContent).toContain('Cluster A · alice');
+        expect(field.querySelector('time')!.getAttribute('datetime')).toBe(source.last_success);
+        expect(field.querySelector('time')!.textContent).toBe(dateTime(source.last_success));
+        expect(field.querySelector('time')!.textContent).not.toBe(source.last_success);
+      }
+    }
+    expect(details[0].textContent).toContain(t('plan.factor.wallUnchecked'));
+    expect(details[1].textContent).toContain(t('plan.factor.access.not_associated'));
+  });
+
+  it('distinguishes an empty run time from an unknown maximum', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [option] = planOptions(planContext(source).data, request);
+    for (const max of [24, null]) {
+      for (const hours of [null, 0, 2]) {
+        const factor = planFactors({ ...option, maxWallHours: max }, { ...request, hours }).find(
+          (factor) => factor.key === 'wall',
+        )!;
+        const unchecked = hours == null || max == null;
+        expect(factor.value).toBe(
+          t('plan.factor.wallValue', {
+            max: max == null ? t('status.unknown') : String(max),
+            requested: hours == null ? t('plan.factor.notEntered') : String(hours),
+          }) + (unchecked ? ` ${t('plan.factor.wallUnchecked')}` : ''),
+        );
+        expect(factor.effect).toBe(unchecked ? 'neutral' : 'supports');
+      }
+    }
+  });
+
+  it('explains unknowns, partial capacity, limits, runtime and the contradiction cap without changing verdicts', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: 25 };
+    const ctx = planContext({
+      ...source,
+      qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', MaxWallPJ: '1440' } }],
+    });
+    const [option] = planOptions(ctx.data, request);
+    const factors = planFactors(option, request);
+    expect(option.verdict).toBe('wall');
+    expect(factors.find((factor) => factor.key === 'wall')!.effect).toBe('lowers');
+    expect(factors.find((factor) => factor.key === 'oneNode')!.effect).toBe('ranking');
+    const [contradiction] = planOptions(
+      planContext(source, [pending({ gpu_count: 1, reason: 'AssocMaxJobsLimit' })]).data,
+      { ...request, hours: null },
+    );
+    expect(contradiction.verdict).toBe('possible');
+    expect(
+      planFactors(contradiction, request).find((factor) => factor.key === 'queue'),
+    ).toMatchObject({ effect: 'lowers' });
+    expect(
+      planFactors(contradiction, request).find((factor) => factor.key === 'queue')!.value,
+    ).toContain('AssocMaxJobsLimit');
+    const [unknown] = planOptions(planContext({ ...source, stale: true }).data, request);
+    for (const key of ['free', 'limit', 'queue', 'wall']) {
+      expect(planFactors(unknown, request).find((factor) => factor.key === key)!.value).toContain(
+        t('status.unknown'),
+      );
+    }
+    expect(planFactors({ ...option, freeGpusPartial: true }, request)[0].value).toContain('≥ 4');
+    const [limited] = planOptions(
+      planContext({
+        ...source,
+        qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', MaxJobsPU: '0' } }],
+      }).data,
+      request,
+    );
+    expect(planFactors(limited, request).find((factor) => factor.key === 'limit')).toMatchObject({
+      effect: 'lowers',
+    });
+  });
+
+  it('compares the actual first two visible options and explains equal ranking honestly', () => {
+    setLocale(locale);
+    const ctx = planContext({
+      ...source,
+      qos: [...source.qos, { ...source.qos[0], name: 'other' }],
+    });
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [best, next] = planOptions(ctx.data, request);
+    expect(comparePlans(best, next, request).factor).toBe('tie');
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    expect(root.querySelector('.plan-comparison')!.textContent).toBe(
+      planComparison(best, next, request),
+    );
+    const single = page(renderPlan(source));
+    expect(single.querySelector('.plan-comparison')).toBeNull();
+  });
+
+  it('demonstrates different data ages and an unknown runtime in example mode', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const options = planOptions(data, request);
+    const bob = options.find(
+      (option) => option.source.id === 'example:cluster-a-bob' && option.qos === 'debug',
+    )!;
+    expect(bob.maxWallHours).toBeNull();
+    expect(bob.evidence.nodes[0].at).not.toBe(bob.evidence.limits[0].at);
+    expect(planFactors(bob, request).find((factor) => factor.key === 'wall')!.value).toContain(
+      t('status.unknown'),
+    );
+  });
+});
+
+describe.each(['en', 'zh-CN'] as const)('plan disclosure interaction in %s', (locale) => {
+  it('opens and closes natively, retaining an open panel while polled evidence changes', async () => {
+    setLocale(locale);
+    const ctx = planContext(source);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<PlanPage ctx={ctx} />));
+      const details = container.querySelector<HTMLDetailsElement>('.plan-explanation')!;
+      const summary = details.querySelector('summary')!;
+      summary.click();
+      expect(details.open).toBe(true);
+      expect(details.querySelector('dd')!.textContent).toContain(
+        t('plan.factor.freeValue', { count: '4' }),
+      );
+      const updated = {
+        ...ctx,
+        data: { ...ctx.data, nodes: ctx.data.nodes.map((node) => ({ ...node, gpu_allocated: 1 })) },
+      };
+      await act(async () => root.render(<PlanPage ctx={updated} />));
+      expect(details.open).toBe(true);
+      expect(details.querySelector('dd')!.textContent).toContain(
+        t('plan.factor.freeValue', { count: '3' }),
+      );
+      summary.click();
+      expect(details.open).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+});

@@ -63,6 +63,8 @@ export interface QosRule {
 }
 
 export interface PlanOption {
+  /** The actual logins and observation times used by each part of the estimate. */
+  evidence: Record<'nodes' | 'limits' | 'jobs' | 'access', PlanObservation[]>;
   access: 'verified' | 'not_associated' | 'unknown';
   key: string;
   source: Source;
@@ -97,6 +99,27 @@ export interface PlanOption {
   verdict: Verdict;
   /** The rule behind the verdict, when one is. */
   rule: QosRule | null;
+}
+
+export interface PlanObservation {
+  source: Source;
+  at: string | null;
+  current: boolean;
+}
+
+function observations(
+  sources: Source[],
+  capability: string,
+  rows?: { source_id: string; observed_at: string | null }[],
+): PlanObservation[] {
+  return sources.map((source) => {
+    const times = rows?.filter((row) => row.source_id === source.id).map((row) => row.observed_at);
+    return {
+      source,
+      at: times?.length ? (times.some((at) => !at) ? null : times.sort()[0]) : source.last_success,
+      current: sourceHasData(source, capability),
+    };
+  });
 }
 
 const ORDER: Verdict[] = [
@@ -369,11 +392,8 @@ export function planOptions(
       )
     )
       continue;
-    const cluster = capacity(
-      nodes.filter((node) => node.cluster_id === source.cluster_id),
-      request.gpuType,
-      request.gpus,
-    );
+    const clusterNodes = nodes.filter((node) => node.cluster_id === source.cluster_id);
+    const cluster = capacity(clusterNodes, request.gpuType, request.gpus);
     const twins = new Set(
       sources
         .filter(
@@ -541,6 +561,22 @@ export function planOptions(
           : undefined;
       const option = {
         source,
+        evidence: {
+          nodes: observations(
+            clusterNodes.length
+              ? sources.filter((login) => clusterNodes.some((node) => node.source_id === login.id))
+              : [source],
+            'nodes',
+            clusterNodes,
+          ),
+          limits: observations([source], 'qos_limits'),
+          jobs: observations(
+            currentJobs ? sources.filter((login) => twins.has(login.id)) : [source],
+            'jobs',
+            inQos,
+          ),
+          access: observations([source], 'qos_access'),
+        },
         access: sourceHasData(source, 'qos_access')
           ? (qos?.access ?? 'unknown')
           : ('unknown' as const),
@@ -575,16 +611,25 @@ export function planOptions(
       });
     }
   }
-  return options.sort(
-    (a, b) =>
-      ORDER.indexOf(a.verdict) - ORDER.indexOf(b.verdict) ||
-      Number((b.largestNodeFree ?? 0) >= request.gpus) -
-        Number((a.largestNodeFree ?? 0) >= request.gpus) ||
-      (b.headroomAfterQueue ?? -Infinity) - (a.headroomAfterQueue ?? -Infinity) ||
-      (b.freeGpus ?? -1) - (a.freeGpus ?? -1) ||
-      Number(b.access === 'verified') - Number(a.access === 'verified') ||
-      a.key.localeCompare(b.key),
-  );
+  return options.sort((a, b) => comparePlans(a, b, request).order);
+}
+
+/** Sorting and its explanation share the same first differing factor. */
+export function comparePlans(a: PlanOption, b: PlanOption, request: PlanRequest) {
+  const factors = [
+    ['verdict', -ORDER.indexOf(a.verdict), -ORDER.indexOf(b.verdict)],
+    [
+      'oneNode',
+      Number((a.largestNodeFree ?? 0) >= request.gpus),
+      Number((b.largestNodeFree ?? 0) >= request.gpus),
+    ],
+    ['queue', a.headroomAfterQueue ?? -Infinity, b.headroomAfterQueue ?? -Infinity],
+    ['free', a.freeGpus ?? -1, b.freeGpus ?? -1],
+    ['access', Number(a.access === 'verified'), Number(b.access === 'verified')],
+  ] as const;
+  for (const [factor, left, right] of factors)
+    if (left !== right) return { factor, order: left > right ? -1 : 1 };
+  return { factor: 'tie' as const, order: a.key.localeCompare(b.key) };
 }
 
 /** GPU models the visible nodes report, for the model filter. */

@@ -1,6 +1,6 @@
 import { serverClusterState, serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
-import { gpuModels, idleInstances, planOptions, wallHours } from './plan';
+import { comparePlans, gpuModels, idleInstances, planOptions, wallHours } from './plan';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
 
 const source = (extra: Partial<Source> = {}): Source => ({
@@ -1602,4 +1602,74 @@ describe('honest ranking', () => {
       });
     },
   );
+});
+
+describe('estimate evidence and ranking explanations', () => {
+  const request = { gpus: 2, gpuType: '', hours: null };
+
+  it('attributes deduplicated nodes and merged jobs to their actual logins and oldest observation', () => {
+    const limits = source({ capabilities: ['qos_limits', 'qos_access'] });
+    const twin = source({ id: 'twin', last_success: '2026-01-01T00:05:00Z', qos: [] });
+    const other = source({ id: 'bob', username: 'bob', qos: [] });
+    const [option] = planOptions(
+      {
+        sources: [limits, twin, other],
+        nodes: [
+          node('g1', { source_id: 'bob' }),
+          node('g1', { source_id: 'twin', observed_at: '2026-01-01T00:03:00Z' }),
+          node('g2', { source_id: 'bob', observed_at: '2026-01-01T00:01:00Z' }),
+        ],
+        jobs: [job('1', { source_id: 'twin', observed_at: '2026-01-01T00:02:00Z' })],
+      },
+      request,
+    ).filter((option) => option.source.username === 'alice' && option.qos === 'normal');
+    expect(option.evidence.nodes.map((item) => [item.source.id, item.at])).toEqual([
+      ['twin', '2026-01-01T00:03:00Z'],
+      ['bob', '2026-01-01T00:01:00Z'],
+    ]);
+    expect(option.evidence.limits[0].source.id).toBe(limits.id);
+    expect(option.evidence.jobs.map((item) => item.source.id)).toEqual(['twin']);
+    expect(option.evidence.jobs[0].at).toBe('2026-01-01T00:02:00Z');
+    expect(option.used).toBe(4);
+  });
+
+  it('preserves missing observation times and marks stale evidence as not current', () => {
+    const [option] = planOptions(
+      { sources: [source()], nodes: [node('g1', { observed_at: null })], jobs: [] },
+      request,
+    );
+    expect(option.evidence.nodes[0].at).toBeNull();
+    expect(option.evidence.jobs[0].at).toBe(source().last_success);
+    const [stale] = planOptions(
+      { sources: [source({ stale: true })], nodes: [node('g1')], jobs: [] },
+      request,
+    );
+    expect(stale.freeGpus).toBeNull();
+    expect(stale.evidence.nodes[0].current).toBe(false);
+    expect(stale.evidence.limits[0].current).toBe(false);
+  });
+
+  it('uses the first differing sort factor and does not invent an advantage on ties', () => {
+    const [base] = planOptions({ sources: [source()], nodes: [node('g1')], jobs: [] }, request);
+    const changes: [Partial<typeof base>, string][] = [
+      [{ verdict: 'possible', freeGpus: 100 }, 'verdict'],
+      [{ largestNodeFree: 1, headroomAfterQueue: 100 }, 'oneNode'],
+      [{ headroomAfterQueue: 1, freeGpus: 100 }, 'queue'],
+      [{ freeGpus: 1 }, 'free'],
+      [{ access: 'unknown' }, 'access'],
+    ];
+    for (const [change, factor] of changes) {
+      const next = { ...base, ...change };
+      expect(comparePlans(base, next, request)).toEqual({ factor, order: -1 });
+      expect(comparePlans(next, base, request)).toEqual({ factor, order: 1 });
+    }
+    expect(comparePlans(base, { ...base, key: `${base.key}z` }, request).factor).toBe('tie');
+    expect(
+      comparePlans(
+        { ...base, headroomAfterQueue: Infinity },
+        { ...base, headroomAfterQueue: Infinity },
+        request,
+      ),
+    ).toEqual({ factor: 'tie', order: 0 });
+  });
 });

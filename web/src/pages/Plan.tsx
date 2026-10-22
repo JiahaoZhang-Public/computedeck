@@ -3,10 +3,11 @@ import { Clock3, Plus } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { money, relativeTime } from '../domain';
+import { dateTime, money, relativeTime } from '../domain';
 import { jobReason } from '../jobFacts';
+import { planComparison, planFactors, RULES } from '../planExplanation';
 import { gpuModels, idleInstances, planOptions } from '../plan';
-import type { PlanOption, PlanRequest, QosRule, Verdict } from '../plan';
+import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
 import type { NodeSummary } from '../types';
@@ -22,19 +23,6 @@ const TONES: Record<Verdict, string> = {
   none: 'red',
   unavailable: 'red',
   denied: 'gray',
-};
-
-/** Why a QoS rule decided the estimate. */
-const RULES: Record<QosRule['kind'], Partial<Record<QosRule['effect'], MessageKey>>> = {
-  perJob: { limit: 'plan.why.perJob' },
-  jobs: { limit: 'plan.why.jobs' },
-  submit: { limit: 'plan.why.submit' },
-  group: {
-    limit: 'plan.why.groupLimit',
-    busy: 'plan.why.groupBusy',
-    doubt: 'plan.why.groupUnknown',
-  },
-  typed: { doubt: 'plan.why.typed' },
 };
 
 function verdictLabel(option: PlanOption, request: PlanRequest) {
@@ -226,6 +214,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                 {t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
               </span>
             )}
+            {visible[1] && (
+              <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
+            )}
           </div>
         </Panel>
       )}
@@ -384,6 +375,7 @@ function OptionsTable({
                     {verdictLabel(option, request)}
                   </span>
                   {why && <span className="sub plan-why">{why}</span>}
+                  <PlanExplanation option={option} request={request} />
                 </td>
               </tr>
             );
@@ -391,5 +383,46 @@ function OptionsTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function PlanExplanation({ option, request }: { option: PlanOption; request: PlanRequest }) {
+  return (
+    <details className="plan-explanation">
+      <summary>{t('plan.explanation')}</summary>
+      <p className="sub">{t('plan.factor.note')}</p>
+      <dl className="plan-factors">
+        {planFactors(option, request).map((factor) => (
+          <div key={factor.key}>
+            <dt>{t(`plan.factor.${factor.key}`)}</dt>
+            <dd>
+              <span>{factor.value}</span>
+              <span className="sub">{t(`plan.effect.${factor.effect}`)}</span>
+              {[
+                ...new Map(
+                  factor.evidence.map((item) => [
+                    `${item.source.id}:${item.at}:${item.current}`,
+                    item,
+                  ]),
+                ).values(),
+              ].map((item) => (
+                <span className="sub" key={`${item.source.id}:${item.at}:${item.current}`}>
+                  {t('plan.factor.source', {
+                    source: `${item.source.name} · ${item.source.username}`,
+                    age: item.at ? relativeTime(item.at) : t('status.unknown'),
+                    state: t(item.current ? 'plan.factor.current' : 'plan.factor.notCurrent'),
+                  })}
+                  {item.at && (
+                    <time className="sub" dateTime={item.at}>
+                      {dateTime(item.at)}
+                    </time>
+                  )}
+                </span>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }

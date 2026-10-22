@@ -113,13 +113,13 @@ it('shows unknown access inline and keeps only unassociated options in a closed 
   });
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   const html = renderToStaticMarkup(<PlanPage ctx={ctx} />);
-  const disclosures = [...html.matchAll(/<details[^>]*>(.*?)<\/details>/g)];
+  const disclosures = [...html.matchAll(/<details class="panel"[^>]*>(.*?)<\/details>/g)];
   expect(disclosures).toHaveLength(1);
   expect(disclosures.every((match) => !match[0].match(/<details[^>]*\sopen/))).toBe(true);
   expect(disclosures[0][1]).toContain('Not associated (1)');
   expect(disclosures[0][1]).toContain('denied');
   expect(disclosures[0][1]).not.toContain('unverified');
-  expect(html.slice(0, html.indexOf('<details'))).toContain('unverified');
-  expect(html.slice(0, html.indexOf('<details'))).toContain('Access not checked');
-  expect(html.slice(0, html.indexOf('<details'))).toContain('allowed');
+  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('unverified');
+  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('Access not checked');
+  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('allowed');
 });

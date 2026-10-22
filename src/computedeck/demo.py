@@ -171,6 +171,8 @@ def dashboard() -> dict[str, Any]:
     # A missing optional command has never worked here: a gap, not a regression.
     sources[1]["capabilities"].remove("history")
     sources[1]["warnings"] = [{"code": "history_unavailable", "detail": "sacct: command not found"}]
+    # The planner explains a missing run-time limit as unknown, not unlimited.
+    next(qos for qos in sources[1]["qos"] if qos["name"] == "debug")["limits"].pop("MaxWallPJ")
     sources[4].update(
         stale=True,
         last_success=(current - timedelta(minutes=47)).isoformat(),
