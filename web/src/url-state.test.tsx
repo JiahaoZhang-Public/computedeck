@@ -498,3 +498,13 @@ it('keeps a live job with an optional null end on the live job route', async () 
   expect(container.querySelector('#detail-title')?.textContent).toBe(live.name);
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('common.sampledAt'));
 });
+
+it('announces that copying submit flags submitted nothing', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  await render('/#/plan');
+  await act(async () => container.querySelector<HTMLButtonElement>('.plan-submit button')!.click());
+  expect(writeText).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain(t('plan.submit.copied'));
+  expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+});

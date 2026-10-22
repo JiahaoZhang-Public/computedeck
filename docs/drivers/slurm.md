@@ -127,3 +127,18 @@ history collection, up to 24 hours during an outage; see [job lifecycle](../metr
 PBS and LSF use the offset from their existing remote clock for terminal timestamps;
 that current offset may differ across a daylight-saving transition. Their legacy
 failure-row `end` strings also remain unchanged, with `ended_at` carrying the offset. No extra SSH connection is added.
+
+### Copy-only submit flags
+
+Where to run can copy flags or `#SBATCH` header lines using the requested GPU count and
+optional run time. A safe QoS name always comes from the selected option. GPU model
+spelling comes from current scheduler node records in that cluster, regardless of health,
+and must have one unambiguous safe spelling matching the request case-insensitively.
+Account and partition come from your own current jobs or recent failures in that QoS,
+including current jobs from twin logins with the same cluster and username. A partition
+also needs a currently observed usable matching node. Unknown or unsafe flags are
+combined into one visible note; model, multi-node and zero-time notes remain separate.
+Neither copied format includes notes. Uniform known node capacity permits an exact
+multi-node split; other layouts remain manual. This is not a submission or an access check.
+See [request copying](../metrics.md#copying-requests-and-reusing-job-shapes)
+for the evidence, rounding and preset rules.

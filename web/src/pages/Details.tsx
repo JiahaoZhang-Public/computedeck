@@ -19,6 +19,7 @@ import {
   runningPrice,
 } from '../domain';
 import { directSSHCommand } from '../connections';
+import { jobPlanLink } from '../submit';
 import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
@@ -207,6 +208,13 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       : job.observed_at;
   return (
     <div className="drawer-body">
+      {(pending || failure) && (
+        <div className="drawer-actions">
+          <a className="button" href={jobPlanLink(job, ctx.data.nodes)}>
+            {t('plan.findAnother')}
+          </a>
+        </div>
+      )}
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">

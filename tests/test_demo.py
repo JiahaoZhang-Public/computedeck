@@ -537,3 +537,18 @@ def test_demo_ssh_machine_shows_all_gpu_states() -> None:
     assert machine["gpus"][2]["processes"] == []
     assert machine["gpu_allocated"] is None
     assert machine["gpus_observed_at"] == machine["observed_at"]
+
+
+def test_submit_examples_include_unproven_flags_and_unsafe_model() -> None:
+    data = dashboard()
+    source = next(source for source in data["sources"] if source["id"] == "example:cluster-a-bob")
+    assert any(qos["name"] == "long" for qos in source["qos"])
+    assert not any(
+        job["cluster_id"] == source["cluster_id"] and job["user"] == "bob" and job["qos"] == "long"
+        for job in [*data["jobs"], *data["recent_failures"]]
+    )
+    model = next(
+        node["gpu_type"] for node in data["nodes"] if node["cluster_id"] == source["cluster_id"]
+    )
+    assert model == "A100 80GB"
+    assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", model) is None

@@ -1,16 +1,19 @@
-import { useRouteParam } from '../useRouteParam';
-import { Clock3, Copy, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { setRouteParams, useRouteParam } from '../useRouteParam';
+import { canCopySubmit, jobPlanRequest, jobWaitsHere, planPresets, submitFlags } from '../submit';
+import type { SubmitFormat } from '../submit';
+import { Clock3, Copy, Plus, X } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { dateTime, money, relativeTime } from '../domain';
+import { dateTime, money, relativeTime, sourceHasData } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES } from '../planExplanation';
 import { gpuModels, idleInstances, machineOptions, machineSamples, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
-import { Empty, GroupMark, Panel } from '../ui';
+import { Chips, Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
-import type { NodeSummary } from '../types';
+import type { Job, NodeSummary } from '../types';
 
 const TONES: Record<Verdict, string> = {
   likely: 'green',
@@ -104,10 +107,23 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
 
 export function PlanPage({ ctx }: { ctx: Ctx }) {
   const { data } = ctx;
-  const [requestedGpus, setGpus] = useRouteParam('gpus', '1');
-  const [gpuType, setGpuType] = useRouteParam('model');
-  const [requestedHours, setHours] = useRouteParam('hours');
-  const count = Number(requestedGpus);
+  const [from, setFrom] = useRouteParam('from');
+  const jobs = [...data.jobs, ...(data.recent_failures ?? [])];
+  const fromJob = jobs.find((job) => job.id === from);
+  const preset = fromJob ? jobPlanRequest(fromJob, data.nodes) : null;
+  const [requestedGpus] = useRouteParam('gpus');
+  const [format, setFormat] = useState<SubmitFormat>(() => {
+    try {
+      return localStorage.getItem('computedeck.submitFormat') === 'header' ? 'header' : 'line';
+    } catch {
+      return 'line';
+    }
+  });
+  const presets = planPresets(data);
+  const [requestedModel] = useRouteParam('model');
+  const gpuType = requestedModel || (!requestedGpus ? (preset?.gpuType ?? '') : '');
+  const [requestedHours] = useRouteParam('hours');
+  const count = Number(requestedGpus || preset?.gpus || 1);
   const gpus = Number.isInteger(count) && count >= 1 && count <= 1024 ? count : 1;
   const hours =
     Number.isFinite(Number(requestedHours)) && Number(requestedHours) >= 0 ? requestedHours : '';
@@ -116,6 +132,23 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     gpuType,
     hours: hours.trim() ? Number(hours) : null,
   };
+  // Resolve from-only links once; explicit inputs then survive polling and job expiry.
+  useEffect(() => {
+    if (fromJob && !requestedGpus) {
+      setRouteParams({ gpus: String(request.gpus), model: gpuType });
+    }
+  }, [fromJob, requestedGpus, request.gpus, gpuType]);
+  function changeRequest(values: Record<string, string | null>) {
+    setRouteParams({ gpus: String(gpus), model: gpuType, hours, ...values });
+  }
+  function changeFormat(value: SubmitFormat) {
+    setFormat(value);
+    try {
+      localStorage.setItem('computedeck.submitFormat', value);
+    } catch {
+      // Copying still works when browser storage is unavailable.
+    }
+  }
   const options = planOptions(data, request);
   const visible = options.filter((option) => option.access !== 'not_associated');
   const denied = options.filter((option) => option.access === 'not_associated');
@@ -144,6 +177,55 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <Panel>
+        {from && (
+          <div className="plan-from">
+            <span>
+              {fromJob
+                ? fromJob.gpu_count != null && fromJob.gpu_count > 0
+                  ? t('plan.forJob', { name: fromJob.name, count: fromJob.gpu_count })
+                  : t('plan.forJob.nameOnly', { name: fromJob.name })
+                : t('plan.fromMissing', { id: from })}
+              {fromJob && (fromJob.gpu_count == null || fromJob.gpu_count < 1) && (
+                <span className="sub">{t('plan.fromUnknown')}</span>
+              )}
+            </span>
+            <button
+              className="icon-button"
+              aria-label={t('plan.clearFrom')}
+              onClick={() => setFrom('')}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {presets.length > 0 && (
+          <div className="plan-presets" role="group" aria-label={t('plan.presets')}>
+            <span className="muted">{t('plan.presets')}</span>
+            {presets.map((job) => {
+              const next = jobPlanRequest(job, data.nodes);
+              return (
+                <button
+                  key={`${job.source_id}:${job.id}`}
+                  className="button small"
+                  onClick={() => {
+                    changeRequest({
+                      gpus: String(next.gpus),
+                      model: next.gpuType,
+                      hours: null,
+                      from: job.id,
+                    });
+                  }}
+                >
+                  {t(next.gpuType ? 'plan.preset' : 'plan.preset.noModel', {
+                    count: next.gpus,
+                    model: next.gpuType,
+                    name: job.name,
+                  })}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <form className="plan-form" onSubmit={(event) => event.preventDefault()}>
           <label>
             {t('plan.gpus')}
@@ -152,12 +234,15 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               min="1"
               max="1024"
               value={gpus}
-              onChange={(event) => setGpus(event.target.value)}
+              onChange={(event) => changeRequest({ gpus: event.target.value })}
             />
           </label>
           <label>
             {t('plan.model')}
-            <select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>
+            <select
+              value={gpuType}
+              onChange={(event) => changeRequest({ model: event.target.value })}
+            >
               <option value="">{t('plan.anyModel')}</option>
               {(gpuType && !models.includes(gpuType) ? [gpuType, ...models] : models).map(
                 (model) => (
@@ -178,11 +263,25 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               step="0.5"
               value={hours}
               placeholder="24"
-              onChange={(event) => setHours(event.target.value)}
+              onChange={(event) => changeRequest({ hours: event.target.value })}
             />
           </label>
         </form>
       </Panel>
+      {options.some(canCopySubmit) && (
+        <div className="plan-copy-format">
+          <span>{t('plan.submit.format')}</span>
+          <Chips<SubmitFormat>
+            label={t('plan.submit.format')}
+            value={format}
+            onChange={changeFormat}
+            options={[
+              { value: 'line', label: t('plan.submit.line') },
+              { value: 'header', label: t('plan.submit.header') },
+            ]}
+          />
+        </div>
+      )}
       {best && (
         <Panel title={t('plan.best')}>
           <div className="plan-best">
@@ -218,6 +317,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                 {t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
               </span>
             )}
+            <SubmitCopy option={best} request={request} ctx={ctx} format={format} />
             {visible[1] && (
               <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
             )}
@@ -232,7 +332,13 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             </p>
           ))}
           {visible.length ? (
-            <OptionsTable options={visible} request={request} ctx={ctx} />
+            <OptionsTable
+              options={visible}
+              request={request}
+              ctx={ctx}
+              format={format}
+              fromJob={fromJob}
+            />
           ) : (
             <Empty
               title={t(denied.length ? 'plan.noAccess' : 'plan.empty')}
@@ -261,7 +367,13 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
       {denied.length > 0 && (
         <details className="panel">
           <summary>{t('plan.access.not_associated', { count: denied.length })}</summary>
-          <OptionsTable options={denied} request={request} ctx={ctx} />
+          <OptionsTable
+            options={denied}
+            request={request}
+            ctx={ctx}
+            format={format}
+            fromJob={fromJob}
+          />
         </details>
       )}
       {hasMachines && (
@@ -353,7 +465,11 @@ function OptionsTable({
   options,
   request,
   ctx,
+  format,
+  fromJob,
 }: {
+  format: SubmitFormat;
+  fromJob?: Job;
   options: PlanOption[];
   request: PlanRequest;
   ctx: Ctx;
@@ -387,6 +503,9 @@ function OptionsTable({
                     <span>
                       <strong>
                         {option.source.name}
+                        {jobWaitsHere(fromJob, option) && (
+                          <span className="tag plan-qos">{t('plan.waitsHere')}</span>
+                        )}
                         {option.qos && <span className="tag plan-qos">{option.qos}</span>}
                         {option.access === 'unknown' && (
                           <span className="tag plan-qos">{t('plan.accessUnchecked')}</span>
@@ -439,6 +558,7 @@ function OptionsTable({
                   </span>
                   {why && <span className="sub plan-why">{why}</span>}
                   <PlanExplanation option={option} request={request} />
+                  <SubmitCopy option={option} request={request} ctx={ctx} format={format} />
                 </td>
               </tr>
             );
@@ -491,5 +611,53 @@ function PlanExplanation({ option, request }: { option: PlanOption; request: Pla
         ))}
       </dl>
     </details>
+  );
+}
+
+function SubmitCopy({
+  option,
+  request,
+  ctx,
+  format,
+}: {
+  option: PlanOption;
+  request: PlanRequest;
+  ctx: Ctx;
+  format: SubmitFormat;
+}) {
+  const result = submitFlags(
+    option,
+    request,
+    [
+      ...ctx.data.jobs.filter((job) =>
+        ctx.data.sources.some(
+          (source) =>
+            source.id === job.source_id &&
+            source.cluster_id === option.source.cluster_id &&
+            source.username === option.source.username &&
+            sourceHasData(source, 'jobs'),
+        ),
+      ),
+      ...(ctx.data.recent_failures ?? []),
+    ],
+    ctx.data.nodes,
+    format,
+  );
+  if (!result) return null;
+  return (
+    <div className="plan-submit">
+      <button
+        className="button small"
+        disabled={ctx.demo}
+        onClick={() => void ctx.copy(result.text, t('plan.submit.copied'))}
+      >
+        <Copy size={14} /> {t('plan.submit.copy')}
+      </button>
+      {result.notes.map((note) => (
+        <span className="sub" key={note}>
+          {note}
+        </span>
+      ))}
+    </div>
   );
 }

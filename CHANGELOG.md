@@ -2,6 +2,8 @@
 
 ## 0.7.0 (unreleased)
 
+- Reuse recent job resource shapes in Where to run, follow pending or failed jobs to alternative resources, and copy Slurm submit flags or script headers: QoS comes from the selected option, model spelling from current scheduler node records, and partition/account from your own jobs across matching logins. Unconfirmed flags share one visible note. Copying never submits a job; queue counts remain unchanged.
+
 - Show per-GPU availability, memory, utilization and owners on SSH machines, and offer current free GPUs in a separate Machines panel in Where to run with copy-only NVIDIA setup. Unknown GPUs never count as free. SSH machine and hand-added probe GPUs-in-use counts now include significant memory use even when an empty process list hides the workload; missing process or memory readings remain unknown.
 
 ## 0.6.0 (unreleased)

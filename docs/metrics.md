@@ -509,3 +509,62 @@ visible processes. The reason code is unchanged; it does not imply the process q
 
 部分总量的原因码 `summary_gpu_processes_unavailable` 表示部分 GPU 的使用情况无法读取：
 可能是进程不可读，也可能是没有可见进程且显存缺失。原因码保持不变，并不表示进程查询一定失败。
+
+### Copying requests and reusing job shapes
+
+Where to run offers **Copy submit flags** on Slurm options estimated likely, possible,
+behind your queue or busy, unless a per-job rule decides the verdict. It copies only;
+the toast confirms that nothing was submitted. Example mode disables this copy action.
+The format switch chooses flags alone (no command or comments) or `#SBATCH` header lines
+and remembers the choice in this browser when storage is available.
+
+QoS always comes from the selected option when its name can be used safely in a flag.
+Model spelling comes from current scheduler node records for this cluster, regardless of
+node health: a case-insensitive match must yield exactly one safe spelling. Account and
+partition still require an unambiguous value from your own current jobs or recent
+failures in that QoS. Current jobs from any twin login with the same cluster and
+username can provide evidence. A partition also needs a currently observed usable
+matching node. Missing or unsafe flags are combined into one visible note. Model
+omissions, multi-node layout and zero-time notes stay separate; neither copied format
+contains these notes. A model containing spaces, or without one unambiguous current
+spelling, is omitted with a note to add the model before submitting. Generic GPU counts
+and entered run time come from the request. Positive hours round to the nearest minute
+(at least one minute); zero is omitted because Slurm would interpret it as unlimited.
+Node count is added only when every matching usable node has the same known GPU capacity
+and the request exceeds that capacity and is an exact multiple of it; the GPU flag then
+uses the per-node count. Otherwise a known need for multiple nodes is explained without
+inventing a layout. Review these partial flags before using them. PBS, LSF and
+Kubernetes do not offer submission copying.
+
+Up to four preset chips reuse distinct positive GPU-count/model shapes from your current
+jobs and recent failures. Labels and deduplication use the count and model actually
+filled; unlisted or multiple models become a model-less request. They clear the optional
+run time and perform no action on a source. Pending and failed job drawers link to the
+same form with `#/plan?from=<job id>` plus the GPU count and, if listed, a single model.
+From-only links resolve the job while it is available; explicit form parameters win and
+survive the job leaving the list. Unknown or zero job GPU counts require you to enter
+the intended request. The banner names the source job and its own GPU count, or just its
+name when that count is unknown or zero. Its waiting login/QoS is marked, including a
+merged twin login. Neither queue counts nor ranking are adjusted. Clearing the job
+context keeps the form values.
+
+中文：“在哪里运行”在 Slurm 的较可能启动、可能、较可能等待你的排队作业及空闲不足选项上提供“复制提交参数”，
+由每作业规则决定的选项除外。操作只复制，提示明确说明未提交任何作业；示例模式禁用此复制按钮。
+可选择不含命令或注释的单行参数，或 `#SBATCH` 脚本头部，格式偏好在浏览器允许时保存。
+QoS 始终来自所选选项，只要名称可安全用于参数。型号写法来自该集群当前的调度器节点记录，
+不受节点健康状态影响：忽略大小写匹配后必须只有一种可安全用于参数的写法。账户和分区仍需
+同一集群、用户名和 QoS 的当前作业或近期失败记录提供唯一值；任一相同账户的重复连接都可
+提供当前作业证据。分区还必须出现在当前观测的、符合型号且可用的节点上。
+未知或不安全的参数合并为一行提示，型号、多节点布局和零运行时间的提示保持独立；两种复制
+格式均不包含提示文字。包含空格或无法确认唯一当前写法的型号会省略，提示提交前补充。
+GPU 数和运行时间来自表单；正数小时四舍五入到分钟（至少一分钟），零因在 Slurm
+表示不限时而省略。仅在所有匹配可用节点的 GPU 容量一致且已知、请求超过单节点容量并可整除时
+添加节点数，同时把 GPU 参数改为每节点数量；其他已知多节点需求只提示，不推测布局。
+使用前请检查这些可能不完整的参数。PBS、LSF 和 Kubernetes 不提供提交参数复制。
+
+最多四个预设按钮复用当前作业和近期失败记录的资源需求，按实际填入的 GPU 数量和型号生成
+标签并去重；未列出的型号或多型号请求按不指定型号处理。预设会清空可选运行时间，
+不操作任何来源。等待和失败作业详情可通过 `#/plan?from=<作业 ID>` 及资源参数进入表单；
+型号只有在列表中存在且为单一型号时才填入。仅含 from 的链接在作业仍存在时解析，显式资源参数
+优先，并在作业离开列表后保留。GPU 数未知或为零时提示填写需求。横幅显示作业自身的 GPU 数，未知或为零时仅显示名称。
+页面标明关联作业及其等待的登录/QoS，合并的重复登录也可识别；队列数量和排序均不改变。清除作业关联保留资源输入。
