@@ -3,6 +3,7 @@
 All objects are hand-written from the Kubernetes API reference and use fictional data.
 """
 
+import asyncio
 import json
 import re
 import shlex
@@ -15,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from computedeck import events
+from computedeck import events, plugins
 from computedeck.drivers import kubernetes, ssh
 from computedeck.drivers.base import Batch, SourceError
 from computedeck.store import Store
@@ -1102,8 +1103,8 @@ def test_terminal_pods_include_success_but_not_running_container_failures() -> N
 
 @pytest.mark.parametrize("held", [False, True])
 @pytest.mark.parametrize("terminal", [False, True])
-def test_deleted_pod_uses_last_observed_container_failure(
-    monkeypatch: pytest.MonkeyPatch, store: Store, held: bool, terminal: bool
+async def test_deleted_pod_uses_last_observed_container_failure(
+    monkeypatch: pytest.MonkeyPatch, store: Store, tmp_path: Path, held: bool, terminal: bool
 ) -> None:
     at = datetime.now(UTC)
     monkeypatch.setattr(events, "now", lambda: at.isoformat())
@@ -1130,12 +1131,13 @@ def test_deleted_pod_uses_last_observed_container_failure(
         capabilities=["history"],
     )
     assert running.finished == []
-    assert (
-        events.collected(
-            SOURCE, {"jobs": running.jobs, "lifecycle_pending": []}, running, first=False
-        )
-        == []
+    [container_failure] = events.collected(
+        SOURCE, {"jobs": running.jobs, "lifecycle_pending": []}, running, first=False
     )
+    assert container_failure["type"] == "job.failed"
+    assert not container_failure["silent"]
+    assert notify.matches({"events": ["job.failed"]}, container_failure)
+    store.add_events([container_failure])
     old = running.snapshot()
     if held:
         old["lifecycle_pending"], old["jobs"] = old["jobs"], []
@@ -1144,11 +1146,36 @@ def test_deleted_pod_uses_last_observed_container_failure(
         deleted.finished = [{**running.failures[0], "state": "COMPLETED", "exit_code": "0"}]
     store.add_events(events.collected(SOURCE, old, deleted, first=False))
     store.add_events(events.collected(SOURCE, deleted.snapshot(), deleted, first=False))
-    [row] = store.recent_events()
+    rows = store.events()
+    assert len(rows) == len(store.recent_events()) == 2
+    [row] = [row for row in rows if row["type"] == "job.finished"]
     assert row["data"]["outcome"] == ("completed" if terminal else "out_of_memory")
     assert row["data"]["outcome_reason"] is None
-    assert events.for_handler(row, None)["type"] == ("job.ended" if terminal else "job.failed")
-    assert notify.matches(notify.migrate_rule({"events": ["job.failed"]}), row) == (not terminal)
+    assert bool(row["data"].get("failure_announced")) == (not terminal)
+    rule = notify.migrate_rule({"events": ["job.failed"]})
+    assert sum(notify.matches(rule, row) for row in rows) == 1
+    assert all(notify.matches({"events": ["job.ended"]}, row) for row in rows)
+
+    runtime = plugins.Runtime(tmp_path)
+    runtime.store = store
+    context = plugins.PluginContext(plugins.Plugin("watcher", lambda ctx: None), runtime)
+    delivered = []
+    received = asyncio.Event()
+
+    async def handle(event: dict[str, Any]) -> None:
+        delivered.append(event["type"])
+        if len(delivered) == 2:
+            received.set()
+
+    context.on_event(handle)  # API-1 wildcard subscription.
+    store.set_plugin_cursor("watcher", 0)
+    task = asyncio.create_task(plugins.deliver(context, poll=0.01))
+    try:
+        await asyncio.wait_for(received.wait(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert delivered == ["job.failed", "job.ended"]
 
 
 def test_kubernetes_jobs_do_not_infer_arrays_from_names() -> None:

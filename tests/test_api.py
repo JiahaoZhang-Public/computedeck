@@ -1274,7 +1274,7 @@ def test_live_event_grouping_caps_children_but_retains_totals_and_ids(
     assert len(result) == 1 and result[0]["group"]["count"] == 250
     group = result[0]["group"]
     assert group["ids"] == list(range(250, 0, -1))
-    assert [row["id"] for row in group["events"]] == group["ids"][:50]
+    assert [row["id"] for row in group["events"]] == [1, *group["ids"][:49]]
     assert group["observed_time"] is True
     assert group["since"] == "2026-01-01T00:00:00Z"
     assert group["outcomes"] == {"completed": 249, "failed": 1}
@@ -1902,3 +1902,30 @@ def test_manual_edits_keep_checks_only_for_the_same_connection(client, data_dir,
         assert "ssh_error" not in saved
         assert "last_probe_attempt" not in saved
         assert "gpu_allocated" not in saved
+
+
+def test_catchup_completion_is_visible_and_keeps_legacy_delivery(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from computedeck import events, sdk
+
+    at = datetime.now(UTC)
+    monkeypatch.setattr(events, "now", lambda: at.isoformat())
+    source = {"id": "cluster-a-alice", "last_success": (at - timedelta(hours=3)).isoformat()}
+    [ending] = events.collected(
+        source,
+        {"lifecycle_pending": []},
+        Batch(
+            jobs=[], finished=[{"id": "cluster-a:1", "state": "COMPLETED", "end": at.isoformat()}]
+        ),
+        first=False,
+    )
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events([ending])
+    store.db.close()
+    rows = client.get("/api/events").json()
+    assert len(rows) == 1 and rows[0]["data"]["since"] == source["last_success"]
+    assert rows[0]["type"] == "job.finished"
+    assert events.for_handler(rows[0], frozenset(sdk.EVENT_TYPES))["type"] == "job.ended"

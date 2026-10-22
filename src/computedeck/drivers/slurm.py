@@ -619,8 +619,9 @@ class SlurmDriver:
             if "history" in (source.get("capabilities") or []) and (
                 previous := job_time(source.get("last_success") or "")
             ):
+                # Keep the five-minute overlap and collection timeout at daily polling.
                 minutes = min(
-                    1440,
+                    1447,
                     max(
                         5,
                         math.ceil(

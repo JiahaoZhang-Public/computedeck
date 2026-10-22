@@ -32,10 +32,25 @@ version is unchanged.
 
 New event types reach only handlers that name them. A handler that does not subscribe
 to `job.finished` continues to receive one legacy `job.failed` or `job.ended` per ending;
-wildcard handlers retain the five 0.5 types. Gap events also require named subscriptions.
+wildcard handlers and subscriptions using `sdk.EVENT_TYPES` retain the five 0.5 types.
+`EVENT_TYPES` stays frozen at that set; subscribe to `"job.finished"` by name to opt in.
+Gap events also require named subscriptions.
 `change.*` events are never delivered to plugins. See [Events](#events) for the full
 contract and [Notification delivery status](#notification-delivery-status) for the
 optional delivery fields.
+
+Notify interprets stored 0.5 rules at read time without rewriting them, so a downgrade
+keeps those rules usable until the user edits them in 0.6. Kubernetes container failures
+still produce legacy `job.failed` events while a pod is running or when it later succeeds;
+these describe a failed container run, separately from the pod's terminal outcome.
+If a departure reuses the same failure already reported while the job was present,
+`job.finished` carries `data.failure_announced: true`. Its failure outcome remains
+visible in Activity, but API-1 handlers receive `job.ended` for this departure and
+Notify rules with outcome filters do not match the failure again. Rules matching all
+outcomes can still receive the departure. A different failure end time is a new failure.
+Mapped Slurm, PBS and LSF legacy events keep scheduler-local naive `data.job.end`, while
+`data.ended_at` retains the offset. The job payload for a known ending is the accounting
+record, rather than the last queue sample; absent utilization fields remain unknown.
 
 ## Quick start
 
@@ -181,15 +196,16 @@ job waits until the next successful accounting collection when history has been 
 During an accounting outage it stays pending for up to 24 hours; a successful history
 collection that still omits it, or expiry of that window, resolves it as unknown.
 Sources that have never reported history resolve departures immediately as unknown. `outcome_reason` distinguishes `outcomes_unavailable`
-(the cluster does not report outcomes) from `outcome_not_reported` (history has not
-reported this job). Late accounting does not deliver a second ending for an unknown one.
+(this connection cannot read accounting) from `outcome_not_reported` (history had not
+reported this job by the observation) and `outside_lookback` (accounting could not cover
+the full unobserved period). Late accounting does not deliver a second ending for an unknown one.
 
 `at` uses the offset-bearing job end time (start time for `job.started`) when known;
 otherwise it is the observation time. `data.observed_at` always records collection time.
 Unknown job times are null. After a gap longer than two collection intervals plus 240 seconds
-(allowing for a failed attempt and recovery, each bounded by the 120-second collection timeout), non-failure
-endings are recorded silently, including departures resolved in a later collection; failures
-remain eligible for delivery. Job events found after that gap also carry `data.since`, the
+(allowing for a failed attempt and recovery, each bounded by the 120-second collection timeout),
+all endings remain visible and eligible for delivery, including departures resolved in a
+later collection. Notify groups catch-up messages. Job events found after that gap carry `data.since`, the
 previous successful collection time; the collection window is `since` to `observed_at`,
 not a claim that every job ended or started at recovery. Unknown departures preserve `data.job` as last seen;
 `data.outcome` is `unknown`, and top-level `data.state` and `data.exit_code` are null.
@@ -202,9 +218,10 @@ map to one `job.failed`, and all other outcomes to one `job.ended`. A handler th
 legacy rows remain readable and deliverable; cursors still use event IDs. `PLUGIN_API`
 and `WEB_API` remain 1.
 
-The gap types `service.gap` and `source.gap` are outside `sdk.EVENT_TYPES`.
-Subscribe to them by name; wildcard handlers do not receive them, and Notify refuses
-them as rule types. Their `at` is the observation time at the end of the gap.
+The new types `job.finished`, `service.gap` and `source.gap` are outside `sdk.EVENT_TYPES`.
+Subscribe to new types by name. Wildcard handlers do not receive gap events, and
+Notify refuses `service.gap` and `source.gap` as rule types. Gap events use the
+observation time at the end of the gap for `at`.
 `source.gap` describes the full span between successful observations, not job end times.
 `failures_checked_from` uses the current successful history query's lookback. It is
 null when the window is unknown or history could not be collected. A known window
@@ -221,7 +238,10 @@ than one collection interval after the last successful observation, allowing ano
 75 seconds for heartbeat/tick granularity and 120 seconds for a collection in flight,
 and the time from service resume to successful
 collection is no longer than the source-gap threshold. This includes failed attempts
-and retries shortly after waking up.
+and retries shortly after waking up. When the accounting window is known, it must also
+cover the whole unobserved period; otherwise the source gap remains visible to explain
+unchecked history. When the window is unknown or history is unavailable, a covering
+service gap suppresses the redundant source gap.
 First collections have no source gap; repeated observations use the same deduplication
 key. Lookbacks and the Failed tab's 24-hour meaning are unchanged.
 
@@ -247,8 +267,9 @@ separately. Rules filter every child before grouping; silent events are excluded
 Collection identity uses `data.observed_at`, falling back to `at` for legacy rows, never
 the job's end time.
 
-The lowest event ID leads. Its template and optional log are used; a translated tail
-names the other jobs, grouped by array, name and outcome, with at most ten groups and
+The lowest-ID failure outcome leads when present; otherwise the lowest event ID leads.
+The leader's template and optional log are used. A translated tail lists failure groups
+and their IDs before other outcomes, and names the other jobs, grouped by array, name and outcome, with at most ten groups and
 ten additional job IDs; omitted events are counted. Opt-in AI composition receives the
 total count, this summary, and template facts for at most twenty siblings, rather than
 full sibling records. Full siblings are used only in memory during composition. The
@@ -256,7 +277,7 @@ queued message and JSON webhook `event` contain only the leader event; the messa
 carries the digest summary. Stored events are unchanged.
 
 Notify records one `grouped` row per digest and rule, with `digest` and `event` (the
-leader ID), `events` (the sibling IDs), and `count` (the number of grouped siblings).
+leader ID), `events` (the sibling IDs), and `count` (the total number of events including the leader).
 This row is reserved with the queued message in one transaction. Channel `sent`/`failed`
 records retain the total count including the leader. A suppressed digest gets one
 `suppressed` row with the total count, leader ID and sibling IDs. These compact records
@@ -270,7 +291,8 @@ collapses three or more non-silent events sharing source, type and observation t
 Each group is an event-shaped row with an additional `group` object: `count`, `ids`,
 `first_at`, `last_at`, `names` (up to ten `{name, count}` entries), `outcomes` (outcome
 to count for `job.finished`, empty for other types), and `events` containing at most
-the newest 50 children by event ID. `count`, `ids`, names and outcome counts cover the
+50 children, with failure outcomes first, then unknown outcomes, then other endings,
+newest ID first within each class. `count`, `ids`, names and outcome counts cover the
 whole group. `observed_time` is true when any child lacks its own start/end time;
 `since` is the collection-gap start for such children, or null. These fields cover
 omitted children too, so the time label and failure indicator remain accurate.
@@ -708,7 +730,9 @@ rewrite events or deliver new event types. Per rule/channel the newest outcome w
 different channels and rules may produce different outcomes for the same event.
 Grouped rows summarize all their IDs, including children omitted from the display cap,
 and displayed children carry their own outcomes. `grouped` means included in a digest,
-not successfully delivered; it may appear alongside `sent` or `failed`.
+not successfully delivered. Channel outcomes (`sent`, `failed`, `dropped`) attach to
+the leader; siblings carry `grouped`, or `suppressed` for a rate-limited message.
+The aggregate row still shows all recorded outcomes across its members.
 
 Only retained, linked log records contribute. An absent/empty list means no retained
 outcome is known, not that nothing was sent. Test messages and records without an event

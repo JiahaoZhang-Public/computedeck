@@ -252,7 +252,7 @@ def test_upgrade_records_terminal_history_silently() -> None:
     assert "lifecycle_pending" in batch.snapshot()
 
 
-def test_gap_delivers_only_failure_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gap_delivers_all_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "now", lambda: "2026-01-02T12:00:00+00:00")
     source = {**SOURCE, "last_success": "2026-01-01T12:00:00+00:00", "interval_minutes": 10}
     rows = events.collected(
@@ -268,9 +268,8 @@ def test_gap_delivers_only_failure_outcomes(monkeypatch: pytest.MonkeyPatch) -> 
         first=False,
     )
     assert len(rows) == len(events.OUTCOMES)
-    assert all(
-        row["silent"] == (row["data"]["outcome"] not in events.FAILURE_OUTCOMES) for row in rows
-    )
+    assert all(not row["silent"] for row in rows)
+    assert all(row["data"]["since"] == source["last_success"] for row in rows)
     assert not events.after_gap(
         {**source, "last_success": "2026-01-02T11:40:00+00:00"}, events.now()
     )
@@ -452,7 +451,7 @@ def test_three_collection_accounting_outage_delivers_failures_once(
 
 @pytest.mark.parametrize("baseline", [False, True])
 @pytest.mark.parametrize("outcome", ["unknown", "completed", "failed"])
-def test_held_catchup_departures_keep_non_failure_endings_silent(
+def test_held_departures_preserve_only_upgrade_baseline_silence(
     monkeypatch: pytest.MonkeyPatch, baseline: bool, outcome: str
 ) -> None:
     monkeypatch.setattr(events, "now", lambda: "2026-01-04T12:00:00+00:00")
@@ -475,7 +474,7 @@ def test_held_catchup_departures_keep_non_failure_endings_silent(
         first=False,
     )
     assert len(rows) == 1
-    assert rows[0]["silent"] == (outcome != "failed")
+    assert rows[0]["silent"] == baseline
     assert rows[0]["data"]["outcome"] == outcome
 
 
@@ -722,3 +721,135 @@ def test_legacy_naive_end_stays_conservative_but_same_raw_key_can_retry() -> Non
     assert retry["key"] == original["key"]
     changed_raw = {**normalized, "end": normalized["ended_at"]}
     assert events.collected(SOURCE, old, Batch(jobs=[], finished=[changed_raw]), first=False) == []
+
+
+def test_lagged_short_failure_outside_terminal_window_is_announced(store: Store) -> None:
+    old = {"jobs": [], "failures": [], "lifecycle_pending": []}
+    empty = Batch(jobs=[], failures=[], finished=[], capabilities=["history"])
+    assert events.collected(SOURCE, old, empty, first=False) == []
+    late = Batch(jobs=[], failures=[failure("short")], finished=[], capabilities=["history"])
+    [row] = events.collected(SOURCE, empty.snapshot(), late, first=False)
+    assert row["type"] == "job.finished" and row["data"]["outcome"] == "failed"
+    assert not row["silent"]
+    assert store.add_events([row]) == 1
+    assert events.collected(SOURCE, late.snapshot(), late, first=False) == []
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "COMPLETED"])
+def test_live_container_failure_keeps_legacy_delivery_and_key(store: Store, state: str) -> None:
+    pod = job("pod", state)
+    failed = {**failure("pod"), "state": "OUT_OF_MEMORY"}
+    batch = Batch(
+        jobs=[pod] if state == "RUNNING" else [],
+        failures=[failed],
+        finished=[pod] if state == "COMPLETED" else [],
+    )
+    rows = events.collected(
+        {**SOURCE, "driver": "kubernetes"},
+        {"jobs": [pod], "lifecycle_pending": []},
+        batch,
+        first=False,
+    )
+    legacy = [row for row in rows if row["type"] == "job.failed"]
+    assert len(legacy) == 1
+    assert legacy[0]["key"] == f"job.failed:{failed['id']}:{failed['end']}"
+    assert events.for_handler(legacy[0], None) == legacy[0]
+    assert notify.matches({"events": ["job.failed"]}, legacy[0])
+    assert store.add_events(rows) == len(rows)
+    assert store.add_events(events.collected(SOURCE, batch.snapshot(), batch, first=False)) == 0
+
+
+@pytest.mark.parametrize("outcome,kind", [("failed", "job.failed"), ("completed", "job.ended")])
+def test_sdk_event_types_keep_legacy_delivery_and_naive_end(outcome: str, kind: str) -> None:
+    from computedeck import sdk
+
+    row = {
+        "type": "job.finished",
+        "data": {
+            "driver": "slurm",
+            "outcome": outcome,
+            "job": {"end": "2026-01-01T12:00:00+04:00"},
+        },
+    }
+    delivered = events.for_handler(row, frozenset(sdk.EVENT_TYPES))
+    assert delivered["type"] == kind
+    assert delivered["data"]["job"]["end"] == "2026-01-01T12:00:00"
+    assert row["data"]["job"]["end"].endswith("+04:00")
+    assert events.for_handler(row, frozenset(["job.finished"])) == row
+
+
+def test_activity_group_keeps_low_id_failure_in_visible_children() -> None:
+    rows = [
+        {
+            "id": i,
+            "type": "job.finished",
+            "source_id": "a",
+            "at": "2026-01-01T12:00:00Z",
+            "data": {"outcome": "failed" if i == 1 else "completed"},
+        }
+        for i in range(1, 62)
+    ]
+    [row] = events.group_events(rows)
+    assert row["group"]["count"] == 61
+    assert len(row["group"]["events"]) == 50
+    assert row["group"]["events"][0]["id"] == 1
+
+
+def test_unknown_after_long_gap_explains_lookback_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(events, "now", lambda: "2026-01-04T12:00:00+00:00")
+    source = {**SOURCE, "last_success": "2026-01-01T12:00:00+00:00"}
+    old = {"jobs": [job("1", "RUNNING")], "lifecycle_pending": []}
+    batch = Batch(jobs=[], finished=[], capabilities=["history"], history_window_seconds=86400)
+    assert events.collected(source, old, batch, first=False) == []
+    next_batch = Batch(jobs=[], finished=[], capabilities=["history"], history_window_seconds=86400)
+    [row] = events.collected(
+        {**source, "last_success": events.now()}, batch.snapshot(), next_batch, first=False
+    )
+    assert row["data"]["outcome_reason"] == "outside_lookback"
+    assert row["data"]["since"] == source["last_success"]
+    assert not row["silent"]
+
+
+@pytest.mark.parametrize("location", ["current", "previous", "pending"])
+def test_requeued_failure_keeps_legacy_notice_without_resolving_new_attempt(location: str) -> None:
+    running = {**job("requeued", "RUNNING"), "started_at": "2026-01-01T10:00:00+00:00"}
+    stale = {**failure("requeued"), "end": "2026-01-01T09:00:00+00:00"}
+    old = {
+        "jobs": [] if location == "pending" else [running],
+        "lifecycle_pending": [running] if location == "pending" else [],
+    }
+    batch = Batch(
+        jobs=[running] if location == "current" else [],
+        finished=[stale],
+        failures=[stale],
+        capabilities=["history"],
+    )
+    rows = events.collected(SOURCE, old, batch, first=False)
+    assert not any(
+        row["type"] == "job.finished" and row["data"]["outcome"] == "failed" for row in rows
+    )
+    if location == "current":
+        [row] = rows
+        assert row["key"] == f"job.failed:{stale['id']}:{stale['end']}"
+        assert not row["silent"]
+        assert events.for_handler(row, None)["type"] == "job.failed"
+    else:
+        assert not any(row["type"] == "job.failed" for row in rows)
+
+
+@pytest.mark.parametrize("same_failure", [True, False])
+def test_departure_only_marks_the_container_failure_already_announced(same_failure: bool) -> None:
+    previous_failure = failure("pod")
+    terminal = {
+        **previous_failure,
+        "end": previous_failure["end"] if same_failure else "2026-01-01T01:00:00",
+    }
+    old = {"jobs": [job("pod", "RUNNING")], "failures": [previous_failure], "lifecycle_pending": []}
+    [row] = events.collected(SOURCE, old, Batch(jobs=[], finished=[terminal]), first=False)
+    assert not row["silent"]
+    assert bool(row["data"].get("failure_announced")) == same_failure
+    assert events.for_handler(row, None)["type"] == ("job.ended" if same_failure else "job.failed")
+    assert notify.matches({"events": ["job.finished"], "outcomes": ["failed"]}, row) == (
+        not same_failure
+    )
+    assert notify.matches({"events": ["job.finished"], "outcomes": []}, row)

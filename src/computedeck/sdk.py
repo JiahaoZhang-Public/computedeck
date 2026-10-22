@@ -47,7 +47,7 @@ from .drivers.base import (
 from .drivers.cloud import Account, Api, CloudDriver, CloudInstance
 from .drivers.cloud import ssh_command as parse_ssh_command
 from .drivers.ssh import SSHBusyError, ssh_command
-from .events import TYPES as EVENT_TYPES
+from .events import LEGACY_TYPES as EVENT_TYPES
 from .plugins import PLUGIN_API, Plugin, PluginContext, SettingField, Text
 from .tools.channels import ChannelKind, Message
 from .tools.channels import register as register_channel

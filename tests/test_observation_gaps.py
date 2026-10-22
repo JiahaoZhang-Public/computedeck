@@ -272,24 +272,26 @@ def test_heartbeat_gap_and_metadata_roll_back_together(store: Store) -> None:
 
 @pytest.mark.parametrize(
     "heartbeat_delay,covered",
-    [(300, True), (610, True), (795, True), (796, False), (46 * 3600, False)],
+    [(300, True), (610, True), (795, True), (796, False), (22 * 3600, False)],
 )
 @pytest.mark.parametrize("tick_before_collection", [True, False])
+@pytest.mark.parametrize("hours", [24, 48])
 async def test_collector_suppresses_only_source_gaps_covered_by_service_gap(
     monkeypatch: pytest.MonkeyPatch,
     store: Store,
     tmp_path: Path,
     add_source: Callable[..., dict[str, Any]],
     heartbeat_delay: int,
+    hours: int,
     covered: bool,
     tick_before_collection: bool,
 ) -> None:
-    source = add_source(last_success=(AT - timedelta(hours=48)).isoformat())
+    source = add_source(last_success=(AT - timedelta(hours=hours)).isoformat())
     collector = Collector(runtime(store, tmp_path))
     monkeypatch.setattr(collector_module, "now", lambda: AT.isoformat())
     monkeypatch.setattr(events, "now", lambda: AT.isoformat())
     store.record_heartbeat(
-        (AT - timedelta(hours=48) + timedelta(seconds=heartbeat_delay)).isoformat()
+        (AT - timedelta(hours=hours) + timedelta(seconds=heartbeat_delay)).isoformat()
     )
     if tick_before_collection:
         collector._heartbeat()
@@ -301,13 +303,13 @@ async def test_collector_suppresses_only_source_gaps_covered_by_service_gap(
     await collector.collect(source["id"])
     kinds = [row["type"] for row in store.recent_events()]
     assert kinds.count("service.gap") == 1
-    assert kinds.count("source.gap") == (0 if covered else 1)
+    assert kinds.count("source.gap") == (0 if covered and hours <= 24 else 1)
     assert store.source(source["id"])["history_window_seconds"] == 86400
     await collector.collect(source["id"])
     assert [row["type"] for row in store.recent_events()] == kinds
 
 
-async def test_collector_retry_after_wake_keeps_only_the_service_gap(
+async def test_collector_retry_after_long_sleep_keeps_unchecked_history_warning(
     monkeypatch: pytest.MonkeyPatch,
     store: Store,
     tmp_path: Path,
@@ -342,13 +344,13 @@ async def test_collector_retry_after_wake_keeps_only_the_service_gap(
     assert store.source(source["id"])["status"] == "ready"
     kinds = [row["type"] for row in store.recent_events()]
     assert kinds.count("service.gap") == 1
-    assert "source.gap" not in kinds
+    assert kinds.count("source.gap") == 1
     assert kinds.count("source.failed") == kinds.count("source.recovered") == 1
 
 
 @pytest.mark.parametrize("window,threshold", [(86400, 82800), (None, 3600)])
 @pytest.mark.parametrize("extra", [-1, 0, 1])
-def test_service_gap_suppression_uses_remaining_source_gap_threshold(
+def test_service_gap_suppresses_covered_outages_unless_known_history_is_incomplete(
     monkeypatch: pytest.MonkeyPatch, window: int | None, threshold: int, extra: int
 ) -> None:
     monkeypatch.setattr(events, "now", lambda: AT.isoformat())
@@ -362,7 +364,9 @@ def test_service_gap_suppression_uses_remaining_source_gap_threshold(
             "to": (AT - timedelta(seconds=threshold + extra)).isoformat(),
         },
     )
-    assert [row["type"] for row in rows] == (["source.gap"] if extra > 0 else [])
+    assert [row["type"] for row in rows] == (
+        ["source.gap"] if window is not None or extra > 0 else []
+    )
 
 
 def test_old_service_gap_does_not_hide_later_source_outage(monkeypatch: pytest.MonkeyPatch) -> None:

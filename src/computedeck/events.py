@@ -56,8 +56,16 @@ def for_handler(event: dict[str, Any], types: frozenset[str] | None) -> dict[str
     if kind.startswith("change."):
         return None
     if kind == "job.finished" and (types is None or kind not in types):
-        kind = "job.failed" if event["data"].get("outcome") in FAILURE_OUTCOMES else "job.ended"
-        event = {**event, "type": kind}
+        data = event["data"]
+        kind = (
+            "job.failed"
+            if data.get("outcome") in FAILURE_OUTCOMES and not data.get("failure_announced")
+            else "job.ended"
+        )
+        job = dict(data.get("job") or {})
+        if data.get("driver") in {"slurm", "pbs", "lsf"} and (end := job_time(job.get("end"))):
+            job["end"] = datetime.fromisoformat(end).replace(tzinfo=None).isoformat()
+        event = {**event, "type": kind, "data": {**data, "job": job}}
     if (types is None and kind in LEGACY_TYPES) or (types is not None and kind in types):
         return event
     return None
@@ -97,6 +105,10 @@ def source_gap(
             and resumed
             and datetime.fromisoformat(offline) - slack <= start
             and (end - datetime.fromisoformat(resumed)).total_seconds() <= threshold
+            and (
+                window is None
+                or (end - min(start, datetime.fromisoformat(offline))).total_seconds() <= window
+            )
         ):
             return []
     return [
@@ -196,6 +208,35 @@ def collected(
         )
         if started and end and datetime.fromisoformat(end) < datetime.fromisoformat(started):
             terminal.pop(job_id, None)
+    old_failures = {job["id"]: job for job in old.get("failures") or []}
+    for job in batch.failures or []:
+        job_id = job["id"]
+        if (
+            job_id in current or (source.get("driver") == "kubernetes" and job_id in terminal)
+        ) and (
+            job_id not in terminal
+            or str(terminal[job_id].get("state", "")).lower() not in FAILURE_OUTCOMES
+        ):
+            # A restarted container can fail while its pod stays live or later succeeds.
+            # Preserve the API-1 event and key for this distinct container failure.
+            events.append(
+                {
+                    "key": f"job.failed:{job_id}:{job.get('end')}",
+                    "type": "job.failed",
+                    "at": job_time(job.get("ended_at")) or job_time(job.get("end")) or at,
+                    "source_id": source["id"],
+                    "silent": first,
+                    "data": {**context, "job": job, "observed_at": at},
+                }
+            )
+        elif (
+            job_id not in previous
+            and job_id not in pending
+            and job_id not in current
+            and job_id not in ended
+            and job_id not in old_failures
+        ):
+            terminal.setdefault(job_id, job)
     waiting: list[dict[str, Any]] = []
     if batch.jobs is not None:
         renamed = _renamed(previous, current)
@@ -232,7 +273,8 @@ def collected(
                     {
                         **job,
                         "held_at": held_at,
-                        "held_silent": job.get("held_silent", baseline or gap),
+                        "held_silent": job.get("held_silent", baseline),
+                        "since": job.get("since") or (source.get("last_success") if gap else None),
                     }
                 )
             else:
@@ -242,7 +284,12 @@ def collected(
         waiting = list(pending.values())
     for job_id, job in terminal.items():
         held_silent = pending.get(job_id, {}).get("held_silent", False)
-        job = {key: value for key, value in job.items() if key not in {"held_at", "held_silent"}}
+        since = pending.get(job_id, {}).get("since")
+        job = {
+            key: value
+            for key, value in job.items()
+            if key not in {"held_at", "held_silent", "since"}
+        }
         raw_end = None if job_id in unknown else job.get("end")
         end = None if job_id in unknown else job_time(job.get("ended_at")) or job_time(raw_end)
         before = ended.get(job_id)
@@ -258,6 +305,14 @@ def collected(
         outcome = "unknown" if job_id in unknown else str(job.get("state", "")).lower()
         if outcome not in OUTCOMES:
             outcome = "unknown"
+        # A failed container run already announced while the pod was live is not
+        # another failure on departure. Keep the outcome visible in Activity.
+        failure_announced = (
+            outcome in FAILURE_OUTCOMES
+            and job_id in previous.keys() | pending.keys()
+            and job_id in old_failures
+            and old_failures[job_id].get("end") == raw_end
+        )
         reason = None
         if outcome == "unknown":
             reason = (
@@ -265,13 +320,24 @@ def collected(
                 if history_capable or job_id in pending
                 else "outcomes_unavailable"
             )
+        previous_success = job_time(since or source.get("last_success"))
+        if (
+            outcome == "unknown"
+            and previous_success
+            and batch.history_window_seconds is not None
+            and (
+                datetime.fromisoformat(at) - datetime.fromisoformat(previous_success)
+            ).total_seconds()
+            > batch.history_window_seconds
+        ):
+            reason = "outside_lookback"
         events.append(
             {
                 "key": f"job.finished:{job_id}:{raw_end or 'left'}",
                 "type": "job.finished",
                 "at": end or at,
                 "source_id": source["id"],
-                "silent": baseline or ((gap or held_silent) and outcome not in FAILURE_OUTCOMES),
+                "silent": baseline or held_silent,
                 "data": {
                     **context,
                     "job": job,
@@ -283,6 +349,8 @@ def collected(
                     "ended_at": end,
                     "observed_at": at,
                     "outcome_reason": reason,
+                    **({"failure_announced": True} if failure_announced else {}),
+                    **({"since": since} if since else {}),
                 },
             }
         )
@@ -447,7 +515,17 @@ def group_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         (event["data"]["since"] for event in unknown if event["data"].get("since")),
                         None,
                     ),
-                    "events": siblings[:50],
+                    "events": sorted(
+                        siblings,
+                        key=lambda event: (
+                            0
+                            if event["data"].get("outcome") in FAILURE_OUTCOMES
+                            else 1
+                            if event["data"].get("outcome") == "unknown"
+                            else 2,
+                            -event["id"],
+                        ),
+                    )[:50],
                 },
             }
         )

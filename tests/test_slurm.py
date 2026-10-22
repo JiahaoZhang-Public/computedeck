@@ -769,7 +769,14 @@ def test_terminal_history_has_offsets_and_keeps_failure_end_unchanged() -> None:
 
 @pytest.mark.parametrize(
     "minutes,capabilities,window",
-    [(10, ["history"], 15), (3000, ["history"], 1440), (10, [], 1440), (10, None, 1440)],
+    [
+        (10, ["history"], 15),
+        (1440, ["history"], 1445),
+        (1441, ["history"], 1446),
+        (3000, ["history"], 1447),
+        (10, [], 1440),
+        (10, None, 1440),
+    ],
 )
 async def test_terminal_window_overlaps_previous_success_and_is_capped(
     monkeypatch: pytest.MonkeyPatch, minutes: int, capabilities: list[str] | None, window: int

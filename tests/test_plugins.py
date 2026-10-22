@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from computedeck import app as api
-from computedeck import cli, credentials, drivers
+from computedeck import cli, credentials, drivers, sdk
 from computedeck import plugins as plugin_host
 from computedeck.drivers.base import Batch, SourceError
 from computedeck.plugins import Plugin, PluginContext, Runtime
@@ -520,6 +520,7 @@ async def test_an_event_handler_that_works_again_is_no_longer_reported(
     [
         None,
         ["job.failed", "job.ended"],
+        list(sdk.EVENT_TYPES),
         ["job.finished"],
         ["job.finished", "job.failed", "job.ended"],
     ],
