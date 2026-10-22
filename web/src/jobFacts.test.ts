@@ -38,3 +38,18 @@ it('bounds waits by observation time and preserves unknown timestamps', () => {
   expect(jobWaiting({ ...job, submitted_at: '2026-01-05T10:00:00' })).toBe('—');
   expect(jobWaiting({ ...job, observed_at: '2025-01-01T00:00:00Z' })).toBe('—');
 });
+
+it.each([
+  'QOSMaxSubmitJobPerUserLimit',
+  'AssocMaxGRESPerUser',
+  'AssocMaxCpuPerUserLimit',
+  'AssocMaxSubmitJobLimit',
+])('shares the personal-limit class for %s with the planner', (reason) => {
+  for (const locale of ['en', 'zh-CN'] as const) {
+    setLocale(locale);
+    expect(jobReason({ state: 'PENDING', reason: `${reason} (details)` }, 'slurm')).toMatchObject({
+      kind: 'personalLimit',
+      summary: t('job.explain.personalLimit'),
+    });
+  }
+});

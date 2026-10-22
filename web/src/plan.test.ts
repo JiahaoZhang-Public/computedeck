@@ -241,7 +241,14 @@ describe('where to run', () => {
     };
     const [option] = planOptions(open, { gpus: 4, gpuType: '', hours: null });
     expect(option.limit).toBe(Infinity);
-    expect(option.verdict).toBe('likely');
+    expect(option.verdict).toBe('possible');
+    expect(option.contradiction?.reason).toBe('QOSMaxGRESPerUser');
+    expect(
+      planOptions(
+        { ...open, jobs: [job('1'), job('2', { state: 'PENDING', reason: 'Priority' })] },
+        { gpus: 4, gpuType: '', hours: null },
+      )[0].verdict,
+    ).toBe('likely');
   });
 
   it('keeps unknown allocation unknown instead of counting it as free', () => {
@@ -711,10 +718,10 @@ describe('own queue estimates', () => {
       headroomAfterQueue: 2,
       verdict: 'likely',
     });
-    // A reason alone does not override the arithmetic.
+    // A personal-limit wait that fits contradicts the collected arithmetic.
     expect(
       option([{ gpu_count: 1, reason: 'QOSMaxGRESPerUser' }], {}, { ...ask, gpus: 2 }).verdict,
-    ).toBe('likely');
+    ).toBe('possible');
   });
 
   it.each([
@@ -1170,3 +1177,252 @@ it.each([
     for (const option of options) expect(option.onDemandGpus).toBe(expected);
   },
 );
+
+describe('honest ranking', () => {
+  const ask = { gpus: 2, gpuType: '', hours: null };
+  const estimate = (waiting: Partial<Job>, gpuType = '', extra: Partial<Source> = {}) =>
+    planOptions(
+      {
+        sources: [
+          source({
+            qos: [
+              {
+                ...source().qos[0],
+                limits: { MaxTRESPU: gpuType ? 'gres/gpu=12,gres/gpu:a100=8' : 'gres/gpu=8' },
+              },
+            ],
+            ...extra,
+          }),
+        ],
+        nodes: [node('g1', { gpu_allocated: 0 })],
+        jobs: [
+          job('running'),
+          job('waiting', {
+            state: 'PENDING',
+            gpu_count: 1,
+            reason: 'QOSMaxGRESPerUser',
+            ...waiting,
+          }),
+        ],
+      },
+      { ...ask, gpuType },
+    )[0];
+
+  it.each(['', 'a100'])('caps a contradictory personal-limit wait for %s', (model) => {
+    expect(estimate({}, model)).toMatchObject({
+      headroom: 4,
+      headroomAfterQueue: 3,
+      verdict: 'possible',
+      contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+    });
+    expect(estimate({ gpu_count: 12 }, model)).toMatchObject({
+      verdict: 'likely',
+      contradiction: null,
+      headroomAfterQueue: 4,
+    });
+    expect(estimate({ gpu_count: 4 }, model)).toMatchObject({ verdict: 'behind' });
+    expect(estimate({ gpu_count: null }, model).contradiction).toBeNull();
+    expect(estimate({ reason: 'JobHeldUser', gpu_count: 8 }, model)).toMatchObject({
+      verdict: 'likely',
+      contradiction: null,
+    });
+  });
+
+  it.each([
+    'QOSMaxJobsPerUserLimit',
+    'QOSMaxSubmitJobPerUserLimit',
+    'AssocMaxGRESPerUser',
+    'AssocMaxJobsLimit',
+    'AssocMaxSubmitJobLimit',
+  ])('uses the personal-limit class for %s', (reason) => {
+    expect(estimate({ reason })).toMatchObject({ verdict: 'possible', contradiction: { reason } });
+  });
+
+  it('does not infer a contradiction from stale, unrelated or unknown evidence', () => {
+    for (const extra of [
+      { stale: true },
+      { capabilities: ['nodes', 'qos_limits', 'qos_access'] },
+      { capabilities: ['jobs', 'nodes', 'qos_access'] },
+      { driver: 'pbs' },
+    ])
+      expect(estimate({}, '', extra).contradiction).toBeNull();
+    expect(estimate({ qos: 'other' }).contradiction).toBeNull();
+    expect(estimate({ source_id: 'other-login' }).contradiction).toBeNull();
+    expect(estimate({ reason: 'Priority' }).verdict).toBe('likely');
+    for (const gpu_type of [null, 'h100', 'a100,h100'])
+      expect(estimate({ gpu_type }, 'a100').contradiction).toBeNull();
+    expect(
+      estimate({}, '', { qos: [{ ...source().qos[0], origin: 'kubernetes_resource_quota' }] }),
+    ).toMatchObject({
+      verdict: 'likely',
+      queuedForRoom: 0,
+      contradiction: null,
+    });
+  });
+
+  it('caps a contradiction with only a typed GPU limit', () => {
+    expect(
+      estimate({}, 'a100', {
+        qos: [{ ...source().qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }],
+      }),
+    ).toMatchObject({
+      used: 4,
+      headroom: 4,
+      headroomAfterQueue: 3,
+      verdict: 'possible',
+      contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+    });
+  });
+
+  it('does not turn stale twin jobs into current queue evidence', () => {
+    const current = source({ id: 'second-alice', last_success: '2026-01-01T01:00:00Z' });
+    const [option] = planOptions(
+      {
+        sources: [source({ stale: true }), current],
+        nodes: [node('g1', { source_id: current.id })],
+        jobs: [job('old-wait', { state: 'PENDING', gpu_count: 1, reason: 'QOSMaxGRESPerUser' })],
+      },
+      ask,
+    );
+    expect(option).toMatchObject({
+      source: { id: current.id },
+      used: 0,
+      queued: 0,
+      contradiction: null,
+      verdict: 'likely',
+    });
+  });
+
+  it.each([0, 1, null])(
+    'keeps zero-GPU running jobs out of typed use, preserving unknowns (%s)',
+    (gpu_count) => {
+      const [option] = planOptions(
+        {
+          sources: [
+            source({ qos: [{ ...source().qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }] }),
+          ],
+          nodes: [node('g1')],
+          jobs: [job('gpu'), job('cpu', { gpu_count, gpu_type: null })],
+        },
+        { ...ask, gpuType: 'a100' },
+      );
+      expect(option.headroom).toBe(gpu_count === 0 ? 4 : null);
+      expect(option.verdict).toBe(gpu_count === 0 ? 'likely' : 'possible');
+    },
+  );
+
+  it.each([false, true])('prefers a current twin over a newer failed twin (%s)', (reverse) => {
+    const current = source({ last_success: '2026-01-01T10:00:00Z', qos: [source().qos[0]] });
+    const failed = source({
+      id: 'second-alice',
+      last_success: '2026-01-01T10:02:00Z',
+      last_attempt: '2026-01-01T10:07:00Z',
+      status: 'error',
+      error: { code: 'ssh_failed' },
+      stale: false,
+      qos: [source().qos[0]],
+    });
+    const sources = [current, failed];
+    const options = planOptions(
+      {
+        sources: reverse ? sources.reverse() : sources,
+        nodes: [node('g1')],
+        jobs: [
+          job('running'),
+          job('waiting', { state: 'PENDING', gpu_count: 1, reason: 'Priority' }),
+        ],
+      },
+      ask,
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({
+      source: { id: current.id },
+      qos: 'normal',
+      limit: 8,
+      used: 4,
+      headroom: 4,
+      queued: 1,
+      queuedGpus: 1,
+      queuedForRoom: 1,
+      headroomAfterQueue: 3,
+      verdict: 'likely',
+    });
+  });
+
+  it.each([false, true])(
+    'merges twins per QoS, attributing jobs regardless of source order (%s)',
+    (reverse) => {
+      const old = source({ last_success: '2026-01-01T00:00:00Z' });
+      const newer = source({
+        id: 'second-alice',
+        name: 'Second login',
+        last_success: '2026-01-01T01:00:00Z',
+        qos: [source().qos[0]],
+      });
+      const bob = source({ id: 'bob', username: 'bob' });
+      const disabled = source({
+        id: 'disabled',
+        enabled: false,
+        last_success: '2026-01-01T02:00:00Z',
+      });
+      const sources = [old, newer, bob, disabled];
+      const options = planOptions(
+        {
+          sources: reverse ? sources.reverse() : sources,
+          nodes: [node('g1', { gpu_allocated: 0 })],
+          jobs: [
+            job('running'),
+            job('waiting', { state: 'PENDING', gpu_count: 1, reason: 'QOSMaxGRESPerUser' }),
+          ],
+        },
+        ask,
+      );
+      expect(options).toHaveLength(4);
+      expect(
+        options.find((o) => o.source.username === 'alice' && o.qos === 'normal'),
+      ).toMatchObject({
+        source: { id: newer.id },
+        used: 4,
+        queued: 1,
+        verdict: 'possible',
+        contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+      });
+      expect(
+        options.find((o) => o.source.username === 'alice' && o.qos === 'long')?.source.id,
+      ).toBe(old.id);
+      expect(options.find((o) => o.source.username === 'bob' && o.qos === 'normal')).toMatchObject({
+        used: 0,
+        queued: 0,
+        verdict: 'likely',
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'counts duplicated jobs once using their newest observation (%s)',
+    (reverse) => {
+      const newer = source({ id: 'second-alice', last_success: '2026-01-01T01:00:00Z' });
+      const jobs = [
+        job('same', {
+          source_id: newer.id,
+          state: 'PENDING',
+          gpu_count: 1,
+          reason: 'QOSMaxGRESPerUser',
+          observed_at: '2026-01-01T00:00:00Z',
+        }),
+        job('same', { observed_at: '2026-01-01T01:00:00Z' }),
+      ];
+      const [option] = planOptions(
+        { sources: [source(), newer], nodes: [node('g1')], jobs: reverse ? jobs.reverse() : jobs },
+        ask,
+      );
+      expect(option).toMatchObject({
+        source: { id: newer.id },
+        used: 4,
+        queued: 0,
+        contradiction: null,
+        verdict: 'likely',
+      });
+    },
+  );
+});

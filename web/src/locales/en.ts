@@ -727,6 +727,8 @@ const en = {
     'Your queue would reduce the available room by {queued} GPUs; about {left} would remain if those jobs start first. Scheduling order may differ.',
   'plan.why.behind.one':
     'Your queue would reduce the available room by {queued} GPU; about {left} would remain if those jobs start first. Scheduling order may differ.',
+  'plan.why.contradiction':
+    '{job} waits on {reason} although the collected numbers show room; the scheduler’s count may differ.',
   'plan.why.queueUnknown':
     'Your eligible queued GPU demand is unknown; the estimate cannot account for it.',
   'plan.queuedGpus': 'Room used by queue: {count} GPUs',

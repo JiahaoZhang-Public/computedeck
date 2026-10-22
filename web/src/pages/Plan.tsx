@@ -4,6 +4,7 @@ import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { money, relativeTime } from '../domain';
+import { jobReason } from '../jobFacts';
 import { gpuModels, idleInstances, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, QosRule, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
@@ -99,6 +100,7 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
         model: request.gpuType,
       }),
     );
+  if (option.contradiction) parts.push(t('plan.why.contradiction', option.contradiction));
   if (option.onDemandGpus) parts.push(t('plan.why.onDemand', { count: option.onDemandGpus }));
   if (
     option.largestNodeFree != null &&
@@ -319,6 +321,10 @@ function OptionsTable({
         <tbody>
           {options.map((option) => {
             const why = explain(option, request, ctx.data.summary.sources[option.source.id].nodes);
+            const reason = option.reasons?.[0];
+            const explanation = reason
+              ? jobReason({ state: 'PENDING', reason }, option.source.driver)
+              : null;
             return (
               <tr key={option.key}>
                 <td>
@@ -361,7 +367,11 @@ function OptionsTable({
                       ? t('plan.queueRoomUnknown')
                       : t('plan.queuedGpus', { count: option.queuedForRoom })}
                   </span>
-                  {option.reasons?.[0] && <span className="sub">{option.reasons[0]}</span>}
+                  {reason && (
+                    <span className="sub" title={reason}>
+                      {explanation && explanation.kind !== 'unknown' ? explanation.summary : reason}
+                    </span>
+                  )}
                 </td>
                 <td className="num" data-label={t('plan.col.wall')}>
                   {option.maxWallHours == null ? '—' : duration(option.maxWallHours)}

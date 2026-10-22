@@ -151,6 +151,40 @@ function page(html: string) {
 }
 
 describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (locale) => {
+  it('explains a contradiction and translates the queue class with the raw code on hover', () => {
+    setLocale(locale);
+    const reason = 'QOSMaxSubmitJobPerUserLimit';
+    const root = page(renderPlan(source, [pending({ gpu_count: 1, reason })]));
+    const row = root.querySelector('.plan-table tbody tr')!;
+    expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
+      t('plan.verdict.possible'),
+    );
+    expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
+    const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
+    expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
+    expect(queue.textContent).toContain(t('job.explain.personalLimit'));
+    expect(queue.textContent).not.toContain(reason);
+    expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
+  });
+
+  it.each([
+    ['slurm', 'SiteSpecificCode', null],
+    ['pbs', 'Not Running: Insufficient amount of resource: ngpus', null],
+    ['slurm', 'Priority', 'job.explain.priority'],
+  ] as const)(
+    'preserves reported %s reasons unless a class is recognised: %s',
+    (driver, reason, key) => {
+      setLocale(locale);
+      const root = page(renderPlan({ ...source, driver }, [pending({ gpu_count: 1, reason })]));
+      const queue = root.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
+      const label = queue.querySelector('[title]')!;
+      expect(label.getAttribute('title')).toBe(reason);
+      expect(label.textContent).toBe(key ? t(key) : reason);
+      expect(queue.textContent).not.toContain(t('job.explain.unknown'));
+      if (key) expect(queue.textContent).not.toContain(reason);
+    },
+  );
+
   it('shows unknown access inline, with one note per source and a tagged best estimate', () => {
     setLocale(locale);
     const root = page(
@@ -299,13 +333,18 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     const data = serverDemo();
     const options = planOptions(data, { gpus: 1, gpuType: '', hours: null });
     expect(options.some((option) => option.verdict === 'behind')).toBe(true);
-    const held = data.jobs.find((job) => job.reason === 'QOSMaxGRESPerUser')!;
+    const held = data.jobs.find(
+      (job) => job.reason === 'QOSMaxGRESPerUser' && job.gpu_count === 16,
+    )!;
+    const contradictory = options.find((option) => option.contradiction);
+    expect(contradictory).toMatchObject({ queuedForRoom: 1, verdict: 'possible' });
     expect(
       options.find((option) => option.source.id === held.source_id && option.qos === held.qos),
     ).toMatchObject({ queuedForRoom: 0, verdict: 'likely' });
     const root = page(
       renderToStaticMarkup(<PlanPage ctx={{ data, groups: groupsOf(data), demo: true } as Ctx} />),
     );
+    expect(root.textContent).toContain(t('plan.why.contradiction', contradictory!.contradiction!));
     const best = root.querySelector('.plan-best')!;
     expect(best.querySelector('strong')!.textContent).toBe(
       `${options[0].source.name} · ${options[0].source.username} · ${options[0].qos}`,

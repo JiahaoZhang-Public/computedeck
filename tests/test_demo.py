@@ -303,12 +303,12 @@ def test_demo_failure_coverage_uses_only_fresh_history_sources() -> None:
     assert data["failure_history_observed_at"] == min(source["last_success"] for source in covered)
 
 
-def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
+def test_demo_queue_waits_show_both_contradictory_and_larger_limit_held_jobs() -> None:
     data = dashboard()
     queued = [job for job in data["jobs"] if job["state"] == "PENDING"]
     assert queued
     limit_held = [job for job in queued if job["reason"] == "QOSMaxGRESPerUser"]
-    assert limit_held
+    assert len(limit_held) == 2
     for job in limit_held:
         source = next(source for source in data["sources"] if source["id"] == job["source_id"])
         qos = next(qos for qos in source["qos"] if qos["name"] == job["qos"])
@@ -320,9 +320,14 @@ def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
             and running["qos"] == job["qos"]
             and running["state"] in RUNNING
         )
-        assert job["gpu_count"] > max(0, limit - used)
-    # A separate queue still demonstrates demand that can start before a new request.
-    assert any(job["reason"] == "Priority" and job["gpu_count"] == 4 for job in queued)
+        room = max(0, limit - used)
+        if job["cluster_id"] == "example:cluster-a":
+            assert job["gpu_count"] == 1
+            assert room == 4
+        else:
+            assert job["gpu_count"] > room
+    # Ordinary resource and priority waits remain visible alongside limit waits.
+    assert {"Priority", "Resources"} <= {job["reason"] for job in queued}
 
 
 def test_example_all_down_cluster_has_consistent_state_and_capacity() -> None:

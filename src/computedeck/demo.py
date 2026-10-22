@@ -26,7 +26,7 @@ _JOBS = [
     ("example:cluster-b-alice", "vit-pretrain / stage 2", "RUNNING", 8, 94, 78, "1-06:12:04"),
     ("example:cluster-a-bob", "speech-asr / eval", "RUNNING", 2, 73, 47, "03:28:51"),
     ("example:cluster-b-alice", "diffusion / fid eval", "RUNNING", 4, None, None, "08:14:32"),
-    ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 4, None, None, "00:00:00"),
+    ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 1, None, None, "00:00:00"),
     ("example:cluster-b-alice", "rl-agent / rollout", "PENDING", 16, None, None, "00:00:00"),
 ]
 
@@ -203,6 +203,8 @@ def dashboard() -> dict[str, Any]:
         capabilities_seen=["instances", "ssh_discovery", "ssh_probe"],
     )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
+    # Cluster A shows contradictory scheduler evidence: 1 GPU fits its 4-GPU room.
+    jobs[4]["reason"] = "QOSMaxGRESPerUser"
     # Cluster B's long QoS has 8 GPUs left: this 16-GPU job cannot start first.
     jobs[-1]["reason"] = "QOSMaxGRESPerUser"
     for job in jobs:

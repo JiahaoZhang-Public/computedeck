@@ -34,6 +34,19 @@ rank by whether the request fits one node, room after your queue, free GPUs and 
 access. The best-estimate card uses the first row only when it is likely or possible.
 These are estimates, not a queue position or a guarantee that Slurm will start the job.
 
+A pending personal-limit wait (for example `QOSMaxGRESPerUser` or
+`AssocMaxJobsLimit`) whose known GPU request fits the collected headroom caps a
+"Likely" estimate at "Possible". The explanation names the job and reason: the
+scheduler may count differently. A larger limit-held job does not trigger this cap,
+and stale or unknown relevant data is not treated as proof of a contradiction.
+CPU-only running jobs do not make model-specific GPU use unknown. Queue reasons
+use the same translated class as job details when recognised, with the raw code on
+hover. Unrecognised reasons remain visible as reported.
+Duplicate sources for the same cluster and username merge per QoS, preferring current
+QoS-limit data, then current job data, then the latest successful collection.
+Jobs from either current source are deduplicated by their newest
+observation. Different usernames retain separate options.
+
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.
 Usable/free GPU counts exclude nodes with no partition and FUTURE/ERROR state tokens.

@@ -15,7 +15,11 @@ const SLURM_REASONS: Record<string, string> = {
   QOSMaxGRESPerUser: 'personalLimit',
   QOSMaxCpuPerUserLimit: 'personalLimit',
   QOSMaxJobsPerUserLimit: 'personalLimit',
+  QOSMaxSubmitJobPerUserLimit: 'personalLimit',
+  AssocMaxGRESPerUser: 'personalLimit',
+  AssocMaxCpuPerUserLimit: 'personalLimit',
   AssocMaxJobsLimit: 'personalLimit',
+  AssocMaxSubmitJobLimit: 'personalLimit',
   QOSMaxGRESPerJob: 'requestLimit',
   QOSMaxWallDurationPerJobLimit: 'requestLimit',
   QOSGrpGRES: 'groupLimit',
@@ -45,6 +49,7 @@ export function jobReason(job: Pick<Job, 'state' | 'reason'>, driver: string) {
     : FAILURE_REASONS[state];
   if (!kind) return null;
   return {
+    kind,
     summary: t(`job.explain.${kind}` as MessageKey),
     next: t(`job.next.${kind}` as MessageKey),
   };
