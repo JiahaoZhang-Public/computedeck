@@ -104,6 +104,15 @@ loads. This does not add an SSH connection or widen the history query. Activity 
 the window to explain observation gaps; it does not assume that LSF retained records
 outside that window.
 
+## Wait estimates
+
+Typical wait history is not supported by the LSF driver yet. Its submit/start
+fields remain scheduler-local text without timezone offsets, so they cannot form
+reliable submit-to-start samples. Where to run and pending-job drawers explain
+this limitation instead of showing a permanent zero-sample count. Existing job
+and failure history remains available. Queue-position and fair-share estimates
+are Slurm-only. See [wait-history semantics](../metrics.md#typical-wait-from-your-job-history).
+
 ## Warnings
 
 | Code | Meaning |

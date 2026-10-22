@@ -207,7 +207,8 @@ drawers show a 25th–75th percentile range only with at least eight samples, al
 “typical wait for your jobs, not a prediction”. Slurm and PBS explicitly support
 this through the optional driver class attribute `supports_wait_history = True`.
 LSF, Kubernetes and plugins without that opt-in show an unsupported-history
-explanation. Smaller samples and unreadable accounting are explained separately. This does not use other users' queue rows or change ranking.
+explanation. Smaller samples and unreadable accounting are explained separately.
+This does not use other users' queue rows or change ranking.
 
 There is no extra SSH call or expanded lookback: samples accumulate from the existing
 terminal query after upgrading, with its existing outage and retention limitations.

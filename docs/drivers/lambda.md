@@ -20,7 +20,8 @@ The driver class is `computedeck.drivers.lambda_cloud.LambdaCloudDriver` (driver
 | `state` | `status` (below) |
 | `gpu_count` | `instance_type.specs.gpus` (0 for CPU-only types) |
 | `gpu_type` | `instance_type.gpu_description` |
-| `hourly_cost` (USD) | `instance_type.price_cents_per_hour` / 100 |
+| `hourly_cost` (USD) | `instance_type.price_cents_per_hour` / 100, for the whole instance |
+| `started_at` | `null`; no documented current-run start is collected |
 | `region` | `region.name` |
 | `host`, `port`, `username` | `ip` (public IPv4), port 22, user `ubuntu`, as in Lambda's [connection guide](https://docs.lambda.ai/public-cloud/on-demand/connecting-instance/) |
 
@@ -49,3 +50,14 @@ The driver has no options. A source-level `username` replaces `ubuntu` for SSH.
 - The API does not describe `unhealthy` or `preempted` beyond their names, so both are shown as unknown lifecycle.
 - The SSH user `ubuntu` is Lambda's default image login. A custom image with another user needs a source `username`.
 - If the API ever returns a `page_token` without being asked, the collection fails rather than showing an incomplete list.
+
+## Running cost and low-use coverage
+
+Running-cost estimates use the labelled `seen_running_since` observation window
+because no provider start is collected. Gaps or lifecycle changes reset the window;
+stale estimates stop at the last successful collection. Current-price estimates
+are not bills. See [running cost estimates](../metrics.md#running-cost-estimates).
+
+The listing provides no utilization. On-demand hardware checks contribute actual
+readings, but one check cannot establish sustained low use and no periodic provider
+SSH checks are added. See [low-use coverage](../metrics.md#sustained-low-gpu-use).

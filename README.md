@@ -10,7 +10,7 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 [![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
 
-*All screenshots use built-in example data from an earlier preview; the 0.6.0 layout and figures have changed. Click the overview for the 20-second demo.*
+*All screenshots use built-in example data from an earlier preview; the 0.7.0 layout and figures have changed. Click the overview for the 20-second demo.*
 
 ## Features
 
@@ -39,13 +39,15 @@ for upgrade details, including possible steps in the history chart.
 
 **0.6.0 — Know what changed** adds searchable activity, recorded job outcomes and array summaries, notification digests and delivery status, visible observation gaps, and attention acknowledgement and snoozing. See the [changelog](CHANGELOG.md).
 
+**0.7.0 — Choose resources with confidence** explains resource estimates and their evidence, finds free SSH GPUs, and copies Slurm flags from collected facts. Usage & cost adds observed daily usage and cost estimates; low-use hints, Slurm queue positions and history-backed waits help you decide where to run. See the [changelog](CHANGELOG.md).
+
 ## Version preview
 
-Planned work; scope and priorities may change.
+Completed milestones and planned work; future scope and priorities may change.
 
 - [x] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
 - [x] **v0.6 — Know what changed:** a searchable activity page, one recorded outcome per job with failure explanations, grouped job and array notifications with delivery status, attention acknowledgement and snoozing, and visible observation gaps.
-- [ ] **v0.7 — Choose resources with confidence:** explainable resource comparisons, cost estimates and usage trends, sustained low-utilization hints, and wait estimates only where history supports them.
+- [x] **v0.7 — Choose resources with confidence:** explained resource comparisons, free SSH GPUs and copy-only Slurm flags, observed usage and cost estimates, sustained low-use hints, Slurm queue positions, history-backed waits, and shared-host GPU counting.
 - [ ] **v1.0 — A redesigned interface:** a rebuilt visual system, navigation organised around your questions, a command palette, a phone layout with bottom tabs, and one place to add and repair connections.
 
 ## Terms in the interface
@@ -89,9 +91,9 @@ Enter the model, count and run time. The planner flags the two-hour debug QoS an
 
 | Clusters | Cloud GPUs | Other machines |
 |---|---|---|
-| Slurm, Kubernetes, PBS, LSF | RunPod, Lambda, AWS EC2, Vast.ai | NVIDIA and AMD GPU hosts over SSH; manual entries |
+| Slurm, Kubernetes, PBS, LSF | RunPod, Lambda, AWS EC2, Vast.ai, GPUhub | NVIDIA and AMD GPU hosts over SSH; manual entries |
 
-Kubernetes, PBS, LSF and Vast.ai are beta integrations. The interface supports English and Chinese.
+Kubernetes, PBS, LSF, Vast.ai and GPUhub are beta integrations. The interface supports English and Chinese.
 
 ## Run from source
 

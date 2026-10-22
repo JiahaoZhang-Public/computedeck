@@ -90,8 +90,9 @@ such as `down` or `offline` still take precedence. An unset vnode `queue` is not
 node cannot take work; the Slurm partition-membership requirement does not apply.
 
 Node rows retain IP-valued `Mom` as `host_addresses` for matching SSH machines to
-scheduler nodes. DNS-only values stay unmatched; no lookup is added. Multiple
-vnodes sharing one address are ambiguous and are not matched automatically. See
+scheduler nodes. A unique IP match also needs the probed short hostname to match
+the vnode name; an address alone is not enough. DNS-only values stay unmatched;
+no lookup is added. Multiple vnodes sharing one address are ambiguous and are not matched automatically. See
 [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
 
 ## Queue limits
@@ -125,6 +126,22 @@ same history document. Values are kept as reported, including the output path's 
 prefix. Missing values are null; no extra command is run.
 
 If job history is not enabled, `qselect -H` selects nothing without an error; the driver checks `job_history_enable` first and reports `history_unavailable` instead of "no failures".
+
+## Typical waits from accounting
+
+PBS supports own-job wait history through the existing terminal-history read,
+including successful jobs. Terminal records expose `submitted_at` from `qtime`,
+`started_at` from `stime`, and `ended_at` from `obittime`, with the remote clock's
+timezone offset. Wait is queue entry to actual start, including holds or dependencies.
+
+Samples accumulate after upgrading and are retained for 30 days by completion time;
+there is no extra query or 30-day backfill. At least eight matching jobs are needed
+for a 25th–75th percentile range, grouped by login, queue and GPU-count bucket.
+Missing GPU counts are explained rather than treated as zero. Disabled or unreadable
+PBS job history shows unavailable, not an empty history. The range is labelled
+“typical wait for your jobs, not a prediction” and does not affect planner ranking.
+See [wait-history semantics](../metrics.md#typical-wait-from-your-job-history).
+Queue-position and fair-share estimates remain Slurm-only.
 
 ## Warnings
 

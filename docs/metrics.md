@@ -7,7 +7,7 @@ with named missing evidence. Neither means zero.
 
 - **Freshness** in the topbar uses the oldest enabled source’s last successful collection. If any enabled source has never succeeded, it says "Not collected yet". Disabled sources and manual SSH checks do not make the fleet age newer. "Collecting N" keeps that age visible, and Refresh can queue the other sources. Open the health pill on any page for source ages, next attempts, backoff and service faults. The age can look older than in earlier releases because it no longer follows the newest source.
 - **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts GPUs with visible compute processes or an empty process list with memory use at least max(1024 MiB, 5% of total GPU memory). Unavailable process visibility (for example on AMD GPUs), or missing memory without visible processes, remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
-- **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and idle-instance suggestions.
+- **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and low-use suggestions.
 - **SSH checks** of a cloud instance are kept across provider listings while its host, port and user stay the same, so a failed connection stays failed until it is checked again. A listing that reports the instance no longer holds GPUs clears the old check, even if it retains an endpoint. The check shows its own age next to the listing's; counting a provider's allocation never makes an old utilization reading fresh.
 - **Usable capacity** includes only healthy nodes from enabled, current sources. Down, drained, reserved, UNKNOWN, FUTURE, ERROR and nonresponsive (`*`) nodes are unavailable. Slurm nodes must belong to a partition. Power-saving nodes with idle, free or empty base states, and PBS provisioning, sleep and wait-provisioning nodes, cannot contribute current usable or free GPUs. Nodes with assigned work remain usable and retain their allocations even with power flags. DYNAMIC_FUTURE is not the FUTURE state and does not exclude an idle node. Non-faulty resting Slurm power-saving nodes (with or without CLOUD) and PBS sleep/provisioning nodes are labelled **available on demand**, never free now. They remain healthy for cluster status and do not count as unhealthy nodes. Usable, unavailable and on-demand GPU counts are separate parts of the total inventory; GPUs on unknown-state nodes remain unknown. An outage reads "0 usable · N unavailable", alongside the total inventory. **Unallocated** GPUs are usable capacity minus the allocations on those usable nodes. QoS limits and your access still constrain where you can run.
 - **QoS limits** are what the scheduler shows for your login. Limits alone do not prove access. The planner shows verified and unknown-access options together, with one access note per login. Only options without an association are collapsed. Limits of different QoS do not add up.
@@ -89,6 +89,29 @@ saved as a failed check while its retry is pending.
 认证失败、主机密钥验证失败、网络不可达及连接被拒绝都有具体指引，不会自动重试。
 未知错误保留通用说明。在重试期间，不会将第一次瞬时故障保存为检查失败。
 远程命令失败（SSH 退出码不是 255）保留原始详情并使用通用错误说明，不提供连接指引或重试。
+
+## Upgrading to 0.7
+
+New samples use the corrected node-usability and SSH GPU-use rules, and omit
+machines matched to scheduler nodes. Existing history is not rewritten, so a step
+at upgrade can reflect a counting change rather than a workload change. Resting
+on-demand GPUs are shown separately from capacity that is free now.
+
+[Usage & cost](#usage--cost-now-and-over-range) builds group breakdowns from new
+observations; older days remain not recorded. [Running cost](#running-cost-estimates)
+uses a documented provider start or a labelled observation window.
+[Low-use hints](#sustained-low-gpu-use) need enough actual readings, and
+[typical waits](#typical-wait-from-your-job-history) need at least eight matching
+own-job samples collected after upgrading. [Slurm queue estimates](#slurm-queue-estimates)
+appear after a normal collection with an eligible pending job. None of these
+estimates is a scheduling guarantee or a bill.
+
+中文：升级后的新采样采用修正的节点可用性和 SSH GPU 使用规则，已匹配到集群节点的
+机器不再重复计数；旧历史不重算，因此升级时的跳变不一定表示工作负载变化。按需可用 GPU
+与当前空闲容量分开显示。分组用量从新观测开始积累，旧日期保持“未记录”；运行费用使用
+平台记录的启动时间或明确标注的观测窗口。低利用率提示需要足够的实际读数，通常等待区间
+需要升级后采集的至少 8 个匹配的自身作业样本。Slurm 队列估计在存在符合条件的等待作业时
+随正常采集出现。这些估计都不是调度保证或账单。
 
 ## Upgrading from 0.3
 
@@ -864,9 +887,8 @@ and oldest relevant accounting age appear once per panel, with the absolute time
 hover. The best card puts waits after the ranking comparison; the drawer puts them
 after the scheduler reason and queue position. Durations use whole hours/minutes,
 rounded to the nearest minute, or seconds for sub-minute waits. The drawer matches
-the job's partition(s),
-showing insufficient history for any without samples. It never borrows another
-login's, QoS's, partition's or GPU-count bucket's range.
+the job's partition(s), showing insufficient history for any without samples. It never
+borrows another login's, QoS's, partition's or GPU-count bucket's range.
 An unknown queue/QoS gets its own explanation instead of a zero-sample count.
 
 History accumulates after upgrading from the existing normal terminal-history query;
@@ -878,8 +900,8 @@ keeps naive submit/start text, and Kubernetes lacks complete terminal times and
 reliable login ownership. Plugin drivers must explicitly opt in. Unsupported drivers
 get an explanation rather than a permanent zero-sample message. A supported driver
 whose accounting is not readable reports unavailable instead. Only own-job identifiers,
-grouping
-fields and timestamps are retained locally, for 30 days; the dashboard sends aggregates.
+grouping fields and timestamps are retained locally, for 30 days; the dashboard
+sends aggregates.
 Deleting or repointing a login clears its retained samples; pausing it preserves them.
 
 ## 根据你的作业历史展示通常等待时间

@@ -16,19 +16,32 @@ surface; other modules may change between releases.
 A plugin runs inside the service with the permissions of the user who runs it. Install
 only plugins you trust, and say plainly in your plugin what it does.
 
-## Compatibility with 0.6.0
+## Compatibility with 0.7.0
 
 `PLUGIN_API = 1`, `WEB_API = 1`, `SCHEMA_VERSION = 2` and existing route IDs stay
-unchanged. The additive `attention_state` table is created with `CREATE TABLE IF NOT
-EXISTS`; a 0.5 build can still open the database. Existing API keys keep their meaning.
-Event filters, grouping, change history and delivery status are opt-in; the default
-`GET /api/events` response remains a plain list.
+unchanged. The `instance_samples` and `job_wait_samples` tables join the existing
+`attention_state` table through `CREATE TABLE IF NOT EXISTS`; no schema-version
+migration is required. Event filters, grouping, change history and delivery status
+remain opt-in; the default `GET /api/events` response remains a plain list.
 
-Plugins tested across 0.3–0.6 can declare `requires=">=0.3,<0.7"`; widen matching pip
-dependencies and marketplace entries too. Features introduced in 0.4 require at least
-0.4, and plugins relying on 0.6 fields should require `>=0.6,<0.7` or handle their absence
-on older cores. A plugin's existing `<0.6` bound still excludes 0.6 even though its API
-version is unchanged.
+Plugins tested across 0.3–0.7 can declare `requires=">=0.3,<0.8"`; widen matching pip
+dependencies and marketplace entries too, after testing against 0.7. Features
+introduced in 0.4 still require at least 0.4. Plugins relying on 0.7 fields should
+require `>=0.7,<0.8` or handle their absence on older cores; the same rule applies
+to 0.6 fields with a minimum of 0.6. An existing `<0.7` bound excludes 0.7 even
+though its API version is unchanged.
+
+The 0.7 additions are optional per-GPU readings, run-start and spend fields,
+[usage rollups](#observed-usage-rollups-07),
+[low-use hints and settings](#low-gpu-use-additions-07), Slurm queue estimates,
+[own-job wait history](#own-job-wait-history-07) and
+[machine/node identity](#machinenode-identity-07-additive). Consumers should accept
+missing fields on older snapshots and the new `on_demand` node-health value.
+Existing counts follow the corrected measurement rules: resting on-demand nodes
+are not free, SSH GPU use includes significant memory use, and matched machines
+are counted with their scheduler node. See [Dashboard summaries](#dashboard-summaries)
+and [Reading the numbers](metrics.md). No new event type or subscription rule is
+introduced by 0.7; `instance_low_use` is an attention condition, not a plugin event.
 
 New event types reach only handlers that name them. A handler that does not subscribe
 to `job.finished` continues to receive one legacy `job.failed` or `job.ended` per ending;
@@ -81,7 +94,7 @@ plugin = Plugin(
     permissions=({"en": "posts failed jobs to the lab chat"},),
     settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
     default_enabled=False,  # start off until the owner turns it on
-    requires=">=0.3,<0.7",  # ComputeDeck versions it supports
+    requires=">=0.3,<0.8",  # ComputeDeck versions it supports
     api=1,  # the plugin API it was written for
     page="lab-alerts",  # the page its web bundle adds, if any
     web=Path(__file__).parent / "web",  # the built web bundle, if any
@@ -487,7 +500,7 @@ balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/g
 are complete examples.
 
 Drivers emitting `reported_running` or other SDK values introduced in 0.4 must declare
-`requires=">=0.4,<0.7"`, or use `desired_running` on 0.3.
+`requires=">=0.4,<0.8"`, or use `desired_running` on 0.3.
 
 `CloudInstance.state` also accepts `reported_running`: the provider's normal running
 report without an observation of readiness, as with RunPod REST. It can still be starting
@@ -811,7 +824,7 @@ an https address, or in a folder. The format follows Claude Code's `marketplace.
       "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
                   "sha256": ["<sha256 of the wheel>"] },
       "permissions": [{ "en": "posts failed jobs to the lab chat" }],
-      "requires": ">=0.3,<0.7",
+      "requires": ">=0.3,<0.8",
       "license": "MIT",
       "homepage": "https://example.com/lab-alerts"
     }
@@ -949,6 +962,8 @@ collection-machine status keep their ten-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
 polls every fifteen seconds and when the dashboard token changes. Relative ages
 continue to advance even when the dashboard is unchanged.
+
+### Per-GPU readings (0.7)
 
 SSH-source instances may include optional `gpus_observed_at` and `gpus` rows with
 `index`, `name`, `utilization`, `memory_used_mb`, `memory_total_mb`, `processes`,

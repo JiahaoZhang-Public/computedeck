@@ -35,6 +35,7 @@ Only instances whose type has GPUs (`GpuInfo.Gpus` in [DescribeInstanceTypes](ht
 | `username` | the `ssh_user` option, default `ec2-user` |
 | `region` | the configured Region |
 | `hourly_cost` | not read (`null`) |
+| `started_at` | valid timezone-aware `LaunchTime` for running instances; otherwise `null` |
 
 State, from [`InstanceState`](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceState.html):
 
@@ -64,7 +65,7 @@ There is no credential field.
 
 ## Limitations
 
-- No prices. On-Demand, Spot, Savings Plans and Capacity Blocks price the same instance differently, and the Price List API is out of scope.
+- No prices. On-Demand, Spot, Savings Plans and Capacity Blocks price the same instance differently, and the Price List API is out of scope. A running instance is named as missing a price in current spend totals; its cost remains unknown.
 - No utilization. EC2 reports configuration and lifecycle; use an SSH check or CloudWatch for usage.
 - The SSH user depends on the AMI and cannot be read from EC2, so one `ssh_user` applies to every instance of the source.
 - Instances without a public IPv4 address (private subnets, IPv6 only) get no SSH endpoint. Add them by hand with an existing SSH alias, for example one that uses a bastion host.

@@ -157,6 +157,15 @@ A GPU pod of the namespace counts as a failure when it finished within the last 
 | `time_limit` | `spec.activeDeadlineSeconds`, formatted as `[D-][H:]MM:SS`; null when absent. No log path is collected. |
 | `reason` | The pod reason (e.g. `Evicted`), the disruption reason, or the container reason (e.g. `Error`). Termination messages are never read. |
 
+### Wait estimates
+
+Typical wait history is not supported by this driver yet: completed pods do not
+supply the complete terminal times and reliable login ownership needed for own-job
+samples. Where to run and pending-pod drawers show an unsupported explanation,
+not an empty history. This does not change existing pod failure records.
+Queue-position and fair-share estimates are Slurm-only. See
+[wait-history semantics](../metrics.md#typical-wait-from-your-job-history).
+
 ## Errors
 
 When the namespace's pods cannot be listed, the collection fails and keeps the previous data. kubectl and API server messages are not shown, since they can contain user names and server addresses; the error is one of these codes:
