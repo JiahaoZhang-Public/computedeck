@@ -218,19 +218,19 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       >
         <GroupsTable ctx={ctx} />
       </Panel>
-      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
-        <p className="panel-note">
-          <a href={routeHash('usage')}>{t('usage.view')}</a>
-        </p>
-        {asides.length > 0 && (
-          <div className="stack">
-            {asides.map((plugin) => {
-              const Aside = plugin.overview!;
-              return <Aside key={plugin.id} {...ctx.plugin} />;
-            })}
-          </div>
-        )}
-      </div>
+      <p className="panel-note">
+        <a className="link" href={routeHash('usage')}>
+          {t('usage.view')} <ArrowRight size={13} />
+        </a>
+      </p>
+      {asides.length > 0 && (
+        <div className="stack">
+          {asides.map((plugin) => {
+            const Aside = plugin.overview!;
+            return <Aside key={plugin.id} {...ctx.plugin} />;
+          })}
+        </div>
+      )}
     </>
   );
 }

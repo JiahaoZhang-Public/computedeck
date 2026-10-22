@@ -7,13 +7,12 @@ HOLD_SECONDS = 1800
 
 
 def group_history(data: dict[str, Any]) -> dict[str, Any]:
-    source_groups = {source["id"]: source["cluster_id"] for source in data["sources"]}
+    source_ids = {source["id"] for source in data["sources"]}
     active = {source["cluster_id"] for source in data["sources"] if source["enabled"]}
     active.update(
-        source_groups.get(
-            item["source_id"], f"platform:{(item.get('platform') or '').strip().lower()}"
-        )
+        f"platform:{(item.get('platform') or '').strip().lower()}"
         for item in data["instances"]
+        if item["source_id"] not in source_ids
     )
     return {
         key: {

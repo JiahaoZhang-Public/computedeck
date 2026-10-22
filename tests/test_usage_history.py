@@ -109,6 +109,31 @@ def test_demo_exercises_missing_days() -> None:
     assert trace[-1]["by_group"] == group_history(dashboard())
 
 
+def test_demo_history_agrees_across_ranges(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return END
+
+    monkeypatch.setattr("computedeck.demo.datetime", Clock)
+    data = dashboard()
+    traces = [demo_history(hours, data) for hours in (24, 168, 720)]
+    shared = {point["at"]: point for point in traces[0]}
+    for trace in traces:
+        for sample in trace:
+            if sample["at"] in shared:
+                assert sample == shared[sample["at"]]
+            if "by_group" in sample:
+                assert sample["by_group"]["example:ec2"]["known_allocated"] == 1
+        shared.update((sample["at"], sample) for sample in trace)
+        assert rollup_history(trace, 24, end=END) == rollup_history(traces[0], 24, end=END)
+    for hours, trace in zip((168, 720), traces[1:], strict=True):
+        assert (
+            rollup_history(trace, hours, end=END)["buckets"][-24:]
+            == rollup_history(traces[0], 24, end=END)["buckets"]
+        )
+
+
 def test_hold_cap_is_identical_across_ranges() -> None:
     # Successive gaps of 40 minutes and two hours must never gain coverage on zoom-out.
     points = [point(200), point(160, 8), point(40, None, 2, spend_unknown=1), point(10)]
@@ -144,12 +169,15 @@ def test_gpu_coverage_counts_known_zero_and_lower_bounds_but_not_failed_time() -
     assert sum(g["gpu_hours"] for g in groups) == 1
 
 
-def test_group_history_omits_paused_groups_without_instances() -> None:
+def test_group_history_omits_paused_groups_even_with_retained_instances() -> None:
     data = dashboard()
     for source in data["sources"]:
         source["enabled"] = False
     groups = group_history(data)
     assert "example:cluster-a" not in groups
     assert "example:cluster-c" not in groups
-    assert "example:runpod" in groups  # Retained instances still identify this group.
+    assert "example:runpod" not in groups
     assert any(key.startswith("platform:") for key in groups)
+    resumed = next(source for source in data["sources"] if source["cluster_id"] == "example:runpod")
+    resumed["enabled"] = True
+    assert "example:runpod" in group_history(data)

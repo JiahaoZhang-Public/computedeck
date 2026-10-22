@@ -137,8 +137,8 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
     ]
     steps = min(hours, 720) * 2
     points: list[dict[str, Any]] = []
-    for i in range(steps + 1):
-        age = steps - i
+    for age in range(steps, -1, -1):
+        i = 1440 - age  # Keep periodic terms independent of the requested range.
         allocated = 14 + (4 if age % 48 < 32 else 0) + (4 if i % 96 > 60 else 0)
         at = current - timedelta(minutes=30 * age)
         # Unprobed machines create a gap only after being added. Source gaps start
@@ -194,17 +194,20 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
                             item["source_id"], f"platform:{item['platform'].strip().lower()}"
                         )
                         groups[key]["unknown_allocation_sources"] += 1
-            # Scale the known counts to the point's fleet allocation. Cumulative
-            # rounding keeps both integer counts and an exact sum across groups.
-            known_total = sum(group["known_allocated"] or 0 for group in groups.values())
+            # Keep single-GPU groups visible; larger groups absorb the variation.
+            # Cumulative rounding preserves integer counts and the fleet total.
+            fixed = sum(group["known_allocated"] == 1 for group in groups.values())
+            known_total = sum(group["known_allocated"] or 0 for group in groups.values()) - fixed
             cumulative = previous = 0
             for group in groups.values():
                 if not group["unknown_allocation_sources"] and group["known_allocated"] is None:
                     group["known_allocated"] = 0
                 known = group["known_allocated"]
-                if known is not None:
+                if known is not None and known > 1:
                     cumulative += known
-                    scaled = round(cumulative * point["known_allocated_gpus"] / known_total)
+                    scaled = round(
+                        cumulative * (point["known_allocated_gpus"] - fixed) / known_total
+                    )
                     group["known_allocated"] = scaled - previous
                     previous = scaled
                 group["allocated"] = (

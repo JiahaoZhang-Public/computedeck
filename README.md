@@ -31,7 +31,7 @@ keep their own age across provider updates.
 The **Data freshness and service health** indicator in the top bar shows the oldest
 enabled source's successful collection, or **Not collected yet** if any enabled source
 has never succeeded. Open it for errors and retry times.
-Overview puts Needs attention and current jobs before the chart. Hidden tabs pause
+Overview highlights Needs attention and current jobs; trends live on Usage & cost. Hidden tabs pause
 browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
 for upgrade details, including possible steps in the history chart.
 

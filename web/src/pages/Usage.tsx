@@ -81,7 +81,7 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
             })}
           />
         ) : (
-          <Empty title={t('cloud.empty')} />
+          <Empty title={t('usage.noGroups')} />
         )}
         {!!summary.unmeasured.length && (
           <div className="panel-note">
@@ -299,10 +299,23 @@ export function UsageHistory({
     ),
   ].sort();
   const number = (value: number, partial: boolean) =>
-    value.toLocaleString(ctx.locale, {
+    (partial ? value + 1e-9 * Math.max(1, Math.abs(value)) : value).toLocaleString(ctx.locale, {
       maximumFractionDigits: value >= 100 ? 0 : 1,
       roundingMode: partial ? 'floor' : 'halfExpand',
     });
+  const dayLabel = (day: (typeof days)[number]) => {
+    const nextDay = new Date(day.label);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const time = (at: number) =>
+      new Date(at).toLocaleTimeString(ctx.locale, { hour: '2-digit', minute: '2-digit' });
+    return [
+      day.label.toLocaleDateString(ctx.locale),
+      day.start > day.label.getTime() ? t('usage.dayFrom', { time: time(day.start) }) : '',
+      day.end < nextDay.getTime() ? t('usage.dayUntil', { time: time(day.end) }) : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  };
   const coverage = (total: UsageTotal, seconds: number) =>
     !total.observed
       ? t('usage.notRecorded')
@@ -357,7 +370,7 @@ export function UsageHistory({
                 const value = usageTotal(rollups, day.start, day.end, key);
                 return {
                   key: String(day.start),
-                  label: day.label.toLocaleDateString(ctx.locale),
+                  label: dayLabel(day),
                   group: findGroup(ctx.groups, key),
                   value: value.gpuHours,
                   partial: value.gpuPartial,
@@ -388,7 +401,7 @@ export function UsageHistory({
               const value = usageTotal(rollups, day.start, day.end);
               return {
                 key: String(day.start),
-                label: day.label.toLocaleDateString(ctx.locale),
+                label: dayLabel(day),
                 value: value.observed && value.spendKnown ? (value.spend[currency] ?? 0) : null,
                 partial: value.spendPartial,
                 note: coverage(value, (day.end - day.start) / 1000),

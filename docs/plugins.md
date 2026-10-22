@@ -541,7 +541,7 @@ register({
   id: 'lab-alerts',
   requires: 'lab-alerts',            // hidden while this server plugin is off
   pages: [{ id: 'lab-alerts', label: { en: 'Lab alerts' }, icon: Icon, render: (props) => <Page {...props} /> }],
-  overview: OverviewCard,             // optional: beside the 24-hour chart at the bottom of the Overview
+  overview: OverviewCard,             // optional: below the usage link at the bottom of the Overview
   settings: SettingsPanel,            // optional: on the Settings page
   banner: Banner,                     // optional: above every page
 });
@@ -956,7 +956,8 @@ No schema, plugin API or web API version changes are required.
 New stored history points add `by_group`, keyed exactly as `summary.groups`:
 `{allocated, known_allocated, unknown_allocation_sources, spend: {currency: rate},
 spend_unknown}`. `spend_unknown` is the count of unpriced subjects in that group.
-Groups with no enabled source and no instance are omitted from new samples.
+Groups without an enabled source are omitted from new samples, even if cloud instances
+are retained; hand-added platform groups remain included.
 Raw history retention is 30 days; older rows without this field are not backfilled.
 
 `rollups` contains `start`, `end` and hourly `buckets`. Each bucket has `at`, `end`,

@@ -110,6 +110,50 @@ it('uses local calendar boundaries rather than UTC labels or fixed 24-hour steps
 });
 
 describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
+  it('labels both cut-off days in a mid-day 24-hour range for GPU-hours and spend', () => {
+    setLocale(locale);
+    const ctx = context();
+    ctx.locale = locale;
+    const start = new Date(2026, 0, 2, 14, 11).getTime();
+    const data = rollups();
+    data.start = new Date(start).toISOString();
+    data.end = new Date(start + 24 * hour).toISOString();
+    const group = data.buckets[1].groups['example:cluster-a'];
+    data.buckets = Array.from({ length: 24 }, (_, index) => ({
+      at: new Date(start + index * hour).toISOString(),
+      end: new Date(start + (index + 1) * hour).toISOString(),
+      observed_seconds: 3600,
+      groups: {
+        'example:cluster-a': {
+          ...group,
+          observed_seconds: 3600,
+          gpu_observed_seconds: 3600,
+        },
+      },
+    }));
+    const html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={ctx} />));
+    const time = new Date(start).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    const labels = usageDays(start, start + 24 * hour).map(
+      (day, index) =>
+        `${day.label.toLocaleDateString(locale)} · ${t(index ? 'usage.dayUntil' : 'usage.dayFrom', { time })}`,
+    );
+    for (const bars of html.querySelectorAll('.ranked-bars')) {
+      for (const [index, row] of [...bars.querySelectorAll('li')].entries()) {
+        expect(row.textContent).toContain(labels[index]);
+        expect(row.textContent).toContain(t('usage.coverage', { percent: 100 }));
+      }
+    }
+  });
+
+  it('uses a usage-specific empty state for current GPU groups', () => {
+    setLocale(locale);
+    const ctx = context();
+    ctx.groups = [];
+    const html = dom(renderToStaticMarkup(<UsagePage ctx={ctx} />));
+    expect(html.textContent).toContain(t('usage.noGroups'));
+    expect(html.textContent).not.toContain(t('cloud.empty'));
+  });
+
   it('prints currency once, translates hourly bars, hides unrelated currencies and omits missing run information', () => {
     setLocale(locale);
     const ctx = context();
@@ -197,6 +241,8 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     for (const [value, text] of [
       [2.34, '2.3'],
       [2.39, '2.3'],
+      [2.3 - 1e-14, '2.3'],
+      [166 - 1e-12, '166'],
       [499.5, '499'],
       [166.5, '166'],
       [2400.09, (2400).toLocaleString(locale)],
@@ -248,22 +294,25 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     );
   });
 
-  it.each([4.35, 0.29])('preserves exact cents in partial USD totals and bars: %s', (value) => {
-    setLocale(locale);
-    const data = rollups();
-    data.buckets[1].groups['example:cluster-a'].spend = { USD: value };
-    const html = dom(
-      renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
-    );
-    const expected = `≥ ${money(value, 'USD')}`;
-    expect(html.querySelector('h4')?.textContent).toBe(`${expected} · USD`);
-    expect(
-      [...html.querySelectorAll('.ranked-value')].some((row) => row.textContent === expected),
-    ).toBe(true);
-    expect(money(value, 'USD', true)).toBe(money(value, 'USD'));
-    expect(money(value, 'invalid', true)).toBe(`invalid ${value.toFixed(2)}`);
-    expect(money(1.239, 'invalid', true)).toBe('invalid 1.23');
-  });
+  it.each([4.35, 0.29, 66.6 - 1e-12])(
+    'preserves exact cents in partial USD totals and bars: %s',
+    (value) => {
+      setLocale(locale);
+      const data = rollups();
+      data.buckets[1].groups['example:cluster-a'].spend = { USD: value };
+      const html = dom(
+        renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
+      );
+      const expected = `≥ ${money(value, 'USD')}`;
+      expect(html.querySelector('h4')?.textContent).toBe(`${expected} · USD`);
+      expect(
+        [...html.querySelectorAll('.ranked-value')].some((row) => row.textContent === expected),
+      ).toBe(true);
+      expect(money(value, 'USD', true)).toBe(money(value, 'USD'));
+      expect(money(value, 'invalid', true)).toBe(`invalid ${value.toFixed(2)}`);
+      expect(money(1.239, 'invalid', true)).toBe('invalid 1.23');
+    },
+  );
 
   it('floors partial spend and gives removed platforms a readable name', () => {
     setLocale(locale);

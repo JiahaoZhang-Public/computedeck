@@ -184,6 +184,7 @@ export function runDuration(hours: number) {
 }
 export function money(value: number | null, currency: string, lowerBound = false) {
   if (value === null) return t('money.unknown');
+  if (lowerBound) value += 1e-9 * Math.max(1, Math.abs(value));
   try {
     return new Intl.NumberFormat(locale(), {
       style: 'currency',
