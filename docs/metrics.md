@@ -805,7 +805,8 @@ shown only when Slurm reports a factor and uses multifactor priority with a posi
 `PriorityWeightFairShare`. An absent weight leaves fair-share unknown but does not
 prevent queue estimates. Both values refer to the drawer's displayed sample time, including
 retained older observations. Hidden queues, unreadable output and jobs missing from
-the listing show “—” with a reason, never an invented zero. Fair-share that is missing
+the listing show “—” with a reason, never an invented zero. Older snapshots without
+queue fields say “Not collected yet”. Fair-share that is missing
 or not used by the policy also shows “—”. Only aggregate queue counts are retained;
 other users' job ids are never stored or logged. See the
 [Slurm driver](drivers/slurm.md#queue-estimates-and-fair-share) for the queries and limits.
@@ -816,11 +817,12 @@ other users' job ids are never stored or logged. See the
 “前方约有 N 个作业”是估计，不是启动时间预测；资源预留、抢占和回填调度都可能改变顺序。
 只计算前方因 Priority 或 Resources 等待的作业，不计挂起、依赖或配额限制中的作业。
 前方优先级相同的作业单独形成 N 至 N+T 的范围，多分区分别展示。
-Resources 作业仅在该分区的前方作业数和同优先级作业数均为零时，说明已排到前列、等待节点释放资源；
+Resources 作业仅在该分区的前方作业数和同优先级作业数均为零时，说明已排在队首、等待节点释放资源；
 否则和 Priority 作业一样显示数量或范围。这些信息不改变资源推荐排名。
 
 公平共享因子属于你的账户，范围 0 至 1，近期使用量越多则越低。仅当 Slurm 报告该因子、
 使用 multifactor 优先级且 `PriorityWeightFairShare` 大于零时展示。权重缺失时因子保持未知，
 但仍可计算队列估计。队列和因子都对应详情中显示的采样时间，
 保留的旧观测也不会被当作新数据。集群隐藏队列、读取失败或列表中找不到作业时，展示“—”并解释原因，
-不会填成零。因子缺失或调度策略未使用它时也展示“—”。只保留队列汇总数量，不保存或记录其他用户的作业 ID。
+不会填成零。没有队列字段的旧快照显示“尚未采集”。因子缺失或调度策略未使用它时也展示“—”。
+只保留队列汇总数量，不保存或记录其他用户的作业 ID。

@@ -465,8 +465,6 @@ async def collect_queue(batch: Batch, source: dict[str, Any], associations: str)
         for job in jobs:
             job["queue"] = positions[job["id"]]
             job["queue_unknown"] = None if job["queue"] is not None else "failed"
-        if any(job["queue"] is None for job in jobs):
-            batch.warnings.append(message("queue_unavailable"))
     except (RuntimeError, TimeoutError, SourceError):
         # Remote errors may echo other users' job ids. Never persist their text.
         batch.warnings.append(message("queue_unavailable"))

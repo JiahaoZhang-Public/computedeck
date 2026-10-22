@@ -75,6 +75,23 @@ def test_never_succeeded_failure_uses_attempt_not_an_invented_onset() -> None:
     assert item["observed_at"] == row["last_attempt"]
 
 
+def test_queue_warning_does_not_need_attention() -> None:
+    assert derive([source(warnings=[{"code": "queue_unavailable"}])]) == []
+
+
+def test_queue_warning_does_not_reopen_acknowledged_partial_data() -> None:
+    row = source(warnings=[{"code": "partial_one"}])
+    [item] = derive([row])
+    state = saved(item)
+    row["warnings"].append({"code": "queue_unavailable"})
+    [muted] = derive([row], state=state)
+    assert muted["details"] == [{"code": "partial_one"}]
+    assert muted["fingerprint"] == item["fingerprint"]
+    assert muted["muted"]["state"] == "acknowledged"
+    row["warnings"].append({"code": "partial_two"})
+    assert derive([row], state=state)[0]["muted"] is None
+
+
 def test_capability_gaps_regressions_and_all_other_warnings() -> None:
     warnings = [
         {"code": "history_unavailable"},

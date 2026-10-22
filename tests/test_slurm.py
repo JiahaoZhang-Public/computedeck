@@ -1106,8 +1106,6 @@ async def test_fairshare_requires_a_known_active_weight(queue_cluster, config) -
         ("queue", ssh.SSHError("900001: private remote diagnostic")),
         ("queue", TimeoutError()),
         ("queue", "malformed 900001 output"),
-        ("queue", "900|gpu|900001|Priority"),
-        ("queue", ""),
         ("config", ssh.SSHError("private diagnostic")),
         ("config", TimeoutError()),
         ("config", "not recognized"),
@@ -1129,6 +1127,22 @@ async def test_optional_queue_failures_are_generic_and_do_not_fail_collection(
     assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
     if step == "config":
         assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+
+
+@pytest.mark.parametrize("output", ["900|gpu|900001|Priority", "", "100|gpu|42|QOSMaxGRESPerUser"])
+async def test_successful_queue_query_without_own_wait_is_unknown_without_warning(
+    queue_cluster, output, caplog
+) -> None:
+    import json
+
+    queue_cluster["queue"] = output
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["queue"] is None
+    assert batch.jobs[0]["queue_unknown"] == "failed"
+    assert batch.jobs[0]["fairshare"] == 0.12
+    assert not batch.warnings
+    assert "jobs" in batch.capabilities
+    assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
 
 
 @pytest.mark.parametrize(

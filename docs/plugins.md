@@ -404,6 +404,9 @@ Rules that keep the numbers honest:
   `ahead` to `ahead + ties`. Other users' ids are never persisted. Missing fields on
   older snapshots stay unknown. These are optional JSON additions with no new
   capability, event, schema version or plugin API version.
+  `queue`, `fairshare` and `queue_unknown` are reserved job keys with these shapes;
+  shared row validation enforces them for every driver. Store scheduler queue names in
+  `partition`, never `queue`; also use `qos` when the queue carries limits, as PBS and LSF do.
 - Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
   `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
   heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,

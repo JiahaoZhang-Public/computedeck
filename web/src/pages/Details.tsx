@@ -276,7 +276,11 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
               ) : (
                 <p>
                   {t(
-                    job.queue_unknown === 'private_data' ? 'job.queue.private' : 'job.queue.failed',
+                    job.queue_unknown === undefined
+                      ? 'job.queue.notCollected'
+                      : job.queue_unknown === 'private_data'
+                        ? 'job.queue.private'
+                        : 'job.queue.failed',
                   )}
                 </p>
               )}

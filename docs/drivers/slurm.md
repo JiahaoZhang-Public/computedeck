@@ -1,6 +1,8 @@
 # Slurm permissions and availability
 
 Collection reads the current user's jobs, visible nodes, QoS limits and recent failures.
+Only when your jobs wait on Priority or Resources, it also reads their partitions'
+pending queue (priorities and reasons; counts kept, no other users' ids retained).
 All commands are read-only. Example outputs in the tests use fictional users and clusters.
 
 QoS definitions and partition `AllowQos` values do not prove that a user may use that QoS.
@@ -165,17 +167,19 @@ waits. Neither message predicts a start time or changes Where-to-run rankings.
 Other users' job ids exist only in the transient query/parser input: they are never
 stored, logged, returned in the dashboard or included in warnings. Only counts per
 partition are kept on your jobs. The existing own-job query fields are unchanged.
-If a job is missing from any requested partition, the output is unrecognized, or the
-step fails, its queue stays null. A generic `queue_unavailable` warning is added only
-when attempted work fails, without remote error text. It creates no capability gap or
-attention item.
+If a job is missing from any requested partition after a successful query (including
+an empty listing), its queue stays null with `queue_unknown=failed`, without a batch
+warning: jobs can start or change reasons between queries. Unrecognized output or a
+failed step also leaves the queue null, with a generic `queue_unavailable` warning
+only when attempted work fails, without remote error text. The warning creates no
+capability gap or attention item.
 
 `scontrol show config` has a 15-second timeout and its successful settings are cached
 in process for one hour per source and SSH identity. Missing `PriorityType` or
 `PrivateData` prevents a queue estimate. `PriorityWeightFairShare` is optional: a
 missing weight leaves fair-share unknown without preventing queue counts, including
 on `priority/basic` clusters, which do not print priority weights.
-`PrivateData=jobs` (or `all`) suppresses the partition query entirely
+`PrivateData=jobs` suppresses the partition query entirely
 and explains that the cluster hides other users' jobs. The queue query also has a
 15-second timeout. Neither extra query runs when there are no eligible waits.
 

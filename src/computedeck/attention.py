@@ -8,6 +8,7 @@ from typing import Any
 from .low_use import measurement_family
 
 IMMUTABLE_KINDS = {"service_loop_failed", "unreadable_rows"}
+INFORMATIONAL_WARNINGS = {"queue_unavailable"}
 
 
 def _source_name(source: dict[str, Any]) -> str:
@@ -137,9 +138,10 @@ def derive(
         partial = []
         regressed: dict[str, list[Any]] = {}
         for warning in source.get("warnings", []):
-            capability = (
-                capabilities.get(warning.get("code")) if isinstance(warning, dict) else None
-            )
+            code = warning.get("code") if isinstance(warning, dict) else None
+            if code in INFORMATIONAL_WARNINGS:
+                continue
+            capability = capabilities.get(code)
             if capability is None:
                 partial.append(warning)
             elif capability in seen:

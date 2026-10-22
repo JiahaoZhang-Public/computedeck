@@ -85,12 +85,13 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     );
     expect(text).not.toContain(t('job.queue.resources', { partition: 'gpu' }));
   });
-  it.each(['private_data', 'failed'] as const)('explains an unknown queue: %s', (reason) => {
+  it.each(['private_data', 'failed', null] as const)('explains an unknown queue: %s', (reason) => {
     job.queue = null;
     job.queue_unknown = reason;
     job.fairshare = null;
     const text = drawer().textContent;
     expect(text).toContain(t(reason === 'private_data' ? 'job.queue.private' : 'job.queue.failed'));
+    expect(text).not.toContain(t('job.queue.notCollected'));
     if (reason === 'failed') expect(text).toContain(t('job.queue.fairshareUnknown'));
     expect(text).not.toContain(t('job.queue.ahead', { partition: 'gpu', count: 0 }));
   });
@@ -99,7 +100,8 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     delete job.queue_unknown;
     delete job.fairshare;
     const text = drawer().textContent;
-    expect(text).toContain(t('job.queue.failed'));
+    expect(text).toContain(t('job.queue.notCollected'));
+    expect(text).not.toContain(t('job.queue.failed'));
     expect(text).toContain(t('job.queue.fairshareUnknown'));
     expect(formatMessage({ code: 'queue_unavailable' })).toBe(t('msg.queue_unavailable'));
   });

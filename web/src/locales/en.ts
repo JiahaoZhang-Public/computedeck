@@ -507,6 +507,7 @@ const en = {
     'Your fair-share in account {account}: {factor} (0 to 1; recent use lowers it).',
   'job.queue.private': 'Queue estimate: — · The cluster hides other users’ jobs.',
   'job.queue.failed': 'Queue estimate: — · The value could not be read.',
+  'job.queue.notCollected': 'Queue estimate: — · Not collected yet.',
   'job.queue.fairshareUnknown':
     'Fair-share: — · Not available, or not used by this scheduler’s priority policy.',
 
