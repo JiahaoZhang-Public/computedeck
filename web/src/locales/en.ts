@@ -131,6 +131,7 @@ const en = {
   'plan.verdict.denied': 'Not associated',
   'plan.why.denied': 'This login has no association granting this QoS.',
   'plan.why.degraded': 'Fewer than 20% of visible nodes are available.',
+  'plan.why.unavailable': 'No visible nodes are available.',
   'plan.access.not_associated': 'Not associated ({count})',
   'market.official': 'Official marketplace',
 
@@ -768,7 +769,7 @@ const en = {
   'plan.factor.limitValue': 'GPU limit: {limit}; in use: {used}; room: {room}.',
   'plan.factor.queueValue':
     'Eligible jobs: {jobs}; room used (GPUs): {used}; room after queue (GPUs): {room} (estimate).',
-  'plan.factor.wallValue': 'Maximum hours: {max}; requested hours: {requested}.',
+  'plan.factor.wallValue': 'Maximum run time: {max}; requested: {requested}.',
   'plan.factor.notEntered': 'not entered',
   'plan.factor.wallUnchecked':
     'Run time is not checked when either value is unknown; this does not lower the verdict.',

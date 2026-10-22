@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { dateTime, money, relativeTime } from '../domain';
 import { jobReason } from '../jobFacts';
-import { planComparison, planFactors, RULES } from '../planExplanation';
+import { duration, planComparison, planFactors, RULES } from '../planExplanation';
 import { gpuModels, idleInstances, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
@@ -30,12 +30,6 @@ function verdictLabel(option: PlanOption, request: PlanRequest) {
   return request.gpuType
     ? t('plan.verdict.none', { model: request.gpuType })
     : t('plan.verdict.noGpus');
-}
-
-function duration(hours: number) {
-  return hours >= 48 && hours % 24 === 0
-    ? t('plan.days', { count: hours / 24 })
-    : t('plan.hours', { count: Math.round(hours * 10) / 10 });
 }
 
 function freeGpuCount(option: PlanOption, used = 0) {

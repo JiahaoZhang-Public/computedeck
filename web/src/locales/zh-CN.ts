@@ -133,6 +133,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.verdict.denied': '未关联权限',
   'plan.why.denied': '此账户没有授予该 QoS 的关联。',
   'plan.why.degraded': '可见节点中可用的不足 20%。',
+  'plan.why.unavailable': '没有可用的可见节点。',
   'plan.access.not_associated': '未关联权限（{count}）',
   'market.official': '官方市场',
 
@@ -713,8 +714,8 @@ const zhCN: Record<keyof typeof en, string> = {
     '单节点容纳情况：{fit}。单个节点上已测得的最多空闲 GPU 数量：{count}；请求数量：{requested}。',
   'plan.factor.limitValue': 'GPU 上限：{limit}；已用：{used}；余量：{room}。',
   'plan.factor.queueValue':
-    '可调度等待作业：{jobs}；占用余量：{used} 张 GPU；队列之后剩余：{room} 张 GPU（估计）。',
-  'plan.factor.wallValue': '最长小时数：{max}；请求小时数：{requested}。',
+    '可调度等待作业：{jobs}；占用余量（GPU）：{used}；队列之后剩余（GPU）：{room}（估计）。',
+  'plan.factor.wallValue': '最长运行时间：{max}；请求时间：{requested}。',
   'plan.factor.notEntered': '未填写',
   'plan.factor.wallUnchecked': '任一数值未知时不核对运行时间，也不会因此降低判断。',
   'plan.factor.access.verified': '已验证此登录身份的权限。',

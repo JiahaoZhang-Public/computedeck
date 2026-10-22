@@ -395,6 +395,13 @@ export function planOptions(
     )
       continue;
     const clusterNodes = nodes.filter((node) => node.cluster_id === source.cluster_id);
+    const nodeObservations = observations(
+      clusterNodes.length
+        ? sources.filter((login) => clusterNodes.some((node) => node.source_id === login.id))
+        : [source],
+      'nodes',
+      clusterNodes,
+    );
     const cluster = capacity(clusterNodes, request.gpuType, request.gpus);
     const twins = new Set(
       sources
@@ -564,13 +571,7 @@ export function planOptions(
       const option = {
         source,
         evidence: {
-          nodes: observations(
-            clusterNodes.length
-              ? sources.filter((login) => clusterNodes.some((node) => node.source_id === login.id))
-              : [source],
-            'nodes',
-            clusterNodes,
-          ),
+          nodes: nodeObservations,
           limits: observations([source], 'qos_limits'),
           jobs: observations(
             currentJobs ? sources.filter((login) => twins.has(login.id)) : [source],

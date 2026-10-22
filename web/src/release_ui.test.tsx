@@ -451,14 +451,75 @@ describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale
         const unchecked = hours == null || max == null;
         expect(factor.value).toBe(
           t('plan.factor.wallValue', {
-            max: max == null ? t('status.unknown') : String(max),
-            requested: hours == null ? t('plan.factor.notEntered') : String(hours),
+            max: max == null ? t('status.unknown') : t('plan.hours', { count: max }),
+            requested:
+              hours == null ? t('plan.factor.notEntered') : t('plan.hours', { count: hours }),
           }) + (unchecked ? ` ${t('plan.factor.wallUnchecked')}` : ''),
         );
         expect(factor.effect).toBe(unchecked ? 'neutral' : 'supports');
       }
     }
   });
+
+  it.each([
+    ['100', 1.7],
+    ['00:20:00', 0.3],
+  ])('rounds a %s wall limit and requested hours like the table', (max, rounded) => {
+    setLocale(locale);
+    const ctx = planContext({
+      ...source,
+      qos: [{ ...source.qos[0], limits: { ...source.qos[0].limits, MaxWallPJ: max } }],
+    });
+    const request = { gpus: 1, gpuType: '', hours: 1 / 3 };
+    const [option] = planOptions(ctx.data, request);
+    const factor = planFactors(option, request).find((factor) => factor.key === 'wall')!;
+    expect(factor.value).toBe(
+      locale === 'en'
+        ? `Maximum run time: ${rounded} h; requested: 0.3 h.`
+        : `最长运行时间：${rounded} 小时；请求时间：0.3 小时。`,
+    );
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const wall = root.querySelector(`[data-label="${t('plan.col.wall')}"]`)!;
+    expect(wall.textContent).toBe(t('plan.hours', { count: rounded }));
+    expect(root.querySelector('.plan-factors')!.textContent).toContain(wall.textContent);
+  });
+
+  it('labels unknown and unlimited queue counts without attaching GPU units to their values', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [option] = planOptions(planContext(source).data, request);
+    for (const room of [null, Infinity]) {
+      const factor = planFactors(
+        { ...option, queuedForRoom: null, headroomAfterQueue: room },
+        request,
+      ).find((factor) => factor.key === 'queue')!;
+      const value = room == null ? t('status.unknown') : t('plan.noLimit');
+      expect(factor.value).toContain(
+        locale === 'en' ? `room after queue (GPUs): ${value}` : `队列之后剩余（GPU）：${value}`,
+      );
+      expect(factor.value).not.toMatch(/(?:未知|不限) 张 GPU/);
+    }
+  });
+
+  it.each([false, true])(
+    'explains unavailable clusters only with current nodes (stale: %s)',
+    (stale) => {
+      setLocale(locale);
+      const ctx = planContext({ ...source, cluster_state: 'unavailable', stale });
+      ctx.data.nodes = [];
+      const request = { gpus: 1, gpuType: '', hours: null };
+      const [option] = planOptions(ctx.data, request);
+      expect(option.freeGpus).toBeNull();
+      if (!stale) expect(option.verdict).toBe('unavailable');
+      const free = planFactors(option, request).find((factor) => factor.key === 'free')!;
+      expect(free.effect).toBe(stale ? 'unknown' : 'lowers');
+      expect(free.value.includes(t('plan.why.unavailable'))).toBe(!stale);
+      const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+      expect(root.querySelector('.plan-factors dd')!.textContent).toContain(
+        t(stale ? 'plan.effect.unknown' : 'plan.effect.lowers'),
+      );
+    },
+  );
 
   it('explains unknowns, partial capacity, limits, runtime and the contradiction cap without changing verdicts', () => {
     setLocale(locale);

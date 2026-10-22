@@ -33,6 +33,12 @@ const number = (value: number | null) =>
 const enough = (value: number | null, request: number): Effect =>
   value == null ? 'unknown' : value >= request ? 'supports' : 'lowers';
 
+export function duration(hours: number) {
+  return hours >= 48 && hours % 24 === 0
+    ? t('plan.days', { count: hours / 24 })
+    : t('plan.hours', { count: Math.round(hours * 10) / 10 });
+}
+
 export function planFactors(option: PlanOption, request: PlanRequest): PlanFactor[] {
   const { evidence } = option;
   const all = [...evidence.nodes, ...evidence.limits, ...evidence.jobs, ...evidence.access];
@@ -48,6 +54,8 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
   const age = knownAge ? all.map((item) => item.at!).sort()[0] : null;
   const degraded =
     sourceHasData(option.source, 'nodes') && option.source.cluster_state === 'degraded';
+  const unavailable =
+    sourceHasData(option.source, 'nodes') && option.source.cluster_state === 'unavailable';
   const rules = option.rules
     .map((rule) => {
       const key = RULES[rule.kind][rule.effect];
@@ -63,10 +71,11 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
         }),
         option.onDemandGpus ? t('plan.why.onDemand', { count: option.onDemandGpus }) : '',
         degraded ? t('plan.why.degraded') : '',
+        unavailable ? t('plan.why.unavailable') : '',
       ]
         .filter(Boolean)
         .join(' '),
-      effect: degraded ? 'lowers' : enough(option.freeGpus, request.gpus),
+      effect: degraded || unavailable ? 'lowers' : enough(option.freeGpus, request.gpus),
       evidence: evidence.nodes,
     },
     {
@@ -126,7 +135,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
     },
     {
       key: 'wall',
-      value: `${t('plan.factor.wallValue', { max: number(option.maxWallHours), requested: request.hours == null ? t('plan.factor.notEntered') : number(request.hours) })}${request.hours == null || option.maxWallHours == null ? ` ${t('plan.factor.wallUnchecked')}` : ''}`,
+      value: `${t('plan.factor.wallValue', { max: option.maxWallHours == null ? t('status.unknown') : duration(option.maxWallHours), requested: request.hours == null ? t('plan.factor.notEntered') : duration(request.hours) })}${request.hours == null || option.maxWallHours == null ? ` ${t('plan.factor.wallUnchecked')}` : ''}`,
       effect:
         request.hours == null || option.maxWallHours == null
           ? 'neutral'

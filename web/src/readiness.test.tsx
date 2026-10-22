@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { serverDashboard } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -92,6 +93,7 @@ describe('optional capabilities', () => {
 });
 
 it('shows unknown access inline and keeps only unassociated options in a closed disclosure', () => {
+  setLocale('en');
   const data: Dashboard = serverDashboard({
     mode: 'live',
     sources: [
@@ -101,6 +103,7 @@ it('shows unknown access inline and keeps only unassociated options in a closed 
           { name: 'allowed', access: 'verified', limits: {}, origin: 'test' },
           { name: 'unverified', access: 'unknown', limits: {}, origin: 'test' },
           { name: 'denied', access: 'not_associated', limits: {}, origin: 'test' },
+          { name: 'restricted', access: 'not_associated', limits: {}, origin: 'test' },
         ],
       },
     ],
@@ -113,13 +116,18 @@ it('shows unknown access inline and keeps only unassociated options in a closed 
   });
   const ctx = { data, groups: groupsOf(data), demo: false } as unknown as Ctx;
   const html = renderToStaticMarkup(<PlanPage ctx={ctx} />);
-  const disclosures = [...html.matchAll(/<details class="panel"[^>]*>(.*?)<\/details>/g)];
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  const disclosures = root.querySelectorAll('details.panel');
   expect(disclosures).toHaveLength(1);
-  expect(disclosures.every((match) => !match[0].match(/<details[^>]*\sopen/))).toBe(true);
-  expect(disclosures[0][1]).toContain('Not associated (1)');
-  expect(disclosures[0][1]).toContain('denied');
-  expect(disclosures[0][1]).not.toContain('unverified');
-  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('unverified');
-  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('Access not checked');
-  expect(html.slice(0, html.indexOf('<details class="panel"'))).toContain('allowed');
+  expect(disclosures[0].hasAttribute('open')).toBe(false);
+  expect(disclosures[0].textContent).toContain('Not associated (2)');
+  expect(disclosures[0].textContent).toContain('denied');
+  expect(disclosures[0].textContent).toContain('restricted');
+  expect(disclosures[0].querySelectorAll('details.plan-explanation')).toHaveLength(2);
+  expect(disclosures[0].textContent).not.toContain('unverified');
+  disclosures[0].remove();
+  expect(root.textContent).toContain('unverified');
+  expect(root.textContent).toContain('Access not checked');
+  expect(root.textContent).toContain('allowed');
 });
