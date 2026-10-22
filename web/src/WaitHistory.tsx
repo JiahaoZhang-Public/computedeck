@@ -41,7 +41,9 @@ export function WaitHistory({
           ? 'wait.unsupported'
           : gpus == null
             ? 'wait.unknownGpus'
-            : null;
+            : qos == null
+              ? 'wait.unknownQos'
+              : null;
   // A multi-partition request must not hide partitions that have no matching samples.
   const rows = partitions
     ? partitions.map((name) => ({ name, bucket: buckets.find((b) => b.partition === name) }))
@@ -55,7 +57,9 @@ export function WaitHistory({
           high: waitDuration(bucket.p75_seconds),
           count: bucket.samples,
         })
-      : t('wait.insufficient', { count: bucket?.samples ?? 0 });
+      : history?.unknown_gpu_samples
+        ? t('wait.accountingGpus', { count: history.unknown_gpu_samples })
+        : t('wait.insufficient', { count: bucket?.samples ?? 0 });
   }
   if (compact) {
     return (

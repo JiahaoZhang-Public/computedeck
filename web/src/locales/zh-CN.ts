@@ -16,6 +16,9 @@ const zhCN: Record<keyof typeof en, string> = {
   'wait.unavailable': '— · 此登录的作业记账历史不可用。',
   'wait.notCollected': '— · 尚未采集等待历史。',
   'wait.unknownGpus': '— · GPU 数量未知，无法匹配历史分组。',
+  'wait.unknownQos': '— · 队列 / QoS 未知，无法匹配历史分组。',
+  'wait.accountingGpus':
+    '— · 此登录有 {count} 个作业的记账记录缺少 GPU 数量，匹配的历史可能不完整。',
   'wait.asOf': '记账历史最近采集于：{time}',
   'wait.asOfUnknown': '记账历史采集时间未知。',
   'wait.seconds': '{count} 秒',

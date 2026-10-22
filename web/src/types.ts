@@ -316,6 +316,7 @@ export interface Dashboard {
 export interface WaitHistory {
   status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
   observed_at: string | null;
+  unknown_gpu_samples?: number;
   buckets: {
     qos: string | null;
     partition: string | null;

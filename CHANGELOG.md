@@ -3,6 +3,7 @@
 ## 0.7.0 (unreleased)
 
 - Show typical waits from your own finished accounting jobs in Where to run and waiting-job drawers: a 25th–75th percentile range only with at least eight samples, grouped by login, QoS, partition and GPU count over 30 days. Distinguish unsupported drivers from insufficient or unavailable history; Slurm and PBS support estimates. Use compact planner rows with one accounting age and disclaimer per panel, whole-unit durations, and scheduler reasons first in drawers. Label every range as not a prediction, and retain only own-job times without new cluster queries.
+- Keep Slurm CPU-only accounting jobs in the zero-GPU bucket when GPU tracking is confirmed, and explain missing accounting GPU counts or unknown QoS instead of showing a permanent zero-sample history. Show Kubernetes' unsupported-history explanation even without owner labels, and preserve collection events if a wait-history write fails.
 
 - Explain Slurm Priority and Resources waits with per-partition queue estimates and account fair-share when available. Hidden or unreadable queues stay unknown; only counts are retained, never other users' job ids.
 - Detect sustained low GPU use from actual readings with a configurable threshold and window, a three-reading minimum, per-GPU maxima and bounded gaps. Show acknowledgeable hints, covered-duration cost estimates only when priced, Cloud filters and a paid-instance pointer in Where to run. Explain unknown coverage and offer provider console links without stopping anything or adding automatic checks.

@@ -89,7 +89,7 @@ def test_gpu_buckets(count: int, bounds: tuple[int, int]) -> None:
     [
         {"user": "bob"},
         {"cluster_id": "cluster-b"},
-        {"gpu_count": None},
+        {"gpu_count": None, "ended_at": job()["started_at"]},
         {"gpu_count": True},
         {"gpu_count": -1},
         {"gpu_count": 1.5},
@@ -152,7 +152,18 @@ def test_unavailable_uncollected_and_stale_history() -> None:
     assert result["observed_at"] == old
 
 
-def test_slurm_accounting_rows_supply_wait_times_without_another_query() -> None:
+@pytest.mark.parametrize(
+    ("tracked", "tres", "count"),
+    [
+        (False, "gres/gpu=1", 1),
+        (True, "billing=4,cpu=4,mem=16G,node=1", 0),
+        (False, "billing=4,cpu=4,mem=16G,node=1", None),
+        (True, "", None),
+    ],
+)
+def test_slurm_accounting_rows_supply_wait_times_without_another_query(
+    tracked: bool, tres: str, count: int | None
+) -> None:
     values = {
         "JobID": "42",
         "JobName": "training",
@@ -161,7 +172,7 @@ def test_slurm_accounting_rows_supply_wait_times_without_another_query() -> None
         "Partition": "gpu",
         "QOS": "normal",
         "State": "COMPLETED",
-        "AllocTRES": "gres/gpu=1",
+        "AllocTRES": tres,
         "NCPUS": "8",
         "NodeList": "gpu-01",
         "Elapsed": "00:30:00",
@@ -172,12 +183,57 @@ def test_slurm_accounting_rows_supply_wait_times_without_another_query() -> None
         "End": "2026-10-19T10:50:00+0400",
     }
     [parsed] = parse_failures(
-        "|".join(values[field] for field in _FINISHED_FIELDS), SOURCE, terminal=True
+        "|".join(values[field] for field in _FINISHED_FIELDS),
+        SOURCE,
+        terminal=True,
+        tracked=tracked,
     )
+    assert parsed["gpu_count"] == count
     sample = wait_sample(parsed, SOURCE)
     assert sample and sample["started_at"] == "2026-10-19T06:20:00+00:00"
-    result = summary([sample])["buckets"][0]
-    assert result["samples"] == 1 and result["p25_seconds"] is None
+    result = summary([sample])
+    if count is None:
+        assert result["buckets"] == []
+        assert result["unknown_gpu_samples"] == 1
+    else:
+        [bucket] = result["buckets"]
+        assert bucket["samples"] == 1 and bucket["p25_seconds"] is None
+        assert (bucket["gpu_min"], bucket["gpu_max"]) == (count, count)
+        assert result["unknown_gpu_samples"] == 0
+    if tres == "":
+        assert wait_sample({**parsed, "started_at": parsed["ended_at"]}, SOURCE) is None
+
+
+def test_unknown_gpu_counts_are_deduplicated_scoped_and_expire(store: Store) -> None:
+    current = datetime.now(UTC)
+    source = {**SOURCE, "enabled": True, "interval_minutes": 10, "name": "Cluster A"}
+    twin = {**source, "id": "twin"}
+    bob = {**source, "id": "bob", "username": "bob"}
+    other = {**source, "id": "other", "cluster_id": "cluster-b"}
+    for login in (source, twin, bob, other):
+        store.save_source(login)
+    unknown = job(current=current, gpu_count=None)
+    store.record_job_waits(source, [unknown, unknown, {**unknown, "user": "bob"}])
+    store.record_job_waits(twin, [unknown])
+    store.record_job_waits(source, [job(1, current=current - timedelta(days=31), gpu_count=None)])
+    reopened = Store(store.path)
+    try:
+        history = reopened.dashboard()["wait_history"]
+        assert history[source["id"]] == history["twin"]
+        assert history[source["id"]]["unknown_gpu_samples"] == 1
+        assert history[source["id"]]["buckets"] == []
+        assert history["bob"]["unknown_gpu_samples"] == history["other"]["unknown_gpu_samples"] == 0
+        # A twin's known count resolves the uncertainty without counting an attempt twice.
+        reopened.record_job_waits(twin, [{**unknown, "gpu_count": 1}])
+        result = reopened.dashboard()["wait_history"][source["id"]]
+        assert result["unknown_gpu_samples"] == 0
+        assert result["buckets"][0]["samples"] == 1
+    finally:
+        reopened.db.close()
+    assert (
+        summary(samples(3, gpu_count=None, current=NOW - timedelta(days=31)))["unknown_gpu_samples"]
+        == 0
+    )
 
 
 def test_store_retains_only_times_deduplicates_attempts_and_survives_restart(store: Store) -> None:
@@ -262,6 +318,9 @@ def test_example_has_range_small_sample_and_unavailable_accounting() -> None:
     assert small["samples"] == 3 and small["p25_seconds"] is None
     assert history["example:cluster-a-bob"]["status"] == "unavailable"
     assert history["example:cluster-a-bob"]["buckets"] == []
+    assert history["example:cluster-d-alice"]["unknown_gpu_samples"] == 4
+    [cpu] = history["example:cluster-d-alice"]["buckets"]
+    assert (cpu["gpu_min"], cpu["gpu_max"], cpu["samples"]) == (0, 0, 8)
 
 
 @pytest.mark.parametrize(

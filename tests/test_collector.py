@@ -1,6 +1,7 @@
 """Background collection and probes: commit only good results, never resurrect old settings."""
 
 import asyncio
+import sqlite3
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -1352,3 +1353,33 @@ async def test_wait_history_does_not_keep_a_repointed_collection(
     use_driver(monkeypatch, collect)
     await collector.collect(source["id"])
     assert calls == []
+
+
+async def test_wait_history_write_failure_preserves_job_events(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = add_source(fresh=False)
+    batch = job_batch(source)
+    batch.jobs = []
+    batch.finished = []
+    batch.capabilities.append("history")
+    use_driver(monkeypatch, lambda _: batch)
+    await collector.collect(source["id"])
+
+    def fail(*_: Any) -> None:
+        raise sqlite3.OperationalError("must-not-log-row-data")
+
+    monkeypatch.setattr(store, "record_job_waits", fail)
+    batch.jobs = job_batch(source).jobs
+    await collector.collect(source["id"])
+    assert store.source(source["id"])["status"] == "ready"
+    assert store.source(source["id"])["error"] is None
+    assert store.snapshot(source["id"])["jobs"] == batch.jobs
+    assert "job.started" in [event["type"] for event in store.events()]
+    assert not any(event["type"] == "source.failed" for event in store.events())
+    assert "Could not record wait history (OperationalError)" in caplog.text
+    assert "must-not-log-row-data" not in caplog.text

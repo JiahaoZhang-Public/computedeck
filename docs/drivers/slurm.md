@@ -205,7 +205,18 @@ explanation. Smaller samples and unreadable accounting are explained separately.
 
 There is no extra SSH call or expanded lookback: samples accumulate from the existing
 terminal query after upgrading, with its existing outage and retention limitations.
-Jobs lacking an actual start, valid ordered aware timestamps or a known GPU count are
-excluded. Repeated observations of the same job/start count once. See
+Jobs lacking an actual start or valid ordered aware timestamps are excluded. A
+nonempty AllocTRES without GPUs gives zero only when the collected nodes' CfgTRES
+confirms GPU tracking, as for live jobs. Without that evidence, missing GPU counts
+stay null and contribute to the login's `unknown_gpu_samples`, not a GPU bucket.
+Empty AllocTRES stays null; unallocated cancellations whose Start equals End remain
+excluded. Missing accounting counts are explained when a bucket has insufficient
+history, rather than always showing zero jobs. Repeated observations of the same
+job/start count once. See
 [wait-history semantics](../metrics.md#typical-wait-from-your-job-history) for buckets,
 percentile interpolation and coverage limitations.
+
+Slurm 记账与实时作业采用相同证据：只有节点 CfgTRES 确认追踪 GPU 时，非空但没有
+GPU 条目的 AllocTRES 才表示零 GPU。否则数量保持未知，计入此登录的
+`unknown_gpu_samples`，不进入 GPU 分组。空 AllocTRES 保持未知，未分配资源且
+Start 等于 End 的取消记录仍排除。匹配分组历史不足时说明记账数量缺失，不再永久显示零作业。

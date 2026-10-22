@@ -670,18 +670,23 @@ def dashboard() -> dict[str, Any]:
         )
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
     data["summary"] = summarize(data)
-    # Accounting-shaped own jobs show a range, a small sample and missing accounting.
+    # Own accounting demonstrates ranges, small samples and missing GPU counts.
     wait_samples = []
-    for source, count, gpus in ((sources[0], 12, 1), (sources[2], 3, 16)):
+    for source, count, gpus in (
+        (sources[0], 12, 1),
+        (sources[2], 3, 16),
+        (sources[7], 8, 0),
+        (sources[7], 4, None),
+    ):
         for index in range(count):
             wait_ended = current - timedelta(days=index + 1)
             wait_started = wait_ended - timedelta(hours=1)
             sample = wait_sample(
                 {
-                    "id": f"{source['cluster_id']}:wait-{index}",
+                    "id": f"{source['cluster_id']}:wait-{gpus}-{index}",
                     "cluster_id": source["cluster_id"],
                     "user": source["username"],
-                    "qos": "normal" if gpus == 1 else "long",
+                    "qos": "long" if gpus == 16 else "normal",
                     "partition": "gpu",
                     "gpu_count": gpus,
                     "submitted_at": (

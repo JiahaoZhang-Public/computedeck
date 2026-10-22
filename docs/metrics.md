@@ -833,6 +833,8 @@ Where to run and a waiting job's drawer show “Typical wait for your jobs”, e
 labelled “Not a prediction”. The range is the 25th–75th percentile of submit-to-start
 seconds from this login's own finished accounting records ending in the last 30 days
 (a rolling 30 × 24 hours, selected by job end time).
+This includes time held for dependencies, scheduled begin times, user holds or array
+throttling; PBS uses queue-entry time (`qtime`) rather than creation time (`ctime`).
 At least eight samples are required in the matching group. With fewer, the value is
 “— · Not enough history (n jobs)”. Missing accounting and history not yet collected
 have their own explanations, as does a driver that cannot supply usable accounting times.
@@ -845,8 +847,15 @@ pooled and the UI says so. Same-account twin logins share samples, deduplicated 
 job id and actual start time. Repeated polls do not increase the count; a new attempt
 with a different start can count again. Quartiles use linear interpolation at
 `(n - 1) × 0.25` and `(n - 1) × 0.75`. A zero wait is valid. A job cancelled before
-starting, an unknown GPU count, missing or timezone-free timestamps, or times out of
-order cannot supply a sample. Failed jobs that did start can supply one.
+starting, missing or timezone-free timestamps, or times out of order cannot supply a
+sample. Failed jobs that did start can supply one. Jobs with valid times but unknown
+GPU counts are retained separately and counted per login, outside the GPU buckets.
+When a matching bucket has fewer than eight samples and such jobs exist, the UI
+explains the login's missing accounting GPU counts instead of claiming an empty or
+complete sample count. A range still requires eight jobs with known counts.
+On Slurm, a nonempty CPU-only AllocTRES means zero GPUs only when the collected nodes
+confirm GPU TRES tracking; otherwise the count stays unknown. Empty AllocTRES stays
+unknown, and unallocated cancellations with Start equal to End remain excluded.
 
 Where to run has no partition selector, so it shows each observed partition separately
 for the selected QoS and count bucket, with partition labels only when several rows
@@ -858,6 +867,7 @@ rounded to the nearest minute, or seconds for sub-minute waits. The drawer match
 the job's partition(s),
 showing insufficient history for any without samples. It never borrows another
 login's, QoS's, partition's or GPU-count bucket's range.
+An unknown queue/QoS gets its own explanation instead of a zero-sample count.
 
 History accumulates after upgrading from the existing normal terminal-history query;
 there is no additional accounting query or 30-day backfill. Collection gaps and the
@@ -876,7 +886,9 @@ Deleting or repointing a login clears its retained samples; pausing it preserves
 
 “在哪里运行”和等待中的作业详情展示“你的作业通常等待多久”，并明确标注“不是预测”。
 范围取自此登录自己的已结束作业记账记录，计算提交至实际开始的时长，按作业结束时间筛选
-最近滚动的 30 × 24 小时。匹配分组至少有 8 个样本才显示第 25–75 百分位及作业数；
+最近滚动的 30 × 24 小时。此时长包含依赖、预定开始时间、用户挂起或数组并发限制带来的
+等待；PBS 使用进入队列的时间（`qtime`），而不是创建时间（`ctime`）。
+匹配分组至少有 8 个样本才显示第 25–75 百分位及作业数；
 不足时显示“— · 历史不足（n 个作业）”。驱动不支持等待历史、记账不可用和尚未采集分别说明。最近一次记账
 采集时间以本地时间展示；旧历史不会随当前时间延长，也不影响规划结论或排序。
 
@@ -884,8 +896,13 @@ Deleting or repointing a login clears its retained samples; pausing it preserves
 之后上界依次翻倍。分组包含所有 GPU 型号，界面明确说明。同集群同用户名的重复登录共享
 样本，以作业 ID 和实际开始时间去重；重复采集不增加数量，重新运行且开始时间不同的尝试
 可以另计。百分位在排序后的 `(n - 1) × 0.25` 和 `(n - 1) × 0.75` 处线性插值。
-零等待有效。未开始就取消、GPU 数量未知、时间缺失或没有时区、时间顺序错误的作业不计入；
-实际开始后失败的作业可以计入。
+零等待有效。未开始就取消、时间缺失或没有时区、时间顺序错误的作业不计入；
+实际开始后失败的作业可以计入。时间有效但 GPU 数量未知的作业单独保留，按登录计数，
+不进入 GPU 分组。匹配分组不足 8 个样本且存在此类作业时，界面说明此登录的记账记录缺少
+GPU 数量，不再声称样本为零或完整。区间仍要求至少 8 个 GPU 数量已知的作业。
+Slurm 仅在采集到的节点确认追踪 GPU TRES 时，将非空且只含 CPU 等资源的 AllocTRES
+解释为零 GPU，否则保持未知。空 AllocTRES 仍为未知；未分配资源且 Start 等于 End 的
+取消记录仍排除。
 
 “在哪里运行”没有分区选择器，因此按分区分别展示当前 QoS 和 GPU 数量分组的历史，
 仅在有多个分区需要区分时显示分区名。每个选项使用紧凑的一行；“不是预测”及最早的相关
@@ -894,6 +911,7 @@ Deleting or repointing a login clears its retained samples; pausing it preserves
 以小时和分钟表示；不足一分钟时显示秒。
 作业详情匹配该作业的各个分区，没有样本的分区单独说明历史不足。不会借用其他登录、QoS、
 分区或 GPU 数量分组的数据。
+队列/QoS 未知时给出专门说明，不显示零样本。
 
 升级后利用原有的正常终态历史采集逐步积累，不新增记账查询，也不回查完整 30 天。
 采集中断和调度器自身的保留期可能造成缺失。Slurm 已提供带时区的提交、开始、结束时间；

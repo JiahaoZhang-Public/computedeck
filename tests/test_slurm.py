@@ -417,6 +417,36 @@ def fake_cluster(
     return run
 
 
+@pytest.mark.parametrize("tracked", [True, False])
+async def test_collect_passes_gpu_tracking_to_accounting(
+    monkeypatch: pytest.MonkeyPatch, tracked: bool
+) -> None:
+    calls: list[tuple[str, str, list[str] | None]] = []
+    fake = fake_cluster(calls)
+    tres = "billing=4,cpu=4,mem=16G,node=1"
+
+    async def run(destination: str, command: str, options: list[str] | None = None) -> str:
+        if command == "scontrol -d show nodes -o" and not tracked:
+            return "NodeName=node-01 CfgTRES=cpu=64 State=IDLE Partitions=gpu Gres=gpu:4\n"
+        if " sacct " in command:
+            return (
+                sacct_line(AllocTRES=tres)
+                + "\n"
+                + slurm.HISTORY_MARKER
+                + "\n"
+                + terminal_line(AllocTRES=tres)
+            )
+        return await fake(destination, command, options)
+
+    monkeypatch.setattr(ssh, "run", run)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert "history" in batch.capabilities
+    assert batch.finished and batch.failures
+    assert (
+        batch.finished[0]["gpu_count"] == batch.failures[0]["gpu_count"] == (0 if tracked else None)
+    )
+
+
 async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     user = "alice@example.org"
     source = {**SOURCE, "id": "cluster-a-alice-example-org", "username": user}

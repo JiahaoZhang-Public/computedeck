@@ -495,7 +495,7 @@ def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
 
 
 def parse_failures(
-    output: str, source: dict[str, Any], *, terminal: bool = False
+    output: str, source: dict[str, Any], *, terminal: bool = False, tracked: bool = False
 ) -> list[dict[str, Any]]:
     """sacct allocations in a failure state. Only terminal accounting records count."""
     fields = _FINISHED_FIELDS if terminal else _HISTORY_FIELDS
@@ -533,7 +533,9 @@ def parse_failures(
             "partition": row["Partition"],
             "qos": row["QOS"],
             "state": state,
-            "gpu_count": gpu_count(row["AllocTRES"]) if "gpu" in row["AllocTRES"] else None,
+            "gpu_count": gpu_count(row["AllocTRES"])
+            if tracked or "gpu" in row["AllocTRES"]
+            else None,
             "gpu_type": gpu_type(row["AllocTRES"]),
             "cpu_count": integer(row["NCPUS"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
@@ -808,8 +810,9 @@ class SlurmDriver:
             failures, marker, finished = output.partition(HISTORY_MARKER)
             if not marker:
                 raise SourceError("unexpected_output", command="sacct")
-            batch.failures = parse_failures(failures, source)
-            batch.finished = parse_failures(finished, source, terminal=True)
+            tracked = gpus_tracked(node_output)
+            batch.failures = parse_failures(failures, source, tracked=tracked)
+            batch.finished = parse_failures(finished, source, terminal=True, tracked=tracked)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

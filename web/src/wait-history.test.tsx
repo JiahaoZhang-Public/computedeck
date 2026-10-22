@@ -134,6 +134,63 @@ describe.each(['en', 'zh-CN'] as const)('wait history in %s', (locale) => {
     expect(view(1, 'normal', 'other').textContent).toContain(t('wait.insufficient', { count: 0 }));
     expect(view(1, 'normal', null).textContent).toContain(t('wait.insufficient', { count: 0 }));
   });
+  it('matches CPU-only jobs to the zero-GPU bucket', () => {
+    const bucket = history().buckets[0];
+    bucket.gpu_min = bucket.gpu_max = 0;
+    job.gpu_count = 0;
+    const drawer = markup(<JobDetail job={job} ctx={ctx} />).querySelector('.wait-history')!;
+    expect(drawer.textContent).toContain(t('wait.bucket', { gpus: 0 }));
+    expect(drawer.textContent).toContain(
+      t('wait.range', { low: lowUseDuration(38), high: lowUseDuration(93), count: 12 }),
+    );
+    expect(drawer.textContent).not.toContain(t('wait.insufficient', { count: 0 }));
+  });
+  it('explains missing accounting GPU counts in drawers and planner rows without claiming zero jobs', () => {
+    history().buckets = [];
+    history().unknown_gpu_samples = 9;
+    const expected = t('wait.accountingGpus', { count: 9 });
+    const drawer = markup(<JobDetail job={job} ctx={ctx} />).querySelector('.wait-history')!;
+    const planner = markup(<PlanPage ctx={ctx} />);
+    const row = [...planner.querySelectorAll('.plan-options .wait-history')].find((r) =>
+      r.textContent.includes(expected),
+    )!;
+    expect(row).toBeDefined();
+    for (const text of [drawer.textContent, row.textContent, view().textContent]) {
+      expect(text).toContain(expected);
+      expect(text).not.toContain(t('wait.insufficient', { count: 0 }));
+    }
+  });
+  it('preserves a supported range when other own jobs lack GPU counts', () => {
+    history().unknown_gpu_samples = 3;
+    expect(view().textContent).toContain(
+      t('wait.range', { low: lowUseDuration(38), high: lowUseDuration(93), count: 12 }),
+    );
+    history().buckets[0].samples = 7;
+    expect(view().textContent).toContain(t('wait.accountingGpus', { count: 3 }));
+  });
+  it('explains an unknown QoS in planner options instead of claiming zero samples', () => {
+    for (const source of ctx.data.sources) source.qos = [];
+    const rows = markup(<PlanPage ctx={ctx} />).querySelectorAll('.wait-history');
+    const unknown = [...rows].filter((row) => row.textContent.includes(t('wait.unknownQos')));
+    expect(unknown.length).toBeGreaterThan(0);
+    for (const row of unknown) {
+      expect(row.textContent).not.toContain(t('wait.insufficient', { count: 0 }));
+    }
+    expect(view(1, null).textContent).toContain(t('wait.unknownQos'));
+  });
+  it('shows unsupported history for Kubernetes even without an owner label', () => {
+    const source = ctx.data.sources.find((s) => s.id === job.source_id)!;
+    source.driver = 'kubernetes';
+    source.username = 'example-namespace';
+    // Kubernetes can report no owner label despite the legacy string-only Job type.
+    Object.assign(job, { user: null });
+    history().status = 'unsupported';
+    const text = markup(<JobDetail job={job} ctx={ctx} />).querySelector(
+      '.wait-history',
+    )!.textContent;
+    expect(text).toContain(t('wait.unsupported'));
+    expect(text).not.toContain(t('wait.ownOnly'));
+  });
   it('does not pool partitions and names missing partitions on multi-partition jobs', () => {
     history().buckets.push({
       ...history().buckets[0],

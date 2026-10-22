@@ -16,6 +16,9 @@ const en = {
   'wait.unavailable': '— · Accounting history is unavailable for this login.',
   'wait.notCollected': '— · Wait history has not been collected yet.',
   'wait.unknownGpus': '— · GPU count is unknown; no history bucket can be matched.',
+  'wait.unknownQos': '— · Queue / QoS is unknown; no history bucket can be matched.',
+  'wait.accountingGpus':
+    '— · Accounting lacks GPU counts for {count} of this login’s jobs; matching history may be incomplete.',
   'wait.asOf': 'Accounting last collected: {time}',
   'wait.asOfUnknown': 'Accounting collection time unknown.',
   'wait.seconds': '{count} s',

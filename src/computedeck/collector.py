@@ -168,7 +168,12 @@ class Collector:
             # Write only a successful collection. Failures preserve last good snapshots.
             self.store.save_snapshot(source_id, batch.snapshot())
             if batch.finished is not None and "history" in batch.capabilities:
-                self.store.record_job_waits(source, batch.finished)
+                try:
+                    self.store.record_job_waits(source, batch.finished)
+                except Exception as error:
+                    # Ancillary history must not discard collected job events. Do not
+                    # log the exception text: a storage error can contain row data.
+                    logger.warning("Could not record wait history (%s)", type(error).__name__)
             source.update(
                 status="ready",
                 last_success=now(),

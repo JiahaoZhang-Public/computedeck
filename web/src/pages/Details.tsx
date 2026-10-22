@@ -310,7 +310,8 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
         </div>
       )}
       {pending &&
-        (source?.username === job.user && source.cluster_id === job.cluster_id ? (
+        (ctx.data.wait_history?.[job.source_id]?.status === 'unsupported' ||
+        (source?.username === job.user && source.cluster_id === job.cluster_id) ? (
           <WaitHistory
             history={ctx.data.wait_history?.[job.source_id]}
             qos={job.qos}

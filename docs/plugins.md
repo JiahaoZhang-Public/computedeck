@@ -1040,6 +1040,7 @@ need no change. The drawer only opens a link; it sends no provider mutation.
 {
   status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
   observed_at: string | null; // latest accounting-capable login collection, ISO time
+  unknown_gpu_samples?: number; // own attempts with valid times but missing GPU counts
   buckets: {
     qos: string | null;
     partition: string | null;
@@ -1065,11 +1066,21 @@ For opted-in drivers, the service computes aggregates from `Batch.finished` only
 when the batch has `history`. Each sample must match the source's `cluster_id` and
 `username` and carry
 `submitted_at`, `started_at`, `ended_at` with timezone offsets, in that order, plus a
-known nonnegative integer `gpu_count`. Unknown values are excluded, not filled with
-zero. No new job field or query is required. Individual missing or invalid times are
+known nonnegative integer `gpu_count` to enter a bucket. Null GPU counts are retained
+and counted in additive `unknown_gpu_samples` per cluster/login over the same window,
+never filled with zero. Twin logins deduplicate these attempts; a known count from
+either twin resolves the missing count. Unknown-count jobs with start equal to end
+are excluded because they can represent unallocated cancellations. Unsupported
+drivers return zero for this count. Older services may omit the count.
+No new job field or query is required. Individual missing or invalid times are
 still excluded on supported drivers. An unreadable accounting capability remains
 `unavailable`, distinct from unsupported drivers and insufficient sample counts.
 Older dashboards may omit `wait_history`.
+
+`unknown_gpu_samples` 是新增的可选字段：按集群/登录统计同一 30 天窗口内时间有效但
+GPU 数量未知的作业尝试，不填成零 GPU，也不进入百分位分组。同账号重复登录共享去重
+计数；任一登录提供已知数量即可消除该尝试的不确定性。GPU 数量未知且开始等于结束的
+记录可能是未分配资源的取消，不计入。不支持的驱动返回零，旧服务可以省略此字段。
 
 The window is 30 days by completion time. Buckets are 0, 1, 2, 3–4, 5–8, 9–16, etc.,
 separate per cluster/user/QoS/partition. Same-account twins share deduplicated job/start
