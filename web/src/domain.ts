@@ -111,7 +111,7 @@ export function historyPartial(point: HistoryPoint) {
   );
 }
 /**
- * GPUs an instance holds: those with compute processes on a machine read over SSH, the
+ * GPUs an instance holds: those with processes or significant memory use over SSH, the
  * allocation a provider lists otherwise. A machine added by hand counts only what an SSH
  * check measured, never the GPUs typed in.
  */
@@ -296,4 +296,13 @@ export function qosUsedTres(qos: QosLimit): string | null {
 /** GPUs counted against the total limit, when reported by the scheduler. */
 export function qosGpuUsed(qos: QosLimit): number | null {
   return gpuTres(qosUsedTres(qos)).find((entry) => !entry.model)?.value ?? null;
+}
+
+/** Only the driver's explicit free state is evidence; unknown never becomes free. */
+export function freeGpuIndexes(instance: Instance, model: string) {
+  return (instance.gpus ?? [])
+    .filter(
+      (gpu) => gpu.in_use === false && (!model || gpu.name?.toLowerCase() === model.toLowerCase()),
+    )
+    .flatMap((gpu) => (gpu.index == null ? [] : [gpu.index]));
 }

@@ -6,7 +6,7 @@ read those figures. `—` means unknown or no measurement; `≥ n` is a known su
 with named missing evidence. Neither means zero.
 
 - **Freshness** in the topbar uses the oldest enabled source’s last successful collection. If any enabled source has never succeeded, it says "Not collected yet". Disabled sources and manual SSH checks do not make the fleet age newer. "Collecting N" keeps that age visible, and Refresh can queue the other sources. Open the health pill on any page for source ages, next attempts, backoff and service faults. The age can look older than in earlier releases because it no longer follows the newest source.
-- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts GPUs with compute processes; unavailable process visibility (for example on AMD GPUs) remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
+- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts GPUs with visible compute processes or an empty process list with memory use at least max(1024 MiB, 5% of total GPU memory). Unavailable process visibility (for example on AMD GPUs), or missing memory without visible processes, remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
 - **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and idle-instance suggestions.
 - **SSH checks** of a cloud instance are kept across provider listings while its host, port and user stay the same, so a failed connection stays failed until it is checked again. A listing that reports the instance no longer holds GPUs clears the old check, even if it retains an endpoint. The check shows its own age next to the listing's; counting a provider's allocation never makes an old utilization reading fresh.
 - **Usable capacity** includes only healthy nodes from enabled, current sources. Down, drained, reserved, UNKNOWN, FUTURE, ERROR and nonresponsive (`*`) nodes are unavailable. Slurm nodes must belong to a partition. Power-saving nodes with idle, free or empty base states, and PBS provisioning, sleep and wait-provisioning nodes, cannot contribute current usable or free GPUs. Nodes with assigned work remain usable and retain their allocations even with power flags. DYNAMIC_FUTURE is not the FUTURE state and does not exclude an idle node. Non-faulty resting Slurm power-saving nodes (with or without CLOUD) and PBS sleep/provisioning nodes are labelled **available on demand**, never free now. They remain healthy for cluster status and do not count as unhealthy nodes. Usable, unavailable and on-demand GPU counts are separate parts of the total inventory; GPUs on unknown-state nodes remain unknown. An outage reads "0 usable · N unavailable", alongside the total inventory. **Unallocated** GPUs are usable capacity minus the allocations on those usable nodes. QoS limits and your access still constrain where you can run.
@@ -461,3 +461,41 @@ outcomes and a failing Team alerts channel, without reading live deliveries.
 其余事件仅显示“已合并”，避免误以为每个事件都单独发送了消息；限流事件仍显示“已抑制”。状态来自保留的最近 500 条日志，未显示状态表示未知。
 动态加载记录时读取这些状态；任务提醒页面的发送日志会自动刷新。示例模式使用虚构状态和发送失败的
 Team alerts 渠道，不读取真实发送记录。
+
+### Per-GPU SSH availability / SSH 单卡可用状态
+
+Machine drawers show Free, Busy, Busy (processes not visible), or Unknown for each GPU,
+with memory, utilization, and up to two owners with process counts and memory. Unknown
+memory is never zero. Owner totals cover only the shown processes when the 16-process
+cap is reached; PIDs are not displayed. The section uses its own `gpus_observed_at`,
+which probes never refresh.
+
+Where to run has a separate Machines panel for current SSH-source GPU samples no older
+than twice the collection interval. Only `in_use: false` counts as free. Unknown states
+or models keep free counts as lower bounds, with the missing count stated. Rows sort by
+known free GPUs and are muted when fewer than requested are known free. Model filtering
+includes machine models. Copy-only SSH and NVIDIA CUDA settings select known-free indexes
+in ascending index order, up to the requested count; fewer free GPUs means fewer selected.
+Connect with SSH, then run the copied `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
+line in that shell before your command. Copying runs nothing and reserves no GPU. SSH hosts
+do not appear in the paid-cloud idle list. Hand-added machines do not yet retain per-GPU data.
+
+机器抽屉逐卡显示空闲、使用中、使用中但进程不可见或未知，以及显存、利用率和最多两位
+用户的进程数与显存。可见进程或空进程列表下达到 max(1024 MiB, 总显存的 5%) 的用量
+表示使用中；只有空进程列表且已知显存低于阈值才是空闲。进程不可读，或没有可见进程且
+显存未知时，状态保持未知。任一卡未知都会使机器的总使用量未知。每卡最多保留 16 个进程，
+超出时说明用户合计仅覆盖已显示的进程；不显示 PID。单卡列表使用独立采样时间，探测不会刷新它。
+
+“在哪里运行”的机器面板仅采用最近两个采集周期内的有效 SSH 来源单卡采样，未知卡不计为
+空闲，空闲数标为下界并说明未知数量。按已知空闲卡数排序，不足请求数量时淡化显示。
+型号筛选包含机器型号。SSH 和 NVIDIA CUDA 设置仅供复制，按编号升序选取已知空闲卡，
+最多选取请求数量；不足时选取所有已知空闲卡。先通过 SSH 连接，再在该 shell 中执行复制的
+`export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...` 行，然后运行你的命令。
+复制操作不会执行命令或预留 GPU。SSH 主机不再出现在付费云实例的低利用率列表中；手动添加机器尚不保留单卡数据。
+
+The partial-total reason `summary_gpu_processes_unavailable` means GPU use could not be
+read on every GPU, whether because processes were unreadable or memory was missing without
+visible processes. The reason code is unchanged; it does not imply the process query failed.
+
+部分总量的原因码 `summary_gpu_processes_unavailable` 表示部分 GPU 的使用情况无法读取：
+可能是进程不可读，也可能是没有可见进程且显存缺失。原因码保持不变，并不表示进程查询一定失败。

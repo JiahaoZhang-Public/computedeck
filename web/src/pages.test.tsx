@@ -263,11 +263,11 @@ describe('the last SSH check of a machine', () => {
       />,
     );
 
-  it('shows when it was checked and how many GPUs had processes', () => {
+  it('shows when it was checked and how many GPUs were in use', () => {
     const html = drawer(machine);
     expect(html).toContain('Reachable');
     expect(html).toContain('checked 2 min ago');
-    expect(html).toMatch(/GPUs with processes<\/dt><dd>1</);
+    expect(html).toMatch(/GPUs in use<\/dt><dd>1</);
     const page = renderToStaticMarkup(
       <CloudPage ctx={ctx(dash({ sources: [], instances: [machine] }))} />,
     );
@@ -280,13 +280,13 @@ describe('the last SSH check of a machine', () => {
       gpu_allocated: null,
       probe_warnings: [{ code: 'gpu_processes_unavailable', detail: 'rocm-smi' }],
     });
-    expect(html).toMatch(/GPUs with processes<\/dt><dd>—/);
+    expect(html).toMatch(/GPUs in use<\/dt><dd>—/);
     expect(html).toContain('GPU processes unavailable: rocm-smi');
   });
 
   it('leaves the busy count out for a provider instance, which holds what it rents', () => {
     const html = drawer({ ...machine, manual: false, metrics_scope: undefined });
-    expect(html).not.toContain('GPUs with processes');
+    expect(html).not.toContain('GPUs in use');
   });
 });
 

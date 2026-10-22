@@ -242,8 +242,8 @@ def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[d
     """GPU, CPU and memory readings of one machine, the capabilities they cover and warnings
     for what was not read.
 
-    ``gpu_allocated`` counts the GPUs with compute processes; it stays None, never 0, when
-    the processes could not be read (``gpu_processes_unavailable``), as on AMD GPUs.
+    ``gpu_allocated`` counts GPUs with visible compute processes or significant memory use.
+    Unreadable processes or memory leave idle-looking GPUs unknown, never free.
     """
     warnings: list[dict[str, Any]] = []
     capabilities = ["instances"]
@@ -279,12 +279,25 @@ def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[d
             f"{tool} listed no GPUs" if tool else "no nvidia-smi or rocm-smi"
         )
         warnings.append(message("gpus_unavailable", detail=str(detail)[:180]))
+    for row in gpus or []:
+        processes = row["processes"]
+        used, total = row["memory_used_mb"], row["memory_total_mb"]
+        row["in_use"] = (
+            True
+            if processes
+            else None
+            if processes is None or used is None or total is None
+            else used >= max(1024, total * 0.05)
+        )
+        row["processes_omitted"] = max(0, len(processes) - 16) if processes else 0
+        if processes is not None:
+            row["processes"] = processes[:16]
     observed = [row["utilization"] for row in gpus or [] if row["utilization"] is not None]
     readings = {
         "gpu_count": len(gpus) if gpus else None,
         "gpu_allocated": (
-            sum(bool(row["processes"]) for row in gpus)
-            if gpus and all(row["processes"] is not None for row in gpus)
+            sum(row["in_use"] for row in gpus)
+            if gpus and all(row["in_use"] is not None for row in gpus)
             else None
         ),
         "gpu_type": ", ".join(dict.fromkeys(row["name"] for row in gpus or [] if row["name"]))
@@ -326,6 +339,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "hourly_cost": None,
         "currency": "USD",
         "observed_at": observed,
+        "gpus_observed_at": observed,
         "last_probe_attempt": observed,
         "ssh_status": "reachable",
     }

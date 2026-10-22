@@ -1,12 +1,12 @@
 import { useRouteParam } from '../useRouteParam';
-import { Clock3, Plus } from 'lucide-react';
+import { Clock3, Copy, Plus } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { dateTime, money, relativeTime } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES } from '../planExplanation';
-import { gpuModels, idleInstances, planOptions } from '../plan';
+import { gpuModels, idleInstances, machineOptions, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -128,7 +128,12 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   ];
   const first = visible[0];
   const best = first && ['likely', 'possible'].includes(first.verdict) ? first : null;
-  const models = gpuModels(data.nodes);
+  const machines = machineOptions(data, request);
+  const models = gpuModels(
+    data.nodes,
+    machines.map((option) => option.instance),
+  );
+  const hasMachines = data.sources.some((source) => source.driver === 'ssh');
   const idle = idleInstances(data.instances);
   const hasClusters = data.sources.some((source) => source.kind === 'cluster');
   return (
@@ -214,43 +219,94 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           </div>
         </Panel>
       )}
-      <Panel title={t('plan.options')} count={visible.length}>
-        {unchecked.map((source) => (
-          <p className="panel-note" key={source.id}>
-            {t('plan.accessNote', { source: `${source.name} · ${source.username}` })}
-          </p>
-        ))}
-        {visible.length ? (
-          <OptionsTable options={visible} request={request} ctx={ctx} />
-        ) : (
-          <Empty
-            title={t(denied.length ? 'plan.noAccess' : 'plan.empty')}
-            text={
-              denied.length
-                ? t('plan.noAccessHint')
-                : hasClusters
-                  ? t('plan.emptyDisabled')
-                  : t('plan.emptyHint')
-            }
-            action={
-              hasClusters || ctx.demo ? undefined : (
-                <button
-                  className="button primary"
-                  onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
-                >
-                  <Plus size={14} /> {t('clusters.add')}
-                </button>
-              )
-            }
-          />
-        )}
-        <p className="panel-note">{t('plan.note')}</p>
-      </Panel>
+      {(hasClusters || !hasMachines) && (
+        <Panel title={t('plan.options')} count={visible.length}>
+          {unchecked.map((source) => (
+            <p className="panel-note" key={source.id}>
+              {t('plan.accessNote', { source: `${source.name} · ${source.username}` })}
+            </p>
+          ))}
+          {visible.length ? (
+            <OptionsTable options={visible} request={request} ctx={ctx} />
+          ) : (
+            <Empty
+              title={t(denied.length ? 'plan.noAccess' : 'plan.empty')}
+              text={
+                denied.length
+                  ? t('plan.noAccessHint')
+                  : hasClusters
+                    ? t('plan.emptyDisabled')
+                    : t('plan.emptyHint')
+              }
+              action={
+                hasClusters || ctx.demo ? undefined : (
+                  <button
+                    className="button primary"
+                    onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
+                  >
+                    <Plus size={14} /> {t('clusters.add')}
+                  </button>
+                )
+              }
+            />
+          )}
+          <p className="panel-note">{t('plan.note')}</p>
+        </Panel>
+      )}
       {denied.length > 0 && (
         <details className="panel">
           <summary>{t('plan.access.not_associated', { count: denied.length })}</summary>
           <OptionsTable options={denied} request={request} ctx={ctx} />
         </details>
+      )}
+      {hasMachines && (
+        <Panel title={t('plan.machines')} count={machines.length}>
+          <p className="panel-note">{t('plan.machinesNote')}</p>
+          {machines.length ? (
+            <ul className="rows machine-options">
+              {machines.map(({ instance, free, total, unknown, command }) => (
+                <li key={instance.id} className={free < request.gpus ? 'muted' : undefined}>
+                  <div className="grow">
+                    <strong>
+                      {instance.platform} · {instance.name}
+                    </strong>
+                    <span className="sub">
+                      {t('plan.machineFree', { free: unknown ? `≥ ${free}` : free, total })}
+                    </span>
+                    {unknown > 0 && (
+                      <span className="sub">{t('plan.machineUnknown', { count: unknown })}</span>
+                    )}
+                    <span className="sub" title={dateTime(instance.gpus_observed_at)}>
+                      {t('gpu.sampled', { time: relativeTime(instance.gpus_observed_at) })}
+                    </span>
+                    {command && <pre className="machine-command">{command}</pre>}
+                  </div>
+                  <div className="machine-actions">
+                    {command && (
+                      <button
+                        className="button small"
+                        disabled={ctx.demo}
+                        onClick={() => void ctx.copy(command)}
+                      >
+                        <Copy size={14} />
+                        {t('plan.machineCopy')}
+                      </button>
+                    )}
+                    <button className="button small" onClick={() => ctx.openInstance(instance)}>
+                      {t('plan.open')}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="panel-note">{t('plan.machinesEmpty')}</p>
+          )}
+          <p className="panel-note">{t('plan.machineFreshness')}</p>
+          {machines.some((option) => option.command) && (
+            <p className="panel-note">{t('plan.machineCopyNote')}</p>
+          )}
+        </Panel>
       )}
       {idle.length > 0 && (
         <Panel title={t('plan.idle')} count={idle.length}>

@@ -720,3 +720,33 @@ def test_unreadable_attention_state_is_skipped(store: Store) -> None:
     )
     assert store.attention_state() == {}
     assert store.unreadable_rows()["attention_state"] == 2
+
+
+def test_probe_preserves_per_gpu_rows_and_sample_time(store: Store) -> None:
+    from computedeck.hardware import parse_probe
+
+    sampled = "2026-01-01T00:00:00+00:00"
+    endpoint = {"host": "gpu-box", "port": None, "username": "alice"}
+    gpu = {"index": 0, "in_use": False, "processes": []}
+    store.save_snapshot(
+        "gpu-box",
+        {
+            "instances": [
+                {
+                    "id": "gpu-box:a",
+                    "source_id": "gpu-box",
+                    **endpoint,
+                    "gpus": [gpu],
+                    "gpus_observed_at": sampled,
+                    "observed_at": sampled,
+                }
+            ]
+        },
+    )
+    readings = parse_probe('{"cpu_utilization": 20}')
+    assert "gpus" not in readings and "gpus_observed_at" not in readings
+    store.update_cloud_metrics("gpu-box:a", endpoint, readings)
+    row = next(row for row in store.dashboard()["instances"] if row["id"] == "gpu-box:a")
+    assert row["gpus"] == [gpu]
+    assert row["gpus_observed_at"] == sampled
+    assert row["observed_at"] != sampled

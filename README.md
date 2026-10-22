@@ -23,9 +23,10 @@ The core only reads resources; it does not submit jobs or stop instances. Missin
 
 In **0.4.0 — Numbers you can trust**, partial totals show `≥` and name the unmeasured
 machines or logins. Overview, Usage and history share the same figures. Running cloud
-instances count their provider's GPU allocation; SSH machines count GPUs with compute
-processes, and hand-added machines with monitoring off are excluded. SSH checks keep
-their own age across provider updates.
+instances count their provider's GPU allocation; SSH machines count GPUs with visible compute
+processes or significant GPU memory use. Unreadable processes, or missing memory without visible
+processes, leave use unknown. Hand-added machines with monitoring off are excluded. SSH checks
+keep their own age across provider updates.
 
 The **Data freshness and service health** indicator in the top bar shows the oldest
 enabled source's successful collection, or **Not collected yet** if any enabled source
@@ -56,7 +57,7 @@ Planned work; scope and priorities may change.
 | Instance / machine | One rented or owned machine. **Cloud and machines** includes cloud instances, SSH sources and hand-added machines. |
 | Collection machine | Another computer that collects sources for this service, shown as **via {name}**. It is not a compute node. |
 | Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
-| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with compute processes on SSH machines. This is not GPU utilization. |
+| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with visible compute processes or significant GPU memory use on SSH machines. Unreadable processes, or missing memory without visible processes, leave use unknown. This is not GPU utilization. |
 | “usable GPUs” in the capacity reading | Capacity on usable nodes across all users, not a promise that your login can allocate it. |
 | Needs attention | The single list of current faults and warnings; its badge, tile and panel count only items that are not acknowledged or snoozed. |
 

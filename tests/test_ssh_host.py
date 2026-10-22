@@ -105,6 +105,8 @@ def test_one_running_instance_with_gpus_and_processes() -> None:
             "utilization": 80,
             "memory_used_mb": 40000,
             "memory_total_mb": 81920,
+            "in_use": True,
+            "processes_omitted": 0,
             "processes": [
                 {"pid": 4242, "user": "alice", "memory_mb": 39000},
                 {"pid": 4343, "user": "bob", "memory_mb": None},
@@ -117,6 +119,8 @@ def test_one_running_instance_with_gpus_and_processes() -> None:
             "memory_used_mb": 1000,
             "memory_total_mb": 81920,
             "processes": [],
+            "in_use": False,
+            "processes_omitted": 0,
         },
     ]
 
@@ -257,6 +261,8 @@ def test_amd_gpus_without_process_data() -> None:
             "memory_used_mb": 10,
             "memory_total_mb": 65520,
             "processes": None,
+            "in_use": None,
+            "processes_omitted": 0,
         },
         {
             "index": 1,
@@ -265,6 +271,8 @@ def test_amd_gpus_without_process_data() -> None:
             "memory_used_mb": None,
             "memory_total_mb": 65520,
             "processes": None,
+            "in_use": None,
+            "processes_omitted": 0,
         },
     ]
 
@@ -472,8 +480,45 @@ def test_a_comma_in_a_gpu_name_keeps_the_gpu() -> None:
 
 @pytest.mark.parametrize(("apps", "expected"), [(APPS, 1), ("", 0), (None, None)])
 def test_in_use_means_compute_processes_not_utilization(apps, expected):
-    instance, _ = parse(apps=apps)
+    instance, _ = parse(apps=apps, gpu=GPUS.replace("40000", "0"))
     assert instance["gpu_allocated"] == expected
     assert instance["gpu_count"] == 2
     # A high utilization sample without a listed process does not redefine this count.
     assert instance["gpu_utilization"] == 50
+
+
+@pytest.mark.parametrize(
+    ("used", "total", "apps", "expected"),
+    [
+        (0, 81920, "", False),
+        (4095, 81920, "", False),
+        (4096, 81920, "", True),
+        (1023, 8192, "", False),
+        (1024, 8192, "", True),
+        ("N/A", 81920, "", None),
+        (0, "N/A", "", None),
+        (8000, 81920, None, None),
+        (0, 81920, None, None),
+        ("N/A", "N/A", "GPU-0000aaaa, 4242, 10", True),
+    ],
+)
+def test_in_use_from_processes_and_memory(used: Any, total: Any, apps: Any, expected: Any) -> None:
+    instance, _ = parse(gpu=f"0, GPU-0000aaaa, NVIDIA L4, 0, {used}, {total}", apps=apps)
+    assert instance["gpus"][0]["in_use"] is expected
+    assert instance["gpu_allocated"] == (None if expected is None else int(expected))
+    assert instance["gpus_observed_at"] == instance["observed_at"]
+
+
+def test_process_list_is_capped_without_changing_allocation() -> None:
+    instance, _ = parse(apps="".join(f"GPU-0000aaaa, {pid}, 10\n" for pid in range(20)))
+    gpu = instance["gpus"][0]
+    assert len(gpu["processes"]) == 16
+    assert gpu["processes_omitted"] == 4
+    assert gpu["in_use"] is True
+    assert instance["gpu_allocated"] == 1
+
+
+def test_any_unknown_gpu_keeps_total_allocation_unknown() -> None:
+    instance, _ = parse(gpu=GPUS.replace("1000, 81920", "N/A, 81920"))
+    assert [gpu["in_use"] for gpu in instance["gpus"]] == [True, None]
+    assert instance["gpu_allocated"] is None

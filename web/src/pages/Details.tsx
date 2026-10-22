@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
-import type { DeckEvent, Instance, Job, SSHConfig } from '../types';
+import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
+  dateTime,
+  percentage,
   arrayField,
   groupArrays,
   instanceAllocation,
@@ -400,7 +402,7 @@ export function InstanceDetail({
 }) {
   const { demo, remote, busy } = ctx;
   const direct = remote || !!item.existing_alias;
-  // GPUs with compute processes, as the last SSH check counted them.
+  // Busy GPUs, as the last SSH check counted them.
   const inUse = instanceAllocation(item);
   async function copyCommand() {
     if (direct) {
@@ -536,6 +538,7 @@ export function InstanceDetail({
           <dd>{relativeTime(item.observed_at)}</dd>
         </div>
       </dl>
+      <GpuDetails item={item} />
       <Metrics
         values={[
           { label: 'GPU', value: item.gpu_utilization },
@@ -548,5 +551,77 @@ export function InstanceDetail({
         {t('instance.note.scope')}
       </p>
     </div>
+  );
+}
+
+function gpuMemory(value: number | null) {
+  return value == null ? t('status.unknown') : `${Math.round((value / 1024) * 10) / 10} GiB`;
+}
+
+function gpuOwners(gpu: GpuRow) {
+  const owners = new Map<string | null, { count: number; memory: number | null }>();
+  for (const process of gpu.processes ?? []) {
+    const owner = owners.get(process.user) ?? { count: 0, memory: 0 };
+    owner.count += 1;
+    owner.memory =
+      owner.memory == null || process.memory_mb == null ? null : owner.memory + process.memory_mb;
+    owners.set(process.user, owner);
+  }
+  const labels = [...owners].slice(0, 2).map(([user, owner]) =>
+    t('gpu.owner', {
+      user: user ?? t('gpu.unknownUser'),
+      count: owner.count,
+      memory: gpuMemory(owner.memory),
+    }),
+  );
+  if (owners.size > 2) labels.push(t('gpu.moreOwners', { count: owners.size - 2 }));
+  if (gpu.processes_omitted) labels.push(t('gpu.omitted', { count: gpu.processes_omitted }));
+  return labels.join(' · ');
+}
+
+function GpuDetails({ item }: { item: Instance }) {
+  if (!item.gpus?.length) return null;
+  return (
+    <section className="gpu-details">
+      <h3>{t('gpu.title')}</h3>
+      <p className="panel-note" title={dateTime(item.gpus_observed_at)}>
+        {t('gpu.sampled', {
+          time: item.gpus_observed_at ? relativeTime(item.gpus_observed_at) : t('status.unknown'),
+        })}
+      </p>
+      <ul className="rows">
+        {item.gpus.map((gpu, index) => {
+          const owners = gpuOwners(gpu);
+          return (
+            <li key={index}>
+              <div className="grow">
+                <strong>
+                  {gpu.index ?? '—'} · {gpu.name ?? t('status.unknown')}
+                </strong>
+                <span className="sub">
+                  {t('gpu.memory', {
+                    used: gpuMemory(gpu.memory_used_mb),
+                    total: gpuMemory(gpu.memory_total_mb),
+                  })}{' '}
+                  · {t('gpu.utilization', { value: percentage(gpu.utilization) })}
+                </span>
+                {owners && <span className="sub">{owners}</span>}
+                <span className="tag">
+                  {t(
+                    gpu.in_use == null
+                      ? 'status.unknown'
+                      : !gpu.in_use
+                        ? 'gpu.free'
+                        : gpu.processes?.length
+                          ? 'gpu.busy'
+                          : 'gpu.busyHidden',
+                  )}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

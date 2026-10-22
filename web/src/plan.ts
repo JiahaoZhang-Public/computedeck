@@ -1,6 +1,8 @@
 import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
+import { directSSHCommand } from './connections';
 import { reasonCode, reasonKind } from './jobFacts';
 import {
+  freeGpuIndexes,
   holdsAllocation,
   PENDING_STATES,
   instanceLifecycle,
@@ -635,15 +637,18 @@ export function comparePlans(a: PlanOption, b: PlanOption, request: PlanRequest)
   return { factor: 'tie' as const, order: a.key.localeCompare(b.key) };
 }
 
-/** GPU models the visible nodes report, for the model filter. */
-export function gpuModels(nodes: ComputeNode[]) {
+/** Models reported by scheduler nodes and per-GPU machine rows. */
+export function gpuModels(nodes: ComputeNode[], instances: Instance[] = []) {
   return [
     ...new Set(
-      nodes
-        .flatMap((node) =>
+      [
+        ...nodes.flatMap((node) =>
           node.gpu_type ? node.gpu_type.split(',').map((model) => model.trim()) : [],
-        )
-        .filter(Boolean),
+        ),
+        ...instances.flatMap((item) =>
+          (item.gpus ?? []).flatMap((gpu) => (gpu.name ? [gpu.name] : [])),
+        ),
+      ].filter(Boolean),
     ),
   ].sort();
 }
@@ -653,9 +658,59 @@ export function idleInstances(instances: Instance[], threshold = 10) {
   return instances.filter(
     (item) =>
       !item.manual &&
+      item.metrics_scope !== 'host_visible' &&
       instanceLifecycle(item.state) === 'held' &&
       item.gpu_utilization != null &&
       item.gpu_utilization < threshold &&
       (item.gpu_count ?? 0) > 0,
   );
+}
+
+/** Current per-GPU SSH samples, separate from scheduler estimates. */
+export function machineOptions(
+  data: Pick<Dashboard, 'sources' | 'instances'>,
+  request: PlanRequest,
+  now = Date.now(),
+) {
+  return data.instances
+    .flatMap((instance) => {
+      const source = data.sources.find((source) => source.id === instance.source_id);
+      const age = Math.max(0, now - Date.parse(instance.gpus_observed_at ?? ''));
+      if (
+        !source ||
+        source.driver !== 'ssh' ||
+        !sourceHasData(source, 'instances') ||
+        !Number.isFinite(age) ||
+        age > source.interval_minutes * 120000 ||
+        !instance.gpus?.length
+      )
+        return [];
+      const matching = instance.gpus.filter(
+        (gpu) => !request.gpuType || gpu.name?.toLowerCase() === request.gpuType.toLowerCase(),
+      );
+      const unknown =
+        matching.filter((gpu) => gpu.in_use == null).length +
+        (request.gpuType ? instance.gpus.filter((gpu) => !gpu.name).length : 0);
+      const free = matching.filter((gpu) => gpu.in_use === false).length;
+      const indexes = freeGpuIndexes(instance, request.gpuType)
+        .sort((a, b) => a - b)
+        .slice(0, request.gpus);
+      const ssh = directSSHCommand(instance);
+      // Only the NVIDIA query provides gpu_processes; GPU names can also start with Tesla.
+      const nvidia = indexes.length > 0 && source.capabilities.includes('gpu_processes');
+      return [
+        {
+          instance,
+          source,
+          free,
+          total: matching.length,
+          unknown,
+          command:
+            ssh && nvidia
+              ? `${ssh}\nexport CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes.join(',')}`
+              : null,
+        },
+      ];
+    })
+    .sort((a, b) => b.free - a.free || a.instance.name.localeCompare(b.instance.name));
 }

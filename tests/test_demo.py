@@ -34,7 +34,7 @@ def test_demo_has_verified_planner_choices() -> None:
 
 def test_demo_machine_added_by_hand_is_checked_and_counted() -> None:
     [machine] = [row for row in dashboard()["instances"] if row["name"] == "dev-box"]
-    # The state the service would derive from its last check, and GPUs with processes.
+    # The state and GPU use measured by the last check (visible processes or significant memory).
     assert machine["state"] == manual_state(machine) == "running"
     assert gpu_allocation(machine) == machine["gpu_allocated"] == 1
 
@@ -53,6 +53,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     assert data["summary"]["known_allocated"] == 25
     assert {row["subject"]["name"] for row in data["summary"]["unmeasured"]} == {
         "build-box",
+        "lab-server",
         "Cluster A · carol",
         "Cluster C · alice",
         "RunPod secondary",
@@ -369,6 +370,11 @@ def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) ->
             point["at"] >= s["last_success"] for s in data["sources"] if s["stale"] or s["error"]
         )
         gaps += sum(point["at"] >= i["added_at"] for i in unprobed)
+        gaps += sum(
+            point["at"] >= i["gpus_observed_at"]
+            for i in data["instances"]
+            if i.get("gpus") and i.get("gpu_allocated") is None
+        )
         assert point["unknown_allocation_sources"] == gaps
         assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])
 
@@ -520,3 +526,14 @@ def test_demo_planner_includes_an_unknown_runtime_limit() -> None:
     debug = next(qos for qos in source["qos"] if qos["name"] == "debug")
     assert "MaxWallPJ" not in debug["limits"]
     assert debug["access"] == "verified"
+
+
+def test_demo_ssh_machine_shows_all_gpu_states() -> None:
+    data = dashboard()
+    source = next(source for source in data["sources"] if source["driver"] == "ssh")
+    machine = next(row for row in data["instances"] if row["source_id"] == source["id"])
+    assert [gpu["in_use"] for gpu in machine["gpus"]] == [False, True, True, None]
+    assert machine["gpus"][1]["processes"][0]["user"] == "alice"
+    assert machine["gpus"][2]["processes"] == []
+    assert machine["gpu_allocated"] is None
+    assert machine["gpus_observed_at"] == machine["observed_at"]

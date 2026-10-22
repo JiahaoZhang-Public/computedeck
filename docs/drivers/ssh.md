@@ -45,11 +45,13 @@ The result is one instance with id `<cluster_id>:<alias>`, state `running` (the 
   "utilization": 80,
   "memory_used_mb": 40000,
   "memory_total_mb": 81920,
-  "processes": [{ "pid": 4242, "user": "alice", "memory_mb": 39000 }]
+  "processes": [{ "pid": 4242, "user": "alice", "memory_mb": 39000 }],
+  "in_use": true,
+  "processes_omitted": 0
 }
 ```
 
-`null` always means "not read", never zero. `processes: []` means no GPU processes were running; `processes: null` means they could not be read.
+`null` always means "not read", never zero. `processes: []` means no compute processes were visible; `processes: null` means they could not be read.
 
 ## Fields
 
@@ -84,3 +86,31 @@ Errors (the previous snapshot is kept):
 - The cost of the machine is not known, so the hourly price is empty.
 - Changing the alias changes the instance id; the row under the old alias stays as `missing`.
 - **Check connection** on the instance page refreshes the summary numbers, not the per-GPU rows; those update on the next scheduled collection.
+
+## Per-GPU availability
+
+`in_use` is true when compute processes are visible, or when an empty process list has
+memory use at least `max(1024 MiB, 5% of total memory)`. It is false only with an empty
+process list and known used and total memory below that floor. An unreadable process list,
+or missing memory without visible processes, leaves it null. Utilization alone does not
+establish availability. `gpu_allocated` counts true rows only when every row is known;
+otherwise it is null. Hand-added probes share this rule for their aggregate count.
+
+Each process list keeps at most 16 entries; `processes_omitted` counts those left out.
+The drawer shows at most two owners with process counts and memory, plus the number of
+other displayed owners. Truncated lists explicitly label owner totals as partial. PIDs
+are retained in the existing API field but never shown in the drawer.
+
+`gpus_observed_at` is the collection time of the GPU list. An on-demand hardware probe
+updates aggregate readings but never this timestamp or the per-GPU rows. Where to run
+uses current SSH sources and GPU lists no older than two source collection intervals.
+It shows free GPUs separately from cluster estimates, unknown rows as a lower bound,
+and copy-only SSH/CUDA setup for NVIDIA GPUs. The snippet selects known-free indexes in
+ascending index order, up to the requested count (or all available indexes if fewer are free).
+Connect with the SSH line, then run `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
+in that shell before your command. Copying runs nothing and reserves no GPU. Hand-added machines
+remain outside this panel because their probes do not retain per-GPU lists.
+
+复制的 NVIDIA 设置按编号升序选取已知空闲卡，最多选取请求数量；不足时选取所有已知空闲卡。
+先执行 SSH 连接行，再在该 shell 中执行 `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`，
+然后运行你的命令。复制操作不会执行命令或预留 GPU。

@@ -1,11 +1,13 @@
 """Fictional example data. Never persisted or passed to collectors."""
 
+import json
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import attention, drivers
 from .drivers.base import cluster_state, node_health_fields, requires_partition
+from .drivers.ssh_host import parse_machine
 from .summary import fresh, freshness, summarize
 
 _SOURCES = [
@@ -127,6 +129,9 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
         for i in data["instances"]
         if i.get("manual") and i.get("monitoring") and not i.get("observed_at")
     ]
+    unknown_machines = [
+        i for i in data["instances"] if i.get("gpus") and i.get("gpu_allocated") is None
+    ]
     steps = min(hours, 168) * 2
     points = []
     for i in range(steps + 1):
@@ -137,6 +142,9 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
         # at their last successful collection; the latest point uses the live summary.
         unknown = sum(at >= datetime.fromisoformat(i["added_at"]) for i in unprobed)
         unknown += sum(at >= datetime.fromisoformat(s["last_success"]) for s in gaps)
+        unknown += sum(
+            at >= datetime.fromisoformat(i["gpus_observed_at"]) for i in unknown_machines
+        )
         points.append(
             {
                 "at": at.isoformat(),
@@ -317,7 +325,7 @@ def dashboard() -> dict[str, Any]:
             "platform": "Lab workstation",
             "external_id": "devbox",
             "name": "dev-box",
-            # Running while a recent SSH check reached it; GPUs in use have processes.
+            # Running while a recent SSH check reached it; GPU use was measured by that check.
             "state": "running",
             "gpu_count": 1,
             "gpu_allocated": 1,
@@ -373,6 +381,35 @@ def dashboard() -> dict[str, Any]:
             "ssh_alias": "cd-lab-workstation-shortcut",
         }
     )
+    machine_source = _source(
+        ("example:lab-server", "Lab server", "ssh", "example:lab-server", "alice"), observed
+    )
+    machine_source.update(ssh_alias="lab-server", credential="", capabilities=["instances"])
+    sources.append(machine_source)
+    machine = parse_machine(
+        json.dumps(
+            {
+                "gpu_tool": "nvidia-smi",
+                "gpu": "0, GPU-demo-0, NVIDIA L4, 0, 64, 24576\n"
+                "1, GPU-demo-1, NVIDIA L4, 80, 16000, 24576\n"
+                "2, GPU-demo-2, NVIDIA L4, 25, 8000, 24576\n"
+                "3, GPU-demo-3, NVIDIA L4, N/A, N/A, 24576\n",
+                "apps": "GPU-demo-1, 4242, 16000\n",
+                "owners": "4242 alice\n",
+                "user": "alice",
+                "cpu_utilization": 20,
+                "memory_utilization": 30,
+            }
+        ),
+        machine_source,
+        "lab-server",
+    )
+    machine_source["capabilities"] = machine.capabilities
+    assert machine.instances is not None
+    machine.instances[0].update(
+        observed_at=observed, gpus_observed_at=observed, last_probe_attempt=observed
+    )
+    instances.extend(machine.instances)
     nodes: list[dict[str, Any]] = [
         {
             "id": f"{cluster_id}:{cluster_id[-1]}-gpu-{i:02}",

@@ -567,8 +567,9 @@ listing's `observed_at`. The last `ssh_status`, `ssh_error` and check time survi
 listing with the same host, port and user, until the provider reports the instance
 released. Provider allocation fields are not overwritten by an SSH check.
 
-Hand-added rows carry `gpu_allocated` (GPUs with compute processes, or null) and
-`probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
+Hand-added rows carry `gpu_allocated` (GPUs with visible compute processes or significant
+GPU memory use, or null when processes are unreadable or memory is missing without visible
+processes) and `probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
 Their dashboard `state` is `running` while a successful check is less than twenty
 minutes old, otherwise `unknown`. Use `summary` for totals: typed-in GPU inventory
 is not evidence of use, and hand-added machines with monitoring off are excluded.
@@ -911,3 +912,10 @@ collection-machine status keep their ten-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
 polls every fifteen seconds and when the dashboard token changes. Relative ages
 continue to advance even when the dashboard is unchanged.
+
+SSH-source instances may include optional `gpus_observed_at` and `gpus` rows with
+`index`, `name`, `utilization`, `memory_used_mb`, `memory_total_mb`, `processes`,
+`in_use: true | false | null`, and `processes_omitted`. Process rows retain their existing
+`pid`, `user`, and `memory_mb` fields, with at most 16 rows per GPU. Missing fields in
+older snapshots mean unknown. See [the SSH driver](drivers/ssh.md#per-gpu-availability)
+for the memory-floor rule and timestamp semantics. No API or schema version changes.

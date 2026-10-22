@@ -129,7 +129,19 @@ export interface FailedJob extends Job {
   end: string | null;
   exit_code: string | null;
 }
+export interface GpuRow {
+  index: number | null;
+  name: string | null;
+  utilization: number | null;
+  memory_used_mb: number | null;
+  memory_total_mb: number | null;
+  processes: { pid: number; user: string | null; memory_mb: number | null }[] | null;
+  in_use?: boolean | null;
+  processes_omitted?: number;
+}
 export interface Instance {
+  gpus?: GpuRow[] | null;
+  gpus_observed_at?: string | null;
   id: string;
   source_id: string;
   /** Display label of the cloud or machine type, e.g. the RunPod source name. */

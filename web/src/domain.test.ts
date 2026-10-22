@@ -324,7 +324,7 @@ describe('allocation accounting', () => {
   it('counts a running machine added by hand only by the GPUs a check found busy', () => {
     const data = dashboard([job({})]);
     data.sources.push(source({ id: 'cloud', kind: 'cloud', driver: 'runpod', enabled: false }));
-    // Without a process count the GPUs typed in are not GPUs in use.
+    // Without measured GPU use the GPUs typed in are not GPUs in use.
     data.instances = [instance({ state: 'running', manual: true, source_id: 'manual' })];
     const result = summarize(data);
     expect(result.known_allocated).toBe(4);
@@ -606,7 +606,7 @@ describe('running price', () => {
   });
 });
 
-describe('SSH process-based GPU use', () => {
+describe('SSH measured GPU use', () => {
   it.each([0, 1, null])(
     'reports %s occupied GPUs without replacing unknown with capacity',
     (gpu_allocated) => {

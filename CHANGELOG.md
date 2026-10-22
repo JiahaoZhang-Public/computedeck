@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+- Show per-GPU availability, memory, utilization and owners on SSH machines, and offer current free GPUs in a separate Machines panel in Where to run with copy-only NVIDIA setup. Unknown GPUs never count as free. SSH machine and hand-added probe GPUs-in-use counts now include significant memory use even when an empty process list hides the workload; missing process or memory readings remain unknown.
+
 ## 0.6.0 (unreleased)
 
 - Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.
@@ -36,7 +40,7 @@
 
 - Use the same GPU, job and utilization figures across Overview, Usage, cluster views and history. Partial totals name the machines or logins that could not be measured; machines with monitoring off are excluded.
 - Count running instances reported by a cloud provider as GPUs in use, including RunPod pods. SSH checks measure utilization without changing the provider's allocation.
-- Keep an instance's last SSH check across provider updates until its connection changes or the instance is released. Hand-added machines count measured GPUs with compute processes while their checks are current; failed, old or unavailable readings stay unknown.
+- Keep an instance's last SSH check across provider updates until its connection changes or the instance is released. Hand-added machines count measured GPU use while their checks are current; failed, old or unavailable readings stay unknown.
 - Show usable GPU capacity separately from unavailable GPUs. A cluster with every node down reads “0 usable”; unknown node states preserve a lower bound instead of appearing free.
 - Show collection age and service health on every page. Age follows the oldest enabled source, so it may look older after upgrading. Open the health panel for failures, retries and collection progress; Refresh remains available during background collection.
 - Use one Needs attention list and count for collection failures, stale data, cluster faults, lost capabilities, failed SSH checks and service or plugin errors. Missing capabilities that have never worked and unchecked connections no longer count as faults. Source items open connection diagnosis. A first collection failure appears as a warning.
@@ -52,7 +56,7 @@
 
 - Verify Slurm QoS association access and separate unknown or unassociated planner choices.
 - Distinguish optional capabilities from source failures; surface unavailable and degraded clusters.
-- Count an SSH GPU as in use when it has compute processes; preserve unknown process visibility.
+- Introduce measured SSH GPU use, initially based on compute processes; preserve unknown process visibility.
 - Rotate service logs and restrict data-directory and log permissions at startup.
 - Provide isolated plugin files, JSON state, SQLite transactions and strict SSH execution in the SDK.
 - Add shared CLI and web connection diagnostics with repair guidance and credential redaction.

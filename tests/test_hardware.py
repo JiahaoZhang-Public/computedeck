@@ -48,7 +48,7 @@ def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> No
     result = hardware.parse_probe(probe_output())
     assert result["gpu_count"] == 2
     assert result["gpu_type"] == "NVIDIA A100 80GB"
-    # The same convention as an SSH machine source: GPUs with compute processes.
+    # SSH sources and probes count visible processes or significant GPU memory use.
     assert result["gpu_allocated"] == 1
     assert result["gpu_utilization"] == 80
     assert result["gpu_observed_count"] == 1
@@ -65,7 +65,12 @@ def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> No
 
 
 def test_idle_gpus_are_zero_in_use_but_unreadable_processes_stay_unknown() -> None:
-    assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 0
+    assert (
+        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("40000", "0")))["gpu_allocated"]
+        == 0
+    )
+    # Significant memory use catches processes hidden by the host/container boundary.
+    assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 1
     result = hardware.parse_probe(probe_output(apps=None, apps_error="Insufficient Permissions"))
     assert result["gpu_allocated"] is None
     assert result["gpu_count"] == 2

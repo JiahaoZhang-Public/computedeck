@@ -2,7 +2,7 @@
 
 The snapshot runs the SSH machine driver's read-only probe and reads it the same way, so a
 machine added by hand and an SSH machine source agree on what "GPUs in use" means: GPUs with
-compute processes.
+visible compute processes or significant GPU memory use.
 """
 
 import asyncio

@@ -3052,3 +3052,29 @@ td.wrap {
     white-space: normal;
   }
 }
+
+/* GPU facts stay stacked in drawers and wrap with machine commands on narrow screens. */
+.gpu-details .grow,
+.machine-options .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gpu-details .tag {
+  white-space: normal;
+}
+.machine-options .grow {
+  flex: 1 1 16rem;
+}
+.machine-options li {
+  flex-wrap: wrap;
+}
+.machine-options .machine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.machine-options .machine-command {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: 12px;
+}

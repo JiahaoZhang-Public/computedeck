@@ -12,8 +12,10 @@ PROBE_INTERVAL = timedelta(minutes=10)
 
 
 def gpu_allocation(row: dict[str, Any]) -> int | None:
-    """SSH hosts count GPUs with compute processes; cloud instances count allocations.
+    """SSH hosts count GPUs with visible processes or significant memory use.
 
+    Unreadable processes, or missing memory without visible processes, leave use unknown.
+    Cloud instances count allocations.
     A machine added by hand counts only what an SSH check measured, never the GPUs typed in.
     """
     return (
