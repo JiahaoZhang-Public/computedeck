@@ -103,19 +103,21 @@ export interface PlanOption {
 
 export interface PlanObservation {
   source: Source;
+  capability: 'nodes' | 'qos_limits' | 'jobs' | 'qos_access';
   at: string | null;
   current: boolean;
 }
 
 function observations(
   sources: Source[],
-  capability: string,
+  capability: PlanObservation['capability'],
   rows?: { source_id: string; observed_at: string | null }[],
 ): PlanObservation[] {
   return sources.map((source) => {
     const times = rows?.filter((row) => row.source_id === source.id).map((row) => row.observed_at);
     return {
       source,
+      capability,
       at: times?.length ? (times.some((at) => !at) ? null : times.sort()[0]) : source.last_success,
       current: sourceHasData(source, capability),
     };

@@ -401,14 +401,18 @@ function PlanExplanation({ option, request }: { option: PlanOption; request: Pla
               {[
                 ...new Map(
                   factor.evidence.map((item) => [
-                    `${item.source.id}:${item.at}:${item.current}`,
+                    `${item.source.id}:${item.capability}:${item.at}:${item.current}`,
                     item,
                   ]),
                 ).values(),
               ].map((item) => (
-                <span className="sub" key={`${item.source.id}:${item.at}:${item.current}`}>
+                <span
+                  className="sub"
+                  key={`${item.source.id}:${item.capability}:${item.at}:${item.current}`}
+                >
                   {t('plan.factor.source', {
                     source: `${item.source.name} · ${item.source.username}`,
+                    capability: t(`plan.factor.capability.${item.capability}`),
                     age: item.at ? relativeTime(item.at) : t('status.unknown'),
                     state: t(item.current ? 'plan.factor.current' : 'plan.factor.notCurrent'),
                   })}

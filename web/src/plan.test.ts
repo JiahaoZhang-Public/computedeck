@@ -1,6 +1,7 @@
 import { serverClusterState, serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { comparePlans, gpuModels, idleInstances, planOptions, wallHours } from './plan';
+import { planFactors } from './planExplanation';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
 
 const source = (extra: Partial<Source> = {}): Source => ({
@@ -1671,5 +1672,86 @@ describe('estimate evidence and ranking explanations', () => {
         request,
       ),
     ).toEqual({ factor: 'tie', order: 0 });
+  });
+});
+
+describe('plan factor effects', () => {
+  const request = { gpus: 4, gpuType: '', hours: null };
+  const factors = (login: Source, jobs: Job[] = []) => {
+    const options = planOptions({ sources: [login], nodes: [node('g1')], jobs }, request);
+    const option = options.find((option) => option.qos === 'normal') ?? options[0];
+    return {
+      option,
+      effects: Object.fromEntries(planFactors(option, request).map((f) => [f.key, f.effect])),
+    };
+  };
+
+  it.each([false, true])(
+    'attributes an exhausted limit to the limit, not the empty queue (%j)',
+    (unknownGroupUsage) => {
+      const { option, effects } = factors(
+        source({
+          qos: [
+            {
+              name: 'normal',
+              access: 'verified',
+              origin: 'test',
+              limits: {
+                MaxTRESPU: 'gres/gpu=4',
+                GrpTRES: unknownGroupUsage ? 'gres/gpu=16' : null,
+              },
+            },
+          ],
+        }),
+        [job('1')],
+      );
+      expect(option).toMatchObject({
+        verdict: 'limit',
+        headroom: 0,
+        headroomAfterQueue: 0,
+        queued: 0,
+      });
+      expect(effects).toMatchObject({ limit: 'lowers', queue: 'neutral' });
+      expect(option.rules.some((rule) => rule.effect === 'doubt')).toBe(unknownGroupUsage);
+      const unknownQueue = { ...option, headroomAfterQueue: null };
+      expect(planFactors(unknownQueue, request).find((f) => f.key === 'queue')!.effect).toBe(
+        'unknown',
+      );
+    },
+  );
+
+  it('lowers the queue factor when queued work actually takes the available room', () => {
+    const { option, effects } = factors(source(), [
+      job('1'),
+      job('2', { state: 'PENDING', reason: 'Priority' }),
+    ]);
+    expect(option).toMatchObject({ verdict: 'behind', headroom: 4, headroomAfterQueue: 0 });
+    expect(effects).toMatchObject({ limit: 'supports', queue: 'lowers' });
+  });
+
+  it.each(['pbs', 'lsf', 'kubernetes'])(
+    'keeps fresh %s data neutral even without access capability',
+    (driver) => {
+      const { effects } = factors(source({ driver, capabilities: ['jobs', 'nodes'], qos: [] }));
+      expect(effects).toMatchObject({ age: 'neutral', access: 'lowers' });
+    },
+  );
+
+  it.each([
+    { stale: true },
+    { error: 'collection_failed' },
+    { status: 'error' },
+    { last_success: null },
+  ])('lowers data age for an out-of-date source (%j)', (extra) => {
+    expect(factors(source(extra)).effects.age).toBe('lowers');
+  });
+
+  it('names degradation in the free-GPU factor only with current node data', () => {
+    const { option, effects } = factors(source({ cluster_state: 'degraded' }));
+    expect(option.verdict).toBe('possible');
+    expect(effects.free).toBe('lowers');
+    expect(factors(source({ cluster_state: 'degraded', stale: true })).effects.free).toBe(
+      'unknown',
+    );
   });
 });

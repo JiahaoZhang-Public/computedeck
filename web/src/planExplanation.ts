@@ -1,4 +1,4 @@
-import { relativeTime } from './domain';
+import { relativeTime, sourceHasData } from './domain';
 import { t, type MessageKey } from './i18n';
 import {
   comparePlans,
@@ -37,8 +37,17 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
   const { evidence } = option;
   const all = [...evidence.nodes, ...evidence.limits, ...evidence.jobs, ...evidence.access];
   const knownAge = all.every((item) => item.at != null);
-  const current = all.every((item) => item.current);
+  const current = all.every(
+    ({ source }) =>
+      source.enabled &&
+      source.last_success &&
+      !source.stale &&
+      !source.error &&
+      ['ready', 'syncing'].includes(source.status),
+  );
   const age = knownAge ? all.map((item) => item.at!).sort()[0] : null;
+  const degraded =
+    sourceHasData(option.source, 'nodes') && option.source.cluster_state === 'degraded';
   const rules = option.rules
     .map((rule) => {
       const key = RULES[rule.kind][rule.effect];
@@ -48,8 +57,16 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
   return [
     {
       key: 'free',
-      value: `${t('plan.factor.freeValue', { count: `${option.freeGpusPartial && option.freeGpus != null ? '≥ ' : ''}${number(option.freeGpus)}` })} ${option.onDemandGpus ? t('plan.why.onDemand', { count: option.onDemandGpus }) : ''}`,
-      effect: enough(option.freeGpus, request.gpus),
+      value: [
+        t('plan.factor.freeValue', {
+          count: `${option.freeGpusPartial && option.freeGpus != null ? '≥ ' : ''}${number(option.freeGpus)}`,
+        }),
+        option.onDemandGpus ? t('plan.why.onDemand', { count: option.onDemandGpus }) : '',
+        degraded ? t('plan.why.degraded') : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      effect: degraded ? 'lowers' : enough(option.freeGpus, request.gpus),
       evidence: evidence.nodes,
     },
     {
@@ -72,18 +89,39 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
     },
     {
       key: 'limit',
-      value: `${t('plan.factor.limitValue', { limit: number(option.limit), used: number(option.used), room: number(option.headroom) })} ${rules}`,
-      effect: option.rules.some((rule) => rule.effect !== 'doubt')
-        ? 'lowers'
-        : option.rules.length
-          ? 'unknown'
-          : enough(option.headroom, request.gpus),
+      value: [
+        t('plan.factor.limitValue', {
+          limit: number(option.limit),
+          used: number(option.used),
+          room: number(option.headroom),
+        }),
+        rules,
+      ]
+        .filter(Boolean)
+        .join(' '),
+      effect:
+        (option.headroom != null && option.headroom < request.gpus) ||
+        option.rules.some((rule) => rule.effect === 'limit' || rule.effect === 'busy')
+          ? 'lowers'
+          : option.headroom == null || option.rules.some((rule) => rule.effect === 'doubt')
+            ? 'unknown'
+            : 'supports',
       evidence: [...evidence.limits, ...evidence.jobs],
     },
     {
       key: 'queue',
       value: `${t('plan.factor.queueValue', { jobs: number(option.queued), used: number(option.queuedForRoom), room: number(option.headroomAfterQueue) })}${option.contradiction ? ` ${t('plan.why.contradiction', option.contradiction)}` : ''}`,
-      effect: option.contradiction ? 'lowers' : enough(option.headroomAfterQueue, request.gpus),
+      effect: option.contradiction
+        ? 'lowers'
+        : option.headroomAfterQueue == null
+          ? 'unknown'
+          : option.headroom != null &&
+              option.headroom >= request.gpus &&
+              option.headroomAfterQueue < request.gpus
+            ? 'lowers'
+            : option.headroom != null && option.headroom < request.gpus
+              ? 'neutral'
+              : 'supports',
       evidence: [...evidence.jobs, ...evidence.limits],
     },
     {
@@ -105,7 +143,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
       key: 'age',
       value: t('plan.factor.ageValue', {
         age: age ? relativeTime(age) : t('status.unknown'),
-        state: t(current ? 'plan.factor.current' : 'plan.factor.notCurrent'),
+        state: t(current ? 'plan.factor.current' : 'plan.factor.ageNotCurrent'),
       }),
       effect: current ? 'neutral' : 'lowers',
       evidence: all,
@@ -133,7 +171,13 @@ export function planComparison(best: PlanOption, next: PlanOption, request: Plan
       case 'free':
         return `${option.freeGpusPartial && option.freeGpus != null ? '≥ ' : ''}${number(option.freeGpus)}`;
       case 'access':
-        return t(`plan.factor.access.${option.access}`);
+        return t(
+          option.access === 'verified'
+            ? 'plan.compare.verified'
+            : option.access === 'not_associated'
+              ? 'plan.compare.notVerified'
+              : 'plan.compare.accessUnknown',
+        );
       case 'tie':
         return '';
     }

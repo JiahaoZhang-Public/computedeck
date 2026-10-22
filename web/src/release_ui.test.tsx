@@ -8,7 +8,7 @@ import { groupsOf } from './groups';
 import { dateTime } from './domain';
 import { setLocale, t } from './i18n';
 import { comparePlans, planOptions } from './plan';
-import { planComparison, planFactors } from './planExplanation';
+import { planFactors } from './planExplanation';
 import { PlanPage } from './pages/Plan';
 import type { Ctx } from './pages/shared';
 import type { Dashboard, Job, QosLimit, Source } from './types';
@@ -104,6 +104,9 @@ describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) =
     const html = renderPlan({ ...source, cluster_state: 'degraded' });
     expect(html).toContain(t('plan.verdict.possible'));
     expect(html).toContain(t('plan.why.degraded'));
+    const free = page(html).querySelector('.plan-factors dd')!;
+    expect(free.textContent).toContain(t('plan.why.degraded'));
+    expect(free.textContent).toContain(t('plan.effect.lowers'));
     expect(html).not.toContain(t('plan.why.possibleLimit', { free: 4 }));
   });
 
@@ -510,10 +513,152 @@ describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale
     expect(comparePlans(best, next, request).factor).toBe('tie');
     const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
     expect(root.querySelector('.plan-comparison')!.textContent).toBe(
-      planComparison(best, next, request),
+      t('plan.compare.tie', { other: 'Cluster A · alice · other' }),
     );
     const single = page(renderPlan(source));
     expect(single.querySelector('.plan-comparison')).toBeNull();
+  });
+
+  it.each([
+    'verdict',
+    'none',
+    'noGpus',
+    'oneNode',
+    'unknownFit',
+    'queue',
+    'unlimited',
+    'unknownRoom',
+    'free',
+    'access',
+  ] as const)('renders both values and the first differing factor for %s', async (scenario) => {
+    setLocale(locale);
+    const ctx = planContext({ ...source, cluster_state: 'degraded' });
+    const first = ctx.data.sources[0];
+    const second: Source = {
+      ...first,
+      id: 'cluster-b-bob',
+      name: 'Cluster B',
+      cluster_id: 'cluster-b',
+      username: 'bob',
+      qos: [{ ...first.qos[0] }],
+    };
+    const firstNode = { ...ctx.data.nodes[0], gpu_count: 8 };
+    const secondNode = {
+      ...firstNode,
+      id: 'cluster-b:gpu-1',
+      source_id: second.id,
+      cluster_id: second.cluster_id,
+    };
+    ctx.data.sources = [first, second];
+    ctx.data.nodes = [firstNode, secondNode];
+    let factor: 'verdict' | 'oneNode' | 'queue' | 'free' | 'access' = 'verdict';
+    let best = t('plan.verdict.possible');
+    let next = t('plan.verdict.busy');
+    switch (scenario) {
+      case 'verdict':
+        secondNode.gpu_allocated = 8;
+        break;
+      case 'none':
+      case 'noGpus':
+        if (scenario === 'none') firstNode.gpu_type = 'H100';
+        else secondNode.gpu_count = 0;
+        next =
+          scenario === 'none'
+            ? t('plan.verdict.none', { model: 'H100' })
+            : t('plan.verdict.noGpus');
+        break;
+      case 'oneNode':
+      case 'unknownFit':
+        factor = 'oneNode';
+        best = t('plan.compare.fits');
+        if (scenario === 'oneNode') {
+          secondNode.gpu_count = 2;
+          ctx.data.nodes.push({ ...secondNode, id: 'cluster-b:gpu-2', name: 'gpu-2' });
+          next = t('plan.compare.notFit');
+        } else {
+          secondNode.state = 'new_scheduler_state';
+          next = t('status.unknown');
+        }
+        break;
+      case 'queue':
+      case 'unlimited':
+      case 'unknownRoom':
+        factor = 'queue';
+        first.qos = [
+          {
+            ...first.qos[0],
+            limits: { MaxTRESPU: scenario === 'unlimited' ? 'gres/gpu=N' : 'gres/gpu=16' },
+          },
+        ];
+        best = scenario === 'unlimited' ? t('plan.noLimit') : '16';
+        next = '8';
+        if (scenario === 'unknownRoom') {
+          second.qos = [{ ...second.qos[0], limits: {} }];
+          next = t('status.unknown');
+        }
+        break;
+      case 'free':
+        factor = 'free';
+        ctx.data.nodes.push(
+          { ...firstNode, id: 'cluster-a:gpu-2', name: 'gpu-2', gpu_count: 4 },
+          { ...firstNode, id: 'cluster-a:unknown', name: 'unknown', state: 'new_scheduler_state' },
+        );
+        best = '≥ 12';
+        next = '8';
+        break;
+      case 'access':
+        factor = 'access';
+        second.qos = [{ ...second.qos[0], access: 'unknown' }];
+        best = t('plan.compare.verified');
+        next = t('plan.compare.accessUnknown');
+        break;
+    }
+    ctx.data = serverDashboard(ctx.data);
+    ctx.groups = groupsOf(ctx.data);
+    const previous = window.location.href;
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      window.history.replaceState(
+        null,
+        '',
+        `#/plan?gpus=4${scenario === 'none' ? '&model=H100' : ''}`,
+      );
+      await act(async () => root.render(<PlanPage ctx={ctx} />));
+      expect(container.querySelector('.plan-comparison')!.textContent).toBe(
+        t('plan.compare.reason', {
+          other: 'Cluster B · bob · normal',
+          factor: t(`plan.compare.${factor}`),
+          best,
+          next,
+        }),
+      );
+    } finally {
+      await act(async () => root.unmount());
+      window.history.replaceState(null, '', previous);
+    }
+  });
+
+  it('labels limits and jobs separately when their observation times differ', () => {
+    setLocale(locale);
+    const observed = '2026-01-01T00:00:00Z';
+    const ctx = planContext(source, [pending({ observed_at: observed, gpu_count: 1 })]);
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const factor = [...root.querySelectorAll('.plan-factors > div')].find(
+      (row) => row.querySelector('dt')!.textContent === t('plan.factor.limit'),
+    )!;
+    for (const [capability, at] of [
+      ['qos_limits', source.last_success!],
+      ['jobs', observed],
+    ] as const) {
+      const line = [...factor.querySelectorAll('dd > span')].find(
+        (span) =>
+          span.querySelector('time') &&
+          span.textContent?.includes(t(`plan.factor.capability.${capability}`)),
+      )!;
+      expect(line.textContent).toContain('Cluster A · alice');
+      expect(line.querySelector('time')!.getAttribute('datetime')).toBe(at);
+    }
   });
 
   it('demonstrates different data ages and an unknown runtime in example mode', () => {
