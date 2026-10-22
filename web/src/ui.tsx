@@ -211,7 +211,7 @@ export function RankedBars({
   ordered = false,
 }: {
   items: RankedItem[];
-  format?: (value: number) => string;
+  format?: (value: number, partial: boolean) => string;
   limit?: number;
   ordered?: boolean;
 }) {
@@ -243,7 +243,9 @@ export function RankedBars({
             <i style={{ width: `${max ? ((item.value ?? 0) / max) * 100 : 0}%` }} />
           </span>
           <span className="ranked-value">
-            {item.value == null ? '—' : `${item.partial ? '≥ ' : ''}${format(item.value)}`}
+            {item.value == null
+              ? '—'
+              : `${item.partial ? '≥ ' : ''}${format(item.value, !!item.partial)}`}
           </span>
           {item.note && <span className="ranked-note">{item.note}</span>}
         </li>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { t } from '../i18n';
 import { money, runningPrice, sourceHasData, dateTime, runningHours } from '../domain';
-import { findGroup, groupLabel } from '../groups';
+import { findGroup } from '../groups';
 import { Chips, Empty, Panel, RankedBars, Stat } from '../ui';
 import { useRouteParam } from '../useRouteParam';
 import { usageDays, usageTotal } from '../usage';
@@ -96,16 +96,21 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
               <div key={currency} className="usage-block">
                 <h3>
                   {spend.unpriced.length ? '≥ ' : ''}
-                  {t('cost.rate', { price: money(rate, currency), currency })}
+                  {t('cost.rate', {
+                    price: money(rate, currency, !!spend.unpriced.length),
+                    currency,
+                  })}
                 </h3>
                 <p>
                   {t('usage.projection', {
-                    amount: `${spend.unpriced.length ? '≥ ' : '≈ '}${money(rate * 24, currency)}`,
+                    amount: `${spend.unpriced.length ? '≥ ' : '≈ '}${money(rate * 24, currency, !!spend.unpriced.length)}`,
                     currency,
                   })}
                 </p>
                 <RankedBars
-                  format={(value) => t('usage.hourlyRate', { price: money(value, currency) })}
+                  format={(value, partial) =>
+                    t('usage.hourlyRate', { price: money(value, currency, partial) })
+                  }
                   items={activeGroups
                     .filter((group) => {
                       const value = summary.groups[group.key]?.spend;
@@ -206,7 +211,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
     const request = (range: number) =>
       api<HistoryResponse>(`/history?hours=${range}&rollup=1&demo=${ctx.demo}`);
     const selected = request(hours);
-    Promise.all([selected, hours === 168 ? selected : request(168)])
+    Promise.all([selected, hours >= 168 ? selected : request(168)])
       .then(([value, week]) => {
         if (active) {
           setResult({ ...value, week: week.rollups });
@@ -254,7 +259,7 @@ function emptySpend(total: UsageTotal) {
 function spendText(total: UsageTotal, currency: string) {
   if (!total.observed) return `${t('usage.notRecorded')} · ${currency}`;
   if (!total.spendKnown) return `${t('status.unknown')} · ${currency}`;
-  return `${total.spendPartial ? '≥ ' : '≈ '}${money(total.spend[currency] ?? 0, currency)} · ${currency}`;
+  return `${total.spendPartial ? '≥ ' : '≈ '}${money(total.spend[currency] ?? 0, currency, total.spendPartial)} · ${currency}`;
 }
 
 /** Daily panels share the same hourly server integrals as the today/seven-day totals. */
@@ -293,8 +298,11 @@ export function UsageHistory({
       ),
     ),
   ].sort();
-  const number = (value: number) =>
-    value.toLocaleString(ctx.locale, { maximumFractionDigits: value >= 100 ? 0 : 1 });
+  const number = (value: number, partial: boolean) =>
+    value.toLocaleString(ctx.locale, {
+      maximumFractionDigits: value >= 100 ? 0 : 1,
+      roundingMode: partial ? 'floor' : 'halfExpand',
+    });
   const coverage = (total: UsageTotal, seconds: number) =>
     !total.observed
       ? t('usage.notRecorded')
@@ -334,10 +342,12 @@ export function UsageHistory({
         return (
           <details className="usage-daily" key={key}>
             <summary>
-              {groupLabel(ctx.groups, key)} ·{' '}
+              {findGroup(ctx.groups, key)?.label ??
+                t('usage.removedGroup', { name: key.replace(/^platform:/, '') })}{' '}
+              ·{' '}
               {total.gpuHours == null
                 ? '—'
-                : `${total.gpuPartial ? '≥ ' : ''}${number(total.gpuHours)} ${t('usage.gpuHourUnit')}`}
+                : `${total.gpuPartial ? '≥ ' : ''}${number(total.gpuHours, total.gpuPartial)} ${t('usage.gpuHourUnit')}`}
             </summary>
             <RankedBars
               ordered
@@ -351,7 +361,14 @@ export function UsageHistory({
                   group: findGroup(ctx.groups, key),
                   value: value.gpuHours,
                   partial: value.gpuPartial,
-                  note: coverage(value, (day.end - day.start) / 1000),
+                  note: !value.observed
+                    ? t('usage.notRecorded')
+                    : value.gpuHours == null
+                      ? t('usage.notMeasured')
+                      : coverage(
+                          { ...value, observed: value.gpuObserved },
+                          (day.end - day.start) / 1000,
+                        ),
                 };
               })}
             />
@@ -366,7 +383,7 @@ export function UsageHistory({
           <RankedBars
             ordered
             limit={Infinity}
-            format={(value) => money(value, currency)}
+            format={(value, partial) => money(value, currency, partial)}
             items={days.map((day) => {
               const value = usageTotal(rollups, day.start, day.end);
               return {

@@ -467,6 +467,7 @@ export interface UsageRollups {
       string,
       {
         gpu_hours: number | null;
+        gpu_observed_seconds: number;
         spend: Record<string, number>;
         observed_seconds: number;
         gpu_partial: boolean;

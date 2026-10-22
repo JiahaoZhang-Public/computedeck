@@ -641,6 +641,8 @@ const en = {
     'Estimated from hourly prices observed while ComputeDeck was collecting, not a bill. Missing collection time is excluded; daily bars use your local time. Boundary hours are prorated.',
   'usage.today': 'Today · estimated spend',
   'usage.sevenDays': 'Last 7 days · estimated spend',
+  'usage.notMeasured': 'Not measured',
+  'usage.removedGroup': '{name} (removed)',
   'usage.coverage': '{percent}% of this period observed',
   'usage.gpuHours': 'My GPU-hours by group · daily',
   'usage.gpuHourUnit': 'GPU-hours',

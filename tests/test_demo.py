@@ -11,7 +11,7 @@ import pytest
 from computedeck.demo import dashboard, demo_history, events, nodes
 from computedeck.drivers.cloud import instance_lifecycle
 from computedeck.store import gpu_allocation, manual_state
-from computedeck.summary import RUNNING, fresh
+from computedeck.summary import RUNNING, fresh, summarize
 
 
 def test_demo_mutes_only_the_named_cluster_and_machine() -> None:
@@ -377,6 +377,29 @@ def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) ->
         )
         assert point["unknown_allocation_sources"] == gaps
         assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])
+    for point in history:
+        groups = point["by_group"]
+        assert (
+            sum(g["known_allocated"] or 0 for g in groups.values()) == point["known_allocated_gpus"]
+        )
+        assert point["unknown_allocation_sources"] == sum(
+            g["unknown_allocation_sources"] for g in groups.values()
+        )
+        assert all(
+            g["known_allocated"] is None or isinstance(g["known_allocated"], int)
+            for g in groups.values()
+        )
+        failed = next(
+            source for source in data["sources"] if source["cluster_id"] == "example:cluster-c"
+        )
+        group = groups[failed["cluster_id"]]
+        if point["at"] < failed["last_success"]:
+            assert group["allocated"] == group["known_allocated"] == 0
+            assert group["unknown_allocation_sources"] == 0
+        else:
+            assert group["allocated"] is group["known_allocated"] is None
+            assert group["unknown_allocation_sources"] == 1
+    assert len({p["by_group"]["example:cluster-b"]["known_allocated"] for p in history}) > 1
 
 
 def test_demo_shows_completed_and_unavailable_outcomes() -> None:
@@ -581,3 +604,30 @@ def test_example_costs_have_provider_and_observed_starts_and_unpriced_instances(
         "example:runpod-secondary": "summary_source_failed",
         ec2["id"]: "summary_price_missing",
     }
+
+
+def test_example_history_omits_a_machine_only_group_before_it_was_added() -> None:
+    data = dashboard()
+    machine = next(
+        item
+        for item in data["instances"]
+        if item.get("manual") and item.get("monitoring") and not item.get("observed_at")
+    )
+    machine["platform"] = "New workstation"
+    data["summary"] = summarize(data)
+    key = "platform:new workstation"
+    history = demo_history(24, data)
+    for point in history:
+        groups = point["by_group"]
+        if point["at"] < machine["added_at"]:
+            assert key not in groups
+        else:
+            assert groups[key]["allocated"] is None
+            assert groups[key]["unknown_allocation_sources"] == 1
+        assert (
+            sum(g["known_allocated"] or 0 for g in groups.values()) == point["known_allocated_gpus"]
+        )
+        assert (
+            sum(g["unknown_allocation_sources"] for g in groups.values())
+            == point["unknown_allocation_sources"]
+        )

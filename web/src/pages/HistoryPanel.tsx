@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import type { HistoryPoint } from '../types';
 import { historyPartial } from '../domain';
 import { t } from '../i18n';
-import { Panel } from '../ui';
 import TrendChart from '../TrendChart';
 import { ChartLegend } from './shared';
 
@@ -19,12 +18,13 @@ export function HistoryPanel({
   empty?: string;
 }) {
   return (
-    <Panel
-      title={t('chart.heading')}
-      actions={<ChartLegend partial={points.some(historyPartial)} />}
-    >
+    <section className="usage-trend">
+      <header className="panel-header">
+        <h3>{t('chart.heading')}</h3>
+        <ChartLegend partial={points.some(historyPartial)} />
+      </header>
       <TrendChart history={points} hours={hours} empty={empty} />
       {note && <p className="panel-note">{note}</p>}
-    </Panel>
+    </section>
   );
 }

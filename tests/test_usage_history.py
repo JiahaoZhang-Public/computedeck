@@ -98,7 +98,7 @@ def test_records_group_summary_and_keeps_thirty_days(store: Store) -> None:
     store.record_history()
     raw = [json.loads(row[0]) for row in store.db.execute("SELECT data FROM history ORDER BY at")]
     assert len(raw) == 2
-    assert raw[-1]["by_group"] == group_history(store.dashboard()["summary"])
+    assert raw[-1]["by_group"] == group_history(store.dashboard())
     assert (current - datetime.fromisoformat(raw[0]["at"])).days == 10
 
 
@@ -106,7 +106,7 @@ def test_demo_exercises_missing_days() -> None:
     assert "by_group" not in dashboard()["history"][-1]
     trace = demo_history(720)
     assert "by_group" not in trace[0]
-    assert trace[-1]["by_group"] == group_history(dashboard()["summary"])
+    assert trace[-1]["by_group"] == group_history(dashboard())
 
 
 def test_hold_cap_is_identical_across_ranges() -> None:
@@ -121,3 +121,35 @@ def test_hold_cap_is_identical_across_ranges() -> None:
     assert sum(group["gpu_hours"] for group in groups) == pytest.approx(23 / 3)
     assert sum(group["spend"]["USD"] for group in groups) == pytest.approx(10 / 3)
     assert any(group["gpu_partial"] and group["spend_partial"] for group in groups)
+
+
+def test_failed_group_has_no_gpu_coverage_for_a_whole_day() -> None:
+    points = [point(minutes, None, None) for minutes in range(1440, 0, -30)]
+    result = rollup_history(points, 24, end=END)
+    for bucket in result["buckets"]:
+        group = bucket["groups"]["cluster-a"]
+        assert bucket["observed_seconds"] == group["observed_seconds"] == 3600
+        assert group["gpu_observed_seconds"] == 0
+        assert group["gpu_hours"] is None
+        assert group["gpu_partial"]
+
+
+def test_gpu_coverage_counts_known_zero_and_lower_bounds_but_not_failed_time() -> None:
+    result = rollup_history(
+        [point(90, 0, 0), point(60, None, 2), point(30, None, None)], 2, end=END
+    )
+    groups = [b["groups"]["cluster-a"] for b in result["buckets"]]
+    assert sum(g["gpu_observed_seconds"] for g in groups) == 3600
+    assert sum(g["observed_seconds"] for g in groups) == 5400
+    assert sum(g["gpu_hours"] for g in groups) == 1
+
+
+def test_group_history_omits_paused_groups_without_instances() -> None:
+    data = dashboard()
+    for source in data["sources"]:
+        source["enabled"] = False
+    groups = group_history(data)
+    assert "example:cluster-a" not in groups
+    assert "example:cluster-c" not in groups
+    assert "example:runpod" in groups  # Retained instances still identify this group.
+    assert any(key.startswith("platform:") for key in groups)

@@ -4,6 +4,7 @@ export type UsageTotal = {
   gpuHours: number | null;
   spend: Record<string, number>;
   observed: number;
+  gpuObserved: number;
   gpuPartial: boolean;
   spendPartial: boolean;
   spendKnown: boolean;
@@ -20,6 +21,7 @@ export function usageTotal(
     gpuHours: null,
     spend: {},
     observed: 0,
+    gpuObserved: 0,
     gpuPartial: false,
     spendPartial: false,
     spendKnown: false,
@@ -41,6 +43,7 @@ export function usageTotal(
       groups.some((group) => Object.keys(group.spend).length > 0) ||
       (groups.length > 0 && groups.every((group) => group.spend_known));
     for (const group of groups) {
+      total.gpuObserved += group.gpu_observed_seconds * fraction;
       if (group.gpu_hours != null)
         total.gpuHours = (total.gpuHours ?? 0) + group.gpu_hours * fraction;
       total.gpuPartial ||= group.gpu_partial;

@@ -956,16 +956,20 @@ No schema, plugin API or web API version changes are required.
 New stored history points add `by_group`, keyed exactly as `summary.groups`:
 `{allocated, known_allocated, unknown_allocation_sources, spend: {currency: rate},
 spend_unknown}`. `spend_unknown` is the count of unpriced subjects in that group.
+Groups with no enabled source and no instance are omitted from new samples.
 Raw history retention is 30 days; older rows without this field are not backfilled.
 
 `rollups` contains `start`, `end` and hourly `buckets`. Each bucket has `at`, `end`,
 `observed_seconds` (time with a post-upgrade breakdown) and `groups`. Each group has
 `gpu_hours` (nullable), `spend` (a currency-to-amount map), `observed_seconds`,
+`gpu_observed_seconds` (time with a known allocation or known lower bound, including zero),
 `gpu_partial`, `spend_partial` and `spend_known`. The last flag distinguishes an
 observed zero rate from entirely unknown prices. Empty group maps and zero observed
 time mean not recorded, not zero usage. Partial flags cover both uncertain values
 and gaps within the bucket; clients must also account for missing buckets across
-larger ranges. Currency keys are never converted or combined.
+larger ranges. Group `observed_seconds` retains its meaning as time present in the
+breakdown, even when values are unknown; GPU-row coverage uses `gpu_observed_seconds`.
+Currency keys are never converted or combined.
 
 Integrals use raw, unthinned rows and include a preceding observation when it still
 covers the range boundary. Samples are held until the next point, the response time,

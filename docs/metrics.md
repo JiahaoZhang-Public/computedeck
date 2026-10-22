@@ -691,16 +691,21 @@ boundary hourly buckets are prorated, including timezone offsets and DST boundar
 
 Partial days show observation coverage; uncertain quantities show lower bounds or
 unknown. Before-upgrade days and days without collection read **Not recorded**, not
-zero. Coverage means collection time, not proof that every source or price was known.
+zero. GPU-hours rows use the time that the group's allocation or lower bound was known;
+a collected but entirely unknown group reads **Not measured**. Groups without an enabled
+source or any instance are omitted from new samples, so paused groups leave missing time.
+Spend coverage still means collection time, not proof that every price was known.
 A difference within one second counts as full coverage to tolerate timestamp precision.
 GPU-hours show at most one decimal below 100 and none from 100 up; unknown totals omit
-the unit.
+the unit. Values following ≥ are rounded down to the displayed precision. Historical
+groups no longer configured use their key without the platform prefix and a “removed” label.
 Daily spend and the Today / Last 7 days totals are **estimated from hourly prices
 observed while ComputeDeck was collecting, not a bill**. The two headline totals use
-a fixed seven-day rollup, independent of the selected range. They exclude collection
+the last seven days, independent of the selected range. At 7d and 30d they reuse the
+selected response; only 24h needs a separate seven-day request. They exclude collection
 gaps and do not reconstruct provider billing, storage charges or prices before
 observation. They are separate from each instance's start-time-based estimate.
-The example includes two currencies, a collection gap and pre-upgrade history.
+The example includes two currencies, a collection gap and pre-upgrade history. Its per-group GPU counts sum to each chart point’s known allocation, and groups become unknown when their collection failed. Source gaps start at the last successful collection; an unprobed machine starts contributing unknown usage only after it was added, and an unknown GPU reading only from its observation time. Groups containing only machines not yet added are absent from earlier points.
 
 ## 用量与费用：当前与所选时间范围
 
@@ -720,9 +725,13 @@ The example includes two currencies, a collection gap and pre-upgrade history.
 每日柱形图使用查看者的本地日期，边界小时按比例分摊，兼顾时区与夏令时边界。
 
 部分采集的日期显示观测覆盖率；缺失价格或用量显示下界或未知。升级前及未采集的日期
-显示「未记录」，不会填零。覆盖率只表示采集时长，不保证所有来源或价格均已知。
+显示「未记录」，不会填零。GPU 小时行的覆盖率只计入该组用量或下界已知的时长；
+已采集但用量完全未知的组显示「未测量」。没有启用来源且没有实例的组不写入新采样，暂停期间保持缺失。
+费用覆盖率仍只表示采集时长，不保证所有价格均已知。
 一秒以内的时长差视为完整覆盖，以容忍时间戳精度差异。GPU 小时小于 100 时最多一位小数，
-达到 100 后不显示小数；未知总量不附单位。
-今日与最近七天的估算固定使用七天汇总，不随范围切换改变；这些数值仅来自采集期间观察到
+达到 100 后不显示小数；未知总量不附单位。≥ 后的数值按显示精度向下取整。
+已移除的历史分组去掉平台键前缀，并标注「已移除」。
+今日与最近七天的估算固定使用最近七天的数据，不随范围切换改变；7d 和 30d 复用所选响应，
+仅 24h 需要额外请求七天汇总；这些数值仅来自采集期间观察到
 的小时价格，并非账单，不补算采集间断、存储费或采集前价格，与实例本次运行估算分开。
-示例包含两种币种、采集中断及升级前历史。
+示例包含两种币种、采集中断及升级前历史。每个点的分组 GPU 数量之和与曲线的已知用量一致，分组在采集失败时才变为未知。来源空档从最后一次成功采集开始；未探测机器仅在添加后计入未知用量，未知 GPU 读数仅从其观测时间开始计入。仅包含尚未添加机器的组不会出现在更早的采样中。

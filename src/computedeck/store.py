@@ -1008,7 +1008,7 @@ class Store:
             "unknown_allocation_sources": summary["unknown_allocation_sources"],
             "gpu_utilization": summary["utilization"],
             "coverage_count": summary["covered"],
-            "by_group": group_history(summary),
+            "by_group": group_history(dashboard),
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))

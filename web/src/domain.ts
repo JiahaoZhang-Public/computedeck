@@ -182,16 +182,23 @@ export function runDuration(hours: number) {
     .filter(Boolean)
     .join(' ');
 }
-export function money(value: number | null, currency: string) {
+export function money(value: number | null, currency: string, lowerBound = false) {
   if (value === null) return t('money.unknown');
   try {
     return new Intl.NumberFormat(locale(), {
       style: 'currency',
       currency,
       maximumFractionDigits: 2,
+      roundingMode: lowerBound ? 'floor' : 'halfExpand',
     }).format(value);
   } catch {
-    return `${currency} ${value.toFixed(2)}`;
+    const amount = new Intl.NumberFormat(locale(), {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+      useGrouping: false,
+      roundingMode: lowerBound ? 'floor' : 'halfExpand',
+    }).format(value);
+    return `${currency} ${amount}`;
   }
 }
 export function elapsedSeconds(value: string | null | undefined) {

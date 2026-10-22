@@ -770,7 +770,8 @@ form > .form-error {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
 }
-.panel-header h2 {
+.panel-header h2,
+.usage-trend h3 {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -3125,9 +3126,6 @@ td.wrap {
 .usage-history {
   padding: 16px;
   min-width: 0;
-}
-.usage-history > .panel {
-  margin-top: 20px;
 }
 .usage-history .stat-value {
   font-size: 1.2rem;

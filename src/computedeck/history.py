@@ -6,7 +6,15 @@ from typing import Any
 HOLD_SECONDS = 1800
 
 
-def group_history(summary: dict[str, Any]) -> dict[str, Any]:
+def group_history(data: dict[str, Any]) -> dict[str, Any]:
+    source_groups = {source["id"]: source["cluster_id"] for source in data["sources"]}
+    active = {source["cluster_id"] for source in data["sources"] if source["enabled"]}
+    active.update(
+        source_groups.get(
+            item["source_id"], f"platform:{(item.get('platform') or '').strip().lower()}"
+        )
+        for item in data["instances"]
+    )
     return {
         key: {
             "allocated": group["allocated"],
@@ -15,7 +23,8 @@ def group_history(summary: dict[str, Any]) -> dict[str, Any]:
             "spend": group["spend"]["rates"],
             "spend_unknown": len(group["spend"]["unpriced"]),
         }
-        for key, group in summary["groups"].items()
+        for key, group in data["summary"]["groups"].items()
+        if key in active
     }
 
 
@@ -55,6 +64,7 @@ def rollup_history(
                     key,
                     {
                         "gpu_hours": None,
+                        "gpu_observed_seconds": 0.0,
                         "spend": {},
                         "observed_seconds": 0.0,
                         "gpu_partial": False,
@@ -66,6 +76,7 @@ def rollup_history(
                 allocated = sample["allocated"]
                 known = allocated if allocated is not None else sample["known_allocated"]
                 if known is not None:
+                    group["gpu_observed_seconds"] += seconds
                     group["gpu_hours"] = (group["gpu_hours"] or 0) + known * seconds / 3600
                 group["gpu_partial"] |= allocated is None or bool(
                     sample["unknown_allocation_sources"]

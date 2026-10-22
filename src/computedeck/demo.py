@@ -158,22 +158,64 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
                 "coverage_count": 12 if age % 48 > 16 else 18,
             }
         )
-    # A fictional upgrade ten days ago and a two-hour collection gap yesterday.
-    # Older points deliberately retain only their original fleet figures.
-    for point in points:
-        age_hours = (current - datetime.fromisoformat(point["at"])).total_seconds() / 3600
-        if age_hours <= 240:
-            point["by_group"] = group_history(summary)
-    points = [
-        p
-        for p in points
-        if not 26 < (current - datetime.fromisoformat(p["at"])).total_seconds() / 3600 < 28
-    ]
     points[-1].update(
         allocated_gpus=summary["allocated"],
         known_allocated_gpus=summary["known_allocated"],
         unknown_allocation_sources=len(summary["unmeasured"]),
     )
+    # A fictional upgrade ten days ago and a two-hour collection gap yesterday.
+    # Derive breakdowns from each point without changing the fleet trace: groups
+    # become unknown at the same gap onsets, and newly added machines appear then.
+    source_groups = {source["id"]: source["cluster_id"] for source in data["sources"]}
+    for point in points:
+        at = datetime.fromisoformat(point["at"])
+        age_hours = (current - at).total_seconds() / 3600
+        if age_hours <= 240:
+            groups = group_history(
+                {
+                    **data,
+                    "instances": [
+                        item
+                        for item in data["instances"]
+                        if not item.get("added_at")
+                        or at >= datetime.fromisoformat(item["added_at"])
+                    ],
+                }
+            )
+            for group in groups.values():
+                group["unknown_allocation_sources"] = 0
+            for source in gaps:
+                if at >= datetime.fromisoformat(source["last_success"]):
+                    groups[source["cluster_id"]]["unknown_allocation_sources"] += 1
+            for items, field in ((unprobed, "added_at"), (unknown_machines, "gpus_observed_at")):
+                for item in items:
+                    if at >= datetime.fromisoformat(item[field]):
+                        key = source_groups.get(
+                            item["source_id"], f"platform:{item['platform'].strip().lower()}"
+                        )
+                        groups[key]["unknown_allocation_sources"] += 1
+            # Scale the known counts to the point's fleet allocation. Cumulative
+            # rounding keeps both integer counts and an exact sum across groups.
+            known_total = sum(group["known_allocated"] or 0 for group in groups.values())
+            cumulative = previous = 0
+            for group in groups.values():
+                if not group["unknown_allocation_sources"] and group["known_allocated"] is None:
+                    group["known_allocated"] = 0
+                known = group["known_allocated"]
+                if known is not None:
+                    cumulative += known
+                    scaled = round(cumulative * point["known_allocated_gpus"] / known_total)
+                    group["known_allocated"] = scaled - previous
+                    previous = scaled
+                group["allocated"] = (
+                    None if group["unknown_allocation_sources"] else group["known_allocated"]
+                )
+            point["by_group"] = groups
+    points = [
+        p
+        for p in points
+        if not 26 < (current - datetime.fromisoformat(p["at"])).total_seconds() / 3600 < 28
+    ]
     return points
 
 

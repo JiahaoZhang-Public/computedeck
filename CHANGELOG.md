@@ -2,6 +2,8 @@
 
 ## 0.7.0 (unreleased)
 
+- Keep usage coverage honest for failed and paused groups, round lower bounds down, and label removed groups. Reuse selected history for seven-day totals and align example group usage with each trend point while preserving collection-failure and machine-addition times.
+
 - Make Usage & cost the home of usage trends, with ranked current GPU use and hourly spend, separate currencies and labelled daily projections. Add observed daily GPU-hours and spend, today and seven-day estimates, 24-hour / seven-day / 30-day URL ranges, coverage for partial days and explicit not-recorded history. Integrate raw observations with bounded gaps; keep group breakdowns out of dashboard polls and retain history for 30 days.
 
 - Show running-since and cost-so-far estimates on cloud rows and machine drawers, with provider starts distinguished from ComputeDeck observation windows. Freeze old estimates at the last successful collection. Show current whole-instance hourly totals per currency, naming missing prices and collection gaps; partial totals read “≥”. Leave GPUhub prices unknown for multi-GPU containers or unknown GPU counts because the API reference does not specify whether its $/hr base price is per GPU or per container.

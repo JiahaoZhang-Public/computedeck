@@ -598,6 +598,8 @@ const zhCN: Record<keyof typeof en, string> = {
     '根据 ComputeDeck 采集期间观察到的每小时价格估算，并非账单。未采集时段不计入；每日柱形图使用你的本地时间，边界小时按比例分摊。',
   'usage.today': '今天 · 估算费用',
   'usage.sevenDays': '最近 7 天 · 估算费用',
+  'usage.notMeasured': '未测量',
+  'usage.removedGroup': '{name}（已移除）',
   'usage.coverage': '已观察到此时段的 {percent}%',
   'usage.gpuHours': '我的 GPU 小时（按组）· 每日',
   'usage.gpuHourUnit': 'GPU 小时',

@@ -45,6 +45,7 @@ function rollups(): UsageRollups {
         groups: {
           'example:cluster-a': {
             gpu_hours: 2,
+            gpu_observed_seconds: 1800,
             spend: { USD: 1, EUR: 3 },
             observed_seconds: 1800,
             gpu_partial: true,
@@ -78,6 +79,7 @@ it('clips hourly buckets, sums currencies separately, and keeps unobserved hours
     gpuHours: 2,
     spend: { USD: 1, EUR: 3 },
     observed: 1800,
+    gpuObserved: 1800,
     gpuPartial: true,
     spendPartial: true,
     spendKnown: true,
@@ -173,6 +175,7 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
           'example:cluster-a': {
             ...data.buckets[1].groups['example:cluster-a'],
             observed_seconds: 3599.999656,
+            gpu_observed_seconds: 3599.999656,
           },
         },
       },
@@ -193,6 +196,9 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     ctx.locale = locale;
     for (const [value, text] of [
       [2.34, '2.3'],
+      [2.39, '2.3'],
+      [499.5, '499'],
+      [166.5, '166'],
       [2400.09, (2400).toLocaleString(locale)],
       [null, '—'],
     ] as const) {
@@ -204,6 +210,114 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       );
     }
   });
+
+  it('shows not measured for a failed group throughout a day and counts only known GPU time', () => {
+    setLocale(locale);
+    const data = rollups();
+    const start = new Date(2026, 0, 2).getTime();
+    data.start = new Date(start).toISOString();
+    data.end = new Date(start + 24 * hour).toISOString();
+    const group = data.buckets[1].groups['example:cluster-a'];
+    data.buckets = Array.from({ length: 24 }, (_, index) => ({
+      at: new Date(start + index * hour).toISOString(),
+      end: new Date(start + (index + 1) * hour).toISOString(),
+      observed_seconds: 3600,
+      groups: {
+        'example:cluster-a': {
+          ...group,
+          gpu_hours: null,
+          gpu_observed_seconds: 0,
+          observed_seconds: 3600,
+        },
+      },
+    }));
+    let html = dom(
+      renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
+    );
+    expect(html.querySelector('.usage-daily .ranked-note')?.textContent).toBe(
+      t('usage.notMeasured'),
+    );
+    expect(html.querySelector('summary')?.textContent).toBe('Cluster A · —');
+    Object.assign(data.buckets[0].groups['example:cluster-a'], {
+      gpu_hours: 2,
+      gpu_observed_seconds: 3600,
+    });
+    html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />));
+    expect(html.querySelector('.usage-daily .ranked-note')?.textContent).toBe(
+      t('usage.coverage', { percent: 4 }),
+    );
+  });
+
+  it.each([4.35, 0.29])('preserves exact cents in partial USD totals and bars: %s', (value) => {
+    setLocale(locale);
+    const data = rollups();
+    data.buckets[1].groups['example:cluster-a'].spend = { USD: value };
+    const html = dom(
+      renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
+    );
+    const expected = `≥ ${money(value, 'USD')}`;
+    expect(html.querySelector('h4')?.textContent).toBe(`${expected} · USD`);
+    expect(
+      [...html.querySelectorAll('.ranked-value')].some((row) => row.textContent === expected),
+    ).toBe(true);
+    expect(money(value, 'USD', true)).toBe(money(value, 'USD'));
+    expect(money(value, 'invalid', true)).toBe(`invalid ${value.toFixed(2)}`);
+    expect(money(1.239, 'invalid', true)).toBe('invalid 1.23');
+  });
+
+  it('floors partial spend and gives removed platforms a readable name', () => {
+    setLocale(locale);
+    const data = rollups();
+    const group = data.buckets[1].groups['example:cluster-a'];
+    group.spend = { USD: 1.239 };
+    data.buckets[1].groups = { 'platform:lab workstation': group };
+    const ctx = context();
+    ctx.groups = ctx.groups.filter((group) => group.key !== 'platform:lab workstation');
+    const html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={ctx} />));
+    expect(html.querySelector('summary')?.textContent).toContain(
+      t('usage.removedGroup', { name: 'lab workstation' }),
+    );
+    expect(html.textContent).not.toContain('platform:');
+    expect(html.querySelector('h4')?.textContent).toBe(`≥ ${money(1.23, 'USD')} · USD`);
+    expect(
+      [...html.querySelectorAll('.ranked-value')].some(
+        (row) => row.textContent === `≥ ${money(1.23, 'USD')}`,
+      ),
+    ).toBe(true);
+    expect(money(1.239, 'USD')).toBe(money(1.24, 'USD'));
+  });
+
+  it.each([
+    ['7d', 168],
+    ['30d', 720],
+  ] as const)(
+    'reuses %s rollups for week totals and keeps the chart at heading level three',
+    async (range, hours) => {
+      setLocale(locale);
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      window.history.replaceState(null, '', `/#/usage?range=${range}`);
+      vi.mocked(api).mockResolvedValue({ points: [], rollups: rollups() });
+      const host = document.createElement('div'),
+        root = createRoot(host);
+      const ctx = context();
+      try {
+        await act(async () => root.render(<UsagePage ctx={ctx} />));
+        expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+          `/history?hours=${hours}&rollup=1&demo=false`,
+        ]);
+        expect(host.querySelector('.panel .panel')).toBeNull();
+        expect(host.querySelector('.usage-trend h3')?.textContent).toBe(t('chart.heading'));
+        ctx.data.history = [{ ...ctx.data.history.at(-1)!, at: new Date(end).toISOString() }];
+        await act(async () => root.render(<UsagePage ctx={ctx} />));
+        expect(api).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(api).mock.calls.every(([path]) => path.includes(`hours=${hours}&`))).toBe(
+          true,
+        );
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
 
   it('anchors the seven-day total and coverage to the week response end', () => {
     setLocale(locale);
