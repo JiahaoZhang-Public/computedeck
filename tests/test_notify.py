@@ -1614,7 +1614,7 @@ async def test_delivery_health_tracks_retry_restart_recovery_and_expiry(
     add_channel(store)
 
     async def fail(config: dict[str, Any], mail: Message) -> None:
-        raise SourceError("send_timeout", detail="https://example.com/private-token")
+        raise SourceError("send_timeout", seconds=30, detail="https://example.com/private-token")
 
     use_sender(monkeypatch, fail)
     await notifier.deliver({"id": "r", "channels": ["team"]}, event())
@@ -1623,6 +1623,7 @@ async def test_delivery_health_tracks_retry_restart_recovery_and_expiry(
         "channel": "team",
         "channel_name": "Team",
         "error_code": "send_timeout",
+        "error": {"code": "send_timeout", "seconds": 30},
         "at": problem["at"],
     }
     assert "private-token" not in json.dumps(problem)
@@ -1637,6 +1638,16 @@ async def test_delivery_health_tracks_retry_restart_recovery_and_expiry(
     await restarted._attempt(("r", 7, "team"))
     assert restarted.delivery_failures() == []
     assert notify._recent_log(store)[0]["status"] == "sent"
+    notify._log(
+        store,
+        {
+            "channel": "team",
+            "status": "failed",
+            "error": {"code": "send_timeout", "seconds": 12, "detail": "private-token"},
+        },
+    )
+    assert restarted.delivery_failures()[0]["error"] == {"code": "send_timeout", "seconds": 12}
+    assert "private-token" not in json.dumps(restarted.delivery_failures())
     notify._log(store, {"channel": "team", "status": "failed", "error": {"code": "send_failed"}})
     assert restarted.delivery_failures()[0]["error_code"] == "send_failed"
     store.db.execute("UPDATE notify_log SET at='2000-01-01T00:00:00+00:00'")

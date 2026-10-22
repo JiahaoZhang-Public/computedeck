@@ -2021,14 +2021,15 @@ it.each(['en', 'zh-CN'] as const)(
     });
     await render(<App />);
     const warning = [...container.querySelectorAll<HTMLButtonElement>('.attention-open')].find(
-      (item) => item.textContent?.includes(t('msg.send_timeout')),
+      (item) => item.textContent?.includes(t('msg.send_timeout', { seconds: 30 })),
     )!;
     expect(warning.textContent).toContain(
       t('msg.attention_notification_failed', {
         channel: 'Team alerts',
-        error_code: t('msg.send_timeout'),
+        error_code: t('msg.send_timeout', { seconds: 30 }),
       }),
     );
+    expect(warning.textContent).not.toContain('{');
     expect(warning.querySelector('.dot.amber')).not.toBeNull();
     await act(async () => warning.click());
     expect(window.location.hash).toBe('#/notify');

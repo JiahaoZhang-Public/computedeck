@@ -61,11 +61,12 @@ export function submitFlags(
           .map((model) => model.trim())
           .includes(request.gpuType.toLowerCase())),
   );
-  const partition = only(own.map((job) => job.partition));
-  add(
-    '-p',
-    partition && matching.some((node) => node.partitions?.includes(partition)) ? partition : null,
-  );
+  const ownPartition = only(own.map((job) => job.partition));
+  const partition =
+    ownPartition && matching.some((node) => node.partitions?.includes(ownPartition))
+      ? ownPartition
+      : null;
+  add('-p', partition);
   add('-A', only(own.map((job) => job.account)));
   if (unknownFlags.length) notes.push(t('plan.submit.unknown', { flags: unknownFlags.join(', ') }));
   const model = only(
@@ -75,7 +76,10 @@ export function submitFlags(
   );
   if (request.gpuType && !model) notes.push(t('plan.submit.model'));
   let perNode = request.gpus;
-  const sizes = matching.map((node) =>
+  const partitionNodes = partition
+    ? matching.filter((node) => node.partitions?.includes(partition))
+    : matching;
+  const sizes = partitionNodes.map((node) =>
     request.gpuType && node.gpu_type?.includes(',') ? null : node.gpu_count,
   );
   const size = sizes[0];

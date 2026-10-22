@@ -290,7 +290,9 @@ def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[d
         elif processes is None or used is None or total is None:
             row["in_use"] = None
         else:
-            row["in_use"] = used >= max(1024, total * 0.05)
+            row["in_use"] = used >= max(1024, total * 0.05) or (
+                row["utilization"] is not None and row["utilization"] >= 5
+            )
         row["processes_omitted"] = max(0, len(processes) - 16) if processes else 0
         if processes is not None:
             row["processes"] = processes[:16]

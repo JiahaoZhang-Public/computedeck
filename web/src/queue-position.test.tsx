@@ -32,7 +32,7 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     const view = drawer();
     const callout = view.querySelector('.callout')!;
     expect(callout.textContent).toContain(
-      t('job.queue.range', { count: 0, max: 20, partition: 'gpu' }),
+      t('job.queue.upTo', { count: 0, max: 20, partition: 'gpu' }),
     );
     expect(callout.textContent).toContain(
       t('job.queue.fairshare', { account: job.account, factor: '0.12' }),
@@ -77,7 +77,7 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     expect(job.reason).toBe('Resources');
     expect(job.queue).toEqual([{ partition: 'gpu', ahead: 0, ties: 19 }]);
     const text = drawer().textContent;
-    expect(text).toContain(t('job.queue.range', { partition: 'gpu', count: 0, max: 19 }));
+    expect(text).toContain(t('job.queue.upTo', { partition: 'gpu', count: 0, max: 19 }));
     expect(text).not.toContain(t('job.queue.resources', { partition: 'gpu' }));
   });
   it.each([0, 3])('shows a range for a Resources job with %i ahead and ties', (ahead) => {
@@ -85,7 +85,11 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     job.queue = [{ partition: 'gpu', ahead, ties: 2 }];
     const text = drawer().textContent;
     expect(text).toContain(
-      t('job.queue.range', { partition: 'gpu', count: ahead, max: ahead + 2 }),
+      t(ahead === 0 ? 'job.queue.upTo' : 'job.queue.range', {
+        partition: 'gpu',
+        count: ahead,
+        max: ahead + 2,
+      }),
     );
     expect(text).not.toContain(t('job.queue.resources', { partition: 'gpu' }));
   });
@@ -125,7 +129,7 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     job.state = state;
     job.reason = reason;
     expect(drawer().textContent).not.toContain(
-      t('job.queue.range', { partition: 'gpu', count: 0, max: 20 }),
+      t('job.queue.upTo', { partition: 'gpu', count: 0, max: 20 }),
     );
   });
 });

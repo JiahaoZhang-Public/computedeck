@@ -2,6 +2,10 @@
 
 ## 0.7.0 (unreleased)
 
+- Fix final-review issues: size copied Slurm flags within the proven partition; allow example-mode copying; wrap copy notes and show explanation factors across the row. Improve preset tap targets, accessible control names and Cloud sampling labels.
+- Treat busy GPU utilization as evidence of use even when processes are invisible. Keep legacy plugin start-time text readable, treating ambiguous instance starts as unknown. Round partial spend down consistently and never guess a currency for low-use costs.
+- Collapse consecutive unrecorded days in usage history, clarify shared-host scope, and keep unknown-currency sources out of currency-specific bars. Preserve timeout duration in notification attention through retries.
+
 - Count only scheduler nodes that can take work now as usable or free. Show resting power-saving and PBS provisioning nodes as “Available on demand”, separately from unavailable capacity. Keep active allocations visible, and explain Slurm nodes without a partition.
 - Make Where to run more cautious when your scheduler reports personal limits despite apparent room. Merge duplicate logins for the same account, retain separate users, and keep CPU-only jobs from consuming model-specific GPU headroom.
 - Expand “Why this estimate” on every resource option to see seven factors, their effects, source logins and data ages. Explain the first ranking difference from the next option, or say when options tie; unknown evidence stays unknown.

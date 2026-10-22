@@ -54,6 +54,9 @@ def derive(
             if isinstance(detail, dict)
         )
         cause_params = {key: value for key, value in params.items() if key != "channel"}
+        if kind == "notification_failed":
+            # Error parameters are display context; error_code already identifies the cause.
+            cause_params.pop("error", None)
         if kind == "instance_low_use":
             # Growing/trimmed coverage is the same condition. The collector clears saved
             # acknowledgements when a high reading, gap or lifecycle change resolves it.
@@ -195,8 +198,12 @@ def derive(
                 samples=usage["samples"],
                 minutes=int(usage["covered_minutes"]),
                 origin=usage["origin"],
-                currency=instance.get("currency", "USD"),
-                cost=cost * usage["covered_minutes"] / 60 if cost is not None else None,
+                currency=instance.get("currency"),
+                cost=(
+                    cost * usage["covered_minutes"] / 60
+                    if cost is not None and instance.get("currency")
+                    else None
+                ),
             )
         if instance.get("ssh_status") == "error":
             add(
@@ -254,6 +261,7 @@ def derive(
                 suffix=f":{failure['channel']}",
                 channel=failure["channel_name"],
                 error_code=failure["error_code"],
+                error=failure.get("error"),
                 observed_at=failure["at"],
                 action="notify",
             )

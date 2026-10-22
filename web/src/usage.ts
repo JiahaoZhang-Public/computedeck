@@ -72,3 +72,21 @@ export function usageDays(start: number, end: number) {
   }
   return days;
 }
+
+/** Collapse only adjacent days with no observations; partial days remain separate. */
+export function mergeUnrecordedDays(
+  days: ReturnType<typeof usageDays>,
+  rollups: UsageRollups,
+  key?: string,
+) {
+  const merged: ReturnType<typeof usageDays> = [];
+  let previousMissing = false;
+  for (const day of days) {
+    const missing = usageTotal(rollups, day.start, day.end, key).observed === 0;
+    const previous = merged.at(-1);
+    if (missing && previousMissing && previous?.end === day.start) previous.end = day.end;
+    else merged.push({ ...day });
+    previousMissing = missing;
+  }
+  return merged;
+}

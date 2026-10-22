@@ -1,5 +1,5 @@
 import { relativeTime, sourceHasData } from './domain';
-import { t, type MessageKey } from './i18n';
+import { locale, t, type MessageKey } from './i18n';
 import {
   comparePlans,
   type PlanObservation,
@@ -61,7 +61,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
       const key = RULES[rule.kind][rule.effect];
       return key ? t(key, { count: rule.limit, limit: rule.limit, used: rule.used }) : '';
     })
-    .join(' ');
+    .join(locale() === 'zh-CN' ? '' : ' ');
   return [
     {
       key: 'free',
@@ -74,7 +74,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
         unavailable ? t('plan.why.unavailable') : '',
       ]
         .filter(Boolean)
-        .join(' '),
+        .join(locale() === 'zh-CN' ? '' : ' '),
       effect: degraded || unavailable ? 'lowers' : enough(option.freeGpus, request.gpus),
       evidence: evidence.nodes,
     },
@@ -107,7 +107,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
         rules,
       ]
         .filter(Boolean)
-        .join(' '),
+        .join(locale() === 'zh-CN' ? '' : ' '),
       effect:
         (option.headroom != null && option.headroom < request.gpus) ||
         option.rules.some((rule) => rule.effect === 'limit' || rule.effect === 'busy')
@@ -119,7 +119,7 @@ export function planFactors(option: PlanOption, request: PlanRequest): PlanFacto
     },
     {
       key: 'queue',
-      value: `${t('plan.factor.queueValue', { jobs: number(option.queued), used: number(option.queuedForRoom), room: number(option.headroomAfterQueue) })}${option.contradiction ? ` ${t('plan.why.contradiction', option.contradiction)}` : ''}`,
+      value: `${t('plan.factor.queueValue', { jobs: number(option.queued), used: number(option.queuedForRoom), room: number(option.headroomAfterQueue) })}${option.contradiction ? `${locale() === 'zh-CN' ? '' : ' '}${t('plan.why.contradiction', option.contradiction)}` : ''}`,
       effect: option.contradiction
         ? 'lowers'
         : option.headroomAfterQueue == null

@@ -91,9 +91,11 @@ Errors (the previous snapshot is kept):
 
 `in_use` is true when compute processes are visible, or when an empty process list has
 memory use at least `max(1024 MiB, 5% of total memory)`. It is false only with an empty
-process list and known used and total memory below that floor. An unreadable process list,
-or missing memory without visible processes, leaves it null. Utilization alone does not
-establish availability. `gpu_allocated` counts true rows only when every row is known;
+process list, known used and total memory below that floor, and utilization below 5%
+(or unavailable). An unreadable process list,
+or missing memory without visible processes, leaves it null. With an empty process list
+and known memory, utilization of at least 5% establishes busy status even below the memory
+floor: the drawer says “Busy, processes not visible”. Low utilization alone never proves a GPU free. `gpu_allocated` counts true rows only when every row is known;
 otherwise it is null. Hand-added probes share this rule for their aggregate count.
 
 Each process list keeps at most 16 entries; `processes_omitted` counts those left out.

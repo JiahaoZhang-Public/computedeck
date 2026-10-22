@@ -394,6 +394,14 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     },
   );
 
+  it('labels FUTURE nodes neutrally while retaining their raw scheduler state', () => {
+    setLocale(locale);
+    const data = clusterData(['FUTURE']);
+    const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
+    expect(html).toContain(`<span class="tag gray">${t('clusters.future')}</span>`);
+    expect(html).toContain('<small class="sub muted">FUTURE</small>');
+  });
+
   it('explains why an idle Slurm node without a partition is unavailable', () => {
     setLocale(locale);
     const data = clusterData(['IDLE']);

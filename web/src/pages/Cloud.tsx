@@ -74,7 +74,10 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
               ? Object.entries(spend.rates).map(([currency, rate]) => (
                   <span className="sub" key={currency}>
                     {spend.unpriced.length ? '≥ ' : ''}
-                    {t('cost.rate', { price: money(rate, currency), currency })}
+                    {t('cost.rate', {
+                      price: money(rate, currency, !!spend.unpriced.length),
+                      currency,
+                    })}
                   </span>
                 ))
               : spend.unpriced.length
@@ -98,8 +101,8 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                   <th>GPU</th>
                   <th>{t('cloud.col.utilization')}</th>
                   <th>{remote ? t('cloud.col.sshRemote', { server: ctx.serverName }) : 'SSH'}</th>
-                  <th className="num">{t('cloud.col.price')}</th>
-                  <th className="num">{t('cloud.col.sampled')}</th>
+                  <th className="num cloud-price">{t('cloud.col.price')}</th>
+                  <th className="num cloud-sampled">{t('cloud.col.sampled')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,7 +219,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           )}
                         </span>
                       </td>
-                      <td className="num" data-label={t('cloud.col.price')}>
+                      <td className="num cloud-price" data-label={t('cloud.col.price')}>
                         {price == null ? (
                           <span className="muted">
                             {item.hourly_cost == null
@@ -226,10 +229,10 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                                 })}
                           </span>
                         ) : (
-                          `${money(price, item.currency)}/h`
+                          t('usage.hourlyRate', { price: money(price, item.currency) })
                         )}
                       </td>
-                      <td className="num muted" data-label={t('cloud.col.sampled')}>
+                      <td className="num muted cloud-sampled" data-label={t('cloud.col.sampled')}>
                         {relativeTime(item.observed_at)}
                       </td>
                     </tr>

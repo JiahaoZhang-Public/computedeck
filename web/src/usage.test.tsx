@@ -4,14 +4,14 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
-import { money } from './domain';
+import { money, calendarDate, clockTime } from './domain';
 import { groupsOf } from './groups';
 import { setLocale, t } from './i18n';
 import { UsageHistory, UsagePage } from './pages/Usage';
 import type { Ctx } from './pages/shared';
 import { RankedBars } from './ui';
 import type { UsageRollups } from './types';
-import { usageDays, usageTotal } from './usage';
+import { usageDays, usageTotal, mergeUnrecordedDays } from './usage';
 import { serverDemo } from './test-server';
 import { setRouteParams } from './useRouteParam';
 
@@ -132,10 +132,10 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       },
     }));
     const html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={ctx} />));
-    const time = new Date(start).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    const time = clockTime(start);
     const labels = usageDays(start, start + 24 * hour).map(
       (day, index) =>
-        `${day.label.toLocaleDateString(locale)} · ${t(index ? 'usage.dayUntil' : 'usage.dayFrom', { time })}`,
+        `${calendarDate(day.label)} · ${t(index ? 'usage.dayUntil' : 'usage.dayFrom', { time })}`,
     );
     for (const bars of html.querySelectorAll('.ranked-bars')) {
       for (const [index, row] of [...bars.querySelectorAll('li')].entries()) {
@@ -173,8 +173,13 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     }
     const usd = blocks.find((block) => block.querySelector('h3')?.textContent?.includes('USD'))!;
     expect(usd.querySelector('.ranked-bars')?.textContent).not.toContain('Lab workstation');
-    expect(usd.querySelector('.ranked-bars')?.textContent).toContain('Example EC2');
-    expect([...usd.querySelectorAll('.ranked-value')].map((row) => row.textContent)).toContain('—');
+    expect(usd.querySelector('.ranked-bars')?.textContent).not.toContain('Example EC2');
+    expect(html.textContent).toContain('Example EC2');
+    expect([...usd.querySelectorAll('.ranked-value')].map((row) => row.textContent)).not.toContain(
+      '—',
+    );
+    const eur = blocks.find((block) => block.querySelector('h3')?.textContent?.includes('EUR'))!;
+    expect(eur.querySelector('.ranked-bars')?.textContent).not.toMatch(/RunPod|Example EC2/);
     const manual = [...html.querySelectorAll('.usage-instances li')].find((row) =>
       row.textContent?.includes('dev-box'),
     )!;
@@ -534,4 +539,21 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       host.remove();
     }
   });
+});
+
+it('collapses consecutive unrecorded days without merging measured or partly measured days', () => {
+  const data = rollups();
+  const days = usageDays(end - 30 * 24 * hour, end);
+  for (const key of [undefined, 'example:cluster-a']) {
+    const merged = mergeUnrecordedDays(days, data, key);
+    expect(merged).toHaveLength(2);
+    expect(merged[0].start).toBe(days[0].start);
+    expect(merged[0].end).toBe(days.at(-1)!.start);
+    expect(merged[1]).toEqual(days.at(-1));
+    expect(usageTotal(data, merged[1].start, merged[1].end, key).observed).toBe(1800);
+  }
+  const ctx = context();
+  const html = document.createElement('div');
+  html.innerHTML = renderToStaticMarkup(<UsageHistory rollups={data} hours={720} ctx={ctx} />);
+  expect(html.querySelectorAll('.ranked-bars li')).toHaveLength(6);
 });

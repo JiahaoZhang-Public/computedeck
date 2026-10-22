@@ -68,7 +68,12 @@ it.each(['en', 'zh-CN'] as const)(
     );
     ctx.demo = true;
     await render();
-    expect(buttons().every((button) => button.disabled)).toBe(true);
+    expect(buttons().every((button) => !button.disabled)).toBe(true);
+    await act(async () => buttons()[0].click());
+    expect(ctx.copy).toHaveBeenLastCalledWith(
+      expect.stringContaining('#SBATCH'),
+      t('plan.submit.copied'),
+    );
   },
 );
 
@@ -355,3 +360,28 @@ it('copies current jobs from a twin when the kept login has stale jobs, but excl
   await act(async () => copyRow().querySelector<HTMLButtonElement>('.plan-submit button')!.click());
   expect(vi.mocked(ctx.copy).mock.calls.at(-1)![0]).not.toContain('-A twin-account');
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'gives explanations full-width rows and names repeated copy controls (%s)',
+  async (locale) => {
+    setLocale(locale);
+    ctx.demo = true;
+    await render();
+    for (const explanation of host.querySelectorAll('.plan-explanation')) {
+      expect(explanation.closest('td')!.colSpan).toBe(6);
+      const row = explanation.closest('tr')!;
+      expect(row.classList.contains('plan-explanation-row')).toBe(true);
+      expect(row.previousElementSibling!.classList.contains('plan-option-row')).toBe(true);
+      expect(explanation.querySelector('summary')!.getAttribute('aria-label')).toContain(' · ');
+      expect(explanation.querySelectorAll('.plan-factors > div')).toHaveLength(7);
+    }
+    for (const button of buttons()) expect(button.getAttribute('aria-label')).toContain(' · ');
+    const command = host.querySelector<HTMLPreElement>('.machine-command')!;
+    expect(command.tabIndex).toBe(0);
+    expect(command.getAttribute('aria-label')).toBeTruthy();
+    const machineCopy = host.querySelector<HTMLButtonElement>('.machine-actions button')!;
+    expect(machineCopy.disabled).toBe(false);
+    await act(async () => machineCopy.click());
+    expect(ctx.copy).toHaveBeenLastCalledWith(command.textContent);
+  },
+);

@@ -120,7 +120,7 @@ def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, A
             try:
                 if not isinstance(row, dict):
                     raise ValueError("Invalid collection row")
-                validate_row(row)
+                validate_row(row, instance=key == "instances")
             except (ValueError, TypeError, UnicodeError):
                 invalid = True
                 logging.getLogger("computedeck").warning("Skipped malformed stored %s row", key)
@@ -812,13 +812,13 @@ class Store:
             self.db.execute("DELETE FROM job_wait_samples WHERE ended_at < ?", (cutoff,))
 
     def save_snapshot(self, source_id: str, snapshot: dict[str, Any]) -> None:
-        for rows in snapshot.values():
+        for key, rows in snapshot.items():
             if not isinstance(rows, list):
                 raise ValueError("Snapshot inventory must be a list")
             for row in rows:
                 if not isinstance(row, dict):
                     raise ValueError("Invalid collection row")
-                validate_row(row)
+                validate_row(row, instance=key == "instances")
         old = self.db.execute(
             "SELECT data FROM snapshots WHERE source_id = ?", (source_id,)
         ).fetchone()
@@ -947,7 +947,7 @@ class Store:
                     ):
                         updated = {**row, **updates}
                         try:
-                            validate_row(updated)
+                            validate_row(updated, instance=True)
                         except (ValueError, TypeError, UnicodeError) as error:
                             # Dropped for this instance: the source's listing stays readable.
                             logger.warning("Probe result for %s not saved: %s", instance_id, error)

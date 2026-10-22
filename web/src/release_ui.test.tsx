@@ -84,7 +84,9 @@ describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) =
       await act(async () => root.render(<PlanPage ctx={context} />));
       const sentence = t('plan.why.onDemand', { count: 4 });
       const row = container.querySelector('.plan-table tbody tr')!;
-      expect(row.textContent).toContain(`${t('plan.why.busy', { free: 0 })} ${sentence}`);
+      expect(row.textContent).toContain(
+        `${t('plan.why.busy', { free: 0 })}${locale === 'zh-CN' ? '' : ' '}${sentence}`,
+      );
       expect(sentence).toMatch(/[.。]$/);
       await act(async () => {
         window.history.replaceState(null, '', '#/plan?model=H100');
@@ -228,7 +230,9 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       }),
     );
     expect(root.querySelector('details.panel')).toBeNull();
-    expect(root.querySelectorAll('.plan-table tbody tr')).toHaveLength(2);
+    expect(root.querySelectorAll('.plan-table tbody tr:not(.plan-explanation-row)')).toHaveLength(
+      2,
+    );
     const note = t('plan.accessNote', { source: 'Cluster A · alice' });
     expect(
       [...root.querySelectorAll('.panel-note')].filter((el) => el.textContent === note),

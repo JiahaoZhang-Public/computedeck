@@ -145,6 +145,8 @@ bash scripts/check.sh    # lint、格式、类型、测试和网页构建
 bash scripts/build.sh    # 本地构建 wheel 和 sdist，包含网页
 ```
 
+使用外部 Playwright 安装检查示例页面布局：`PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs`（可用 `PLAYWRIGHT_EXECUTABLE_PATH` 指定浏览器可执行文件）。
+
 Python 服务位于 `src/computedeck`，React 界面位于 `web`，Python 测试位于 `tests`。
 
 网页类型检查使用 TypeScript 7，ESLint 同时使用官方 TypeScript 6 API 包。运行 `npm --prefix web run typecheck` 会明确调用 TypeScript 7 编译器。

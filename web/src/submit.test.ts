@@ -370,3 +370,16 @@ describe('job presets', () => {
     expect(planPresets(data).map((item) => item.gpu_count)).toEqual([4, 1, 2, 3]);
   });
 });
+
+it.each([8, 16])('sizes a %s-GPU submission only from the proven partition', (gpus) => {
+  const { option, job, node } = fixture();
+  const nodes = [
+    { ...node, id: 'g1', gpu_count: 4 },
+    { ...node, id: 'g2', gpu_count: 4 },
+    { ...node, id: 'b1', partitions: ['big'], gpu_count: 8 },
+    { ...node, id: 'b2', partitions: ['big'], gpu_count: 8 },
+  ];
+  const result = submitFlags(option, { gpus, gpuType: '', hours: null }, [job], nodes, 'line')!;
+  expect(result.text).toBe(`-q normal -p gpu -A research --nodes=${gpus / 4} --gres=gpu:4`);
+  expect(result.notes).toEqual([]);
+});

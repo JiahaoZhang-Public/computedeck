@@ -379,3 +379,26 @@ def test_notification_warning_reopens_for_error_code_but_not_channel_label() -> 
     assert renamed["muted"]["state"] == "acknowledged"
     [changed] = derive([], plugin_status=status(code="credential_unavailable"), state=state)
     assert changed["muted"] is None
+
+
+@pytest.mark.parametrize("previous_seconds", [None, 30])
+@pytest.mark.parametrize("seconds", [30, 60])
+def test_notification_display_params_do_not_reopen_acknowledgement(
+    previous_seconds: int | None, seconds: int
+) -> None:
+    failure = {
+        "channel": "team",
+        "channel_name": "Team",
+        "error_code": "send_timeout",
+        "at": NOW.isoformat(),
+    }
+    if previous_seconds is not None:
+        failure["error"] = {"code": "send_timeout", "seconds": previous_seconds}
+    status = {"notify": {"enabled": True, "delivery_failures": [failure]}}
+    [item] = derive([], plugin_status=status)
+    state = {item["key"]: {"fingerprint": item["fingerprint"], "acknowledged_at": NOW.isoformat()}}
+    failure["error"] = {"code": "send_timeout", "seconds": seconds}
+    [updated] = derive([], plugin_status=status, state=state)
+    assert updated["message"]["error"] == failure["error"]
+    assert updated["fingerprint"] == item["fingerprint"]
+    assert updated["muted"]["state"] == "acknowledged"

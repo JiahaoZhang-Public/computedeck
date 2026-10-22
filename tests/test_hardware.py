@@ -66,8 +66,15 @@ def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> No
 
 def test_idle_gpus_are_zero_in_use_but_unreadable_processes_stay_unknown() -> None:
     assert (
-        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("40000", "0")))["gpu_allocated"]
+        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("80, 40000", "0, 0")))[
+            "gpu_allocated"
+        ]
         == 0
+    )
+    # Busy utilization also catches hidden work below the memory floor.
+    assert (
+        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("40000", "0")))["gpu_allocated"]
+        == 1
     )
     # Significant memory use catches processes hidden by the host/container boundary.
     assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 1

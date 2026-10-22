@@ -276,3 +276,29 @@ describe.each(['en', 'zh-CN'] as const)('cost display in %s', (language) => {
     expect(text(html)).toContain(t('cost.unpriced', { count: 2 }));
   });
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'rounds the Cloud running-rate lower bound down (%s)',
+  (locale) => {
+    setLocale(locale);
+    const { data, item, cloud } = fixture();
+    data.instances.push({ ...item, id: 'unpriced', hourly_cost: null });
+    item.hourly_cost = 0.9567;
+    data.summary = serverDashboard(data).summary;
+    const text = cloud();
+    expect(text).toContain(t('cost.rate', { price: money(0.9567, 'USD', true), currency: 'USD' }));
+    expect(text).not.toContain(t('cost.rate', { price: money(0.9567, 'USD'), currency: 'USD' }));
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains a missing hand-added machine run start (%s)',
+  (locale) => {
+    setLocale(locale);
+    const { item, drawer } = fixture();
+    item.manual = true;
+    item.started_at = null;
+    item.seen_running_since = null;
+    expect(drawer()).toContain(t('cost.manualStartUnknown'));
+  },
+);

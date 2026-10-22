@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { t } from '../i18n';
-import { money, runningPrice, sourceHasData, dateTime, runningHours } from '../domain';
+import {
+  money,
+  runningPrice,
+  sourceHasData,
+  dateTime,
+  calendarDate,
+  clockTime,
+  runningHours,
+} from '../domain';
 import { findGroup } from '../groups';
 import { Chips, Empty, Panel, RankedBars, Stat } from '../ui';
 import { useRouteParam } from '../useRouteParam';
-import { usageDays, usageTotal } from '../usage';
+import { usageDays, usageTotal, mergeUnrecordedDays } from '../usage';
 import type { UsageTotal } from '../usage';
 import type { HistoryPoint, UsageRollups } from '../types';
 import { HistoryPanel } from './HistoryPanel';
@@ -114,10 +122,7 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
                   items={activeGroups
                     .filter((group) => {
                       const value = summary.groups[group.key]?.spend;
-                      return (
-                        value?.applies &&
-                        (value.rates[currency] != null || value.unpriced.length > 0)
-                      );
+                      return value?.applies && value.rates[currency] != null;
                     })
                     .map((group) => {
                       const value = summary.groups[group.key].spend!;
@@ -229,7 +234,11 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
     return (
       <Empty
         title={t('chart.failed')}
-        action={<button onClick={() => setRetry(retry + 1)}>{t('usage.retry')}</button>}
+        action={
+          <button className="button small" onClick={() => setRetry(retry + 1)}>
+            {t('usage.retry')}
+          </button>
+        }
       />
     );
   if (!result)
@@ -306,12 +315,12 @@ export function UsageHistory({
   const dayLabel = (day: (typeof days)[number]) => {
     const nextDay = new Date(day.label);
     nextDay.setDate(nextDay.getDate() + 1);
-    const time = (at: number) =>
-      new Date(at).toLocaleTimeString(ctx.locale, { hour: '2-digit', minute: '2-digit' });
+    if (day.end > nextDay.getTime())
+      return `${calendarDate(day.label)} – ${calendarDate(new Date(day.end - 1))}`;
     return [
-      day.label.toLocaleDateString(ctx.locale),
-      day.start > day.label.getTime() ? t('usage.dayFrom', { time: time(day.start) }) : '',
-      day.end < nextDay.getTime() ? t('usage.dayUntil', { time: time(day.end) }) : '',
+      calendarDate(day.label),
+      day.start > day.label.getTime() ? t('usage.dayFrom', { time: clockTime(day.start) }) : '',
+      day.end < nextDay.getTime() ? t('usage.dayUntil', { time: clockTime(day.end) }) : '',
     ]
       .filter(Boolean)
       .join(' · ');
@@ -366,7 +375,7 @@ export function UsageHistory({
               ordered
               limit={Infinity}
               format={number}
-              items={days.map((day) => {
+              items={mergeUnrecordedDays(days, rollups, key).map((day) => {
                 const value = usageTotal(rollups, day.start, day.end, key);
                 return {
                   key: String(day.start),
@@ -397,7 +406,7 @@ export function UsageHistory({
             ordered
             limit={Infinity}
             format={(value, partial) => money(value, currency, partial)}
-            items={days.map((day) => {
+            items={mergeUnrecordedDays(days, rollups).map((day) => {
               const value = usageTotal(rollups, day.start, day.end);
               return {
                 key: String(day.start),

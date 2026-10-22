@@ -143,6 +143,12 @@ const en = {
   'summary.fewer': 'Show fewer',
   'summary.onDemand': '{count} GPUs available on demand (not free now)',
   'summary.onDemand.one': '1 GPU available on demand (not free now)',
+  'clusters.future': 'Not yet in service',
+  'plan.explanationFor': 'Why this estimate: {name}',
+  'plan.submit.copyFor': 'Copy submit flags: {name}',
+  'plan.machineCopyFor': 'Copy GPU setup: {name}',
+  'plan.machineCommandFor': 'GPU setup command: {name}',
+  'plan.factor.allSources': 'All source readings',
   'clusters.noPartition': 'Not in any partition',
   'plan.findAnother': 'Find another place',
   'plan.forJob': 'Options for {name} ({count} GPUs)',
@@ -528,6 +534,8 @@ const en = {
     'About {count} jobs ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
   'job.queue.ahead.one':
     'About {count} job ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
+  'job.queue.upTo':
+    'Up to {max} jobs ahead in partition {partition} ({max} with equal priority; estimate, reservations, preemption and backfill can change the order).',
   'job.queue.range':
     'About {count} to {max} jobs ahead of yours in partition {partition} (estimate; reservations, preemption and backfill can change the order).',
   'job.queue.resources': 'Next in line in partition {partition}; waiting for nodes to free up.',
@@ -606,6 +614,7 @@ const en = {
   'cost.asOf': 'As of {time}',
   'cost.perInstance': '{price}/h per instance',
   'cost.perGpu': '≈ {price} per GPU-hour',
+  'cost.manualStartUnknown': 'Run start is not tracked for hand-added machines.',
   'cost.since': 'Running since',
   'cost.since.provider': '{time} · reported by provider',
   'cost.since.observed': 'Observed running since {time} · ComputeDeck observations only',
@@ -703,8 +712,8 @@ const en = {
   // Usage
   'usage.now': 'Now',
   'usage.scope':
-    'All enabled connections and monitored machines; yours, not cluster-wide. Current figures do not change with the range.',
-  'usage.nowGpus': 'My GPUs in use now',
+    'All enabled connections and monitored machines. Clusters and cloud count your resources; SSH machines count every busy GPU on the host. Current figures do not change with the range.',
+  'usage.nowGpus': 'GPUs in use now',
   'usage.noGroups': 'No clusters, platforms or machines',
   'usage.hourlyRate': '{price}/h',
   'usage.spendNow': 'Spend rate now',
@@ -725,7 +734,7 @@ const en = {
   'usage.notMeasured': 'Not measured',
   'usage.removedGroup': '{name} (removed)',
   'usage.coverage': '{percent}% of this period observed',
-  'usage.gpuHours': 'My GPU-hours by group · daily',
+  'usage.gpuHours': 'GPU-hours by group · daily',
   'usage.gpuHourUnit': 'GPU-hours',
   'usage.estimatedSpend': 'Estimated spend · daily',
   'usage.gpu': 'Average GPU utilization',
@@ -943,8 +952,7 @@ const en = {
   'plan.effect.unknown': 'Unknown — cannot support a stronger estimate',
   'plan.effect.neutral': 'No verdict change',
   'plan.effect.ranking': 'Ranking only — no verdict change',
-  'plan.compare.reason':
-    'Ahead of {other} on the first differing ranking factor, {factor}: {best} versus {next}.',
+  'plan.compare.reason': 'Ranks above {other}: {factor} ({best} vs {next}).',
   'plan.compare.tie': 'Tied with {other} on all ranking factors; the display order breaks the tie.',
   'plan.compare.verdict': 'estimate',
   'plan.compare.oneNode': 'fit on one node',
@@ -1207,6 +1215,7 @@ const en = {
   'msg.email_address_invalid': 'Check the email addresses',
   'msg.webhook_url_invalid': 'The address must use https (http only for this computer)',
   'msg.send_failed': 'Could not send',
+  'msg.send_timeout_unknown': 'No answer before the timeout',
   'msg.send_timeout': 'No answer within {seconds} s',
   'msg.rule_failed': 'The message could not be prepared',
   'msg.delivery_expired': 'Not sent within a day; given up',

@@ -272,7 +272,9 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                           ? 'job.queue.resources'
                           : 'job.queue.front'
                         : ties
-                          ? 'job.queue.range'
+                          ? ahead === 0
+                            ? 'job.queue.upTo'
+                            : 'job.queue.range'
                           : 'job.queue.ahead',
                       { partition, count: ahead, max: ahead + ties },
                     )}
@@ -567,7 +569,13 @@ export function InstanceDetail({
         </div>
         <div>
           <dt>{t('cost.since')}</dt>
-          <dd>{since ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) }) : '—'}</dd>
+          <dd>
+            {since
+              ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) })
+              : item.manual
+                ? t('cost.manualStartUnknown')
+                : '—'}
+          </dd>
         </div>
         <div>
           <dt>{t('cost.thisRun')}</dt>

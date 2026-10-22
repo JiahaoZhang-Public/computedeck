@@ -119,7 +119,7 @@ def test_one_running_instance_with_gpus_and_processes() -> None:
             "memory_used_mb": 1000,
             "memory_total_mb": 81920,
             "processes": [],
-            "in_use": False,
+            "in_use": True,
             "processes_omitted": 0,
         },
     ]
@@ -478,12 +478,12 @@ def test_a_comma_in_a_gpu_name_keeps_the_gpu() -> None:
     assert instance["gpu_type"] and "NVIDIA A100, PCIe" in instance["gpu_type"]
 
 
-@pytest.mark.parametrize(("apps", "expected"), [(APPS, 1), ("", 0), (None, None)])
-def test_in_use_means_compute_processes_not_utilization(apps, expected):
+@pytest.mark.parametrize(("apps", "expected"), [(APPS, 2), ("", 2), (None, None)])
+def test_in_use_accounts_for_utilization_with_no_visible_processes(apps, expected):
     instance, _ = parse(apps=apps, gpu=GPUS.replace("40000", "0"))
     assert instance["gpu_allocated"] == expected
     assert instance["gpu_count"] == 2
-    # A high utilization sample without a listed process does not redefine this count.
+    # A high utilization sample is busy even when compute processes are invisible.
     assert instance["gpu_utilization"] == 50
 
 
@@ -515,10 +515,19 @@ def test_process_list_is_capped_without_changing_allocation() -> None:
     assert len(gpu["processes"]) == 16
     assert gpu["processes_omitted"] == 4
     assert gpu["in_use"] is True
-    assert instance["gpu_allocated"] == 1
+    assert instance["gpu_allocated"] == 2
 
 
 def test_any_unknown_gpu_keeps_total_allocation_unknown() -> None:
     instance, _ = parse(gpu=GPUS.replace("1000, 81920", "N/A, 81920"))
     assert [gpu["in_use"] for gpu in instance["gpus"]] == [True, None]
     assert instance["gpu_allocated"] is None
+
+
+@pytest.mark.parametrize(
+    ("utilization", "busy"), [(0, False), (4, False), (5, True), (97, True), ("N/A", False)]
+)
+def test_low_memory_busy_gpu_is_not_free(utilization: Any, busy: bool) -> None:
+    instance, _ = parse(gpu=f"0, GPU-0000aaaa, NVIDIA L4, {utilization}, 600, 81920", apps="")
+    assert instance["gpus"][0]["in_use"] is busy
+    assert instance["gpu_allocated"] == int(busy)

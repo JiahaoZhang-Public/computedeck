@@ -251,7 +251,6 @@ class CloudDriver:
         for row in rows:
             try:
                 record = instance_record(source, row, observed)
-                validate_row(record, complete=True)
             except ValueError:
                 # An id unsafe as an SSH alias, or a value the dashboard cannot use (a
                 # negative price), leaves out that instance, not the whole listing.
@@ -268,7 +267,8 @@ class CloudDriver:
 
 def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -> dict[str, Any]:
     """The instance shape the app stores and shows. Raises ValueError for an unsafe id;
-    an unsafe SSH endpoint is dropped and the instance kept."""
+    an unsafe SSH endpoint is dropped and the instance kept. Ambiguous start times
+    become unknown, and other invalid measurements raise ValueError."""
     instance_id = validate_alias(row.id[:120])
     endpoint: dict[str, Any] = {"host": None, "port": None, "username": None}
     if row.ssh_host and row.ssh_port:
@@ -278,7 +278,7 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
             endpoint = candidate
         except ValueError:
             pass
-    return {
+    record = {
         "id": f"{source['cluster_id']}:{instance_id}",
         "source_id": source["id"],
         "platform": source["name"],
@@ -300,6 +300,9 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
         "observed_at": observed,
         "ssh_status": "unverified",
     }
+
+    validate_row(record, complete=True, instance=True)
+    return record
 
 
 def provider_console_url(template: object, instance_id: str, region: str | None) -> str | None:

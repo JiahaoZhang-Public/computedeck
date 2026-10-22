@@ -265,6 +265,10 @@ def test_attention_money_acknowledgement_and_resolution() -> None:
     }
     item["low_use"].update(covered_minutes=70, samples=8)
     assert derive(state)[0]["muted"]["state"] == "acknowledged"
+    currency = item.pop("currency")
+    assert derive()[0]["message"]["cost"] is None
+    assert derive()[0]["message"]["currency"] is None
+    item["currency"] = currency
     item["hourly_cost"] = None
     assert derive()[0]["message"]["cost"] is None
     item["low_use"]["since"] = (NOW - timedelta(minutes=70)).isoformat()

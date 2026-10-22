@@ -734,6 +734,7 @@ def dashboard() -> dict[str, Any]:
                         "channel": "example:team",
                         "channel_name": "Team alerts",
                         "error_code": "send_timeout",
+                        "error": {"code": "send_timeout", "seconds": 30},
                         "at": (current - timedelta(minutes=3)).isoformat(),
                     }
                 ],

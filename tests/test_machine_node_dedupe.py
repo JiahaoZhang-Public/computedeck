@@ -428,5 +428,5 @@ async def test_on_demand_check_of_linked_machine_still_collects_and_keeps_schedu
     assert calls == ["192.0.2.31"]
     data = store.dashboard()
     assert data["instances"][0]["same_node"]["name"] == "gpu-01"
-    assert data["instances"][0]["gpu_allocated"] == 1
+    assert data["instances"][0]["gpu_allocated"] == 2
     assert data["summary"]["allocated"] == 2

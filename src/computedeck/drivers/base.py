@@ -120,7 +120,7 @@ def _check_message(value: Any, what: str) -> None:
             raise ValueError(f"Invalid collection message: {what}")
 
 
-def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
+def validate_row(row: dict[str, Any], *, complete: bool = False, instance: bool = False) -> None:
     """Check fields consumed by the dashboard and arithmetic, before storing a row.
 
     Numbers in text fields are stored as text; other kinds of value reject the row.
@@ -187,14 +187,19 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
         ):
             raise ValueError(f"Invalid collection measurement: {key}")
     for key in ("observed_at", "gpus_observed_at", "started_at", "seen_running_since"):
-        # Job started_at also supports raw scheduler text (API 1). Only instance
-        # starts, identified by their platform field, promise an absolute instant.
-        if key == "started_at" and "platform" not in row:
+        if key == "started_at" and not instance:
             continue
         if row.get(key) is not None:
-            timestamp = datetime.fromisoformat(row[key])
-            if timestamp.tzinfo is None:
-                raise ValueError("Collection timestamp needs a timezone")
+            try:
+                timestamp = datetime.fromisoformat(row[key])
+                if timestamp.tzinfo is None:
+                    raise ValueError("Collection timestamp needs a timezone")
+            except ValueError:
+                if key != "started_at":
+                    raise
+                # API-1 plugins may supply arbitrary start text. Keep the instance,
+                # but never use an ambiguous time to calculate its running cost.
+                row[key] = None
 
 
 def node_health(
@@ -293,7 +298,7 @@ class Batch(BaseModel):
         json.dumps(self.model_dump(), allow_nan=False, ensure_ascii=False).encode("utf-8")
         for rows in (self.jobs, self.nodes, self.instances, self.failures, self.finished):
             for row in rows or []:
-                validate_row(row, complete=True)
+                validate_row(row, complete=True, instance=rows is self.instances)
         for entry in self.qos or []:
             if not isinstance(entry.get("name"), str) or not entry["name"]:
                 raise ValueError("QoS entry needs a nonempty name")

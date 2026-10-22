@@ -140,6 +140,12 @@ export function dateTime(value: string | null | undefined) {
     ? value
     : date.toLocaleString(locale(), { hour12: false, dateStyle: 'short', timeStyle: 'short' });
 }
+export function calendarDate(value: Date) {
+  return value.toLocaleDateString(locale(), { dateStyle: 'short' });
+}
+export function clockTime(value: number) {
+  return new Date(value).toLocaleTimeString(locale(), { hour12: false, timeStyle: 'short' });
+}
 /** The hourly price applies while an instance runs; a stopped or terminated one is not billed at it. */
 export function runningPrice(item: Instance): number | null {
   return instanceLifecycle(item.state) === 'held' ? item.hourly_cost : null;

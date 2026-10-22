@@ -150,6 +150,8 @@ bash scripts/check.sh    # lint, formatting, types, tests and web build
 bash scripts/build.sh    # local wheel and sdist, including the web interface
 ```
 
+For demo layout checks with an external Playwright installation, run `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs` (optionally set `PLAYWRIGHT_EXECUTABLE_PATH` to the browser executable).
+
 The Python service is in `src/computedeck`, the React interface in `web`, and Python tests in `tests`.
 
 Web type checks use TypeScript 7. ESLint uses the official TypeScript 6 API package alongside it. Run `npm --prefix web run typecheck` to select the TypeScript 7 compiler explicitly.

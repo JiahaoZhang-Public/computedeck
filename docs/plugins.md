@@ -488,9 +488,10 @@ class ExampleCloud(CloudDriver):
 `CloudInstance.hourly_cost` is the price of the **whole instance per hour**, not per GPU.
 Its optional `started_at` is a timezone-aware ISO 8601 timestamp for the provider-documented
 start of the current run, or `None`. Never substitute creation time or an undocumented
-field. `instance_record()` preserves it. Instance timestamps `started_at` and
-`seen_running_since` reject timezone-free values; raw scheduler job `started_at` text
-keeps its existing contract. The store supplies `seen_running_since` for contiguous held
+field. Unparseable or timezone-free instance `started_at` values become `None`,
+including legacy API-1 plugin rows and stored snapshots; the instance is kept.
+Core-computed `seen_running_since` remains strict. Job `started_at` text keeps its
+existing contract even when the job has a `platform` field. The store supplies `seen_running_since` for contiguous held
 observations within two source intervals, resetting across gaps, state changes and known
 restarts. Consumers must label this as an observation window, not a guaranteed run start.
 Both fields are optional on older rows. No schema or API version changes are required.
@@ -774,13 +775,15 @@ on the next collection. Current and seen capabilities are preserved.
 ## Notification delivery status
 
 Notify health adds `delivery_failures`, a list of `{channel, channel_name, error_code,
-at}` for configured channels whose latest recorded attempt in the last 24 hours failed.
+error, at}` for configured channels whose latest recorded attempt in the last 24 hours failed.
 It reads the retained 500 delivery-log rows and pending retries. Retry records now keep
-`last_attempt_at` and a code-only `last_error` in the existing queue JSON, so a restart
+`last_attempt_at` and a safe `last_error` message in the existing queue JSON, so a restart
 keeps their warning. Older pending records without these fields remain unknown until
 another attempt. A later successful attempt (including Send test), removal of the channel,
 or expiry of the 24-hour window clears the warning. Switching Notify off hides it.
-No channel configuration, recipient address or error detail is copied into this list.
+The additive `error` message retains its code and safe formatting parameters (currently
+`seconds` for `send_timeout`), including through retries. No channel configuration,
+recipient address or raw error detail is copied into this list.
 
 The dashboard lifts these failures as `notification_failed` warning items, labelled as
 Notifications and linking to its page (`action: "notify"`). Their keys are

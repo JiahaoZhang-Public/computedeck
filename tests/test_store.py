@@ -29,9 +29,9 @@ def test_dashboard_does_not_validate_collector_lifecycle_rows(
     validated = []
     validate = store_module.validate_row
 
-    def track(row: dict[str, Any]) -> None:
+    def track(row: dict[str, Any], **kwargs: Any) -> None:
         validated.append(row)
-        validate(row)
+        validate(row, **kwargs)
 
     monkeypatch.setattr(store_module, "validate_row", track)
     assert store.dashboard()["jobs"] == []
@@ -817,3 +817,20 @@ def test_seen_running_since_tracks_contiguous_held_observations(store, add_sourc
     )
     # Missing observation times never invent a start.
     assert save(66, observed_at=None) is None
+
+
+@pytest.mark.parametrize("started", ["2026-10-22T10:00:00", "2026-10-22 10:00 UTC"])
+def test_snapshot_preserves_legacy_start_text_by_inventory(store, add_source, started) -> None:
+    source = add_source()
+    row = {
+        "id": "legacy",
+        "source_id": source["id"],
+        "state": "running",
+        "platform": "batch",
+        "started_at": started,
+    }
+    store.save_snapshot(source["id"], {"jobs": [dict(row)], "instances": [dict(row)]})
+    snapshot = store.snapshot(source["id"])
+    assert snapshot["jobs"][0]["started_at"] == started
+    assert snapshot["instances"][0]["started_at"] is None
+    assert not store.unreadable

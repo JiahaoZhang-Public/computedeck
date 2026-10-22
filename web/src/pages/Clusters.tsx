@@ -233,13 +233,17 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                     </td>
                     <td data-label={t('clusters.col.state')}>
                       <span className={`tag ${nodeTone(node)}`}>
-                        {node.health_reason === 'no_partition'
-                          ? t('clusters.noPartition')
-                          : node.health === 'on_demand'
-                            ? t('clusters.onDemand')
-                            : node.state.replaceAll('+', '+\u200b')}
+                        {/^FUTURE$/i.test(node.state)
+                          ? t('clusters.future')
+                          : node.health_reason === 'no_partition'
+                            ? t('clusters.noPartition')
+                            : node.health === 'on_demand'
+                              ? t('clusters.onDemand')
+                              : node.state.replaceAll('+', '+\u200b')}
                       </span>
-                      {(node.health === 'on_demand' || node.health_reason === 'no_partition') && (
+                      {(node.health === 'on_demand' ||
+                        node.health_reason === 'no_partition' ||
+                        /^FUTURE$/i.test(node.state)) && (
                         <small className="sub muted">{node.state.replaceAll('+', '+\u200b')}</small>
                       )}
                     </td>

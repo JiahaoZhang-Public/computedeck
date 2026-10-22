@@ -324,6 +324,16 @@ def _error_code(error: Any) -> str:
     )
 
 
+def _delivery_error(error: Any) -> dict[str, Any]:
+    """Public delivery context: retain timeout duration, never remote error details."""
+    result: dict[str, Any] = {"code": _error_code(error)}
+    if isinstance(error, dict) and result["code"] == "send_timeout":
+        seconds = error.get("seconds")
+        if isinstance(seconds, int | float) and not isinstance(seconds, bool) and seconds >= 0:
+            result["seconds"] = seconds
+    return result
+
+
 def delivery_status(store: Store, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Annotate API copies using the retained log; absence is not a delivery verdict."""
     if (
@@ -812,6 +822,7 @@ class Notifier:
                 "channel": channel_id,
                 "channel_name": channel["name"],
                 "error_code": _error_code(latest[channel_id].get("error")),
+                "error": _delivery_error(latest[channel_id].get("error")),
                 "at": latest[channel_id]["at"],
             }
             for channel_id, channel in self.channels().items()
@@ -1065,7 +1076,7 @@ class Notifier:
         elif retry:
             self.resting[key[2]] = time.time() + RETRY_DELAYS[0]
             if attempts <= len(RETRY_DELAYS):
-                data["last_error"] = {"code": _error_code(error)}
+                data["last_error"] = _delivery_error(error)
                 data["last_attempt_at"] = now()
                 with self.store.db:
                     self.store.db.execute(

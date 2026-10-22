@@ -537,7 +537,8 @@ def test_existing_alias_instance_probes_alias_without_cluster_source(
     assert result.status_code == 200, result.text
     assert calls == [("gpu-box", [])]
     assert result.json()["gpu_count"] == 8
-    assert result.json()["gpu_allocated"] == 1
+    # All eight readings are busy, including GPUs whose processes are invisible.
+    assert result.json()["gpu_allocated"] == 8
     assert result.json()["gpu_utilization"] == 24
     # It answered just now; there is no provider lifecycle behind a machine added by hand.
     assert result.json()["state"] == "running"
