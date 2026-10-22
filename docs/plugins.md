@@ -596,7 +596,18 @@ hand-added machines) and `sources[source_id]`:
   preserves the subtotal on known usable nodes, displayed as a lower bound.
   `observed_at` is the oldest contributing observation.
   Only enabled, current inventories contribute.
-  Each dashboard node also gains `health: "usable" | "unavailable" | "unknown"`.
+  Each dashboard node has `health: "usable" | "unavailable" | "on_demand" | "unknown"`.
+  `on_demand` is an additive state for non-faulty Slurm power-saving nodes (with or
+  without CLOUD) and PBS provisioning/sleep/wait-provisioning nodes. `nodes.on_demand`
+  counts their GPUs (null when their count is unknown), separately from `usable`
+  and `unavailable`; they contribute no `unallocated` GPUs. These three capacity
+  categories, plus GPUs on unknown-state nodes, partition the total inventory.
+  On-demand nodes count as healthy for cluster status and never as `abnormal` nodes.
+  Slurm nodes with empty or missing `partitions` are unavailable; other drivers do
+  not require a Slurm partition. Faults, including FUTURE/ERROR, always take
+  precedence over power-saving flags.
+  The server supplies this shared classification; web consumers should use `health`
+  rather than interpreting the raw scheduler state.
 - `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the
   fleet-level `summary.jobs` includes `current_ids`, `listed_ids`, `running_ids` and
   `pending_ids`; these lists are not repeated under groups or sources. The running

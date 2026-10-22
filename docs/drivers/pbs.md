@@ -82,6 +82,13 @@ States are mapped so that the web app treats them like the equivalent Slurm stat
 | `state-unknown`, `stale` | `unknown` |
 | others | unchanged, lower case; combined states are joined with `+` (`down+drain`) |
 
+Non-faulty PBS `provisioning`, `sleep` and `wait-provisioning` states are available on
+demand, including combinations with `free`. They remain healthy for cluster status
+but contribute no current usable/free GPUs. Their GPUs count separately from
+unavailable capacity, and they are excluded from the unhealthy-node count. Faults
+such as `down` or `offline` still take precedence. An unset vnode `queue` is not proof that the
+node cannot take work; the Slurm partition-membership requirement does not apply.
+
 ## Queue limits
 
 PBS has no QoS. ComputeDeck keeps limits in the shape of Slurm QoS records and compares each limit with the jobs whose `qos` has the same name, so the PBS driver names each limit after its queue and gives every job its queue as `qos`.

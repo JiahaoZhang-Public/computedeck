@@ -660,5 +660,5 @@ class SlurmDriver:
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))
         batch.qos = list(qos.values())
-        batch.cluster_state = cluster_state(batch.nodes)
+        batch.cluster_state = cluster_state(batch.nodes, require_partition=True)
         return batch

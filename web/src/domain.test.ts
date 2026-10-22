@@ -422,7 +422,7 @@ describe('visible cluster capacity', () => {
       ratio: 37.5,
     });
   });
-  it('counts INVAL nodes as abnormal and power-saving transitions as normal', () => {
+  it('keeps power saving out of the unhealthy count and free capacity', () => {
     const nodes = [
       node({ name: 'bad', state: 'inval' }),
       node({ name: 'p1', state: 'idle+cloud+powering_down' }),
@@ -430,7 +430,13 @@ describe('visible cluster capacity', () => {
       node({ name: 'p3', state: 'idle+powering_up' }),
       node({ name: 'p4', state: 'idle+cloud+powered_down' }),
     ];
-    expect(summarizeNodes(nodes).abnormal).toBe(1);
+    expect(summarizeNodes(nodes)).toMatchObject({
+      abnormal: 1,
+      on_demand: 32,
+      usable: 0,
+      unallocated: 0,
+      unavailable: 8,
+    });
   });
   it('leaves capacity and ratios unknown when nodes have missing allocation data', () => {
     expect(summarizeNodes([node({ gpu_allocated: null })])).toMatchObject({

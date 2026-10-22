@@ -75,7 +75,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     for key, gpus in running_gpus.items():
         assert gpus <= nodes[key]["gpu_count"]
     unavailable = [node for node in data["nodes"] if node["health"] == "unavailable"]
-    assert {node["state"] for node in unavailable} == {"down*", "drained"}
+    assert {node["state"] for node in unavailable} == {"down*", "drained", "IDLE", "FUTURE"}
     assert all(node["gpu_allocated"] == 0 for node in unavailable)
 
 
@@ -489,3 +489,15 @@ def test_array_failure_history_matches_activity_and_coverage() -> None:
         assert job["source_id"] in data["failure_history_sources"]
         assert job["state"] == event["data"]["state"] == "FAILED"
         assert job["end"] == event["data"]["ended_at"]
+
+
+def test_demo_shows_on_demand_and_partitionless_nodes():
+    data = dashboard()
+    on_demand = [n for n in data["nodes"] if n["health"] == "on_demand"]
+    assert len(on_demand) == 1
+    assert on_demand[0]["partitions"] == ["gpu"]
+    assert any(n["state"] == "IDLE" and n["partitions"] == [] for n in data["nodes"])
+    summary = data["summary"]["groups"]["example:cluster-a"]["nodes"]
+    assert summary["on_demand"] == 4
+    assert summary["unavailable"] == 8
+    assert summary["usable"] == 32

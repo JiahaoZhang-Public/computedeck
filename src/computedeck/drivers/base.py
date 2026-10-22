@@ -163,33 +163,47 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             raise ValueError("Collection timestamp needs a timezone")
 
 
-def node_health(state: str) -> Literal["usable", "unavailable", "unknown"]:
-    """Power saving alone is normal; reservations and nonresponsive nodes cannot take work."""
-    state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
-    if re.search(
-        r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|reserved|unknown|\*",
-        state,
+def node_health(
+    state: str, *, partitions: list[str] | None = None
+) -> Literal["usable", "unavailable", "on_demand", "unknown"]:
+    """Current capacity. Pass partitions for Slurm; other schedulers need no partition."""
+    # Inspect faults before power flags: DOWN+CLOUD+POWERED_DOWN is still a fault.
+    power = re.search(r"power(?:ed|ing)?_(?:down|up)", state, re.I)
+    base = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
+    if partitions == [] or re.search(
+        r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|"
+        r"reserved|unknown|future|error|\*",
+        base,
         re.I,
     ):
         return "unavailable"
+    if power or re.search(r"provisioning|sleep", state, re.I):
+        return "on_demand"
     if re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
         return "usable"
     return "unknown"
 
 
 def cluster_state(
-    nodes: list[dict[str, Any]] | None,
+    nodes: list[dict[str, Any]] | None, *, require_partition: bool = False
 ) -> Literal["available", "degraded", "unavailable", "unknown"]:
-    """Availability of the visible inventory, using the same rule as usable capacity."""
+    """Health of the visible inventory; on-demand nodes are healthy but not free now."""
     nodes = [n for n in (nodes or []) if n.get("gpu_count") is None or n["gpu_count"] > 0]
     if not nodes:
         return "unknown"
-    health = [node_health(node.get("state", "")) for node in nodes]
+    health = [
+        node_health(
+            node.get("state", ""),
+            partitions=node.get("partitions", []) if require_partition else None,
+        )
+        for node in nodes
+    ]
     if all(value == "unavailable" for value in health):
         return "unavailable"
     if "unknown" in health:
         return "unknown"
-    return "degraded" if health.count("usable") / len(health) < 0.2 else "available"
+    healthy = health.count("usable") + health.count("on_demand")
+    return "degraded" if healthy / len(health) < 0.2 else "available"
 
 
 class Batch(BaseModel):

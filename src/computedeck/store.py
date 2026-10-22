@@ -908,7 +908,12 @@ class Store:
         observations["instances"].extend(manual)
         history = self.history(24)
         for node in nodes.values():
-            node["health"] = node_health(node.get("state", ""))
+            node["health"] = node_health(
+                node.get("state", ""),
+                partitions=node.get("partitions", [])
+                if source_by_id.get(node["source_id"], {}).get("driver") == "slurm"
+                else None,
+            )
         data = {
             "mode": "live",
             **freshness(sources),

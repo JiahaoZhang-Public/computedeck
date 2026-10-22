@@ -164,7 +164,7 @@ export interface Instance {
   probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
-  health?: 'usable' | 'unavailable' | 'unknown';
+  health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
   id: string;
   source_id: string;
   cluster_id: string;
@@ -196,6 +196,8 @@ export interface NodeSummary {
   capacity: number | null;
   usable: number | null;
   known_usable: number | null;
+  /** GPUs available on demand, separate from usable and unavailable capacity. */
+  on_demand?: number | null;
   unavailable: number | null;
   allocated: number | null;
   unallocated: number | null;

@@ -1,4 +1,5 @@
 import { setLocale, t } from './i18n';
+import { capacityText } from './pages/summary';
 import { ClustersPage } from './pages/Clusters';
 import { PlanPage } from './pages/Plan';
 import { UsagePage } from './pages/Usage';
@@ -218,7 +219,7 @@ function clusterData(states: string[], state: Source['cluster_state'] = 'availab
       gpu_type: 'example',
       cpu_count: 32,
       cpu_allocated: 0,
-      partitions: [],
+      partitions: ['gpu'],
       observed_at: now,
     })),
   });
@@ -339,6 +340,43 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
 });
 
 describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (locale) => {
+  it('shows a healthy resting cluster without an outage or double-counted GPUs', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['IDLE+CLOUD+POWERED_DOWN', 'IDLE+POWERING_UP']));
+    const capacity = capacityText(context.data.summary.nodes, 'available');
+    expect(capacity.outage).toBe(false);
+    expect(capacity.tone).toBe('');
+    expect(capacity.detail).toBe(
+      `${t('summary.onDemand', { count: 16 })} · ${t('summary.capacityTotal', { total: 16 })}`,
+    );
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.onDemand', { count: 16 }));
+      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 16, total: 16 }));
+      expect(html).not.toContain(t('plan.verdict.unavailable'));
+    }
+  });
+
+  it('labels on-demand GPUs separately from free capacity', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', 'IDLE+CLOUD+POWERED_DOWN', 'FUTURE', 'ERROR']));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.onDemand', { count: 8 }));
+      expect(html).not.toContain(t('summary.unknownNodes', { count: 2 }));
+    }
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(clusters).toContain(t('clusters.onDemand'));
+    expect(clusters).toContain('IDLE+CLOUD+POWERED_DOWN');
+    expect(clusters).toContain(t('summary.allocation', { allocated: 2, usable: 8 }));
+  });
+
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
     setLocale(locale);
     const data = serverDemo();
@@ -423,7 +461,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     },
   );
 
-  it.each(['FUTURE', 'ERROR'])('keeps the usable subtotal when a node is %s', (state) => {
+  it.each(['new_scheduler_state'])('keeps the usable subtotal when a node is %s', (state) => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', state], 'unknown'));
     const text = t('summary.allocation', { allocated: '—', usable: '≥ 8' });
@@ -587,7 +625,7 @@ it.each(['en', 'zh-CN'] as const)(
     ]) {
       expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
     }
-    const unknown = ctx(clusterData(['mixed', 'FUTURE'], 'unknown'));
+    const unknown = ctx(clusterData(['mixed', 'new_scheduler_state'], 'unknown'));
     for (const html of [
       renderToStaticMarkup(<OverviewPage ctx={unknown} />),
       renderToStaticMarkup(<ClustersPage ctx={unknown} />),

@@ -36,8 +36,17 @@ These are estimates, not a queue position or a guarantee that Slurm will start t
 
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.
-Power-saving flags alone do not make a node unavailable. An unavailable cluster is shown as
-an outage even if no GPUs are allocated, rather than looking idle.
+Usable/free GPU counts exclude nodes with no partition, FUTURE/ERROR nodes, powered-down
+nodes and power transitions (including powering up). Power-saving flags alone do not
+make a node unhealthy or the cluster unavailable, but they are not free capacity now.
+A partitioned power-saving node without a fault is shown as "Available on demand",
+with or without CLOUD. These GPUs are counted separately from usable and unavailable
+capacity. On-demand nodes count as healthy in the cluster's availability ratio; a
+cluster entirely at rest stays available with zero free GPUs. DOWN, reserved or
+otherwise faulty nodes keep their unavailable classification, even with power flags.
+The node table retains the scheduler's raw state alongside the on-demand label.
+Partition `AllowQos` matching is not part of this capacity check; QoS and access checks
+still apply separately in Where to run.
 
 References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 [sacctmgr](https://slurm.schedmd.com/sacctmgr.html),

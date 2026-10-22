@@ -160,6 +160,7 @@ function capacity(nodes: ComputeNode[], gpuType: string, requestedGpus: number) 
     matching.some(
       (node) =>
         node.health !== 'unavailable' &&
+        node.health !== 'on_demand' &&
         (node.health !== 'usable' || node.gpu_count == null || node.gpu_allocated == null),
     );
   return {

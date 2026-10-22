@@ -1,4 +1,4 @@
-import { serverNodeHealth, serverPendingStates } from './test-server';
+import { serverClusterState, serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
 import { gpuModels, idleInstances, planOptions, wallHours } from './plan';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
@@ -42,7 +42,7 @@ const node = (name: string, extra: Partial<ComputeNode> = {}): ComputeNode => ({
   cluster_id: 'cluster-a',
   name,
   state: 'mixed',
-  health: serverNodeHealth(extra.state ?? 'mixed'),
+  health: serverNodeHealth(extra.state ?? 'mixed', extra.partitions ?? ['gpu']),
   gpu_count: 8,
   gpu_allocated: 4,
   gpu_type: 'a100',
@@ -400,7 +400,7 @@ describe('adversarial GPU planning', () => {
       verdict: 'unknown',
     });
   });
-  it('excludes reserved capacity but allows an idle powered-down cloud node', () => {
+  it('excludes reserved and powered-down cloud capacity', () => {
     const [option] = planOptions(
       {
         sources: [source()],
@@ -412,7 +412,7 @@ describe('adversarial GPU planning', () => {
       },
       { ...request, gpuType: '' },
     );
-    expect(option).toMatchObject({ freeGpus: 8, matchingNodes: 1 });
+    expect(option).toMatchObject({ freeGpus: 0, matchingNodes: 0 });
   });
   it('does not count the GPUs of a Slurm INVAL node as free', () => {
     const [option] = planOptions(
@@ -421,7 +421,7 @@ describe('adversarial GPU planning', () => {
         jobs: [],
         nodes: [
           node('bad', { state: 'inval', gpu_allocated: 0 }),
-          node('saving', { state: 'idle+power_down', gpu_allocated: 0 }),
+          node('ready', { state: 'idle', gpu_allocated: 0 }),
         ],
       },
       { ...request, gpuType: '' },
@@ -1083,3 +1083,60 @@ it.each([{ health: 'unknown' as const }, { gpu_count: null }, { gpu_allocated: n
     expect(option).toMatchObject({ freeGpus: 8, freeGpusPartial: true, verdict: 'likely' });
   },
 );
+
+it.each([
+  { state: 'idle', partitions: [] },
+  { state: 'IDLE+CLOUD+POWERED_DOWN', partitions: ['gpu'] },
+  { state: 'IDLE+CLOUD+POWERED_DOWN', partitions: [] },
+  { state: 'IDLE+CLOUD+POWERING_UP', partitions: ['gpu'] },
+  { state: 'FUTURE', partitions: ['gpu'] },
+  { state: 'ERROR', partitions: ['gpu'] },
+  { state: 'provisioning', partitions: ['gpu'] },
+  { state: 'sleep', partitions: ['gpu'] },
+  { state: 'wait-provisioning', partitions: ['gpu'] },
+])('uses the server classifier to exclude $state ($partitions) from free GPUs', (extra) => {
+  const nodes = [node('g1', { ...extra, gpu_type: 'h100', gpu_allocated: 0 })];
+  const sources = [source()];
+  const request = { gpus: 1, gpuType: 'h100', hours: null };
+  const options = planOptions({ sources, nodes, jobs: [] }, request);
+  for (const option of options) {
+    expect(option.freeGpus).toBe(0);
+    expect(option.matchingNodes).toBe(0);
+    expect(option.freeGpusPartial).toBe(false);
+    expect(option.verdict).not.toBe('likely');
+  }
+  const mixed = planOptions(
+    { sources, nodes: [...nodes, node('g2', { gpu_type: 'h100', gpu_allocated: 2 })], jobs: [] },
+    request,
+  );
+  expect(mixed[0].freeGpus).toBe(6);
+  expect(mixed[0].matchingNodes).toBe(1);
+  expect(mixed[0].freeGpusPartial).toBe(false);
+});
+
+it.each([
+  'IDLE+CLOUD+POWERED_DOWN',
+  'IDLE+POWERED_DOWN',
+  'IDLE+POWERING_DOWN',
+  'IDLE+POWER_DOWN',
+  'IDLE+POWERING_UP',
+  'IDLE+POWER_UP',
+  'IDLE+CLOUD+POWERING_UP',
+  'sleep',
+  'provisioning',
+  'wait-provisioning',
+  'free+sleep',
+])('does not mark a power-saving cluster (%s) as down or free', (state) => {
+  const nodes = [node('saving', { state, gpu_allocated: 0 })];
+  const cluster_state = serverClusterState(nodes);
+  expect(cluster_state).toBe('available');
+  const options = planOptions(
+    { sources: [source({ cluster_state })], nodes, jobs: [] },
+    { gpus: 1, gpuType: '', hours: null },
+  );
+  for (const option of options) {
+    expect(option.freeGpus).toBe(0);
+    expect(option.verdict).not.toBe('unavailable');
+    expect(option.verdict).not.toBe('likely');
+  }
+});

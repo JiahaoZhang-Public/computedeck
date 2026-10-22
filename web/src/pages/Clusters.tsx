@@ -232,7 +232,12 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                       {node.partitions.join(', ') || '—'}
                     </td>
                     <td data-label={t('clusters.col.state')}>
-                      <span className={`tag ${nodeTone(node)}`}>{node.state}</span>
+                      <span className={`tag ${nodeTone(node)}`}>
+                        {node.health === 'on_demand' ? t('clusters.onDemand') : node.state}
+                      </span>
+                      {node.health === 'on_demand' && (
+                        <small className="sub muted">{node.state}</small>
+                      )}
                     </td>
                     <td className="num muted" data-label={t('clusters.col.sampled')}>
                       {relativeTime(node.observed_at)}

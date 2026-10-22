@@ -294,7 +294,12 @@ it.each(['en', 'zh-CN'] as const)(
       ...context.data,
       nodes: [
         context.data.nodes[0],
-        { ...context.data.nodes[0], id: 'cluster-a:unknown', name: 'unknown', state: 'FUTURE' },
+        {
+          ...context.data.nodes[0],
+          id: 'cluster-a:unknown',
+          name: 'unknown',
+          state: 'new_scheduler_state',
+        },
       ],
     });
     const root = page(renderToStaticMarkup(<PlanPage ctx={context} />));

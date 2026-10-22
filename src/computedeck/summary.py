@@ -111,7 +111,9 @@ def _source_reason(source: dict[str, Any]) -> str:
     return "summary_capability_missing"
 
 
-def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_nodes(
+    nodes: list[dict[str, Any]], *, partition_sources: set[str] | None = None
+) -> dict[str, Any]:
     """Current enabled observations only; callers filter before deduplicating."""
     unique: dict[tuple[str, str], dict[str, Any]] = {}
     for node in nodes:
@@ -120,9 +122,20 @@ def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             unique[key].get("observed_at") or ""
         ):
             unique[key] = node
-    rows = list(unique.values())
-    usable = [n for n in rows if node_health(n.get("state", "")) == "usable"]
-    unavailable = [n for n in rows if node_health(n.get("state", "")) == "unavailable"]
+    rows = [
+        {
+            **n,
+            "health": node_health(
+                n.get("state", ""),
+                partitions=n.get("partitions", [])
+                if partition_sources and n.get("source_id") in partition_sources
+                else None,
+            ),
+        }
+        for n in unique.values()
+    ]
+    usable = [n for n in rows if n["health"] == "usable"]
+    unavailable = [n for n in rows if n["health"] == "unavailable"]
     capacity = _sum([n.get("gpu_count") for n in rows]) if rows else None
     usable_gpus = _sum([n.get("gpu_count") for n in usable]) if rows else None
     known_usable = (
@@ -143,21 +156,22 @@ def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         if rows
         else None
     )
-    if any(node_health(n.get("state", "")) == "unknown" for n in rows):
+    if any(n["health"] == "unknown" for n in rows):
         usable_gpus = allocated = free = None
     return {
         "nodes": len(rows),
         "capacity": capacity,
         "usable": usable_gpus,
         "known_usable": known_usable,
+        "on_demand": _sum([n.get("gpu_count") for n in rows if n["health"] == "on_demand"])
+        if rows
+        else None,
         "unavailable": _sum([n.get("gpu_count") for n in unavailable]) if rows else None,
         "allocated": allocated,
         "unallocated": free,
-        "abnormal": len(unavailable),
+        "abnormal": sum(n["health"] == "unavailable" for n in rows),
         "unknown": sum(
-            node_health(n.get("state", "")) == "unknown"
-            or n.get("gpu_count") is None
-            or n.get("gpu_allocated") is None
+            n["health"] == "unknown" or n.get("gpu_count") is None or n.get("gpu_allocated") is None
             for n in rows
         ),
         "observed_at": min((n["observed_at"] for n in rows if n.get("observed_at")), default=None),
@@ -292,7 +306,8 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
                 n
                 for n in data["nodes"]
                 if n["source_id"] in by_id and fresh(by_id[n["source_id"]], "nodes")
-            ]
+            ],
+            partition_sources={s["id"] for s in sources if s["driver"] == "slurm"},
         ),
         "jobs": {
             **(

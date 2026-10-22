@@ -402,6 +402,20 @@ def dashboard() -> dict[str, Any]:
         }
         for i, state in enumerate(("down*", "drained"), 1)
     )
+    nodes.extend(
+        {
+            **nodes[0],
+            "id": f"example:cluster-a:a-cloud-{i:02}",
+            "name": f"a-cloud-{i:02}",
+            "state": state,
+            "partitions": partitions,
+            "gpu_allocated": 0,
+            "cpu_allocated": 0,
+        }
+        for i, (state, partitions) in enumerate(
+            [("IDLE+CLOUD+POWERED_DOWN", ["gpu"]), ("IDLE", []), ("FUTURE", ["gpu"])], 1
+        )
+    )
     for node in nodes:
         if node["cluster_id"] == "example:cluster-b":
             if node["name"] in {"b-gpu-07", "b-gpu-08"}:
@@ -412,11 +426,12 @@ def dashboard() -> dict[str, Any]:
                 )
             elif node["name"] == "b-gpu-02":
                 node["gpu_allocated"] = 8  # The 8-GPU running example job is on this node.
-        node["health"] = node_health(node["state"])
+        node["health"] = node_health(node["state"], partitions=node["partitions"])
     for source in sources:
         if source["kind"] == "cluster":
             source["cluster_state"] = cluster_state(
-                [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
+                [n for n in nodes if n["cluster_id"] == source["cluster_id"]],
+                require_partition=source["driver"] == "slurm",
             )
     array_failures = []
     for index in range(60):
