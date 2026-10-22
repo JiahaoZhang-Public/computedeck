@@ -1105,7 +1105,7 @@ def test_api_checks_the_ai_address_and_saves_each_channel_once(tmp_path: Path) -
         (["job.failed", "job.ended"], []),
     ],
 )
-def test_stored_legacy_rules_migrate_once(
+def test_stored_legacy_rules_migrate_on_read_without_rewriting(
     store: Store, kinds: list[str], outcomes: list[str]
 ) -> None:
     notify._prepare(store)
@@ -1116,11 +1116,14 @@ def test_stored_legacy_rules_migrate_once(
         "subject": "Custom {state}",
     }
     notify._save(store, "notify_rules", rule)
+    raw = store.db.execute("SELECT data FROM notify_rules").fetchone()[0]
     notify._prepare(store)
-    migrated = notify._rows(store, "notify_rules")[0]
+    migrated = notify.migrate_rule(notify._rows(store, "notify_rules")[0])
     assert migrated == {**rule, "events": ["job.finished", "source.failed"], "outcomes": outcomes}
     notify._prepare(store)
-    assert notify._rows(store, "notify_rules") == [migrated]
+    assert notify._rows(store, "notify_rules") == [rule]
+    assert store.db.execute("SELECT data FROM notify_rules").fetchone()[0] == raw
+    assert notify.matches(rule, notify.sample_event("job.finished", "failed"))
     assert notify.matches(migrated, notify.sample_event("job.finished", "failed"))
     assert notify.matches(migrated, notify.sample_event("job.finished", "completed")) == (
         not outcomes
@@ -1281,7 +1284,9 @@ async def test_array_digests_leave_budget_for_unrelated_failure_and_replay_nothi
     assert sum(row["status"] == "grouped" for row in entries) == 2
     assert sum(row["status"] == "sent" for row in entries) == 3
     assert all(
-        len(row["events"]) == row["count"] == 49 for row in entries if row["status"] == "grouped"
+        len(row["events"]) == row["count"] - 1 == 49
+        for row in entries
+        if row["status"] == "grouped"
     )
     assert all(
         row["digest"] in {rows[0]["id"], rows[50]["id"]}
@@ -1551,7 +1556,7 @@ async def test_large_digest_preserves_log_history_and_replays_nothing(
     assert len(log) == (3 if limit else 2)
     grouped = next(row for row in log if row["status"] == ("grouped" if limit else "suppressed"))
     assert grouped["digest"] == rows[0]["id"]
-    assert grouped["count"] == (599 if limit else 600)
+    assert grouped["count"] == 600
     assert grouped["events"] == [row["id"] for row in rows[1:]]
     if limit:
         assert log[0]["count"] == 600  # channel result includes the leader too
@@ -1677,8 +1682,8 @@ def test_delivery_status_preserves_channels_rules_and_digest_members(store: Stor
     store.db.execute("INSERT INTO notify_log(at, data) VALUES ('now', 'not json')")
     result = notify.delivery_status(store, rows)
     assert result[0]["delivery"] == ["failed", "grouped", "sent"]
-    assert result[1]["delivery"] == ["failed", "grouped", "sent"]
-    assert result[2]["delivery"] == ["failed", "grouped", "sent", "suppressed"]
+    assert result[1]["delivery"] == ["grouped"]
+    assert result[2]["delivery"] == ["grouped", "suppressed"]
     assert result[3]["delivery"] == []
     assert all("delivery" not in row for row in rows)
     # A failure outside the displayed children still counts for the group.
@@ -1752,3 +1757,25 @@ def test_corrupt_queue_row_is_counted_once_across_health_and_delivery(
     assert store.unreadable_rows()["notify_queue"] == 1
     assert notifier.delivery_failures() == []
     assert caplog.text.count("Skipped unreadable notify_queue row") == 1
+
+
+async def test_mixed_digest_leads_with_failure_for_legacy_all_outcomes_rule(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "all", "team", events=["job.ended"])
+    rows = digest_events(3)
+    store.add_events([rows[3], *rows[:3]])  # The latest ending, inserted first, completed.
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    for row in store.events():
+        await notifier.on_event(row)
+    assert len(sent) == 1
+    assert sent[0].event["data"]["outcome"] == "failed"
+    assert "failed" in sent[0].subject
+    assert sent[0].body.index("100_failed_1") < sent[0].body.index("100_completed_0")
+    assert all(row["count"] == 4 for row in notify._recent_log(store))

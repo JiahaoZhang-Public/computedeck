@@ -257,11 +257,6 @@ def _prepare(store: Store) -> None:
             );
         """)
 
-    for rule in _rows(store, "notify_rules"):
-        migrated = migrate_rule(rule)
-        if migrated != rule:
-            _save(store, "notify_rules", migrated)
-
 
 def migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
     kinds = rule.get("events", [])
@@ -351,7 +346,9 @@ def delivery_status(store: Store, rows: list[dict[str, Any]]) -> list[dict[str, 
             "dropped",
         }:
             continue
-        ids = [entry.get("event"), *(entry.get("events") or [])]
+        ids = [entry.get("event")]
+        if status in {"grouped", "suppressed"}:
+            ids.extend(entry.get("events") or [])
         for event_id in ids:
             if not isinstance(event_id, int) or event_id <= 0 or event_id not in wanted:
                 continue
@@ -415,6 +412,7 @@ def check_rule(body: RuleInput, known_channels: set[str]) -> None:
 
 
 def matches(rule: dict[str, Any], event: dict[str, Any]) -> bool:
+    rule = migrate_rule(rule)
     # Pre-upgrade events can still be waiting behind the plugin cursor.
     if event["type"] in {"job.failed", "job.ended"} and "job.finished" in rule.get("events", []):
         data = event.get("data") or {}
@@ -434,7 +432,7 @@ def matches(rule: dict[str, Any], event: dict[str, Any]) -> bool:
     if (
         event["type"] == "job.finished"
         and rule.get("outcomes")
-        and data.get("outcome") not in rule["outcomes"]
+        and (data.get("failure_announced") or data.get("outcome") not in rule["outcomes"])
     ):
         return False
     if rule.get("clusters") and data.get("cluster_id") not in rule["clusters"]:
@@ -703,16 +701,21 @@ async def compose(
     if outcome:
         values["outcome"] = OUTCOME_TEXT.get(language, OUTCOME_TEXT["en"]).get(outcome, outcome)
         if outcome == "unknown":
-            unavailable = (event.get("data") or {}).get("outcome_reason") == "outcomes_unavailable"
-            reason = (
-                ("此集群不报告作业结果" if unavailable else "调度器尚未报告结果")
-                if language == "zh-CN"
-                else (
-                    "this cluster does not report outcomes"
-                    if unavailable
-                    else "the scheduler has not reported an outcome"
-                )
+            reasons = {
+                "outcomes_unavailable": (
+                    "this connection cannot read job accounting",
+                    "此连接无法读取作业记账信息",
+                ),
+                "outside_lookback": (
+                    "accounting could not cover the full unobserved period",
+                    "记账历史无法覆盖完整的未观测区间",
+                ),
+            }
+            words = reasons.get(
+                str((event.get("data") or {}).get("outcome_reason")),
+                ("no outcome was reported by this observation", "截至此次观测，调度器尚未报告结果"),
             )
+            reason = words[1 if language == "zh-CN" else 0]
             values["outcome"] += f" ({reason})"
     subject = render(rule.get("subject") or defaults[0], values)
     body = render(rule.get("body") or defaults[1], values)
@@ -818,7 +821,7 @@ class Notifier:
         ]
 
     def rules(self) -> list[dict[str, Any]]:
-        return _rows(self.store, "notify_rules")
+        return [migrate_rule(rule) for rule in _rows(self.store, "notify_rules")]
 
     def queued(self) -> int:
         return int(self.store.db.execute("SELECT COUNT(*) FROM notify_queue").fetchone()[0])
@@ -893,6 +896,10 @@ class Notifier:
                 row_scope = digest_scope(row)
                 if row_scope and matches(rule, row):
                     groups.setdefault(row_scope, []).append(row)
+            for rows in groups.values():
+                rows.sort(
+                    key=lambda row: (row["data"].get("outcome") not in FAILURE_OUTCOMES, row["id"])
+                )
             digests = {
                 name: {**rows[0], **({"digest": rows[1:]} if len(rows) > 1 else {})}
                 for name, rows in groups.items()
@@ -994,9 +1001,7 @@ class Notifier:
                 )
                 keys.append(key)
             if event.get("digest"):
-                _write_log(
-                    self.store, {**entry, "status": "grouped", "count": len(event["digest"])}
-                )
+                _write_log(self.store, {**entry, "status": "grouped"})
         return keys
 
     async def _first_attempts(self, keys: list[Key]) -> None:
