@@ -335,6 +335,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "ssh_alias": alias,
         "existing_alias": True,
         "identity_file": None,
+        "started_at": None,
         "hourly_cost": None,
         "currency": "USD",
         "observed_at": observed,

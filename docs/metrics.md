@@ -26,7 +26,7 @@ with named missing evidence. Neither means zero.
 - **Utilization** is a percentage, separate from allocation. GPU utilization is weighted by the number of GPUs observed, and the coverage figure reports how many GPUs contributed. CPU and memory utilization are simple means of available samples, not weighted by cores or RAM. Samples come from current running jobs and reachable SSH readings less than twelve minutes old; missing samples are left out, not treated as idle. Machines with monitoring off do not contribute. An instance reading covers the visible host, which can include more than the container. The twenty-minute rule for a hand-added machine's allocation does not extend the twelve-minute utilization window.
 - **History** uses the same server allocation and utilization figures as Overview and Usage. Periods without data stay empty. Older points stay unchanged; excluding unmonitored machines can create a step at upgrade.
 - **Jobs counts** include only current jobs from enabled logins. If an enabled login lacks a current list, the count is partial. Last-known jobs remain visible as stale rows but do not increase the current count. The navigation badge and unfiltered Jobs count use the same server selection.
-- **Prices** are estimates from known hourly prices, not bills. Held instances show their hourly price; not-held instances do not. Unknown and transitional states retain the existing price display until fuller cost accounting is added; a price alone does not establish allocation. Currencies are never added together.
+- **Prices** are for the whole instance per hour, not per GPU. Only held instances (`running` or `reported_running`) contribute to the current hourly estimate. Other states show the known price as “while running”; their running cost is unknown, never zero. Currencies are never added together.
 
 ## Scope and freshness
 
@@ -580,3 +580,78 @@ GPU 数和运行时间来自表单；正数小时四舍五入到分钟（至少�
 
 本项的预设和详情链接暂不自动填入运行时间。作业已有可选的 `time_limit` 字段（包括 Slurm/PBS 失败记录和示例数据）；
 后续可在该值已知且可解析时用于填入小时数。
+
+## Running cost estimates
+
+Cloud and machines shows **Running now** from `summary.spend` for the selected group,
+before text-search filtering. The server computes the same figures for the fleet, each
+group and each login. Only held instances from current, enabled cloud API listings count,
+including third-party cloud drivers. A hand-added machine participates only when an hourly
+price was typed (including zero): `manual_state()` running counts its price; otherwise it
+is listed with `summary_lifecycle_unknown`. Hand-added machines without a typed price are
+neither counted nor listed. The built-in `ssh` driver's rows and sources are outside spend,
+including failed or stale SSH sources. Disabled sources are excluded.
+
+For cloud API sources, missing prices or currencies, uncertain lifecycles and unavailable
+listings are still named with links and reasons. Known totals read **≥** when that coverage
+is incomplete; unknown totals show **—**. If nothing priced is running and no cost is
+unknown, the note says **No priced instance running**. The note is hidden in scopes with
+neither a cloud API source nor a hand-added machine with a typed price. Each currency has
+its own hourly total. A supplied zero price remains a known zero.
+
+Rows have one compact platform/state line: **up 3 d 4 h** for a provider start or
+**seen running 2 h** for an observation window, followed by **≈ cost** only when known.
+Unknown parts are omitted. The panel note and drawer label estimates as **not a bill**;
+the drawer keeps the start's origin and any **As of** cutoff. Durations show days and hours,
+or whole minutes below an hour, rounded down. The drawer also states the whole-instance
+price and, for a known positive GPU count, the approximate price per GPU-hour. Cost is
+current price × elapsed hours; it does not reconstruct past price changes or include
+storage and other charges. This note appears in the drawer only
+when a cost estimate is shown.
+
+`started_at` is used only as a provider-documented start of the current run: RunPod's
+[`lastStartedAt`](https://docs.runpod.io/api-reference/pods/GET/pods) for RUNNING pods, and
+EC2's [`LaunchTime`](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_Instance.html)
+for running instances. Invalid or timezone-free values are unknown. EC2 has no collected
+price, so it shows the start without a cost. Vast.ai's `start_date` is not used because its
+reset-on-restart semantics have not been confirmed. Lambda, GPUhub and SSH sources do not
+supply a provider start in this slice.
+
+When no provider start is known, `seen_running_since` gives the contiguous observation
+window. It carries only between held observations at most two source intervals apart;
+a stop, uncertain state, disappearance, backwards time, observed provider restart or
+longer gap resets it. The drawer says **over the 3 d 4 h ComputeDeck saw it running**, never a
+lower-bound claim about this run: polling can miss a stop and restart. An unobserved
+start remains unknown. Hand-added machines do not receive a stored observation window.
+When the source is stale, disabled, failed or lacks current instance data, estimates stop
+at its last successful collection and say **As of** with the local time. A missing
+observation time leaves cost unknown. Today, seven-day spend and history rollups belong
+to the later Usage & cost slice.
+
+### 运行费用估算
+
+「云与机器」的当前费用来自所选分组的 `summary.spend`，不受文字搜索筛选影响。
+服务端统一计算全局、分组及各登录的结果。仅计入已启用且采集有效、状态为
+`running` 或 `reported_running` 的云 API 实例，包括第三方云驱动。手动添加的机器仅在
+填写了小时单价（包括零）后参与费用统计：`manual_state()` 为运行时计入单价，否则
+以 `summary_lifecycle_unknown` 列出。未填写单价的手动机器不计入，也不列为费用未知。
+内置 `ssh` 驱动的机器和数据源均不参与费用统计，包括采集过期或失败的 SSH 数据源。
+已停用的数据源不计入。
+
+云 API 实例缺少单价或币种、运行状态未知或采集不可用时，仍列出名称、原因和链接；
+已知金额显示 **≥**，全部费用未知时显示 **—**。没有已知单价的实例运行且没有未知费用时，
+显示「当前无已知单价的实例运行」。所选范围内既无云 API 数据源，也无填写单价的手动
+机器时，隐藏整条费用说明。各币种分别汇总，绝不相加；明确填写的零单价按已知零处理。
+
+行中仅保留一条平台与状态信息，追加「已运行 3 天 4 小时」或「已观测运行 2 小时」，
+费用已知时再追加「≈ 金额」；未知部分不显示占位符。面板说明及详情注明「估算，非账单」，
+详情保留起始时间的来源和「截至」时间。时长向下取整，显示天和小时，不足一小时显示分钟。
+小时单价属于整个实例；GPU 数量已知且大于零时另列每 GPU 小时的近似价格。估算使用当前单价乘以时长，不还原历史
+价格变动，也不包含存储及其他费用；详情中仅在显示费用估算时附上此说明。
+RunPod 和 EC2 使用平台记录的本次启动时间；EC2 没有采集单价，因此只显示起始时间。其他平台在本阶段仅使用连续观测窗口。
+
+缺少平台启动时间时，详情显示「在 ComputeDeck 观测到运行的 3 天 4 小时内」。
+手动添加的机器不记录观测起始时间。连续两次观测必须均为运行状态，间隔不超过两倍采集周期；停止、状态未知、消失、时间倒退、平台
+报告重启或更长的间隔会重置窗口。轮询可能漏掉中间的停止和重启，因此这不是本次运行
+费用的下界。采集过期、失败、停用或缺少当前实例数据时，估算停在最后成功采集时间并
+显示「截至」；时间未知则费用未知。今日和七天费用及历史汇总留给后续「使用与费用」功能。

@@ -81,7 +81,10 @@ class CloudInstance(BaseModel):
     state: State = "unknown"
     gpu_count: int | None = None
     gpu_type: str | None = None
+    # Price of the whole instance per hour, not per GPU.
     hourly_cost: float | None = None
+    # Provider-documented start of the current run, with a timezone.
+    started_at: str | None = None
     currency: str = "USD"
     ssh_host: str | None = None
     ssh_port: int | None = None
@@ -288,6 +291,7 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
         "ssh_alias": f"computedeck-{source['cluster_id']}-{instance_id}",
         "identity_file": None,
         "hourly_cost": row.hourly_cost,
+        "started_at": row.started_at,
         "currency": row.currency,
         "region": row.region,
         "observed_at": observed,

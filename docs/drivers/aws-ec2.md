@@ -70,3 +70,7 @@ There is no credential field.
 - Instances without a public IPv4 address (private subnets, IPv6 only) get no SSH endpoint. Add them by hand with an existing SSH alias, for example one that uses a bastion host.
 - A fractional GPU (e.g. G6f) counts as one GPU, the one device the instance sees.
 - The `aws` executable must be found on the service's `PATH`; otherwise the collection fails with `aws_cli_unavailable`.
+
+For running instances, the provider's `LaunchTime` is exposed as `started_at` only when it
+is a valid timezone-aware timestamp. EC2 documents it as the last launch time, not initial
+creation. No price is collected, so the drawer shows running-since with unknown cost.

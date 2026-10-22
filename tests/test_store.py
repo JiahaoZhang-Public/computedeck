@@ -511,7 +511,7 @@ def test_reopening_bad_snapshot_preserves_good_rows(tmp_path: Path) -> None:
     assert reopened.dashboard()["instances"] == [good]
     reopened.record_history()
     reopened.save_snapshot("source", {"instances": [good]})
-    assert reopened.snapshot("source") == {"instances": [good]}
+    assert reopened.snapshot("source") == {"instances": [{**good, "seen_running_since": None}]}
     reopened.db.close()
 
 
@@ -750,3 +750,37 @@ def test_probe_preserves_per_gpu_rows_and_sample_time(store: Store) -> None:
     assert row["gpus"] == [gpu]
     assert row["gpus_observed_at"] == sampled
     assert row["observed_at"] != sampled
+
+
+def test_seen_running_since_tracks_contiguous_held_observations(store, add_source) -> None:
+    source = add_source(driver="runpod", interval_minutes=10)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def save(minute, state="reported_running", **extra):
+        at = (base + timedelta(minutes=minute)).isoformat()
+        row = {"id": "pod", "source_id": source["id"], "state": state, "observed_at": at, **extra}
+        store.save_snapshot(source["id"], {"instances": [row]})
+        return store.snapshot(source["id"])["instances"][0]["seen_running_since"]
+
+    start = save(0)
+    assert start == base.isoformat()
+    assert save(10) == start
+    assert save(30, "running") == start  # Exactly two intervals still carries.
+    after_gap = save(51)
+    assert after_gap == (base + timedelta(minutes=51)).isoformat()
+    assert save(55, "stopped") is None
+    assert save(60) == (base + timedelta(minutes=60)).isoformat()
+    assert save(61, "desired_running") is None
+    assert save(62) == (base + timedelta(minutes=62)).isoformat()
+    store.save_snapshot(source["id"], {"nodes": []})
+    assert save(63) == (base + timedelta(minutes=62)).isoformat()
+    store.save_snapshot(source["id"], {"instances": []})
+    assert store.snapshot(source["id"])["instances"][0]["seen_running_since"] is None
+    assert save(64) == (base + timedelta(minutes=64)).isoformat()
+    # A provider-reported restart is evidence even within the polling interval.
+    assert (
+        save(65, started_at=(base + timedelta(minutes=64)).isoformat())
+        == (base + timedelta(minutes=65)).isoformat()
+    )
+    # Missing observation times never invent a start.
+    assert save(66, observed_at=None) is None

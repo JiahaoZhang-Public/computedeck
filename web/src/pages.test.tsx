@@ -414,7 +414,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       (item) => item.subject.kind === 'instance',
     );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
-    expect(overview).toContain('≥ 25');
+    expect(overview).toContain('≥ 27');
     expect(overview).toContain('build-box');
     expect(overview).toContain(t('msg.summary_not_probed_yet'));
     expect(overview).toContain(t('summary.unmonitored.one'));

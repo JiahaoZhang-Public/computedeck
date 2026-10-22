@@ -2,6 +2,8 @@
 
 ## 0.7.0 (unreleased)
 
+- Show running-since and cost-so-far estimates on cloud rows and machine drawers, with provider starts distinguished from ComputeDeck observation windows. Freeze old estimates at the last successful collection. Show current whole-instance hourly totals per currency, naming missing prices and collection gaps; partial totals read “≥”. Document GPUhub's per-container hourly price unit.
+
 - Reuse recent job resource shapes in Where to run, follow pending or failed jobs to alternative resources, and copy Slurm submit flags or script headers: QoS comes from the selected option, model spelling from current scheduler node records, and partition/account from your own jobs across matching logins. Unconfirmed flags share one visible note. Copying never submits a job; queue counts remain unchanged.
 
 - Show per-GPU availability, memory, utilization and owners on SSH machines, and offer current free GPUs in a separate Machines panel in Where to run with copy-only NVIDIA setup. Unknown GPUs never count as free. SSH machine and hand-added probe GPUs-in-use counts now include significant memory use even when an empty process list hides the workload; missing process or memory readings remain unknown.

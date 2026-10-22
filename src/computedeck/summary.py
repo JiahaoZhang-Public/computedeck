@@ -198,6 +198,45 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     all_instances = _unique(
         [i for i in data["instances"] if i.get("manual") or i["source_id"] not in disabled]
     )
+    rates: dict[str, float] = {}
+    priced = 0
+    unpriced = [
+        _missing(s, "source", _source_reason(s))
+        for s in sources
+        if s["kind"] == "cloud" and s.get("driver") != "ssh" and not fresh(s, "instances")
+    ]
+    # Choose among current observations before deduplicating twin cloud logins.
+    spend_instances = _unique(
+        [
+            i
+            for i in data["instances"]
+            if (i.get("manual") and i.get("hourly_cost") is not None)
+            or (
+                not i.get("manual")
+                and by_id.get(i["source_id"], {}).get("driver") != "ssh"
+                and i["source_id"] not in disabled
+                and (i["source_id"] not in by_id or fresh(by_id[i["source_id"]], "instances"))
+            )
+        ]
+    )
+    for item in spend_instances:
+        source = by_id.get(item["source_id"])
+        state = manual_state(item) if item.get("manual") else item.get("state")
+        lifecycle = instance_lifecycle(state)
+        if lifecycle == "not_held":
+            continue
+        if not item.get("manual") and source is None:
+            reason = "summary_not_collected"
+        elif lifecycle == "unknown":
+            reason = "summary_lifecycle_unknown"
+        elif item.get("hourly_cost") is None or not item.get("currency"):
+            reason = "summary_price_missing"
+        else:
+            currency = item["currency"]
+            rates[currency] = rates.get(currency, 0) + item["hourly_cost"]
+            priced += 1
+            continue
+        unpriced.append(_missing(item, "instance", reason))
     shortcuts = [i for i in all_instances if i.get("manual") and not i.get("monitoring")]
     instances = [i for i in all_instances if not i.get("manual") or i.get("monitoring")]
     fresh_ids = {
@@ -274,6 +313,7 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     # Preserve history's source count for provider rows; manual machines have no source.
     instance_sources = {i["id"]: i["id"] if i.get("manual") else i["source_id"] for i in instances}
     return {
+        "spend": {"rates": rates, "priced": priced, "unpriced": unpriced},
         "allocated": None if unmeasured else known_allocated,
         "known_allocated": known_allocated,
         "unknown_allocation_sources": len(

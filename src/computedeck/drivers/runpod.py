@@ -4,7 +4,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
-from .base import SourceError, integer, now, number
+from .base import SourceError, integer, job_time, now, number
 from .cloud import Api, CloudDriver, CloudInstance, State, instance_record
 
 API = "https://rest.runpod.io/v1/pods"
@@ -47,6 +47,7 @@ def pod_instance(pod: dict[str, Any], user: str) -> CloudInstance:
         id=pod_id,
         name=pod.get("name") or pod_id,
         state=state,
+        started_at=job_time(pod.get("lastStartedAt")) if desired == "RUNNING" else None,
         # A stopped pod has no "gpu" object; the API still reports gpuCount.
         gpu_count=integer(gpu.get("count"))
         if gpu.get("count") is not None

@@ -459,6 +459,16 @@ class ExampleCloud(CloudDriver):
         ]
 ```
 
+`CloudInstance.hourly_cost` is the price of the **whole instance per hour**, not per GPU.
+Its optional `started_at` is a timezone-aware ISO 8601 timestamp for the provider-documented
+start of the current run, or `None`. Never substitute creation time or an undocumented
+field. `instance_record()` preserves it. Instance timestamps `started_at` and
+`seen_running_since` reject timezone-free values; raw scheduler job `started_at` text
+keeps its existing contract. The store supplies `seen_running_since` for contiguous held
+observations within two source intervals, resetting across gaps, state changes and known
+restarts. Consumers must label this as an observation window, not a guaranteed run start.
+Both fields are optional on older rows. No schema or API version changes are required.
+
 Override `account(api, source)` to return `Account(balance=...)` when the provider has a
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
@@ -621,7 +631,18 @@ hand-added machines) and `sources[source_id]`:
 
 `unknown_allocation_sources` retains the history coverage count: provider instances
 share their login's missing count; unmeasured hand-added machines count individually.
-The summary does not add cost accounting or failure-history coverage.
+`spend` is additive at all three scopes: `{rates: {currency: hourly_total}, priced: n,
+unpriced: [{subject, reason}]}`. Rates include only held instances from fresh enabled
+cloud API sources, including third-party `CloudDriver` plugins. A hand-added machine takes
+part only when `hourly_cost` is not `None` (zero is a typed price): `manual_state()` running
+counts it; any other state produces `summary_lifecycle_unknown`. Hand-added machines without
+a typed price are neither counted nor listed. The built-in `ssh` driver's rows and sources
+are outside spend, even when stale or failed. Disabled sources are excluded. Cloud API
+rows retain the missing-price and coverage rules below.
+Unpriced entries name missing prices/currencies (`summary_price_missing`), unknown
+lifecycles (`summary_lifecycle_unknown`) and unavailable source listings (the existing
+source reason codes). Consumers must keep currencies separate and mark partial totals.
+This is an hourly estimate, not billing or failure-history coverage.
 
 ## Dashboard freshness
 

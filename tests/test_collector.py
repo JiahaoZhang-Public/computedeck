@@ -462,7 +462,7 @@ def test_a_probe_update_the_listing_could_not_read_is_not_saved(store: Store) ->
     pod = {"id": "runpod:a", "source_id": "s", "state": "running", "host": "192.0.2.1"}
     store.save_snapshot("s", {"instances": [pod]})
     store.update_cloud_metrics("runpod:a", {"host": "192.0.2.1"}, {"gpu_count": -1})
-    assert store.dashboard()["instances"] == [pod]
+    assert store.dashboard()["instances"] == [{**pod, "seen_running_since": None}]
     assert store.unreadable_rows() == {}
 
 

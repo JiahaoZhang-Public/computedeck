@@ -84,6 +84,7 @@ def parse_instances(rows: list[Any], source: dict[str, Any]) -> list[dict[str, A
             # Unique per source, so two accounts that see one instance do not collide.
             "ssh_alias": f"computedeck-{source['cluster_id']}-{instance_id}",
             "identity_file": None,
+            "started_at": None,
             # price_cents_per_hour is in US cents.
             "hourly_cost": cents / 100 if cents is not None and cents >= 0 else None,
             "currency": "USD",

@@ -54,6 +54,8 @@ def container_instance(deployment: dict[str, Any], container: dict[str, Any]) ->
     info = container.get("info") or {}
     # info also carries the root password; it is never read.
     host, port, user = ssh_command(info.get("ssh_command") if isinstance(info, dict) else None)
+    # Container base price in USD * 1000 per container-hour, not per GPU:
+    # https://docs.gpuhub.com/api-reference/api-elastic-deployment#8-list-containers
     price = number(container.get("price"))
     label = deployment.get("name") or deployment.get("uuid") or "deployment"
     return CloudInstance(

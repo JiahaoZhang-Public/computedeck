@@ -596,3 +596,198 @@ def test_power_flags_keep_assigned_work_in_capacity(store, add_source, state):
         assert summary["unallocated"] == 16 - allocation - 2
         assert summary["on_demand"] == 0
     assert cluster_state(rows, require_partition=True) == "available"
+
+
+def test_spend_rates_are_scoped_partial_and_never_mix_currencies(store, add_source) -> None:
+    source = add_source(name="Cloud A", driver="runpod")
+    at = now()
+
+    def instance(name, state="running", price=1.5, currency="USD"):
+        return {
+            "id": name,
+            "source_id": source["id"],
+            "name": name,
+            "state": state,
+            "hourly_cost": price,
+            "currency": currency,
+            "observed_at": at,
+        }
+
+    store.save_snapshot(
+        source["id"],
+        {
+            "instances": [
+                instance("usd"),
+                instance("eur", price=2, currency="EUR"),
+                instance("usd2", state="reported_running", price=0.5),
+                instance("free", price=0),
+                instance("no-price", price=None),
+                instance("stopping", state="desired_stopped", price=99),
+                instance("starting", state="desired_running"),
+                instance("stopped", state="stopped", price=99),
+                instance("no-currency", currency=None),
+            ]
+        },
+    )
+    data = store.dashboard()
+    spend = data["summary"]["spend"]
+    assert spend["rates"] == {"USD": 2, "EUR": 2}
+    assert spend["priced"] == 4
+    assert {i["subject"]["id"]: i["reason"]["code"] for i in spend["unpriced"]} == {
+        "no-price": "summary_price_missing",
+        "starting": "summary_lifecycle_unknown",
+        "no-currency": "summary_price_missing",
+    }
+    assert data["summary"]["sources"][source["id"]]["spend"] == spend
+    assert data["summary"]["groups"][source["cluster_id"]]["spend"] == spend
+    store.save_instance(machine(hourly_cost=3, currency="USD"))
+    assert store.dashboard()["summary"]["spend"]["rates"] == {"USD": 5, "EUR": 2}
+    store.save_instance(machine(hourly_cost=3, currency="USD", ssh_status="error"))
+    spend = store.dashboard()["summary"]["spend"]
+    assert spend["rates"] == {"USD": 2, "EUR": 2}
+    assert spend["unpriced"][-1]["reason"]["code"] == "summary_lifecycle_unknown"
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"stale": True}, "summary_source_stale"),
+        ({"last_success": None}, "summary_not_collected"),
+        ({"status": "error"}, "summary_source_failed"),
+        ({"capabilities": []}, "summary_capability_missing"),
+        ({"enabled": False}, None),
+    ],
+)
+def test_spend_excludes_unavailable_sources(changes, reason) -> None:
+    source = {
+        "id": "cloud",
+        "cluster_id": "cloud",
+        "name": "Cloud A",
+        "kind": "cloud",
+        "enabled": True,
+        "status": "ready",
+        "last_success": now(),
+        "capabilities": ["instances"],
+        **changes,
+    }
+    data = {
+        "sources": [source],
+        "jobs": [],
+        "nodes": [],
+        "instances": [
+            {
+                "id": "pod",
+                "source_id": "cloud",
+                "state": "running",
+                "hourly_cost": 2,
+                "currency": "USD",
+            },
+        ],
+    }
+    spend = summarize(data)["spend"]
+    assert spend["rates"] == {}
+    assert spend["priced"] == 0
+    assert [item["reason"]["code"] for item in spend["unpriced"]] == ([reason] if reason else [])
+    # A never-collected source without any cached rows is still named.
+    data["instances"] = []
+    assert summarize(data)["spend"] == spend
+
+
+def test_spend_uses_fresh_twin_before_deduplicating(store, add_source) -> None:
+    good = add_source(name="Cloud A", driver="runpod", cluster_id="cloud-a")
+    old = add_source(name="Cloud B", driver="runpod", cluster_id="cloud-a", status="error")
+    stamp = datetime.now(UTC)
+    row = {"id": "cloud-a:pod", "state": "running", "hourly_cost": 2, "currency": "USD"}
+    store.save_snapshot(
+        good["id"],
+        {"instances": [{**row, "source_id": good["id"], "observed_at": stamp.isoformat()}]},
+    )
+    store.save_snapshot(
+        old["id"],
+        {
+            "instances": [
+                {
+                    **row,
+                    "source_id": old["id"],
+                    "observed_at": (stamp + timedelta(minutes=1)).isoformat(),
+                    "hourly_cost": 99,
+                }
+            ]
+        },
+    )
+    data = store.dashboard()
+    assert data["summary"]["spend"]["rates"] == {"USD": 2}
+    assert data["summary"]["spend"]["priced"] == 1
+    assert data["summary"]["groups"]["cloud-a"]["spend"]["rates"] == {"USD": 2}
+
+
+@pytest.mark.parametrize("hourly_cost", [None, 0, 3])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"ssh_status": "error"},
+        {"observed_at": None},
+        {"monitoring": False, "observed_at": None},
+    ],
+)
+def test_manual_spend_requires_a_typed_price(store, hourly_cost, changes) -> None:
+    store.save_instance(machine(hourly_cost=hourly_cost, currency="USD", **changes))
+    spend = store.dashboard()["summary"]["spend"]
+    if hourly_cost is None:
+        assert spend == {"rates": {}, "priced": 0, "unpriced": []}
+    elif not changes:
+        assert spend == {"rates": {"USD": hourly_cost}, "priced": 1, "unpriced": []}
+    else:
+        assert spend["rates"] == {}
+        assert spend["priced"] == 0
+        assert spend["unpriced"] == [
+            {
+                "subject": {"kind": "instance", "id": "manual:dev-box", "name": "dev-box"},
+                "reason": {"code": "summary_lifecycle_unknown"},
+            }
+        ]
+
+
+@pytest.mark.parametrize("changes", [{}, {"stale": True}, {"status": "error"}])
+def test_ssh_source_is_outside_spend_but_cloud_plugins_are_not(changes) -> None:
+    source = {
+        "id": "source",
+        "name": "Example source",
+        "cluster_id": "example",
+        "kind": "cloud",
+        "driver": "ssh",
+        "enabled": True,
+        "status": "ready",
+        "last_success": now(),
+        "capabilities": ["instances"],
+        **changes,
+    }
+    data = {
+        "sources": [source],
+        "jobs": [],
+        "nodes": [],
+        "instances": [
+            {
+                "id": "host",
+                "source_id": "source",
+                "name": "dev-host",
+                "state": "running",
+                "hourly_cost": None,
+            },
+        ],
+    }
+    assert summarize(data)["spend"] == {"rates": {}, "priced": 0, "unpriced": []}
+    source["driver"] = "example-cloud-plugin"
+    spend = summarize(data)["spend"]
+    assert spend["rates"] == {}
+    assert spend["priced"] == 0
+    assert len(spend["unpriced"]) == 1
+    assert spend["unpriced"][0]["subject"]["kind"] == ("source" if changes else "instance")
+    assert spend["unpriced"][0]["reason"]["code"] == (
+        "summary_source_stale"
+        if changes.get("stale")
+        else "summary_source_failed"
+        if changes.get("status") == "error"
+        else "summary_price_missing"
+    )

@@ -17,6 +17,7 @@ import {
   PENDING_STATES,
   relativeTime,
   runningPrice,
+  runningSince,
 } from '../domain';
 import { directSSHCommand } from '../connections';
 import { jobPlanLink } from '../submit';
@@ -24,7 +25,7 @@ import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
-import { JobsTable } from './shared';
+import { InstanceRunCost, JobsTable } from './shared';
 
 export function SSHConfigView({
   config,
@@ -412,6 +413,8 @@ export function InstanceDetail({
   const direct = remote || !!item.existing_alias;
   // Busy GPUs, as the last SSH check counted them.
   const inUse = instanceAllocation(item);
+  const since = runningSince(item);
+  const source = ctx.data.sources.find((entry) => entry.id === item.source_id);
   async function copyCommand() {
     if (direct) {
       const command = directSSHCommand(item);
@@ -485,13 +488,30 @@ export function InstanceDetail({
           </dd>
         </div>
         <div>
-          <dt>{t('cloud.col.price')}</dt>
+          <dt>{t('cost.price')}</dt>
           <dd>
             {item.hourly_cost == null
               ? '—'
               : runningPrice(item) == null
                 ? t('cloud.priceWhenRunning', { price: money(item.hourly_cost, item.currency) })
-                : `${money(item.hourly_cost, item.currency)}/h`}
+                : t('cost.perInstance', { price: money(item.hourly_cost, item.currency) })}
+            {item.hourly_cost != null && (item.gpu_count ?? 0) > 0 && (
+              <span className="sub">
+                {t('cost.perGpu', {
+                  price: money(item.hourly_cost / item.gpu_count!, item.currency),
+                })}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{t('cost.since')}</dt>
+          <dd>{since ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) }) : '—'}</dd>
+        </div>
+        <div>
+          <dt>{t('cost.thisRun')}</dt>
+          <dd>
+            <InstanceRunCost item={item} source={source} />
           </dd>
         </div>
         <div>

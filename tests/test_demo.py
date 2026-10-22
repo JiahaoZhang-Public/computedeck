@@ -40,7 +40,7 @@ def test_demo_machine_added_by_hand_is_checked_and_counted() -> None:
 
 
 def test_demo_pod_is_reported_running_and_holds_its_listed_gpus() -> None:
-    [pod] = [row for row in dashboard()["instances"] if row["platform"] == "RunPod"]
+    [pod] = [row for row in dashboard()["instances"] if row["name"] == "sd-inference"]
     assert pod["state"] == "reported_running"
     assert instance_lifecycle(pod["state"]) == "held"
     assert gpu_allocation(pod) == 2
@@ -50,7 +50,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     data = dashboard()
     assert data["summary"]["unmonitored"] == 1
     assert data["summary"]["allocated"] is None
-    assert data["summary"]["known_allocated"] == 25
+    assert data["summary"]["known_allocated"] == 27
     assert {row["subject"]["name"] for row in data["summary"]["unmeasured"]} == {
         "build-box",
         "lab-server",
@@ -552,3 +552,29 @@ def test_submit_examples_include_unproven_flags_and_unsafe_model() -> None:
     )
     assert model == "A100 80GB"
     assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", model) is None
+
+
+def test_example_costs_have_provider_and_observed_starts_and_unpriced_instances() -> None:
+    data = dashboard()
+    pod = next(i for i in data["instances"] if i["name"] == "sd-inference")
+    assert pod["started_at"] < pod["observed_at"]
+    observed = next(i for i in data["instances"] if i["name"] == "batch-inference")
+    assert observed["state"] == "reported_running"
+    assert observed["started_at"] is None
+    assert observed["hourly_cost"] == 0.35
+    ec2 = next(i for i in data["instances"] if i["name"] == "gpu-eval")
+    assert ec2["state"] == "running"
+    assert ec2["started_at"] < ec2["observed_at"]
+    assert ec2["hourly_cost"] is None
+    for item in data["instances"]:
+        if item.get("manual"):
+            assert "seen_running_since" not in item
+        elif instance_lifecycle(item["state"]) == "held":
+            assert item["seen_running_since"] < item["observed_at"]
+    spend = data["summary"]["spend"]
+    assert spend["rates"] == {"USD": 1.04}
+    assert spend["priced"] == 2
+    assert {i["subject"]["id"]: i["reason"]["code"] for i in spend["unpriced"]} == {
+        "example:runpod-secondary": "summary_source_failed",
+        ec2["id"]: "summary_price_missing",
+    }

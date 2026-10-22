@@ -6,7 +6,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import attention, drivers
+from .drivers.aws_ec2 import parse_instances as parse_ec2_instances
 from .drivers.base import cluster_state, node_health_fields, requires_partition
+from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
 from .summary import fresh, freshness, summarize
 
@@ -309,6 +311,8 @@ def dashboard() -> dict[str, Any]:
             "ssh_alias": "computedeck-runpod-demo-pod",
             "identity_file": None,
             "hourly_cost": 0.69,
+            "started_at": (current - timedelta(hours=76)).isoformat(),
+            "seen_running_since": (current - timedelta(hours=4)).isoformat(),
             "currency": "USD",
             "observed_at": observed,
             # A failed check survives provider listings without changing held GPUs.
@@ -407,9 +411,58 @@ def dashboard() -> dict[str, Any]:
     machine_source["capabilities"] = machine.capabilities
     assert machine.instances is not None
     machine.instances[0].update(
-        observed_at=observed, gpus_observed_at=observed, last_probe_attempt=observed
+        observed_at=observed,
+        gpus_observed_at=observed,
+        last_probe_attempt=observed,
+        seen_running_since=(current - timedelta(hours=2)).isoformat(),
     )
     instances.extend(machine.instances)
+    runpod_source = next(s for s in sources if s["id"] == "example:runpod-runpod")
+    observed_pod = parse_pods(
+        [
+            {
+                "id": "observed-pod",
+                "name": "batch-inference",
+                "desiredStatus": "RUNNING",
+                "gpu": {"count": 1, "displayName": "RTX 4090"},
+                "costPerHr": 0.35,
+                # lastStartedAt is not reported: only the store's observation window is known.
+            }
+        ],
+        runpod_source,
+    )[0]
+    observed_pod.update(
+        observed_at=observed,
+        seen_running_since=(current - timedelta(hours=2)).isoformat(),
+        ssh_alias="computedeck-runpod-observed-pod",
+    )
+    instances.append(observed_pod)
+    ec2_source = _source(("example:ec2", "Example EC2", "aws-ec2", "example:ec2", ""), observed)
+    ec2_source.update(credential="", options={"region": "us-east-1"})
+    sources.append(ec2_source)
+    ec2_instance = parse_ec2_instances(
+        [
+            {
+                "Instances": [
+                    {
+                        "InstanceId": "i-00000000000000001",
+                        "InstanceType": "g5.xlarge",
+                        "State": {"Name": "running"},
+                        "LaunchTime": (current - timedelta(hours=6)).isoformat(),
+                        "Tags": [{"Key": "Name", "Value": "gpu-eval"}],
+                    }
+                ]
+            }
+        ],
+        {"g5.xlarge": (1, "A10G")},
+        ec2_source,
+    )[0]
+    ec2_instance.update(
+        observed_at=observed,
+        seen_running_since=(current - timedelta(hours=4)).isoformat(),
+        ssh_alias="computedeck-ec2-gpu-eval",
+    )
+    instances.append(ec2_instance)
     nodes: list[dict[str, Any]] = [
         {
             "id": f"{cluster_id}:{cluster_id[-1]}-gpu-{i:02}",

@@ -1,11 +1,20 @@
 import { Copy, Plus } from 'lucide-react';
 import { findGroup, instanceGroupKey } from '../groups';
 import { t } from '../i18n';
-import { money, relativeTime, runningPrice, sourceHasData } from '../domain';
+import {
+  costThisRun,
+  money,
+  relativeTime,
+  runDuration,
+  runningHours,
+  runningPrice,
+  sourceHasData,
+} from '../domain';
 import { statusLabel } from '../labels';
 import { Empty, GroupMark, Meter, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
 import { GroupFilter, SearchBox } from './shared';
+import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { matches, where } from './util';
 
 export function CloudPage({ ctx }: { ctx: Ctx }) {
@@ -16,6 +25,20 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
       (group === 'all' || instanceGroupKey(item, data.sources) === group) &&
       matches(query, item.name, item.gpu_type, item.ssh_alias, item.host, item.platform),
   );
+  const spend = (group === 'all' ? data.summary : data.summary.groups[group])?.spend;
+  const hasSpendScope =
+    data.sources.some(
+      (source) =>
+        source.kind === 'cloud' &&
+        source.driver !== 'ssh' &&
+        (group === 'all' || source.cluster_id === group),
+    ) ||
+    data.instances.some(
+      (item) =>
+        item.manual &&
+        item.hourly_cost != null &&
+        (group === 'all' || instanceGroupKey(item, data.sources) === group),
+    );
   const hasApiSource = data.sources.some((source) => source.kind === 'cloud');
   return (
     <>
@@ -31,6 +54,28 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
         </div>
       </div>
       <Panel title={t('cloud.instances')} count={instances.length}>
+        {spend && hasSpendScope && (
+          <div className="panel-note">
+            <strong>{t('cost.now')}</strong>{' '}
+            {Object.entries(spend.rates).length
+              ? Object.entries(spend.rates).map(([currency, rate]) => (
+                  <span className="sub" key={currency}>
+                    {spend.unpriced.length ? '≥ ' : ''}
+                    {t('cost.rate', { price: money(rate, currency), currency })}
+                  </span>
+                ))
+              : spend.unpriced.length
+                ? '—'
+                : t('cost.none')}
+            <span className="sub">{t('cost.scope')}</span>
+            {!!spend.unpriced.length && (
+              <>
+                <span className="sub">{t('cost.unpriced', { count: spend.unpriced.length })}</span>
+                <UnmeasuredLinks items={spend.unpriced} ctx={ctx} />
+              </>
+            )}
+          </div>
+        )}
         {instances.length ? (
           <div className="table-wrap">
             <table className="table stack-on-phone">
@@ -50,6 +95,8 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                   // Rows of a source that no longer collects keep their last reading.
                   const stale = !!source && !sourceHasData(source, 'instances');
                   const price = runningPrice(item);
+                  const run = runningHours(item, source);
+                  const cost = costThisRun(item, source);
                   return (
                     <tr
                       key={item.id}
@@ -68,7 +115,20 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           <span>
                             <strong>{item.name}</strong>
                             <span className="sub">
-                              {item.platform} · {statusLabel(item.state)}
+                              {[
+                                item.platform,
+                                statusLabel(item.state),
+                                run
+                                  ? t(run.origin === 'provider' ? 'cost.up' : 'cost.seenRunning', {
+                                      duration: runDuration(run.hours),
+                                    })
+                                  : '',
+                                cost != null
+                                  ? t('cost.shortEstimate', { cost: money(cost, item.currency) })
+                                  : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
                             </span>
                             {stale && (
                               <span className="sub">
@@ -134,7 +194,13 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                       </td>
                       <td className="num" data-label={t('cloud.col.price')}>
                         {price == null ? (
-                          <span className="muted">—</span>
+                          <span className="muted">
+                            {item.hourly_cost == null
+                              ? '—'
+                              : t('cloud.priceWhenRunning', {
+                                  price: money(item.hourly_cost, item.currency),
+                                })}
+                          </span>
                         ) : (
                           `${money(price, item.currency)}/h`
                         )}

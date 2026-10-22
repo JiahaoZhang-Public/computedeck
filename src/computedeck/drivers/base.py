@@ -95,6 +95,7 @@ TEXT_FIELDS = (
     "array_index",
     "submitted_at",
     "started_at",
+    "seen_running_since",
     "last_probe_attempt",
 )
 
@@ -158,7 +159,11 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             number(value) is None or not isinstance(value, int | float) or value < 0
         ):
             raise ValueError(f"Invalid collection measurement: {key}")
-    for key in ("observed_at", "gpus_observed_at"):
+    for key in ("observed_at", "gpus_observed_at", "started_at", "seen_running_since"):
+        # Job started_at also supports raw scheduler text (API 1). Only instance
+        # starts, identified by their platform field, promise an absolute instant.
+        if key == "started_at" and "platform" not in row:
+            continue
         if row.get(key) is not None:
             timestamp = datetime.fromisoformat(row[key])
             if timestamp.tzinfo is None:

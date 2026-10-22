@@ -140,6 +140,8 @@ export interface GpuRow {
   processes_omitted?: number;
 }
 export interface Instance {
+  started_at?: string | null;
+  seen_running_since?: string | null;
   gpus?: GpuRow[] | null;
   gpus_observed_at?: string | null;
   id: string;
@@ -220,6 +222,7 @@ export interface NodeSummary {
   ratio: number | null;
 }
 export interface Summary {
+  spend?: { rates: Record<string, number>; priced: number; unpriced: Unmeasured[] };
   allocated: number | null;
   known_allocated: number | null;
   unknown_allocation_sources: number;

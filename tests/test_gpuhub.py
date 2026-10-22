@@ -192,3 +192,11 @@ def test_the_form_comes_from_the_class() -> None:
     assert info.label == {"en": "GPUhub", "zh-CN": "GPUhub"}
     assert info.fields[0].key == "credential" and info.fields[0].default == "env:GPUHUB_API_KEY"
     assert info.beta is True
+
+
+def test_price_is_usd_per_container_hour_not_per_gpu() -> None:
+    for count in (1, 2, 8):
+        instance = container_instance({}, {**CONTAINER, "gpu_num": count})
+        assert instance.hourly_cost == 1.6
+        assert instance.currency == "USD"
+        assert instance.started_at is None

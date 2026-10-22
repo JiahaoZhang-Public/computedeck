@@ -304,3 +304,17 @@ async def test_one_unusable_pod_is_left_out_not_the_whole_listing() -> None:
     batch.validate_rows()  # what the collector does before saving
     assert [row["id"] for row in batch.instances or []] == ["runpod:good1", "runpod:good2"]
     assert {"code": "instances_skipped", "count": 1} in batch.warnings
+
+
+@pytest.mark.parametrize("value", [None, "invalid", "2026-01-01T12:00:00", 123])
+def test_unknown_start_stays_unknown(value: Any) -> None:
+    assert runpod.parse_pods([pod(lastStartedAt=value)], SOURCE)[0]["started_at"] is None
+
+
+def test_last_started_at_is_only_used_for_a_running_pod() -> None:
+    start = "2026-01-01T12:00:00Z"
+    row = runpod.parse_pods([pod(lastStartedAt=start)], SOURCE)[0]
+    assert row["started_at"] == "2026-01-01T12:00:00+00:00"
+    for state in ("EXITED", "TERMINATED", "UNKNOWN"):
+        row = runpod.parse_pods([pod(lastStartedAt=start, desiredStatus=state)], SOURCE)[0]
+        assert row["started_at"] is None

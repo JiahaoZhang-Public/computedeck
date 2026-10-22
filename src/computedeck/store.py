@@ -765,15 +765,37 @@ class Store:
             "SELECT data FROM snapshots WHERE source_id = ?", (source_id,)
         ).fetchone()
         merged = _read_snapshot(old[0])[0] if old else {}
-        if "instances" in snapshot and merged.get("instances"):
-            previous = {row["id"]: row for row in merged["instances"]}
+        if "instances" in snapshot:
+            previous = {row["id"]: row for row in merged.get("instances", [])}
             listed = [_keep_probe(row, previous.get(row["id"])) for row in snapshot["instances"]]
+            source = self.source(source_id)
+            interval = timedelta(minutes=2 * source["interval_minutes"]) if source else None
+            listed = [dict(row) for row in listed]
+            for row in listed:
+                row["seen_running_since"] = None
+                if instance_lifecycle(row.get("state")) != "held":
+                    continue
+                at = timestamp(row.get("observed_at"))
+                row["seen_running_since"] = at
+                old_row = previous.get(row["id"], {})
+                old_at = timestamp(old_row.get("observed_at"))
+                if (
+                    at
+                    and old_at
+                    and interval is not None
+                    and instance_lifecycle(old_row.get("state")) == "held"
+                    and timedelta(0)
+                    <= datetime.fromisoformat(at) - datetime.fromisoformat(old_at)
+                    <= interval
+                    and row.get("started_at") == old_row.get("started_at")
+                ):
+                    row["seen_running_since"] = timestamp(old_row.get("seen_running_since")) or at
             # Keep an unexplained disappearance for one successful listing. A second
             # complete listing confirms absence; partial failures never reach here.
             seen = {row["id"] for row in listed}
             missing = [
-                {**row, "state": "missing"}
-                for row in merged["instances"]
+                {**row, "state": "missing", "seen_running_since": None}
+                for row in merged.get("instances", [])
                 if row["id"] not in seen
                 and row.get("state") not in {"missing", "terminated", "deleted"}
             ]
