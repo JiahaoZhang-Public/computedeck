@@ -715,29 +715,50 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
 
   it('shows unknown fields honestly and omits a duplicate partition line', () => {
     setLocale(locale);
-    const render = (qos: string | null, partitions: (string | null)[]) => {
-      const data = dash({
-        jobs: partitions.map((partition, index) =>
-          job(String(index), {
-            array_id: '1234',
+    const cases = [
+      { id: '1234', qos: null, partitions: [null, null] },
+      { id: '1235', qos: 'long', partitions: ['long', 'long'] },
+      { id: '1236', qos: 'long', partitions: ['gpu', 'gpu'] },
+      { id: '1237', qos: 'long', partitions: ['long', 'gpu'] },
+      { id: '1238', qos: 'long', partitions: [null, null] },
+    ];
+    const data = dash({
+      jobs: cases.flatMap(({ id, qos, partitions }) =>
+        partitions.map((partition, index) =>
+          job(`${id}_${index}`, {
+            array_id: id,
             array_index: String(index),
             qos,
             partition,
           }),
         ),
-      });
-      return renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
+      ),
+    });
+    const html = renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
+    const rows = [...html.matchAll(/<tr class="clickable array-row\b[^>]*>.*?<\/tr>/g)].map(
+      (match) => match[0],
+    );
+    expect(rows).toHaveLength(cases.length);
+    const row = (id: string) => {
+      // Match the exact array label, regardless of the page's row ordering.
+      const matches = rows.filter((html) => html.includes(`<span class="sub mono">[${id}] ·`));
+      expect(matches).toHaveLength(1);
+      for (const other of cases.filter((item) => item.id !== id))
+        expect(matches[0]).not.toContain(`<span class="sub mono">[${other.id}] ·`);
+      return matches[0];
     };
-    const unknown = render(null, [null, null]);
+    const unknown = row('1234');
     expect(unknown).not.toContain(t('jobs.array.mixed'));
     expect(unknown).toContain('<span class="sub">—</span>');
-    const sameQueue = render('long', ['long', 'long']);
+    const sameQueue = row('1235');
     expect(sameQueue).toContain('<span class="sub">long</span>');
     expect(sameQueue).not.toContain(t('jobs.array.partition', { name: 'long' }));
-    expect(render('long', ['gpu', 'gpu'])).toContain(t('jobs.array.partition', { name: 'gpu' }));
-    expect(render('long', ['long', 'gpu'])).toContain(
-      t('jobs.array.partition', { name: t('jobs.array.mixed') }),
-    );
+    expect(row('1236')).toContain(t('jobs.array.partition', { name: 'gpu' }));
+    expect(row('1237')).toContain(t('jobs.array.partition', { name: t('jobs.array.mixed') }));
+    const unknownPartition = row('1238');
+    expect(unknownPartition).not.toContain(t('jobs.array.mixed'));
+    expect(unknownPartition).toContain('<span class="sub">long</span>');
+    expect(unknownPartition).toContain(t('jobs.array.partition', { name: '—' }));
   });
 
   it('takes eight rows after grouping and tags an array with any stale element', () => {
