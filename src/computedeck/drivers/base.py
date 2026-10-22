@@ -90,6 +90,7 @@ TEXT_FIELDS = (
     "external_id",
     "metrics_scope",
     "observed_at",
+    "gpus_observed_at",
     "array_id",
     "array_index",
     "submitted_at",
@@ -157,10 +158,11 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             number(value) is None or not isinstance(value, int | float) or value < 0
         ):
             raise ValueError(f"Invalid collection measurement: {key}")
-    if row.get("observed_at") is not None:
-        timestamp = datetime.fromisoformat(row["observed_at"])
-        if timestamp.tzinfo is None:
-            raise ValueError("Collection timestamp needs a timezone")
+    for key in ("observed_at", "gpus_observed_at"):
+        if row.get(key) is not None:
+            timestamp = datetime.fromisoformat(row[key])
+            if timestamp.tzinfo is None:
+                raise ValueError("Collection timestamp needs a timezone")
 
 
 def node_health(

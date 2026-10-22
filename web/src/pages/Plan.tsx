@@ -6,7 +6,7 @@ import type { MessageKey } from '../i18n';
 import { dateTime, money, relativeTime } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES } from '../planExplanation';
-import { gpuModels, idleInstances, machineOptions, planOptions } from '../plan';
+import { gpuModels, idleInstances, machineOptions, machineSamples, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Empty, GroupMark, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -129,6 +129,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   const first = visible[0];
   const best = first && ['likely', 'possible'].includes(first.verdict) ? first : null;
   const machines = machineOptions(data, request);
+  const { staleCount } = machineSamples(data);
   const visibleMachines = machines.filter(
     (option) => !request.gpuType || option.total > 0 || option.unknown > 0,
   );
@@ -311,6 +312,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           ) : machines.length === 0 ? (
             <p className="panel-note">{t('plan.machinesEmpty')}</p>
           ) : null}
+          {staleCount > 0 && (
+            <p className="panel-note">{t('plan.machinesStale', { count: staleCount })}</p>
+          )}
           <p className="panel-note">{t('plan.machineFreshness')}</p>
           {machines.some((option) => option.command) && (
             <p className="panel-note">{t('plan.machineCopyNote')}</p>

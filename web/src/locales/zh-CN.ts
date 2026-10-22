@@ -775,8 +775,10 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.machineCopyPartial': '复制 {count} 张 GPU 的设置（请求 {requested} 张）',
   'plan.machinesNoMatch': '{count} 台机器没有匹配的 GPU，已隐藏。',
   'plan.machinesNoMatch.one': '{count} 台机器没有匹配的 GPU，已隐藏。',
+  'plan.machinesStale': '{count} 台机器已隐藏：GPU 采样缺失或过旧。',
+  'plan.machinesStale.one': '{count} 台机器已隐藏：GPU 采样缺失或过旧。',
   'plan.machineCopyNote':
-    '仅复制：先通过 SSH 连接，再在该 shell 中执行 export 行，然后运行你的命令。不会执行命令或预留 GPU。',
+    '仅复制：粘贴后会打开带有这些 GPU 设置的 SSH shell，然后在其中运行你的命令。复制操作不会执行命令或预留 GPU。',
   'plan.machineFreshness':
     '仅显示最近两个采集周期内的有效 SSH GPU 采样，过期或缺失的采样不参与比较。',
   'plan.machinesEmpty': '没有可用于比较的有效 SSH GPU 采样。',

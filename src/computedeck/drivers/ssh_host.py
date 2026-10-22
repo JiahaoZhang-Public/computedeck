@@ -282,13 +282,12 @@ def measure(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[d
     for row in gpus or []:
         processes = row["processes"]
         used, total = row["memory_used_mb"], row["memory_total_mb"]
-        row["in_use"] = (
-            True
-            if processes
-            else None
-            if processes is None or used is None or total is None
-            else used >= max(1024, total * 0.05)
-        )
+        if processes:
+            row["in_use"] = True
+        elif processes is None or used is None or total is None:
+            row["in_use"] = None
+        else:
+            row["in_use"] = used >= max(1024, total * 0.05)
         row["processes_omitted"] = max(0, len(processes) - 16) if processes else 0
         if processes is not None:
             row["processes"] = processes[:16]

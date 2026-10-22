@@ -3,6 +3,7 @@ import { directSSHCommand } from './connections';
 import { reasonCode, reasonKind } from './jobFacts';
 import {
   freeGpuIndexes,
+  gpuMatchesModel,
   holdsAllocation,
   PENDING_STATES,
   instanceLifecycle,
@@ -666,32 +667,42 @@ export function idleInstances(instances: Instance[], threshold = 10) {
   );
 }
 
+/** Separate current GPU samples from otherwise eligible machines missing a recent sample. */
+export function machineSamples(data: Pick<Dashboard, 'sources' | 'instances'>, now = Date.now()) {
+  let staleCount = 0;
+  const current = data.instances.flatMap((instance) => {
+    const source = data.sources.find((source) => source.id === instance.source_id);
+    if (
+      !source ||
+      source.driver !== 'ssh' ||
+      instance.state !== 'running' ||
+      !sourceHasData(source, 'instances')
+    )
+      return [];
+    const age = Math.max(0, now - Date.parse(instance.gpus_observed_at ?? ''));
+    if (!Number.isFinite(age) || age > source.interval_minutes * 120000) {
+      staleCount += 1;
+      return [];
+    }
+    if (!instance.gpus?.length) return [];
+    return [{ instance, source }];
+  });
+  return { current, staleCount };
+}
+
 /** Current per-GPU SSH samples, separate from scheduler estimates. */
 export function machineOptions(
   data: Pick<Dashboard, 'sources' | 'instances'>,
   request: PlanRequest,
   now = Date.now(),
 ) {
-  return data.instances
-    .flatMap((instance) => {
-      const source = data.sources.find((source) => source.id === instance.source_id);
-      const age = Math.max(0, now - Date.parse(instance.gpus_observed_at ?? ''));
-      if (
-        !source ||
-        source.driver !== 'ssh' ||
-        instance.state !== 'running' ||
-        !sourceHasData(source, 'instances') ||
-        !Number.isFinite(age) ||
-        age > source.interval_minutes * 120000 ||
-        !instance.gpus?.length
-      )
-        return [];
-      const matching = instance.gpus.filter(
-        (gpu) => !request.gpuType || gpu.name?.toLowerCase() === request.gpuType.toLowerCase(),
-      );
+  return machineSamples(data, now)
+    .current.map(({ instance, source }) => {
+      const gpus = instance.gpus!;
+      const matching = gpus.filter((gpu) => gpuMatchesModel(gpu, request.gpuType));
       const unknown =
         matching.filter((gpu) => gpu.in_use == null).length +
-        (request.gpuType ? instance.gpus.filter((gpu) => !gpu.name).length : 0);
+        (request.gpuType ? gpus.filter((gpu) => !gpu.name).length : 0);
       const free = matching.filter((gpu) => gpu.in_use === false).length;
       const indexes = freeGpuIndexes(instance, request.gpuType)
         .sort((a, b) => a - b)
@@ -699,19 +710,17 @@ export function machineOptions(
       const ssh = directSSHCommand(instance);
       // Only the NVIDIA query provides gpu_processes; GPU names can also start with Tesla.
       const nvidia = indexes.length > 0 && source.capabilities.includes('gpu_processes');
-      return [
-        {
-          instance,
-          source,
-          free,
-          total: matching.length,
-          unknown,
-          command:
-            ssh && nvidia
-              ? `${ssh}\nexport CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes.join(',')}`
-              : null,
-        },
-      ];
+      return {
+        instance,
+        source,
+        free,
+        total: matching.length,
+        unknown,
+        command:
+          ssh && nvidia
+            ? `${ssh.replace(/^ssh /, 'ssh -t ')} 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes.join(',')}; exec "\${SHELL:-sh}" -l'`
+            : null,
+      };
     })
     .sort((a, b) => b.free - a.free || a.instance.name.localeCompare(b.instance.name));
 }

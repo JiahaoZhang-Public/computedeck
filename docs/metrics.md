@@ -466,7 +466,8 @@ Team alerts 渠道，不读取真实发送记录。
 
 Machine drawers show Free, Busy, Busy (processes not visible), or Unknown for each GPU,
 with memory, utilization, and up to two owners with process counts and memory. Unknown
-memory is never zero. Owner totals cover only the shown processes when the 16-process
+memory is shown as `—`, just like unknown utilization. Owners sort by memory (unknown last),
+then process count. Owner totals cover only the shown processes when the 16-process
 cap is reached; PIDs are not displayed. The section uses its own `gpus_observed_at`,
 which probes never refresh. Older samples without a timestamp say “Sample time unknown”.
 
@@ -478,12 +479,15 @@ includes machine models; machines with no matching GPU are hidden with a count n
 unknown models remain visible. Copy-only SSH and NVIDIA CUDA settings select known-free indexes
 in ascending index order, up to the requested count; fewer free GPUs means fewer selected,
 with both counts stated on the copy button.
-Connect with SSH, then run the copied `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
-line in that shell before your command. Copying runs nothing and reserves no GPU. SSH hosts
+A separate count note identifies machines hidden because their GPU sample is missing or too old.
+The copied setup is one command: `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2; exec "${SHELL:-sh}" -l'`.
+Pasting it opens an SSH shell with the selected GPU settings; run your command in that shell.
+Copying runs nothing and reserves no GPU. SSH hosts
 do not appear in the paid-cloud idle list. Hand-added machines do not yet retain per-GPU data.
 
 机器抽屉逐卡显示空闲、使用中、使用中但进程不可见或未知，以及显存、利用率和最多两位
-用户的进程数与显存。可见进程或空进程列表下达到 max(1024 MiB, 总显存的 5%) 的用量
+用户的进程数与显存。未知显存与未知利用率统一显示为 `—`。用户按显存用量（未知排最后）、
+进程数降序排列。可见进程或空进程列表下达到 max(1024 MiB, 总显存的 5%) 的用量
 表示使用中；只有空进程列表且已知显存低于阈值才是空闲。进程不可读，或没有可见进程且
 显存未知时，状态保持未知。任一卡未知都会使机器的总使用量未知。每卡最多保留 16 个进程，
 超出时说明用户合计仅覆盖已显示的进程；不显示 PID。单卡列表使用独立采样时间，探测不会刷新它。
@@ -494,8 +498,9 @@ do not appear in the paid-cloud idle list. Hand-added machines do not yet retain
 型号筛选包含机器型号；没有匹配 GPU 的机器隐藏并汇总数量，型号未知的机器仍然显示。
 SSH 和 NVIDIA CUDA 设置仅供复制，按编号升序选取已知空闲卡，
 最多选取请求数量；不足时选取所有已知空闲卡，并在复制按钮上说明选取数量和请求数量。
-先通过 SSH 连接，再在该 shell 中执行复制的
-`export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...` 行，然后运行你的命令。
+GPU 采样缺失或过旧而隐藏的机器会单独汇总数量。
+复制内容是一条 SSH 命令，会在远端设置 `CUDA_DEVICE_ORDER=PCI_BUS_ID` 和 `CUDA_VISIBLE_DEVICES`，
+然后打开 shell；粘贴后在该 shell 中运行你的命令。
 复制操作不会执行命令或预留 GPU。SSH 主机不再出现在付费云实例的低利用率列表中；手动添加机器尚不保留单卡数据。
 
 The partial-total reason `summary_gpu_processes_unavailable` means GPU use could not be

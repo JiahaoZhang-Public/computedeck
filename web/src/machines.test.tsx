@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { execFileSync } from 'node:child_process';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -6,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { freeGpuIndexes } from './domain';
 import { groupsOf } from './groups';
 import { setLocale, t } from './i18n';
-import { gpuModels, idleInstances, machineOptions } from './plan';
+import { gpuModels, idleInstances, machineOptions, machineSamples } from './plan';
 import { PlanPage } from './pages/Plan';
 import { InstanceDetail } from './pages/Details';
 import { UnmeasuredLinks } from './pages/UnmeasuredLinks';
@@ -61,11 +62,29 @@ describe('SSH machine planning', () => {
       free: 1,
       total: 4,
       unknown: 1,
-      command: "ssh 'lab-server'\nexport CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0",
+      command: `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0; exec "\${SHELL:-sh}" -l'`,
     });
     item.gpus![0].in_use = undefined;
     expect(freeGpuIndexes(item, '')).toEqual([]);
     expect(machineOptions(data, request)[0]).toMatchObject({ free: 0, unknown: 2, command: null });
+  });
+  it('passes GPU settings and shell expansion to SSH as one remote command', () => {
+    const { data, item } = fixture();
+    item.gpus = [{ ...item.gpus![0], index: 3 }];
+    const command = machineOptions(data, request)[0].command!;
+    expect(command).not.toContain('\n');
+    // Substitute SSH locally: no connection is made, and the receiving arguments prove quoting.
+    const args = execFileSync('sh', ['-c', `ssh() { printf '%s\\n' "$@"; }\n${command}`], {
+      encoding: 'utf8',
+      env: { ...process.env, SHELL: '/local-shell-must-not-expand' },
+    })
+      .trim()
+      .split('\n');
+    expect(args).toEqual([
+      '-t',
+      'lab-server',
+      'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=3; exec "${SHELL:-sh}" -l',
+    ]);
   });
   it.each([
     'stale',
@@ -91,6 +110,32 @@ describe('SSH machine planning', () => {
     // A fresh aggregate probe cannot renew old per-GPU data.
     item.observed_at = new Date().toISOString();
     expect(machineOptions(data, request)).toEqual([]);
+  });
+  it('counts only otherwise eligible machines with missing or old GPU samples', () => {
+    const { data, item, source } = fixture();
+    const now = Date.now();
+    expect(machineSamples(data, now).staleCount).toBe(0);
+    for (const timestamp of [null, 'invalid', new Date(now - 1200001).toISOString()]) {
+      item.gpus_observed_at = timestamp;
+      expect(machineSamples(data, now)).toEqual({ current: [], staleCount: 1 });
+    }
+    item.gpus_observed_at = new Date(now).toISOString();
+    for (const gpus of [[], null]) {
+      item.gpus = gpus;
+      expect(machineSamples(data, now)).toEqual({ current: [], staleCount: 0 });
+    }
+    item.gpus_observed_at = null;
+    item.state = 'stopped';
+    expect(machineSamples(data, now).staleCount).toBe(0);
+    item.state = 'running';
+    source.enabled = false;
+    expect(machineSamples(data, now).staleCount).toBe(0);
+    source.enabled = true;
+    source.stale = true;
+    expect(machineSamples(data, now).staleCount).toBe(0);
+    source.stale = false;
+    source.driver = 'runpod';
+    expect(machineSamples(data, now).staleCount).toBe(0);
   });
   it('keeps samples 60 seconds ahead of the browser clock current', () => {
     const { data, item } = fixture();
@@ -132,7 +177,7 @@ describe('SSH machine planning', () => {
     ] as const) {
       expect(machineOptions(data, { ...request, gpus })[0]).toMatchObject({
         free: 3,
-        command: `ssh 'lab-server'\nexport CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes}`,
+        command: `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes}; exec "\${SHELL:-sh}" -l'`,
       });
     }
   });
@@ -230,6 +275,62 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
       await act(async () => root.unmount());
     }
   });
+  it('counts hidden old and missing samples separately from model mismatches', async () => {
+    setLocale(locale);
+    const { data, item } = fixture();
+    data.instances.push(
+      { ...item, id: 'old', gpus_observed_at: new Date(Date.now() - 1200001).toISOString() },
+      { ...item, id: 'missing', gpus: null, gpus_observed_at: null },
+      { ...item, id: 'stopped', state: 'stopped', gpus: null },
+    );
+    window.history.replaceState(null, '', '#/plan?model=H100');
+    const view = document.createElement('div');
+    const root = createRoot(view);
+    try {
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.textContent).toContain(t('plan.machinesNoMatch', { count: 1 }));
+      expect(view.textContent).toContain(
+        locale === 'en'
+          ? '2 machines hidden: GPU sample missing or too old.'
+          : '2 台机器已隐藏：GPU 采样缺失或过旧。',
+      );
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+  it('excludes current CPU-only machines without a stale-sample note', () => {
+    setLocale(locale);
+    const { data, item } = fixture();
+    item.gpus_observed_at = new Date().toISOString();
+    for (const gpus of [[], null]) {
+      item.gpus = gpus;
+      const view = parse(renderToStaticMarkup(<PlanPage ctx={context(data)} />));
+      expect(view.querySelector('.machine-options')).toBeNull();
+      expect(view.textContent).not.toContain(t('plan.machinesStale', { count: 1 }));
+    }
+  });
+  it('uses dashes for unknown memory and orders equal-memory owners by process count', () => {
+    setLocale(locale);
+    const { data, item } = fixture();
+    item.gpus = [
+      {
+        ...item.gpus![3],
+        processes: [
+          { pid: 1, user: 'alice', memory_mb: 1024 },
+          { pid: 2, user: 'bob', memory_mb: 512 },
+          { pid: 3, user: 'bob', memory_mb: 512 },
+        ],
+      },
+    ];
+    let view = parse(renderToStaticMarkup(drawer(context(data)))).querySelector('.gpu-details')!;
+    expect(view.textContent).toContain(t('gpu.memory', { used: '—', total: '24 GiB' }));
+    expect(view.textContent!.indexOf('bob')).toBeLessThan(view.textContent!.indexOf('alice'));
+    item.gpus[0].processes = [{ pid: 1, user: null, memory_mb: null }];
+    view = parse(renderToStaticMarkup(drawer(context(data)))).querySelector('.gpu-details')!;
+    expect(view.textContent).toContain(
+      t('gpu.owner', { user: t('gpu.unknownUser'), count: 1, memory: '—' }),
+    );
+  });
   it('labels legacy GPU samples without a timestamp explicitly', () => {
     setLocale(locale);
     const { data, item } = fixture();
@@ -326,16 +427,15 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     };
     item.gpus = [gpu];
     const view = parse(renderToStaticMarkup(drawer(context(data)))).querySelector('.gpu-details')!;
-    expect(view.textContent).toContain(
-      t('gpu.owner', { user: t('gpu.unknownUser'), count: 1, memory: t('status.unknown') }),
-    );
+    expect(view.textContent).toContain(t('gpu.owner', { user: 'bob', count: 1, memory: '1 GiB' }));
     expect(view.textContent).toContain(
       t('gpu.owner', { user: 'alice', count: 2, memory: '3 GiB' }),
     );
     expect(view.textContent).toContain(locale === 'en' ? '+1 owner' : '另有 1 位用户');
     expect(view.textContent).not.toContain('+1 owners');
     expect(view.textContent).toContain(t('gpu.omitted', { count: 4 }));
-    expect(view.textContent).not.toContain('bob');
+    expect(view.textContent).not.toContain(t('gpu.unknownUser'));
+    expect(view.textContent!.indexOf('alice')).toBeLessThan(view.textContent!.indexOf('bob'));
     gpu.processes_omitted = 1;
     const singular = parse(renderToStaticMarkup(drawer(context(data)))).textContent;
     expect(singular).toContain(
@@ -363,6 +463,7 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     const stale = renderToStaticMarkup(<PlanPage ctx={ctx} />);
     expect(stale).toContain(t('plan.machinesEmpty'));
     expect(stale).toContain(t('plan.machineFreshness'));
+    expect(stale).toContain(t('plan.machinesStale', { count: 1 }));
   });
   it.each([
     { requested: 1, indexes: [3, 1, 2], selected: '1', muted: false },
@@ -382,12 +483,12 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
         expect(container.querySelector('.machine-options li')?.classList.contains('muted')).toBe(
           muted,
         );
-        const command = `ssh 'lab-server'\nexport CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${selected}`;
+        const command = `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${selected}; exec "\${SHELL:-sh}" -l'`;
         expect(container.querySelector('.machine-command')!.textContent).toBe(command);
         expect(container.textContent).toContain(
           locale === 'en'
-            ? 'Copy only: connect with SSH, then run the export line in that shell before your command. Nothing is run or reserved.'
-            : '仅复制：先通过 SSH 连接，再在该 shell 中执行 export 行，然后运行你的命令。不会执行命令或预留 GPU。',
+            ? 'Copy only: paste to open an SSH shell with these GPU settings, then run your command there. Copying runs nothing and reserves no GPU.'
+            : '仅复制：粘贴后会打开带有这些 GPU 设置的 SSH shell，然后在其中运行你的命令。复制操作不会执行命令或预留 GPU。',
         );
         const [copy, open] =
           container.querySelectorAll<HTMLButtonElement>('.machine-actions button');

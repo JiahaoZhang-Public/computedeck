@@ -555,7 +555,7 @@ export function InstanceDetail({
 }
 
 function gpuMemory(value: number | null) {
-  return value == null ? t('status.unknown') : `${Math.round((value / 1024) * 10) / 10} GiB`;
+  return value == null ? '—' : `${Math.round((value / 1024) * 10) / 10} GiB`;
 }
 
 function gpuOwners(gpu: GpuRow) {
@@ -567,13 +567,16 @@ function gpuOwners(gpu: GpuRow) {
       owner.memory == null || process.memory_mb == null ? null : owner.memory + process.memory_mb;
     owners.set(process.user, owner);
   }
-  const labels = [...owners].slice(0, 2).map(([user, owner]) =>
-    t('gpu.owner', {
-      user: user ?? t('gpu.unknownUser'),
-      count: owner.count,
-      memory: gpuMemory(owner.memory),
-    }),
-  );
+  const labels = [...owners]
+    .sort(([, a], [, b]) => (b.memory ?? -1) - (a.memory ?? -1) || b.count - a.count)
+    .slice(0, 2)
+    .map(([user, owner]) =>
+      t('gpu.owner', {
+        user: user ?? t('gpu.unknownUser'),
+        count: owner.count,
+        memory: gpuMemory(owner.memory),
+      }),
+    );
   if (owners.size > 2) labels.push(t('gpu.moreOwners', { count: owners.size - 2 }));
   if (gpu.processes_omitted) labels.push(t('gpu.omitted', { count: gpu.processes_omitted }));
   return labels.join(' · ');

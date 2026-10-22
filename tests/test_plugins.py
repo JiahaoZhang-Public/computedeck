@@ -605,3 +605,15 @@ def test_exit_fields_require_nonnegative_integers(field, value) -> None:
         validate_row({"id": "cluster-a:1001", field: value})
     for valid in (None, 0, 9, 127):
         validate_row({"id": "cluster-a:1001", field: valid})
+
+
+@pytest.mark.parametrize("field", ["observed_at", "gpus_observed_at"])
+def test_collection_timestamps_require_timezones(field: str) -> None:
+    from computedeck.drivers.base import validate_row
+
+    for value in (None, "2026-01-01T12:00:00Z", "2026-01-01T16:00:00+04:00"):
+        validate_row({"id": "lab-server", field: value})
+    with pytest.raises(ValueError, match="needs a timezone"):
+        validate_row({"id": "lab-server", field: "2026-01-01T12:00:00"})
+    with pytest.raises(ValueError):
+        validate_row({"id": "lab-server", field: "invalid"})

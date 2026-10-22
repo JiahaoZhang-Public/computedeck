@@ -3074,7 +3074,7 @@ td.wrap {
   gap: 8px;
 }
 .machine-options .machine-command {
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  white-space: pre;
+  overflow-x: auto;
   font-size: 12px;
 }

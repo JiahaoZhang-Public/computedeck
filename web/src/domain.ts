@@ -3,6 +3,7 @@ import type {
   ComputeNode,
   Dashboard,
   HistoryPoint,
+  GpuRow,
   Instance,
   Job,
   QosLimit,
@@ -298,11 +299,13 @@ export function qosGpuUsed(qos: QosLimit): number | null {
   return gpuTres(qosUsedTres(qos)).find((entry) => !entry.model)?.value ?? null;
 }
 
+export function gpuMatchesModel(gpu: GpuRow, model: string) {
+  return !model || gpu.name?.toLowerCase() === model.toLowerCase();
+}
+
 /** Only the driver's explicit free state is evidence; unknown never becomes free. */
 export function freeGpuIndexes(instance: Instance, model: string) {
   return (instance.gpus ?? [])
-    .filter(
-      (gpu) => gpu.in_use === false && (!model || gpu.name?.toLowerCase() === model.toLowerCase()),
-    )
+    .filter((gpu) => gpu.in_use === false && gpuMatchesModel(gpu, model))
     .flatMap((gpu) => (gpu.index == null ? [] : [gpu.index]));
 }

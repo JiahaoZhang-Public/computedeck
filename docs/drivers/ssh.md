@@ -97,19 +97,28 @@ establish availability. `gpu_allocated` counts true rows only when every row is 
 otherwise it is null. Hand-added probes share this rule for their aggregate count.
 
 Each process list keeps at most 16 entries; `processes_omitted` counts those left out.
-The drawer shows at most two owners with process counts and memory, plus the number of
-other displayed owners. Truncated lists explicitly label owner totals as partial. PIDs
-are retained in the existing API field but never shown in the drawer.
+The drawer shows at most two owners with process counts and memory, sorted by memory
+(unknown last), then process count, plus the number of other displayed owners.
+Truncated lists explicitly label owner totals as partial. PIDs are retained in the
+existing API field but never shown in the drawer.
 
-`gpus_observed_at` is the collection time of the GPU list. An on-demand hardware probe
-updates aggregate readings but never this timestamp or the per-GPU rows. Where to run
-uses running instances from current SSH sources and GPU lists no older than two source
-collection intervals. Missing instances are excluded, including old rows after an alias change.
+`gpus_observed_at` is the timezone-aware collection time of the GPU list. An on-demand
+hardware probe updates aggregate readings but never this timestamp or the per-GPU
+rows. Where to run uses running instances from current SSH sources and GPU lists no
+older than two source collection intervals. Missing instances are excluded,
+including old rows after an alias change.
 It shows free GPUs separately from cluster estimates, unknown rows as a lower bound,
 and copy-only SSH/CUDA setup for NVIDIA GPUs. The snippet selects known-free indexes in
 ascending index order, up to the requested count (or all available indexes if fewer are free).
 The copy button states the selected and requested counts when fewer GPUs are free. Machines
 with no matching GPU are hidden with a count note; unknown models remain visible.
-Connect with the SSH line, then run `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
-in that shell before your command. Copying runs nothing and reserves no GPU. Hand-added machines
+Machines excluded for missing or old GPU samples have a separate count note.
+The copied setup is one command, for example:
+
+```sh
+ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2; exec "${SHELL:-sh}" -l'
+```
+
+Pasting it opens an SSH shell with the selected GPU settings; run your command in that shell.
+Copying runs nothing and reserves no GPU. Hand-added machines
 remain outside this panel because their probes do not retain per-GPU lists.

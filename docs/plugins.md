@@ -917,5 +917,7 @@ SSH-source instances may include optional `gpus_observed_at` and `gpus` rows wit
 `index`, `name`, `utilization`, `memory_used_mb`, `memory_total_mb`, `processes`,
 `in_use: true | false | null`, and `processes_omitted`. Process rows retain their existing
 `pid`, `user`, and `memory_mb` fields, with at most 16 rows per GPU. Missing fields in
-older snapshots mean unknown. See [the SSH driver](drivers/ssh.md#per-gpu-availability)
-for the memory-floor rule and timestamp semantics. No API or schema version changes.
+older snapshots mean unknown. When present and non-null, `gpus_observed_at` must be a
+timezone-aware ISO 8601 timestamp; rows with a timestamp without a timezone are rejected.
+See [the SSH driver](drivers/ssh.md#per-gpu-availability) for the memory-floor rule and
+timestamp semantics. No API or schema version changes.

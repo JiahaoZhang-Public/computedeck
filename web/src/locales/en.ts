@@ -832,8 +832,10 @@ const en = {
   'plan.machineCopyPartial': 'Copy setup for {count} of {requested} GPUs',
   'plan.machinesNoMatch': '{count} machines have no matching GPU; hidden.',
   'plan.machinesNoMatch.one': '{count} machine has no matching GPU; hidden.',
+  'plan.machinesStale': '{count} machines hidden: GPU sample missing or too old.',
+  'plan.machinesStale.one': '{count} machine hidden: GPU sample missing or too old.',
   'plan.machineCopyNote':
-    'Copy only: connect with SSH, then run the export line in that shell before your command. Nothing is run or reserved.',
+    'Copy only: paste to open an SSH shell with these GPU settings, then run your command there. Copying runs nothing and reserves no GPU.',
   'plan.machineFreshness':
     'Only current SSH GPU samples from the last two collection intervals are shown. Older or missing samples are excluded.',
   'plan.machinesEmpty': 'No current per-GPU SSH samples to compare.',
