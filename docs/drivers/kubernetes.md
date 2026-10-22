@@ -119,6 +119,11 @@ Only nodes with GPUs are shown: nodes whose capacity or allocatable resources li
 - `state` joins the Kubernetes words with the word the dashboard colours by: `ready`, `ready+idle` (no GPU allocated), `ready+cordoned+drain` (`spec.unschedulable`), `not_ready+down` (`Ready` is `False`) and `unknown` (`Ready` is `Unknown` or missing).
 - `partitions` holds the node pool label, if any.
 
+Node rows retain `status.addresses` entries of type InternalIP or ExternalIP as
+`host_addresses`. These can identify an SSH machine that is also a scheduler node;
+Hostname labels alone never establish a match. No extra API call is made. See
+[machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
+
 ### GPU quotas
 
 Each ResourceQuota of the namespace with a GPU entry becomes one limit, named after the quota:

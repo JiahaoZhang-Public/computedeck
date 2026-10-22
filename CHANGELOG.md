@@ -2,6 +2,8 @@
 
 ## 0.7.0 (unreleased)
 
+- Recognize SSH machines that are also collected scheduler nodes from session and scheduler IP addresses. Label the shared host, count its GPUs with the cluster across summaries and new history, and exclude it from unscheduled free-machine offers while keeping hardware checks available. Unknown or ambiguous identities stay separate; no extra connections or DNS lookups are made.
+
 - Show typical waits from your own finished accounting jobs in Where to run and waiting-job drawers: a 25th–75th percentile range only with at least eight samples, grouped by login, QoS, partition and GPU count over 30 days. Distinguish unsupported drivers from insufficient or unavailable history; Slurm and PBS support estimates. Use compact planner rows with one accounting age and disclaimer per panel, whole-unit durations, and scheduler reasons first in drawers. Label every range as not a prediction, and retain only own-job times without new cluster queries.
 - Keep Slurm CPU-only accounting jobs in the zero-GPU bucket when GPU tracking is confirmed, and explain missing accounting GPU counts or unknown QoS instead of showing a permanent zero-sample history. Show Kubernetes' unsupported-history explanation even without owner labels, and preserve collection events if a wait-history write fails.
 

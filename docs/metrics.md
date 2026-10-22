@@ -920,3 +920,60 @@ PBS 的终态记录也为三个时间应用远程时钟偏移，因此支持此�
 插件驱动须显式选择支持。不支持的驱动会给出专门说明，不再永久显示零样本。支持此功能但
 当前记账不可读的来源则说明不可用。本地只保留自己的作业标识、分组字段和时间戳 30 天，
 仪表盘仅返回汇总。删除登录或修改其连接身份会清除相应样本；暂停登录保留样本。
+
+## Machines that are also scheduler nodes
+
+A hand-added or SSH-source machine can be another view of a collected scheduler
+node. During the existing hardware check, ComputeDeck reads the server IP and port
+from `SSH_CONNECTION`. It matches that address against explicit node addresses
+already collected from Slurm (`NodeAddr`), PBS (`Mom`) or Kubernetes (InternalIP /
+ExternalIP). No extra connection or DNS request is made. Names, SSH aliases, GPU
+models and manually typed endpoints alone never establish identity.
+
+A unique match within the same collection-node context is labelled on the machine
+row and drawer. Its measurements stay available and hardware checks still work,
+but its GPUs and utilization are excluded from fleet, group and login aggregates
+and newly recorded history. The cluster remains authoritative: “My GPUs in use”
+still counts your scheduler jobs, while node capacity/allocation covers all users.
+The machine is also excluded from Where to run's unscheduled machine options and
+paid low-use suggestions. A typed hourly price remains a separate expense.
+
+Retained node identity still applies during a cluster outage, so scheduler
+allocation stays unknown instead of being replaced with a host process count.
+Pausing/removing the cluster or removing/changing the node address removes the
+match. Ambiguous addresses, missing identity in older snapshots, DNS-only node
+addresses, nonstandard SSH ports and loopback/link-local addresses stay unmatched.
+LSF currently supplies no explicit address. Matching uses port 22; other ports can
+represent forwarded services or containers. Refresh the machine and cluster after
+upgrading to collect identity evidence. Existing history is not rewritten.
+
+Slurm's `NodeAddr` often defaults to a hostname, and PBS `Mom` is usually a hostname;
+when the scheduler supplies only names, no match is made and the machine's GPU
+readings still count separately. To avoid counting twice, turn off monitoring for
+a hand-added machine (on-demand hardware checks remain available); an SSH source
+has no separate monitoring toggle, so pause the source, which also stops its
+scheduled readings.
+
+## 同时属于集群节点的机器
+
+手动添加的机器或 SSH 数据源可能是已采集集群节点的另一种视图。现有硬件检查会从
+`SSH_CONNECTION` 读取服务端 IP 和端口，与 Slurm 的 `NodeAddr`、PBS 的 `Mom` 或
+Kubernetes 的 InternalIP / ExternalIP 匹配，不增加连接或 DNS 请求。显示名称、SSH
+别名、GPU 型号及手动填写的连接地址本身都不能证明主机相同。
+
+同一采集节点范围内的唯一匹配会显示在机器行和详情中。硬件读数和检查功能仍然保留，
+但不会重复计入总览、分组、登录级别的 GPU 与利用率统计，也不会重复计入新记录的历史。
+“我的 GPU 使用量”仍采用自己的调度任务分配量，节点容量和分配量则涵盖所有用户。
+匹配的机器不会作为无调度器的空闲机器或付费低使用率建议出现在“在哪里运行”中。
+手动填写的小时价格仍作为独立费用计算。
+
+集群采集中断时，保留的节点身份仍有效，调度分配量保持未知，不会改用主机进程数。
+暂停或删除集群、删除节点或更改节点地址后，匹配会消失。地址有歧义、旧快照缺少身份、
+节点仅提供 DNS 名称、非标准 SSH 端口、回环或链路本地地址均不匹配。LSF 目前没有
+提供明确地址。仅匹配端口 22，其他端口可能指向转发服务或容器。升级后刷新机器与集群
+即可采集身份信息；不会改写已有历史。
+
+Slurm 的 `NodeAddr` 通常默认为主机名，PBS 的 `Mom` 也通常是主机名；如果调度器只提供
+名称，就不会匹配，机器的 GPU 读数仍会单独计入。为避免重复计数，手动添加的机器可以
+关闭监控（仍可按需检查硬件）；SSH 数据源没有独立的监控开关，需要暂停数据源，这也会
+停止其定期读数采集。

@@ -5,6 +5,7 @@ from typing import Any
 
 from .drivers.base import node_health, requires_partition
 from .drivers.cloud import instance_lifecycle
+from .host_identity import host_address
 
 RUNNING = {"RUNNING", "R", "CONFIGURING", "CF", "COMPLETING", "CG"}
 PENDING = {"PENDING", "PD", "Q", "PEND", "QUEUED"}
@@ -237,12 +238,25 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
             continue
         unpriced.append(_missing(item, "instance", reason))
     shortcuts = [i for i in all_instances if i.get("manual") and not i.get("monitoring")]
-    instances = [i for i in all_instances if not i.get("manual") or i.get("monitoring")]
+    instances = [
+        i
+        for i in all_instances
+        if not i.get("same_node") and (not i.get("manual") or i.get("monitoring"))
+    ]
+    linked_sources = {
+        s["id"]
+        for s in sources
+        if s.get("driver") == "ssh"
+        and (rows := [i for i in all_instances if i["source_id"] == s["id"]])
+        and all(i.get("same_node") for i in rows)
+    }
     fresh_ids = {
         s["id"] for s in sources if fresh(s, "jobs" if s["kind"] == "cluster" else "instances")
     }
     unmeasured = [
-        _missing(s, "source", _source_reason(s)) for s in sources if s["id"] not in fresh_ids
+        _missing(s, "source", _source_reason(s))
+        for s in sources
+        if s["id"] not in fresh_ids and s["id"] not in linked_sources
     ]
     queued_missing = [_missing(s, "source", _source_reason(s)) for s in missing_jobs]
     for rows, missing in ((running, unmeasured), (pending, queued_missing)):
@@ -283,7 +297,11 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
             else:
                 reason = "summary_not_collected"
         unmeasured.append(_missing(item, "instance", reason))
-    known_allocated = sum(counted) if fresh_ids or counted else None
+    known_allocated = (
+        sum(counted)
+        if fresh_ids or counted or any(i.get("same_node") for i in all_instances)
+        else None
+    )
     jobs_known = any(s["kind"] == "cluster" and fresh(s, "jobs") for s in sources)
     jobs_complete = jobs_known and not missing_jobs
     requested = _sum([j.get("gpu_count") for j in pending]) if jobs_complete else None
@@ -377,8 +395,62 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     }
 
 
+def link_machine_nodes(data: dict[str, Any]) -> None:
+    """Annotate machines before scoping, so all summaries use the same exclusion.
+
+    Retained nodes still establish identity during an outage; the scheduler's existing
+    freshness rules then keep its allocation unknown rather than substituting host use.
+    """
+    sources = {s["id"]: s for s in data["sources"]}
+    nodes: dict[str, dict[str, Any]] = {}
+    for node in data["nodes"]:
+        source = sources.get(node["source_id"], {})
+        if (
+            source.get("kind") != "cluster"
+            or not source.get("enabled")
+            or not source.get("last_success")
+        ):
+            continue
+        previous = nodes.get(node["id"])
+        if previous is None or (node.get("observed_at") or "") > (
+            previous.get("observed_at") or ""
+        ):
+            nodes[node["id"]] = node
+    addresses: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for node in nodes.values():
+        source = sources[node["source_id"]]
+        values = node.get("host_addresses")
+        for value in values if isinstance(values, list) else []:
+            address = host_address(value)
+            if address:
+                addresses.setdefault((source.get("node") or "", address), {})[node["id"]] = node
+    for item in data["instances"]:
+        item.pop("same_node", None)
+        source = sources.get(item["source_id"], {})
+        if not item.get("manual") and source.get("driver") != "ssh":
+            continue
+        endpoint = item.get("ssh_endpoint")
+        if not isinstance(endpoint, dict) or endpoint.get("port") != 22:
+            continue
+        address = host_address(endpoint.get("host"))
+        if not address:
+            continue
+        matches = addresses.get((source.get("node") or "", address), {})
+        if len(matches) != 1:
+            continue
+        node = next(iter(matches.values()))
+        cluster = sources[node["source_id"]]
+        item["same_node"] = {
+            "id": node["id"],
+            "name": node["name"],
+            "cluster_id": cluster["cluster_id"],
+            "cluster_name": cluster["name"],
+        }
+
+
 def summarize(data: dict[str, Any]) -> dict[str, Any]:
     """One set of figures for the fleet, each group and each configured login."""
+    link_machine_nodes(data)
     source_groups = {s["id"]: s["cluster_id"] for s in data["sources"]}
 
     def instance_group(item: dict[str, Any]) -> str:

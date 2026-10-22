@@ -156,6 +156,7 @@ def keep_instance_probe(record: dict[str, Any], old: dict[str, Any] | None) -> N
         "gpu_allocated",
         "gpu_observed_count",
         "probe_warnings",
+        "ssh_endpoint",
         "metrics_scope",
         "gpu_utilization",
         "cpu_utilization",

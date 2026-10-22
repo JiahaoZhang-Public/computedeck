@@ -589,6 +589,24 @@ def dashboard() -> dict[str, Any]:
             ("a-future-01", "FUTURE", ["gpu"]),
         ]
     )
+    # A separate SSH view of a scheduler node: hardware stays inspectable, GPUs count once.
+    nodes[0]["host_addresses"] = ["192.0.2.31"]
+    instances.append(
+        {
+            **instances[1],
+            "id": "example:manual:lab-workstation-node-console",
+            "external_id": "node-console",
+            "name": "node-console",
+            "host": "192.0.2.31",
+            "ssh_alias": "cd-lab-workstation-node-console",
+            "ssh_endpoint": {"host": "192.0.2.31", "port": 22},
+            "gpu_count": 4,
+            "gpu_allocated": 2,
+            "gpu_type": nodes[0]["gpu_type"],
+            "gpu_observed_count": 4,
+            "gpu_utilization": 30,
+        }
+    )
     source_by_id = {source["id"]: source for source in sources}
     for node in nodes:
         if node["cluster_id"] == "example:cluster-b":

@@ -655,7 +655,9 @@ export function gpuModels(nodes: ComputeNode[], instances: Instance[] = []) {
 
 /** Paid resources with sustained low use, as measured by the server. */
 export function lowUseInstances(instances: Instance[]) {
-  return instances.filter((item) => item.low_use?.state === 'low' && (item.hourly_cost ?? 0) > 0);
+  return instances.filter(
+    (item) => !item.same_node && item.low_use?.state === 'low' && (item.hourly_cost ?? 0) > 0,
+  );
 }
 
 /** Separate current GPU samples from otherwise eligible machines missing a recent sample. */
@@ -666,6 +668,7 @@ export function machineSamples(data: Pick<Dashboard, 'sources' | 'instances'>, n
     if (
       !source ||
       source.driver !== 'ssh' ||
+      instance.same_node ||
       instance.state !== 'running' ||
       !sourceHasData(source, 'instances')
     )

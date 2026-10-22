@@ -12,15 +12,18 @@ from typing import Any
 from .drivers import ssh, ssh_host
 from .drivers.base import now
 from .errors import SourceError
+from .host_identity import ssh_endpoint
 from .ssh_config import validate_alias, validate_endpoint
 
 
 def parse_probe(output: str) -> dict[str, Any]:
-    readings, _, warnings = ssh_host.measure(ssh_host.read_output(output))
+    snapshot = ssh_host.read_output(output)
+    readings, _, warnings = ssh_host.measure(snapshot)
     # Per-GPU processes and their users stay on the machine; the row keeps the counts.
     readings.pop("gpus")
     return {
         **readings,
+        "ssh_endpoint": ssh_endpoint(snapshot.get("ssh_connection")),
         "metrics_scope": "host_visible",
         "observed_at": now(),
         "ssh_status": "reachable",

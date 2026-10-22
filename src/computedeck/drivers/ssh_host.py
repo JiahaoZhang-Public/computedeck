@@ -11,6 +11,7 @@ import shlex
 import textwrap
 from typing import Any, ClassVar, Literal
 
+from ..host_identity import ssh_endpoint
 from ..ssh_config import validate_alias, validate_username
 from . import ssh
 from .base import (
@@ -52,7 +53,8 @@ _PROBE = textwrap.dedent(f"""\
             return None, (lines[0] if lines else 'exit status %d' % done.returncode)[:180]
         return done.stdout, None
 
-    result = {{'cpu_utilization': None, 'memory_utilization': None, 'user': None,
+    result = {{'ssh_connection': os.environ.get('SSH_CONNECTION'),
+              'cpu_utilization': None, 'memory_utilization': None, 'user': None,
               'gpu_tool': None, 'gpu': None, 'gpu_error': None, 'amd_memory': None,
               'apps': None, 'apps_error': None, 'owners': None}}
     try:
@@ -331,6 +333,7 @@ def parse_machine(output: str, source: dict[str, Any], alias: str) -> Batch:
         "state": "running",
         **readings,
         "metrics_scope": "host_visible",
+        "ssh_endpoint": ssh_endpoint(snapshot.get("ssh_connection")),
         # The user's own Host block is authoritative; no managed Host block is generated.
         "host": alias,
         "port": None,

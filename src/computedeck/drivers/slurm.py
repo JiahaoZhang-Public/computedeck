@@ -9,6 +9,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, ClassVar, Literal
 
+from ..host_identity import host_address
 from ..ssh_config import validate_alias, validate_username
 from . import ssh
 from .base import (
@@ -219,6 +220,7 @@ def parse_nodes(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": name,
+            "host_addresses": [address] if (address := host_address(row.get("NodeAddr"))) else [],
             "state": row.get("State", "unknown").lower(),
             "gpu_count": capacity,
             "gpu_allocated": allocated,

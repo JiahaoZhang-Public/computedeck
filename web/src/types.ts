@@ -151,6 +151,8 @@ export interface LowUse {
   reason: 'no_reading' | 'not_running' | 'stale' | 'coverage' | null;
 }
 export interface Instance {
+  same_node?: { id: string; name: string; cluster_id: string; cluster_name: string } | null;
+  ssh_endpoint?: { host: string; port: number } | null;
   low_use?: LowUse;
   console_url?: string | null;
   gpu_utilization_max?: number | null;
@@ -192,6 +194,7 @@ export interface Instance {
   probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
+  host_addresses?: string[];
   health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
   health_reason?: 'no_partition' | null;
   id: string;

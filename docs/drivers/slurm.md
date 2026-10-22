@@ -77,6 +77,11 @@ model only, with no count shown when the matching count or model is unknown.
 Partition `AllowQos` matching is not part of this capacity check; QoS and access checks
 still apply separately in Where to run.
 
+Node rows retain IP-valued `NodeAddr` as `host_addresses` for matching SSH machines
+to scheduler nodes. `NodeName` and `NodeHostName` alone are not identity evidence;
+DNS-only addresses remain unmatched without a lookup. Matching does not change
+scheduler allocations or add a cluster query. See [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
+
 References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 [sacctmgr](https://slurm.schedmd.com/sacctmgr.html),
 [association text formatter](https://github.com/SchedMD/slurm/blob/master/src/scontrol/info_assoc_mgr.c).

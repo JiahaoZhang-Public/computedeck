@@ -14,7 +14,7 @@ import {
 import { statusLabel } from '../labels';
 import { Chips, Empty, GroupMark, Meter, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
-import { GroupFilter, SearchBox } from './shared';
+import { GroupFilter, MachineNodeNote, SearchBox } from './shared';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { matches, where } from './util';
 
@@ -143,6 +143,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                                 .filter(Boolean)
                                 .join(' · ')}
                             </span>
+                            <MachineNodeNote item={item} />
                             {stale && (
                               <span className="sub">
                                 <span className="tag amber">

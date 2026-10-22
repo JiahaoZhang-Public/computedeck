@@ -137,3 +137,21 @@ readings are a separate family: a probe of a Vast.ai instance restarts its windo
 SSH-source hints contain duration only because the source has no listed hourly price.
 Hand-added monitored machines use the same measurement rule and may have a typed price.
 This does not change the separate process/memory rule for whether a GPU is free.
+
+## Hosts managed by a scheduler
+
+The existing probe also reads the server address and port from `SSH_CONNECTION`;
+only that endpoint is retained, not the client's address or port. If it uniquely
+matches an explicit address of a collected scheduler node in the same collection
+context, the machine row says its GPUs are counted with that cluster. Hardware
+checks and readings remain available, but the host is not offered as an
+unscheduled free machine. Missing or ambiguous identity stays unmatched; names
+alone never match. See [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes)
+for address, port and freshness limits. There are no extra SSH or DNS calls.
+
+Slurm's `NodeAddr` often defaults to a hostname, and PBS `Mom` is usually a hostname;
+when the scheduler supplies only names, no match is made and the machine's GPU
+readings still count separately. To avoid counting twice, turn off monitoring for
+a hand-added machine (on-demand hardware checks remain available); an SSH source
+has no separate monitoring toggle, so pause the source, which also stops its
+scheduled readings.

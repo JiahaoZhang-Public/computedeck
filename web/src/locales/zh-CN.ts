@@ -596,6 +596,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'instance.deleteConfirm': '移除 {name}？只从 ComputeDeck 中移除，不会改动这台机器。',
   'instance.sshState': 'SSH 状态',
   'instance.checked': '{time}检查',
+  'instance.sameNode':
+    '与 {cluster} 的节点 {node} 是同一主机。GPU 计入集群，请通过调度器运行任务。',
   'instance.gpusBusy': '使用中的 GPU',
   'instance.hostPort': '主机 / 端口',
   'instance.existingAlias': 'SSH 配置中的别名',

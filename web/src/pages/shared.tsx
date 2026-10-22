@@ -520,3 +520,12 @@ export function InstanceRunCost({ item, source }: { item: Instance; source?: Sou
     </>
   );
 }
+
+/** Scheduler-managed hosts remain inspectable, but are counted with their cluster. */
+export function MachineNodeNote({ item }: { item: Instance }) {
+  return item.same_node ? (
+    <span className="sub">
+      {t('instance.sameNode', { node: item.same_node.name, cluster: item.same_node.cluster_name })}
+    </span>
+  ) : null;
+}

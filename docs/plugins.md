@@ -1095,3 +1095,21 @@ The new `job_wait_samples` table is created with `CREATE TABLE IF NOT EXISTS`, w
 no names, paths or other users' jobs. Source deletion or connection-identity edits
 clear that source's samples. Schema, plugin and web API versions are unchanged; no
 new event type, capability, attention kind, setting or route is introduced.
+
+### Machine/node identity (0.7, additive)
+
+Node rows may carry `host_addresses: string[]`, explicit IP addresses reported by
+the scheduler. SSH-source and hand-added probe rows may carry
+`ssh_endpoint: {host: string, port: int} | null`, the server endpoint read from the
+existing SSH session. Missing evidence means no match, not a guessed name match.
+Only hand-added machines and sources with driver `ssh` participate in matching.
+
+Dashboard instance rows may gain
+`same_node: {id, name, cluster_id, cluster_name}` when exactly one collected node
+matches. It is derived on dashboard reads, not stored as a durable link; absent
+means unmatched. All GPU/utilization summary scopes and new history exclude the
+machine's duplicate measurement. Scheduler job allocations keep their existing
+meaning; hourly spend is unchanged. Hardware checks still work. API versions,
+route ids and SCHEMA_VERSION are unchanged; no table or remote query is added.
+See [machine/node accounting](metrics.md#machines-that-are-also-scheduler-nodes)
+for matching limits and outage behaviour.

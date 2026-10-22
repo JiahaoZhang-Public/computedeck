@@ -26,7 +26,7 @@ import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
-import { InstanceRunCost, JobsTable } from './shared';
+import { InstanceRunCost, JobsTable, MachineNodeNote } from './shared';
 import { WaitHistory } from '../WaitHistory';
 
 export function SSHConfigView({
@@ -536,6 +536,7 @@ export function InstanceDetail({
           <span className="mono">{formatMessage(item.ssh_error)}</span>
         </div>
       )}
+      <MachineNodeNote item={item} />
       <dl className="kv">
         <div>
           <dt>{t('usage.col.platform')}</dt>

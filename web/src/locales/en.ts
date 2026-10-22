@@ -637,6 +637,8 @@ const en = {
     'Remove {name}? This only removes it from ComputeDeck; the machine is not touched.',
   'instance.sshState': 'SSH',
   'instance.checked': 'checked {time}',
+  'instance.sameNode':
+    'Same host as {node} in {cluster}. GPUs counted with the cluster; use the scheduler to run work.',
   'instance.gpusBusy': 'GPUs in use',
   'instance.hostPort': 'Host / port',
   'instance.existingAlias': 'SSH alias in your config',

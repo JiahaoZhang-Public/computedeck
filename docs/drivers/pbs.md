@@ -89,6 +89,11 @@ unavailable capacity, and they are excluded from the unhealthy-node count. Fault
 such as `down` or `offline` still take precedence. An unset vnode `queue` is not proof that the
 node cannot take work; the Slurm partition-membership requirement does not apply.
 
+Node rows retain IP-valued `Mom` as `host_addresses` for matching SSH machines to
+scheduler nodes. DNS-only values stay unmatched; no lookup is added. Multiple
+vnodes sharing one address are ambiguous and are not matched automatically. See
+[machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
+
 ## Queue limits
 
 PBS has no QoS. ComputeDeck keeps limits in the shape of Slurm QoS records and compares each limit with the jobs whose `qos` has the same name, so the PBS driver names each limit after its queue and gives every job its queue as `qos`.
