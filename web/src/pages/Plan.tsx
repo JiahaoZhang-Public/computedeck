@@ -129,6 +129,10 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   const first = visible[0];
   const best = first && ['likely', 'possible'].includes(first.verdict) ? first : null;
   const machines = machineOptions(data, request);
+  const visibleMachines = machines.filter(
+    (option) => !request.gpuType || option.total > 0 || option.unknown > 0,
+  );
+  const unmatchedMachines = machines.length - visibleMachines.length;
   const models = gpuModels(
     data.nodes,
     machines.map((option) => option.instance),
@@ -260,11 +264,14 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         </details>
       )}
       {hasMachines && (
-        <Panel title={t('plan.machines')} count={machines.length}>
+        <Panel title={t('plan.machines')} count={visibleMachines.length}>
           <p className="panel-note">{t('plan.machinesNote')}</p>
-          {machines.length ? (
+          {unmatchedMachines > 0 && (
+            <p className="panel-note">{t('plan.machinesNoMatch', { count: unmatchedMachines })}</p>
+          )}
+          {visibleMachines.length ? (
             <ul className="rows machine-options">
-              {machines.map(({ instance, free, total, unknown, command }) => (
+              {visibleMachines.map(({ instance, free, total, unknown, command }) => (
                 <li key={instance.id} className={free < request.gpus ? 'muted' : undefined}>
                   <div className="grow">
                     <strong>
@@ -289,7 +296,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                         onClick={() => void ctx.copy(command)}
                       >
                         <Copy size={14} />
-                        {t('plan.machineCopy')}
+                        {free < request.gpus
+                          ? t('plan.machineCopyPartial', { count: free, requested: request.gpus })
+                          : t('plan.machineCopy')}
                       </button>
                     )}
                     <button className="button small" onClick={() => ctx.openInstance(instance)}>
@@ -299,9 +308,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : machines.length === 0 ? (
             <p className="panel-note">{t('plan.machinesEmpty')}</p>
-          )}
+          ) : null}
           <p className="panel-note">{t('plan.machineFreshness')}</p>
           {machines.some((option) => option.command) && (
             <p className="panel-note">{t('plan.machineCopyNote')}</p>

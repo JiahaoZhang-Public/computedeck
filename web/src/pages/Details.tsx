@@ -585,9 +585,9 @@ function GpuDetails({ item }: { item: Instance }) {
     <section className="gpu-details">
       <h3>{t('gpu.title')}</h3>
       <p className="panel-note" title={dateTime(item.gpus_observed_at)}>
-        {t('gpu.sampled', {
-          time: item.gpus_observed_at ? relativeTime(item.gpus_observed_at) : t('status.unknown'),
-        })}
+        {item.gpus_observed_at
+          ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
+          : t('gpu.sampleUnknown')}
       </p>
       <ul className="rows">
         {item.gpus.map((gpu, index) => {

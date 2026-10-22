@@ -810,6 +810,7 @@ const en = {
   'plan.best.oneNode': 'Fits on one visible node',
   'gpu.title': 'GPUs',
   'gpu.sampled': 'Sampled {time}',
+  'gpu.sampleUnknown': 'Sample time unknown',
   'gpu.memory': 'Memory: {used} / {total}',
   'gpu.utilization': 'Utilization: {value}',
   'gpu.free': 'Free',
@@ -828,6 +829,9 @@ const en = {
   'plan.machineUnknown': '{count} GPUs have unknown availability or model; not counted as free.',
   'plan.machineUnknown.one': '{count} GPU has unknown availability or model; not counted as free.',
   'plan.machineCopy': 'Copy GPU setup',
+  'plan.machineCopyPartial': 'Copy setup for {count} of {requested} GPUs',
+  'plan.machinesNoMatch': '{count} machines have no matching GPU; hidden.',
+  'plan.machinesNoMatch.one': '{count} machine has no matching GPU; hidden.',
   'plan.machineCopyNote':
     'Copy only: connect with SSH, then run the export line in that shell before your command. Nothing is run or reserved.',
   'plan.machineFreshness':

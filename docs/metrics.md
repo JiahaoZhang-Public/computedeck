@@ -468,14 +468,16 @@ Machine drawers show Free, Busy, Busy (processes not visible), or Unknown for ea
 with memory, utilization, and up to two owners with process counts and memory. Unknown
 memory is never zero. Owner totals cover only the shown processes when the 16-process
 cap is reached; PIDs are not displayed. The section uses its own `gpus_observed_at`,
-which probes never refresh.
+which probes never refresh. Older samples without a timestamp say “Sample time unknown”.
 
-Where to run has a separate Machines panel for current SSH-source GPU samples no older
-than twice the collection interval. Only `in_use: false` counts as free. Unknown states
-or models keep free counts as lower bounds, with the missing count stated. Rows sort by
+Where to run has a separate Machines panel for running SSH-source instances with GPU samples
+no older than twice the collection interval. Missing instances are excluded. Only `in_use: false`
+counts as free. Unknown states or models keep free counts as lower bounds, with the missing count stated. Rows sort by
 known free GPUs and are muted when fewer than requested are known free. Model filtering
-includes machine models. Copy-only SSH and NVIDIA CUDA settings select known-free indexes
-in ascending index order, up to the requested count; fewer free GPUs means fewer selected.
+includes machine models; machines with no matching GPU are hidden with a count note, while
+unknown models remain visible. Copy-only SSH and NVIDIA CUDA settings select known-free indexes
+in ascending index order, up to the requested count; fewer free GPUs means fewer selected,
+with both counts stated on the copy button.
 Connect with SSH, then run the copied `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
 line in that shell before your command. Copying runs nothing and reserves no GPU. SSH hosts
 do not appear in the paid-cloud idle list. Hand-added machines do not yet retain per-GPU data.
@@ -485,11 +487,14 @@ do not appear in the paid-cloud idle list. Hand-added machines do not yet retain
 表示使用中；只有空进程列表且已知显存低于阈值才是空闲。进程不可读，或没有可见进程且
 显存未知时，状态保持未知。任一卡未知都会使机器的总使用量未知。每卡最多保留 16 个进程，
 超出时说明用户合计仅覆盖已显示的进程；不显示 PID。单卡列表使用独立采样时间，探测不会刷新它。
+旧采样缺少时间戳时显示“采样时间未知”。
 
-“在哪里运行”的机器面板仅采用最近两个采集周期内的有效 SSH 来源单卡采样，未知卡不计为
-空闲，空闲数标为下界并说明未知数量。按已知空闲卡数排序，不足请求数量时淡化显示。
-型号筛选包含机器型号。SSH 和 NVIDIA CUDA 设置仅供复制，按编号升序选取已知空闲卡，
-最多选取请求数量；不足时选取所有已知空闲卡。先通过 SSH 连接，再在该 shell 中执行复制的
+“在哪里运行”的机器面板仅采用运行中 SSH 来源实例最近两个采集周期内的有效单卡采样，
+不再报告的实例不参与比较。未知卡不计为空闲，空闲数标为下界并说明未知数量。按已知空闲卡数排序，不足请求数量时淡化显示。
+型号筛选包含机器型号；没有匹配 GPU 的机器隐藏并汇总数量，型号未知的机器仍然显示。
+SSH 和 NVIDIA CUDA 设置仅供复制，按编号升序选取已知空闲卡，
+最多选取请求数量；不足时选取所有已知空闲卡，并在复制按钮上说明选取数量和请求数量。
+先通过 SSH 连接，再在该 shell 中执行复制的
 `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...` 行，然后运行你的命令。
 复制操作不会执行命令或预留 GPU。SSH 主机不再出现在付费云实例的低利用率列表中；手动添加机器尚不保留单卡数据。
 

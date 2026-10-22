@@ -99,6 +99,28 @@ describe('SSH machine planning', () => {
     expect(machineOptions(data, request, now)).toHaveLength(1);
     expect(machineOptions(data, request, now)[0].free).toBe(1);
   });
+  it.each(['missing', 'unknown', 'stopped'])(
+    'excludes a fresh %s instance and its models',
+    (state) => {
+      const { data, item } = fixture();
+      expect(machineOptions(data, request)).toHaveLength(1);
+      item.state = state;
+      item.gpus_observed_at = new Date().toISOString();
+      const options = machineOptions(data, request);
+      expect(options).toEqual([]);
+      expect(
+        gpuModels(
+          data.nodes,
+          options.map((option) => option.instance),
+        ),
+      ).toEqual([]);
+      const view = parse(renderToStaticMarkup(<PlanPage ctx={context(data)} />));
+      expect(view.querySelector('.machine-options')).toBeNull();
+      expect(
+        [...view.querySelectorAll('select option')].map((option) => option.textContent),
+      ).not.toContain('NVIDIA L4');
+    },
+  );
   it('exports only the requested free indexes in numeric index order', () => {
     const { data, item } = fixture();
     const free = item.gpus![0];
@@ -170,6 +192,57 @@ describe('SSH machine planning', () => {
 });
 
 describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
+  it('hides nonmatching machines with one count note and preserves unknown models', async () => {
+    setLocale(locale);
+    const { data, item } = fixture();
+    window.history.replaceState(null, '', '#/plan?model=H100');
+    const view = document.createElement('div');
+    const root = createRoot(view);
+    try {
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelector('.machine-options')).toBeNull();
+      expect(view.textContent).toContain(
+        locale === 'en'
+          ? '1 machine has no matching GPU; hidden.'
+          : '1 台机器没有匹配的 GPU，已隐藏。',
+      );
+      expect(view.textContent).not.toContain(t('plan.machinesEmpty'));
+      expect(
+        [...view.querySelectorAll('select option')].map((option) => option.textContent),
+      ).toContain('NVIDIA L4');
+      data.instances.push({ ...item, id: 'other', name: 'other' });
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.textContent).toContain(
+        locale === 'en'
+          ? '2 machines have no matching GPU; hidden.'
+          : '2 台机器没有匹配的 GPU，已隐藏。',
+      );
+      item.gpus = [{ ...item.gpus![0], name: null }];
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(1);
+      expect(view.textContent).toContain(t('plan.machineUnknown', { count: 1 }));
+      expect(view.querySelector('.machine-command')).toBeNull();
+      window.history.replaceState(null, '', '#/plan');
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(2);
+      expect(view.textContent).not.toContain(t('plan.machinesNoMatch', { count: 1 }));
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+  it('labels legacy GPU samples without a timestamp explicitly', () => {
+    setLocale(locale);
+    const { data, item } = fixture();
+    delete item.gpus_observed_at;
+    item.gpus!.forEach((gpu) => delete gpu.in_use);
+    const view = parse(renderToStaticMarkup(drawer(context(data)))).querySelector('.gpu-details')!;
+    expect(view.querySelector('.panel-note')?.textContent).toBe(
+      locale === 'en' ? 'Sample time unknown' : '采样时间未知',
+    );
+    expect([...view.querySelectorAll('.tag')].map((tag) => tag.textContent)).toEqual(
+      item.gpus!.map(() => t('status.unknown')),
+    );
+  });
   it('uses singular wording for the example Lab server unknown GPU', () => {
     setLocale(locale);
     const data = serverDemo();
@@ -318,6 +391,13 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
         );
         const [copy, open] =
           container.querySelectorAll<HTMLButtonElement>('.machine-actions button');
+        expect(copy.textContent).toBe(
+          muted
+            ? locale === 'en'
+              ? 'Copy setup for 1 of 2 GPUs'
+              : '复制 1 张 GPU 的设置（请求 2 张）'
+            : t('plan.machineCopy'),
+        );
         await act(async () => copy.click());
         expect(ctx.copy).toHaveBeenCalledWith(command);
         await act(async () => open.click());

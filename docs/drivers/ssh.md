@@ -103,14 +103,13 @@ are retained in the existing API field but never shown in the drawer.
 
 `gpus_observed_at` is the collection time of the GPU list. An on-demand hardware probe
 updates aggregate readings but never this timestamp or the per-GPU rows. Where to run
-uses current SSH sources and GPU lists no older than two source collection intervals.
+uses running instances from current SSH sources and GPU lists no older than two source
+collection intervals. Missing instances are excluded, including old rows after an alias change.
 It shows free GPUs separately from cluster estimates, unknown rows as a lower bound,
 and copy-only SSH/CUDA setup for NVIDIA GPUs. The snippet selects known-free indexes in
 ascending index order, up to the requested count (or all available indexes if fewer are free).
+The copy button states the selected and requested counts when fewer GPUs are free. Machines
+with no matching GPU are hidden with a count note; unknown models remain visible.
 Connect with the SSH line, then run `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`
 in that shell before your command. Copying runs nothing and reserves no GPU. Hand-added machines
 remain outside this panel because their probes do not retain per-GPU lists.
-
-复制的 NVIDIA 设置按编号升序选取已知空闲卡，最多选取请求数量；不足时选取所有已知空闲卡。
-先执行 SSH 连接行，再在该 shell 中执行 `export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=...`，
-然后运行你的命令。复制操作不会执行命令或预留 GPU。

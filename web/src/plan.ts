@@ -679,6 +679,7 @@ export function machineOptions(
       if (
         !source ||
         source.driver !== 'ssh' ||
+        instance.state !== 'running' ||
         !sourceHasData(source, 'instances') ||
         !Number.isFinite(age) ||
         age > source.interval_minutes * 120000 ||

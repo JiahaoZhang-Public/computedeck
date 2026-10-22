@@ -21,7 +21,7 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
 
-In **0.4.0 — Numbers you can trust**, partial totals show `≥` and name the unmeasured
+**Numbers you can trust:** partial totals show `≥` and name the unmeasured
 machines or logins. Overview, Usage and history share the same figures. Running cloud
 instances count their provider's GPU allocation; SSH machines count GPUs with visible compute
 processes or significant GPU memory use. Unreadable processes, or missing memory without visible

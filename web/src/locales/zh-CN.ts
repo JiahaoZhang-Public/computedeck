@@ -753,6 +753,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.best.oneNode': '可容纳于一个可见节点',
   'gpu.title': 'GPU 明细',
   'gpu.sampled': '采样于 {time}',
+  'gpu.sampleUnknown': '采样时间未知',
   'gpu.memory': '显存：{used} / {total}',
   'gpu.utilization': '利用率：{value}',
   'gpu.free': '空闲',
@@ -771,6 +772,9 @@ const zhCN: Record<keyof typeof en, string> = {
   'plan.machineUnknown': '{count} 张 GPU 的可用状态或型号未知，不计为空闲。',
   'plan.machineUnknown.one': '{count} 张 GPU 的可用状态或型号未知，不计为空闲。',
   'plan.machineCopy': '复制 GPU 设置',
+  'plan.machineCopyPartial': '复制 {count} 张 GPU 的设置（请求 {requested} 张）',
+  'plan.machinesNoMatch': '{count} 台机器没有匹配的 GPU，已隐藏。',
+  'plan.machinesNoMatch.one': '{count} 台机器没有匹配的 GPU，已隐藏。',
   'plan.machineCopyNote':
     '仅复制：先通过 SSH 连接，再在该 shell 中执行 export 行，然后运行你的命令。不会执行命令或预留 GPU。',
   'plan.machineFreshness':
