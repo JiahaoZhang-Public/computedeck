@@ -6,7 +6,7 @@ import { Clock3, Copy, Plus, X } from 'lucide-react';
 import { findGroup } from '../groups';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { dateTime, money, relativeTime, sourceHasData } from '../domain';
+import { dateTime, money, relativeTime, sourceHasData, uniqueNodes } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES } from '../planExplanation';
 import { gpuModels, idleInstances, machineOptions, machineSamples, planOptions } from '../plan';
@@ -139,7 +139,8 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     }
   }, [fromJob, requestedGpus, request.gpus, gpuType]);
   function changeRequest(values: Record<string, string | null>) {
-    setRouteParams({ gpus: String(gpus), model: gpuType, hours, ...values });
+    // Keep an empty edit from turning the URL back into an unresolved job link.
+    setRouteParams({ model: gpuType, hours, ...values, gpus: values.gpus || String(gpus) });
   }
   function changeFormat(value: SubmitFormat) {
     setFormat(value);
@@ -150,6 +151,35 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     }
   }
   const options = planOptions(data, request);
+  const currentSources = new Map(
+    data.sources
+      .filter((source) => sourceHasData(source, 'jobs'))
+      .map((source) => [source.id, source]),
+  );
+  const jobsByLogin = new Map<string, Job[]>();
+  const currentJobs = data.jobs.filter((job) => {
+    const source = currentSources.get(job.source_id);
+    return source?.cluster_id === job.cluster_id && source.username === job.user;
+  });
+  for (const job of [...currentJobs, ...(data.recent_failures ?? [])]) {
+    const key = JSON.stringify([job.cluster_id, job.user]);
+    const own = jobsByLogin.get(key);
+    if (own) own.push(job);
+    else jobsByLogin.set(key, [job]);
+  }
+  const nodes = uniqueNodes(data.nodes);
+  const submissions = new Map(
+    options.map((option) => [
+      option.key,
+      submitFlags(
+        option,
+        request,
+        jobsByLogin.get(JSON.stringify([option.source.cluster_id, option.source.username])) ?? [],
+        nodes,
+        format,
+      ),
+    ]),
+  );
   const visible = options.filter((option) => option.access !== 'not_associated');
   const denied = options.filter((option) => option.access === 'not_associated');
   const unchecked = [
@@ -317,7 +347,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                 {t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
               </span>
             )}
-            <SubmitCopy option={best} request={request} ctx={ctx} format={format} />
+            <SubmitCopy result={submissions.get(best.key)!} ctx={ctx} />
             {visible[1] && (
               <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
             )}
@@ -336,7 +366,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               options={visible}
               request={request}
               ctx={ctx}
-              format={format}
+              submissions={submissions}
               fromJob={fromJob}
             />
           ) : (
@@ -371,7 +401,7 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             options={denied}
             request={request}
             ctx={ctx}
-            format={format}
+            submissions={submissions}
             fromJob={fromJob}
           />
         </details>
@@ -465,10 +495,10 @@ function OptionsTable({
   options,
   request,
   ctx,
-  format,
+  submissions,
   fromJob,
 }: {
-  format: SubmitFormat;
+  submissions: Map<string, ReturnType<typeof submitFlags>>;
   fromJob?: Job;
   options: PlanOption[];
   request: PlanRequest;
@@ -558,7 +588,7 @@ function OptionsTable({
                   </span>
                   {why && <span className="sub plan-why">{why}</span>}
                   <PlanExplanation option={option} request={request} />
-                  <SubmitCopy option={option} request={request} ctx={ctx} format={format} />
+                  <SubmitCopy result={submissions.get(option.key)!} ctx={ctx} />
                 </td>
               </tr>
             );
@@ -614,35 +644,7 @@ function PlanExplanation({ option, request }: { option: PlanOption; request: Pla
   );
 }
 
-function SubmitCopy({
-  option,
-  request,
-  ctx,
-  format,
-}: {
-  option: PlanOption;
-  request: PlanRequest;
-  ctx: Ctx;
-  format: SubmitFormat;
-}) {
-  const result = submitFlags(
-    option,
-    request,
-    [
-      ...ctx.data.jobs.filter((job) =>
-        ctx.data.sources.some(
-          (source) =>
-            source.id === job.source_id &&
-            source.cluster_id === option.source.cluster_id &&
-            source.username === option.source.username &&
-            sourceHasData(source, 'jobs'),
-        ),
-      ),
-      ...(ctx.data.recent_failures ?? []),
-    ],
-    ctx.data.nodes,
-    format,
-  );
+function SubmitCopy({ result, ctx }: { result: ReturnType<typeof submitFlags>; ctx: Ctx }) {
   if (!result) return null;
   return (
     <div className="plan-submit">

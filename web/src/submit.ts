@@ -1,4 +1,4 @@
-import { PENDING_STATES, sourceHasData, uniqueNodes } from './domain';
+import { PENDING_STATES, sourceHasData } from './domain';
 import { t } from './i18n';
 import { gpuModels } from './plan';
 import type { PlanOption, PlanRequest } from './plan';
@@ -14,7 +14,9 @@ export function canCopySubmit(option: PlanOption) {
   );
 }
 
-/** Use the option's QoS, current node model spelling, and this account's own jobs. */
+/** Use the option's QoS, current node model spelling, and this account's own jobs.
+ * Nodes must already be deduplicated with uniqueNodes, shared across all options.
+ */
 export function submitFlags(
   option: PlanOption,
   request: PlanRequest,
@@ -43,7 +45,7 @@ export function submitFlags(
     else unknownFlags.push(flag);
   };
   add('-q', option.qos && token(option.qos) ? option.qos : null);
-  const currentNodes = uniqueNodes(nodes).filter(
+  const currentNodes = nodes.filter(
     (node) =>
       node.cluster_id === option.source.cluster_id &&
       option.evidence.nodes.some((item) => item.source.id === node.source_id && item.current),
@@ -121,6 +123,13 @@ export function jobPlanLink(job: Job, nodes: ComputeNode[]) {
 
 export function planPresets(data: Dashboard) {
   const seen = new Set<string>();
+  const failures = new Set<Job>(data.recent_failures ?? []);
+  const recentTime = (job: Job) =>
+    (failures.has(job)
+      ? Date.parse(job.ended_at ?? '') || Date.parse(job.end ?? '')
+      : Date.parse(job.submitted_at ?? '')) ||
+    Date.parse(job.observed_at ?? '') ||
+    0;
   return [
     ...data.jobs.filter((job) =>
       data.sources.some((source) => source.id === job.source_id && sourceHasData(source, 'jobs')),
@@ -134,7 +143,7 @@ export function planPresets(data: Dashboard) {
         job.gpu_count <= 1024 &&
         data.sources.some((source) => source.id === job.source_id && source.username === job.user),
     )
-    .sort((a, b) => (Date.parse(b.observed_at ?? '') || 0) - (Date.parse(a.observed_at ?? '') || 0))
+    .sort((a, b) => recentTime(b) - recentTime(a))
     .filter((job) => {
       const request = jobPlanRequest(job, data.nodes);
       const key = `${request.gpus}:${request.gpuType}`;

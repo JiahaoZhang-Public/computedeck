@@ -537,7 +537,9 @@ inventing a layout. Review these partial flags before using them. PBS, LSF and
 Kubernetes do not offer submission copying.
 
 Up to four preset chips reuse distinct positive GPU-count/model shapes from your current
-jobs and recent failures. Labels and deduplication use the count and model actually
+jobs and recent failures, newest first by submission time for current jobs and end time
+for failures, falling back to observation time when those times are unknown.
+Labels and deduplication use the count and model actually
 filled; unlisted or multiple models become a model-less request. They clear the optional
 run time and perform no action on a source. Pending and failed job drawers link to the
 same form with `#/plan?from=<job id>` plus the GPU count and, if listed, a single model.
@@ -546,7 +548,12 @@ survive the job leaving the list. Unknown or zero job GPU counts require you to 
 the intended request. The banner names the source job and its own GPU count, or just its
 name when that count is unknown or zero. Its waiting login/QoS is marked, including a
 merged twin login. Neither queue counts nor ranking are adjusted. Clearing the job
-context keeps the form values.
+context keeps the form values. Clearing the GPU count retains its current value and does
+not restore the source job's model over your selection.
+
+Prefilling run time in presets and drawer links remains deferred in this slice. Jobs already have an optional
+`time_limit` (including Slurm/PBS failure records and example data); a later change could
+fill hours from it when known and parseable.
 
 中文：“在哪里运行”在 Slurm 的较可能启动、可能、较可能等待你的排队作业及空闲不足选项上提供“复制提交参数”，
 由每作业规则决定的选项除外。操作只复制，提示明确说明未提交任何作业；示例模式禁用此复制按钮。
@@ -563,8 +570,13 @@ GPU 数和运行时间来自表单；正数小时四舍五入到分钟（至少�
 使用前请检查这些可能不完整的参数。PBS、LSF 和 Kubernetes 不提供提交参数复制。
 
 最多四个预设按钮复用当前作业和近期失败记录的资源需求，按实际填入的 GPU 数量和型号生成
-标签并去重；未列出的型号或多型号请求按不指定型号处理。预设会清空可选运行时间，
+标签并去重；按当前作业的提交时间或失败作业的结束时间从新到旧排列，时间未知时使用观测时间。
+未列出的型号或多型号请求按不指定型号处理。预设会清空可选运行时间，
 不操作任何来源。等待和失败作业详情可通过 `#/plan?from=<作业 ID>` 及资源参数进入表单；
 型号只有在列表中存在且为单一型号时才填入。仅含 from 的链接在作业仍存在时解析，显式资源参数
 优先，并在作业离开列表后保留。GPU 数未知或为零时提示填写需求。横幅显示作业自身的 GPU 数，未知或为零时仅显示名称。
 页面标明关联作业及其等待的登录/QoS，合并的重复登录也可识别；队列数量和排序均不改变。清除作业关联保留资源输入。
+清空 GPU 数量时保留当前数值，不会用来源作业的型号覆盖已选型号。
+
+本项的预设和详情链接暂不自动填入运行时间。作业已有可选的 `time_limit` 字段（包括 Slurm/PBS 失败记录和示例数据）；
+后续可在该值已知且可解析时用于填入小时数。

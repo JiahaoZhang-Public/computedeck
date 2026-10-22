@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale, t } from './i18n';
+import { uniqueNodes } from './domain';
 import { planOptions } from './plan';
 import type { PlanRequest, Verdict } from './plan';
 import { canCopySubmit, jobPlanLink, planPresets, submitFlags } from './submit';
@@ -156,7 +157,9 @@ describe('copy-only Slurm flags', () => {
   it('checks the newest node observation before considering its partition', () => {
     const { option, job, node } = fixture();
     const newer = { ...node, health: 'unavailable' as const, observed_at: '2099-01-01T00:00:00Z' };
-    expect(submitFlags(option, request, [job], [node, newer], 'line')!.text).not.toContain('-p ');
+    expect(
+      submitFlags(option, request, [job], uniqueNodes([node, newer]), 'line')!.text,
+    ).not.toContain('-p ');
   });
   it.each(['A100 80GB', 'A100,H100', '$(touch /tmp/no)', 'A100\n#SBATCH --exclusive'])(
     'never copies unsafe or multiple model spelling %s',
@@ -299,6 +302,53 @@ describe('job presets', () => {
     data.recent_failures = [];
     expect(planPresets(data).map((item) => item.id)).toEqual(['unlisted', 'known']);
   });
+  it('orders by submission or failure end time, falling back to observation time', () => {
+    const { data, job } = fixture();
+    const at = (day: number) => `2026-01-${String(day).padStart(2, '0')}T00:00:00Z`;
+    data.jobs = [
+      { ...job, id: 'old', submitted_at: at(1), observed_at: at(30) },
+      { ...job, id: 'recent', submitted_at: at(8), observed_at: at(30) },
+      { ...job, id: 'observed', submitted_at: null, observed_at: at(6), gpu_count: 2 },
+    ];
+    data.recent_failures = [
+      {
+        ...job,
+        id: 'ended',
+        state: 'FAILED',
+        submitted_at: at(1),
+        ended_at: at(9),
+        end: at(2),
+        observed_at: at(30),
+        gpu_count: 3,
+        exit_code: null,
+      },
+      {
+        ...job,
+        id: 'end',
+        state: 'FAILED',
+        ended_at: null,
+        end: at(7),
+        observed_at: at(30),
+        gpu_count: 5,
+        exit_code: null,
+      },
+    ];
+    expect(planPresets(data).map((item) => item.id)).toEqual([
+      'ended',
+      'recent',
+      'end',
+      'observed',
+    ]);
+    data.jobs = [];
+    data.recent_failures[0] = {
+      ...data.recent_failures[0],
+      ended_at: 'invalid',
+      end: null,
+      submitted_at: at(1),
+      observed_at: at(10),
+    };
+    expect(planPresets(data).map((item) => item.id)).toEqual(['ended', 'end']);
+  });
   it('offers at most four distinct positive GPU shapes from own jobs and recent failures', () => {
     const { data, job } = fixture();
     data.jobs = [
@@ -312,6 +362,7 @@ describe('job presets', () => {
       ...job,
       id: String(count),
       state: 'FAILED',
+      observed_at: job.submitted_at ?? job.observed_at,
       gpu_count: count,
       end: null,
       exit_code: null,

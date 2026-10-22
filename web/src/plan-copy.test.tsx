@@ -133,7 +133,68 @@ it.each(['en', 'zh-CN'] as const)(
   },
 );
 
+it.each(['en', 'zh-CN'] as const)(
+  'keeps Any model after clearing the GPU count of a resolved job link (%s)',
+  async (locale) => {
+    setLocale(locale);
+    const job = ctx.data.jobs.find((item) => item.name === 'llm-sft / lr sweep')!;
+    window.history.replaceState(null, '', `#/plan?from=${encodeURIComponent(job.id)}`);
+    await render();
+    const model = host.querySelector<HTMLSelectElement>('.plan-form select')!;
+    const count = host.querySelector<HTMLInputElement>('.plan-form input')!;
+    expect(model.value).toBe(job.gpu_type);
+    expect(count.value).toBe(String(job.gpu_count));
+    await act(async () => {
+      model.value = '';
+      model.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    for (const [value, expected] of [
+      ['', String(job.gpu_count)],
+      ['8', '8'],
+      ['', '8'],
+    ]) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          count,
+          value,
+        );
+        count.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(model.value).toBe('');
+      expect(routeParams().has('model')).toBe(false);
+      expect(routeParams().get('gpus')).toBe(expected);
+      expect(count.value).toBe(expected);
+    }
+    expect(count.value).toBe('8');
+    await render();
+    expect(model.value).toBe('');
+    expect(count.value).toBe('8');
+  },
+);
+
+it('uses the newest node observation for submit flags on the best card and option rows', async () => {
+  const job = ctx.data.jobs[0];
+  const source = ctx.data.sources.find((item) => item.id === job.source_id)!;
+  const node = ctx.data.nodes.find((item) => item.source_id === source.id)!;
+  ctx.data.nodes.push({ ...node, partitions: [], observed_at: '2099-01-01T00:00:00Z' });
+  ctx.data.nodes = ctx.data.nodes.filter((item) => item.id === node.id);
+  ctx.data.sources = [source];
+  ctx.data.jobs = [{ ...job, partition: 'gpu', account: 'research' }];
+  ctx.data.recent_failures = [];
+  source.qos = source.qos.filter((item) => item.name === job.qos);
+  await render();
+  expect(host.querySelector('.plan-best .plan-submit')).not.toBeNull();
+  expect(buttons().length).toBe(2);
+  for (const button of buttons()) {
+    await act(async () => button.click());
+    const copied = vi.mocked(ctx.copy).mock.calls.at(-1)![0];
+    expect(copied).not.toContain('-p ');
+    expect(copied).toContain('-A research');
+  }
+});
+
 it('preset chips fill only the request and job context, clearing run time', async () => {
+  ctx.data.jobs[0].submitted_at = '2099-01-01T00:00:00Z';
   await act(async () => setRouteParams({ hours: '24' }));
   await render();
   const presets = host.querySelectorAll<HTMLButtonElement>('.plan-presets button');
