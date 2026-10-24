@@ -2,7 +2,8 @@ import { useEffect, useId, useState } from 'react';
 import type { MouseEvent } from 'react';
 import type { HistoryPoint } from './types';
 import { dateTime, historyAllocation, historyPartial } from './domain';
-import { locale, t } from './i18n';
+import { t } from './i18n';
+import { formatDate } from './format';
 
 const WIDTH = 760;
 const HEIGHT = 180;
@@ -11,13 +12,11 @@ const HOUR = 60 * 60 * 1000;
 
 function tick(at: number, hours: number) {
   const date = new Date(at);
-  const time = { hour: '2-digit', minute: '2-digit', hour12: false } as const;
-  if (hours <= 24) return date.toLocaleTimeString(locale(), time);
+  const time = { hour: '2-digit', minute: '2-digit' } as const;
+  if (hours <= 24) return formatDate(date, time);
   const day = { month: 'short', day: 'numeric' } as const;
   // A week reads best by day; a few days need the time as well.
-  return hours > 72
-    ? date.toLocaleDateString(locale(), day)
-    : date.toLocaleString(locale(), { ...day, ...time });
+  return hours > 72 ? formatDate(date, day) : formatDate(date, { ...day, ...time });
 }
 
 export default function TrendChart({

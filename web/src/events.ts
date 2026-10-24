@@ -1,8 +1,8 @@
 import { statusLabel } from './labels';
 import type { DeckEvent, Job } from './types';
-import { formatMessage, locale, t } from './i18n';
+import { formatMessage, t } from './i18n';
 import type { MessageKey } from './i18n';
-import { dateTime } from './domain';
+import { dateTime, formatDate } from './format';
 
 export const OUTCOME_LABELS: Record<string, MessageKey> = {
   completed: 'event.outcome.completed',
@@ -210,7 +210,7 @@ function ownTime(event: DeckEvent): string | null {
 function eventClock(at: string): string {
   const date = new Date(at);
   return date.toDateString() === new Date().toDateString()
-    ? date.toLocaleTimeString(locale(), { hour12: false, hour: '2-digit', minute: '2-digit' })
+    ? formatDate(date, { hour: '2-digit', minute: '2-digit' })
     : dateTime(at);
 }
 

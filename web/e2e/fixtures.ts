@@ -96,11 +96,17 @@ export const test = base.extend<{ freshPage: Page }>({
 });
 export { expect };
 
+// Only explicitly marked static samples inside the gallery are exempt from readiness.
+export const busyRegions =
+  '[aria-busy="true"]:not(main.page-__gallery .gallery [data-static-sample] *)';
 export async function ready(page: Page) {
   await expect(page.locator('main')).toHaveAttribute('aria-busy', 'false');
   // Page-specific reads (history, events, tool settings) start after the dashboard.
   await page.waitForLoadState('networkidle');
-  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await expect(
+    page.locator('[data-static-sample]:not(main.page-__gallery .gallery *)'),
+  ).toHaveCount(0);
+  await expect(page.locator(busyRegions)).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
   await expect(page.locator('main')).not.toBeEmpty();
 }

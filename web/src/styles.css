@@ -890,7 +890,7 @@ form > .form-error {
   letter-spacing: 0.02em;
   flex-shrink: 0;
 }
-/* Marks get a palette slot by group order; no source name is hard-coded. */
+/* Marks use the persisted server identity slot; no source name is hard-coded. */
 .mark-0 {
   --p: var(--id-1);
 }
@@ -908,12 +908,6 @@ form > .form-error {
 }
 .mark-5 {
   --p: var(--id-6);
-}
-.mark-6 {
-  --p: var(--id-4);
-}
-.mark-7 {
-  --p: var(--id-3);
 }
 
 /* ---------- Overview ---------- */

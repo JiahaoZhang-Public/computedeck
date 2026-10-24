@@ -421,3 +421,131 @@ including their effect on inline `.link` controls and compact toolbars.
 axe 测试验证。API、导出组件 DOM、翻译键和示例数据状态不变。
 Q3 的 CHANGELOG「For plugin authors」须保留样式约定中的粗指针选择器列表和
 `44px !important` 最小尺寸，说明对文字内 `.link` 控件和紧凑工具栏的影响。
+
+### F5 display primitives
+
+`#/__gallery` retains the WEB_API 1 samples and adds the core display components from
+`web/src/ui/`: six SVG statuses, value kinds, time disclosures and durations, ages,
+scope and server-rule disclosures, six identity swatches/monograms, copy feedback and
+all six data states. Its fictional readings and rule trace come from `demo.py` through
+`display_example` (example dashboards only). The shape rows request 8/10/12/16 px in
+normal and grayscale; actual sizes clamp to 10 px, or 12 px for the dashed ring.
+The compat pills use CSS masks generated from the same SVG definitions.
+
+`display.spec.ts` adds normal/forced-colors screenshots and axe checks, a canvas raster
+comparison of all 15 shape pairs at 10 px (minimum eight equivalent differing pixels),
+keyboard time disclosure and row descriptions, persisted clock selection, and local-only
+copy feedback. **Implementation deviation:** the raster test uses Chromium's real canvas
+in Playwright instead of jsdom's canvas, which is unavailable without an additional
+package. It is still gating and rasterises the actual rendered SVGs, including antialiasing.
+Unit tests cover both locales, DurationFormat and its absence, the shared timer and cleanup,
+unknown/stale values, clipboard errors, and all display states. Server tests cover slot
+persistence, deletion/reuse, six distinct automatic slots, sharing, config overrides and
+round trips, read-only stores, and the deterministic demo state.
+
+For F5, review/regenerate local gallery, gallery-compat, Settings, fallback gallery and
+hello-page screenshots, plus pages showing group marks (the server assignments may differ
+from the old order-based colours), and any compat pill whose shared outline changed.
+New screenshots are `display-none.png` and `display-active.png` at all six Chromium
+combinations. Run the full UI gate after reviewing those intentional changes; macOS
+baselines remain ignored, and Linux baselines are generated/reviewed at PR time.
+No baseline is changed by unit tests or by compiling the Playwright suite.
+
+Page items adopt the new primitives as they redesign their pages; Q1 covers drop-in uses
+on the remaining pages. The frozen `ui.tsx` components (including legacy Status) keep
+exactly their old DOM. F8 owns distinguishing colliding identity slots in charts; P6 owns
+the mine/others GPU fill grammar. F6 supplies overlays. Time uses a phrasing-only button and span disclosure, valid in
+paragraphs and values; rule disclosures use `details` outside paragraphs. Both expand in
+flow rather than floating over other content.
+
+中文：F5 组件画廊保留插件组件，并增加六种状态形状、各类数值、时间与时长、数据年龄、
+范围与服务端计算说明、六种标识颜色、复制反馈及六种数据状态。示例来自 `demo.py`。
+形状以 8/10/12/16 px 请求展示，实际最小为 10 px，虚线圆为 12 px，并覆盖灰度和强制颜色。
+形状栅格测试使用 Playwright 的真实 canvas（jsdom 没有可用 canvas，且不增加依赖），
+在 10 px 比较全部 15 对形状，每对至少相差八个等效像素；此项仍是门禁。
+测试同时覆盖双语、时间格式原生与兼容路径、共享计时器、复制失败及服务端色位持久化。
+本地截图需审核更新画廊、兼容画廊、设置、兼容色彩画廊、hello 插件，以及使用组标记或
+变化状态蒙版的页面；新增普通与强制颜色截图。macOS 基线保持忽略，Linux 基线留待 PR。
+后续页面项采用新组件；其余页面由 Q1 处理。插件导出组件 DOM 不变；图表共享色位归 F8，
+GPU 所有权填充归 P6。时间使用可置于段落和数值中的按钮与 span 展开控件；
+规则说明的 details 位于段落之外，两者均在原位置展开。
+
+
+F5 review checks: `ready()` excludes busy descendants only inside an explicit
+`data-static-sample` wrapper under `main.page-__gallery .gallery`. The wrapper is used
+only for the gallery's static loading sample; the sample retains `aria-busy="true"` for
+assistive technology. A busy wrapper itself, any unmarked gallery region, and every busy
+region on a real page still block readiness. The gate rejects a static-sample marker
+outside the gallery, and unit tests check the selector and restrict marker use in source.
+Time tests cover Enter/Space toggling, Escape with focus retained, `aria-expanded`, and
+row-link descriptions available while collapsed. The shared clock publishes whole-minute
+snapshots at minute boundaries and immediately notifies mounted labels of 12/24-hour
+changes. Tests require no intervening commits, one boundary commit, and one timer that is
+removed on the last unmount. Duration tests use native DurationFormat where available (a test double on older Node),
+and its absence at 0 s, 59 s, 60 s and 3 h 12 min in both locales; sub-minute prose is always a labelled zero.
+Standalone shapes can carry an accessible label with localized Error:/Warning: prefixes;
+unlabelled shapes stay decorative. Monograms use initials or an explicit initial, retain
+the full accessible name, and grow horizontally to fit two characters.
+
+Two follow-ups remain explicit:
+- Frozen compat `.status.red/.amber` pills still lack the hidden Error:/Warning: prefix.
+  Their DOM is frozen, and legacy amber also represents non-warning states; CSS alt text
+  could therefore mis-announce severity. Page items and Q1 move core pages to the new Status.
+- Identity deviation: a fleet shrinking from 7+ groups to six or fewer retains existing
+  shared slots. “Never recolour a surviving group” takes precedence over “six groups always
+  get six distinct slots”. Initial automatic assignment of six groups remains distinct.
+
+中文：F5 的 ready() 仅排除 `main.page-__gallery .gallery` 内显式 `data-static-sample`
+包装中的忙碌区域；此标记只用于画廊的静态加载样例，样例仍向辅助技术暴露
+`aria-busy="true"`。包装自身忙碌、画廊未标记区域忙碌，以及真实页面的任意忙碌区域
+仍阻止就绪。门禁拒绝画廊外的标记，单元测试同时检查选择器行为和源码中的标记范围。
+时间测试覆盖 Enter/空格切换、Escape 关闭并保留焦点、展开状态和收起时的行链接描述。
+共享时钟只在整分钟边界发布分钟快照，并在 12/24 小时设置改变时立即通知已挂载标签；
+测试断言分钟内无提交、边界一次提交、共用一个计时器且最后一个标签卸载后清理。
+双语时长测试覆盖原生 DurationFormat（旧 Node 使用测试替身）及其缺失时的 0 秒、59 秒、60 秒和 3 小时 12 分钟，
+不足一分钟始终显示带单位的零值。独立形状可提供可访问名称并包含本地化错误/警告前缀；
+无标签形状仍为装饰。字母标记使用缩写或显式字符，保留完整可访问名称并允许横向扩展。
+
+两个后续事项：兼容 `.status.red/.amber` 标签仍没有隐藏的错误/警告前缀，其 DOM 冻结，
+且旧页面的琥珀色也用于非警告状态，用 CSS 添加替代文字可能误报；页面项与 Q1 将核心
+页面迁移至新 Status。标识色位的明确偏离是：从七组以上缩减到六组或更少时保留既有
+共享色位，“不改变仍存在组的颜色”优先于“六组总是六种颜色”；初次自动分配六组仍互异。
+
+
+F5 raster and touch regression checks: the off shape is a 10×10 square at (1,1) with
+0.5-radius corners in the 12-unit SVG viewBox. The ok, warn and error outlines used by
+compat pills are unchanged. This deliberately enlarges the reference mockup's off square
+so it remains distinct from the filled circle at 10 px. The browser gate still requires
+all 15 pairwise raster differences to be at least eight equivalent pixels and reports
+all failing pairs together, with the complete measured matrix. A sandbox-runnable Vitest
+supersamples the actual circle and rounded-square geometry, requiring a twelve-pixel
+coverage difference and area gain and checking all four corner centres. This geometric
+estimate supplements, and does not replace, the Chromium raster gate.
+
+The gallery table uses `display-row-link`, which has a 44×44 px minimum and inline-flex
+alignment under a coarse pointer. Time buttons and the rule summary have the same minimum;
+copy, Clear and the first-use links retain the existing coarse-pointer button/link rules.
+A browser regression requires zero DOM findings for the gallery both collapsed and with
+all time/rule disclosures expanded, plus zero expanded-state axe violations at all six
+combinations. No touch-target baseline exception is permitted for these samples.
+
+中文：F5 的停用形状改为 12 单位 SVG 坐标中的 (1,1)、10×10、圆角半径 0.5 的方形，
+有意增大参考稿中的停用方形，以便在 10 px 下与实心圆区分。兼容标签使用的正常、警告
+和错误轮廓保持不变。浏览器门禁仍要求全部 15 对形状相差至少八个等效像素，并同时报告
+所有失败对及完整测量矩阵。可在沙箱运行的 Vitest 对实际圆形和圆角方形几何超采样，
+要求覆盖差异与面积增量均至少十二个像素，并检查四个圆角中心；它补充而不替代浏览器门禁。
+画廊表格的 display-row-link 在粗指针下最小为 44×44 px，使用 inline-flex 对齐；
+时间按钮、规则展开按钮以及复制、清除、首次使用链接也保持至少 44 px。
+新增浏览器测试在全部六种组合中检查收起及全部展开时的零 DOM 问题，并要求展开状态
+无 axe 违规，不为这些样例添加触摸目标基线例外。
+
+
+The F5 gallery keeps the rule disclosure's native list-item marker on coarse pointers,
+using padding and a 44 px minimum instead of flex display. Normal and forced-colors
+browser checks assert the marker display and target size on touch projects. The grayscale
+caption is a 12 px level-three heading with the same 16 px inline gutter as the sample
+rows; the same tests check its text alignment at all six combinations.
+
+中文：F5 画廊的规则展开按钮在粗指针下保留原生列表标记，使用内边距和 44 px 最小尺寸，
+不再使用 flex 显示。普通与强制颜色测试在触摸项目中检查标记和目标尺寸。灰度标题使用
+12 px 三级标题，与样例行共用 16 px 横向留白，并在六种组合中检查文字起始位置一致。

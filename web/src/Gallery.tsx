@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { t } from './i18n';
 import { BrandMark, Chips, Empty, Meter, Panel, Stat, Status, Switch } from './ui';
 import './gallery.css';
+import { DisplayGallery } from './ui/DisplayGallery';
+import type { Dashboard } from './types';
 
 // The WEB_API 1 names are deliberately literal: this page catches accidental removals.
 const tokens = [
@@ -28,7 +30,7 @@ const tokens = [
   '--text-muted',
 ];
 
-export function Gallery({ compat }: { compat: boolean }) {
+export function Gallery({ compat, data }: { compat: boolean; data?: Dashboard }) {
   const [enabled, setEnabled] = useState(false);
   const [tab, setTab] = useState('running');
   return (
@@ -158,6 +160,7 @@ export function Gallery({ compat }: { compat: boolean }) {
             </div>
           </Panel>
           <Empty title={t('gallery.empty')} text={t('gallery.note')} />
+          <DisplayGallery example={data?.display_example} />
         </>
       )}
     </div>

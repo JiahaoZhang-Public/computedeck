@@ -3,6 +3,7 @@ import { ArrowDownToLine, ArrowRight } from 'lucide-react';
 import { api } from '../api';
 import { errorText, isLocale, locales, t } from '../i18n';
 import { relativeTime } from '../domain';
+import { readClock, saveClock, type Clock } from '../format';
 import { routeHash } from '../routes';
 import { Panel, Status } from '../ui';
 import { readTheme, readDensity, saveTheme, saveDensity } from '../theme/preferences';
@@ -216,6 +217,7 @@ function LowUseSettings({ ctx }: { ctx: Ctx }) {
 function AppearanceSettings() {
   const [theme, setTheme] = useState(readTheme);
   const [density, setDensity] = useState(readDensity);
+  const [clock, setClock] = useState(readClock);
   return (
     <Panel title={t('settings.appearance')}>
       <div className="setting-row">
@@ -250,6 +252,24 @@ function AppearanceSettings() {
           {(['comfortable', 'compact'] as const).map((value) => (
             <option key={value} value={value}>
               {t(`settings.density.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <label htmlFor="appearance-clock">{t('settings.clock')}</label>
+        <select
+          id="appearance-clock"
+          value={clock}
+          onChange={(event) => {
+            const value = event.target.value as Clock;
+            saveClock(value);
+            setClock(value);
+          }}
+        >
+          {(['24', '12'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.clock.${value}`)}
             </option>
           ))}
         </select>

@@ -1,4 +1,13 @@
-import { formatMessage, locale, t } from './i18n';
+import { formatMessage } from './i18n';
+export {
+  relativeTime,
+  dateTime,
+  calendarDate,
+  clockTime,
+  money,
+  runDuration,
+  percentage,
+} from './format';
 import type {
   ComputeNode,
   Dashboard,
@@ -121,31 +130,6 @@ export function instanceAllocation(instance: Instance): number | null {
     ? (instance.gpu_allocated ?? null)
     : instance.gpu_count;
 }
-export function percentage(value: number | null | undefined) {
-  return value == null ? '—' : `${Math.round(value)}%`;
-}
-export function relativeTime(value: string | null | undefined) {
-  if (!value) return t('time.never');
-  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000));
-  if (!Number.isFinite(minutes)) return t('time.unknown');
-  if (minutes < 1) return t('time.justNow');
-  if (minutes < 60) return t('time.minutesAgo', { count: minutes });
-  if (minutes < 1440) return t('time.hoursAgo', { count: Math.floor(minutes / 60) });
-  return t('time.daysAgo', { count: Math.floor(minutes / 1440) });
-}
-export function dateTime(value: string | null | undefined) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString(locale(), { hour12: false, dateStyle: 'short', timeStyle: 'short' });
-}
-export function calendarDate(value: Date) {
-  return value.toLocaleDateString(locale(), { dateStyle: 'short' });
-}
-export function clockTime(value: number) {
-  return new Date(value).toLocaleTimeString(locale(), { hour12: false, timeStyle: 'short' });
-}
 /** The hourly price applies while an instance runs; a stopped or terminated one is not billed at it. */
 export function runningPrice(item: Instance): number | null {
   return instanceLifecycle(item.state) === 'held' ? item.hourly_cost : null;
@@ -174,39 +158,6 @@ export function costThisRun(item: Instance, source?: Source, now = Date.now()) {
   const run = runningHours(item, source, now);
   const price = runningPrice(item);
   return run && price != null && item.currency ? price * run.hours : null;
-}
-/** Compact elapsed time, rounded down: minutes below an hour, otherwise days and hours. */
-export function runDuration(hours: number) {
-  const minutes = Math.floor(hours * 60);
-  if (minutes < 60) return t('cost.duration.minutes', { count: minutes });
-  const days = Math.floor(minutes / 1440);
-  const remainingHours = Math.floor(minutes / 60) % 24;
-  return [
-    days ? t('cost.duration.days', { count: days }) : '',
-    remainingHours ? t('cost.duration.hours', { count: remainingHours }) : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-export function money(value: number | null, currency: string, lowerBound = false) {
-  if (value === null) return t('money.unknown');
-  if (lowerBound) value += 1e-9 * Math.max(1, Math.abs(value));
-  try {
-    return new Intl.NumberFormat(locale(), {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-      roundingMode: lowerBound ? 'floor' : 'halfExpand',
-    }).format(value);
-  } catch {
-    const amount = new Intl.NumberFormat(locale(), {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-      useGrouping: false,
-      roundingMode: lowerBound ? 'floor' : 'halfExpand',
-    }).format(value);
-    return `${currency} ${amount}`;
-  }
 }
 export function elapsedSeconds(value: string | null | undefined) {
   const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec((value ?? '').trim());

@@ -295,7 +295,27 @@ export interface Attention {
   next_attempt: string | null;
   action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
+export interface DisplayExample {
+  known: number;
+  estimate: number;
+  last_known: number;
+  at: string;
+  stale_at: string;
+  qos_at: string;
+  duration_seconds: number;
+  hidden: number;
+  trace: {
+    rule: Message;
+    included: string[];
+    excluded: { source: string; reason: Message }[];
+    as_of: string | null;
+  };
+}
 export interface Dashboard {
+  /** Fictional display states, present only in example mode. */
+  display_example?: DisplayExample;
+  /** Server-assigned identity colours (1–6), keyed by cluster or platform. */
+  identity_slots?: Record<string, number>;
   /** Own finished-job wait aggregates; older services omit this field. */
   wait_history?: Record<string, WaitHistory>;
   low_use_settings?: { threshold: number; window_minutes: number };

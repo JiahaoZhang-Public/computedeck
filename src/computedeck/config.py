@@ -111,9 +111,21 @@ def load(text: str) -> dict[str, Any]:
         raise ConfigError(str(error)) from None
     except RecursionError:
         raise ConfigError("The file nests arrays or tables too deeply") from None
-    unknown = set(data) - {*DEFAULT_SETTINGS, "cluster", "cloud", "instance", "node"}
+    unknown = set(data) - {
+        *DEFAULT_SETTINGS,
+        "cluster",
+        "cloud",
+        "instance",
+        "node",
+        "identity_slots",
+    }
     if unknown:
         raise ConfigError(f"Unknown top-level keys: {', '.join(sorted(unknown))}")
+    slots = data.get("identity_slots", {})
+    if not isinstance(slots, dict) or any(
+        type(value) is not int or not 1 <= value <= 6 for value in slots.values()
+    ):
+        raise ConfigError("identity_slots must map group keys to integers from 1 to 6")
     for section in ("cluster", "cloud", "instance", "node"):
         if section in data and (
             not isinstance(data[section], list)
@@ -152,6 +164,7 @@ def load(text: str) -> dict[str, Any]:
         raise ConfigError(str(error)) from None
     return {
         "settings": settings,
+        "identity_slots": slots,
         "sources": _sources(data),
         "instances": instances,
         "nodes": machines,
@@ -245,6 +258,7 @@ def apply(store: Store, text: str) -> dict[str, int]:
         keep_instance_probe(instance, old)
         store.save_instance(instance)
     store.save_settings(parsed["settings"].model_dump(exclude_unset=True))
+    store.identity_slots(parsed["identity_slots"])
     counts = {"sources": len(sources), "instances": len(instances), "nodes": len(parsed["nodes"])}
     store.add_change("change.import", "config", "", "imported", [], counts=counts)
     return counts
@@ -273,6 +287,9 @@ def export(store: Store) -> str:
             continue
         if settings.get(key) is not None:
             lines.append(f"{key} = {_value(settings[key])}")
+    lines += ["", "[identity_slots]"]
+    for key, slot in store.identity_slots().items():
+        lines.append(f"{_value(key)} = {slot}")
     for node in store.nodes():
         lines += ["", "[[node]]"]
         for key in _NODE_KEYS:

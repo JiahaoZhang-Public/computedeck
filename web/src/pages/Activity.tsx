@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVisibleInterval } from '../useVisibleInterval';
 import type { DeckEvent, Source, Tool } from '../types';
 import { api } from '../api';
-import { formatMessage, locale, localized, t } from '../i18n';
-import { dateTime, relativeTime } from '../domain';
+import { formatMessage, localized, t } from '../i18n';
+import { dateTime, relativeTime, formatDate } from '../format';
 import {
   activityEvents,
   changeFieldLabel,
@@ -440,7 +440,7 @@ function ActivityFeed({
   useVisibleInterval(load, 15000, ctx.data.token);
   const days = new Map<string, DeckEvent[]>();
   for (const event of activityEvents(rows ?? [])) {
-    const day = new Date(event.at).toLocaleDateString(locale(), {
+    const day = formatDate(new Date(event.at), {
       year: 'numeric',
       month: 'long',
       day: 'numeric',

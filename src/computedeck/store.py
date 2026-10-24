@@ -131,6 +131,7 @@ def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, A
 
 class Store:
     def __init__(self, path: Path, *, readonly: bool = False) -> None:
+        self.readonly = readonly
         self.unreadable: dict[str, set[str]] = {}
         if readonly:
             self.path = path
@@ -269,6 +270,17 @@ class Store:
             self.db.executemany("DELETE FROM attention_state WHERE key=?", ((key,) for key in keys))
         for key in keys:
             self._repaired("attention_state", key)
+
+    def identity_slots(self, overrides: dict[str, int] | None = None) -> dict[str, int]:
+        from .identity import assign_slots, group_keys
+
+        saved = self._meta("identity_slots") or {}
+        sources = self.sources()
+        instances = [{**item, "manual": True} for item in self.manual_instances()]
+        slots = assign_slots(group_keys(sources, instances), {**saved, **(overrides or {})})
+        if slots != saved and not self.readonly:
+            self._set_meta("identity_slots", slots)
+        return slots
 
     def settings(self) -> dict[str, Any]:
         result = dict(DEFAULT_SETTINGS)
@@ -778,6 +790,7 @@ class Store:
                 (source["id"], json.dumps(stored)),
             )
         self._repaired("sources", source["id"])
+        self.identity_slots()
 
     def delete_source(self, source_id: str) -> bool:
         with self.db:
@@ -786,6 +799,7 @@ class Store:
             self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source_id,))
         self._repaired("sources", source_id)
         self._repaired("snapshots", source_id)
+        self.identity_slots()
         return deleted == 1
 
     def record_job_waits(self, source: dict[str, Any], jobs: list[dict[str, Any]]) -> None:
@@ -982,11 +996,13 @@ class Store:
                 (instance["id"], json.dumps(instance)),
             )
         self._repaired("instances", instance["id"])
+        self.identity_slots()
 
     def delete_instance(self, instance_id: str) -> bool:
         with self.db:
             deleted = self.db.execute("DELETE FROM instances WHERE id=?", (instance_id,)).rowcount
         self._repaired("instances", instance_id)
+        self.identity_slots()
         return deleted == 1
 
     fresh = staticmethod(fresh)
@@ -1105,6 +1121,7 @@ class Store:
             node.update(node_health_fields(node, source_by_id.get(node["source_id"], {})))
         data = {
             "mode": "live",
+            "identity_slots": self.identity_slots(),
             "low_use_settings": {
                 "threshold": settings["low_use_threshold"],
                 "window_minutes": settings["low_use_window_minutes"],

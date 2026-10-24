@@ -1,0 +1,172 @@
+.status-shape {
+  width: 1em;
+  height: 1em;
+  min-width: 10px;
+  min-height: 10px;
+  flex: none;
+  color: var(--shape-color);
+  vertical-align: -1px;
+}
+.severity-ok {
+  --shape-color: var(--status-ok-shape);
+}
+.severity-wait {
+  --shape-color: var(--status-wait-shape);
+}
+.severity-warn {
+  --shape-color: var(--status-warn-shape);
+}
+.severity-error {
+  --shape-color: var(--status-error-shape);
+}
+.severity-unknown {
+  --shape-color: var(--status-unknown-shape);
+}
+.severity-off {
+  --shape-color: var(--status-off-shape);
+}
+.status-shape.severity-unknown {
+  min-width: 12px;
+  min-height: 12px;
+}
+.display-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--fg-default);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.severity-warn > .status-word {
+  color: var(--status-warn-fg);
+}
+.severity-error > .status-word {
+  color: var(--status-error-fg);
+}
+.display-value,
+.display-duration,
+.display-age {
+  font-variant-numeric: tabular-nums;
+}
+.value-unit,
+.display-age,
+.scope-line {
+  color: var(--fg-subtle);
+}
+.value-unknown {
+  border: 1px dashed var(--hatch-edge);
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hatch) 3px 4px);
+  padding: 2px 4px;
+}
+.display-time {
+  display: inline;
+  position: relative;
+}
+.display-time > button {
+  display: inline-block;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  height: auto;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.time-disclosure[hidden] {
+  display: none;
+}
+.time-disclosure {
+  display: block;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-default);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.how-worked-out > summary {
+  cursor: pointer;
+}
+.how-worked-out dl {
+  display: grid;
+  gap: 4px;
+}
+.how-worked-out dd {
+  margin-inline-start: 16px;
+}
+.identity-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--identity);
+  flex: none;
+}
+.identity-monogram {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  padding-inline: 2px;
+  height: 16px;
+  border: 1px solid var(--identity);
+  border-radius: 4px;
+  background: var(--identity-tint);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 16px;
+  flex: none;
+}
+.display-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.display-copy > button {
+  white-space: normal;
+  height: auto;
+  min-height: 32px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.display-copy code {
+  overflow-wrap: anywhere;
+}
+.data-state {
+  min-width: 0;
+  padding: 12px 16px;
+  border-block-start: 1px solid var(--border-muted);
+}
+.data-skeleton {
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border-muted);
+}
+@media (pointer: coarse) {
+  .display-time > button,
+  .display-row-link {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .how-worked-out > summary {
+    display: list-item;
+    min-height: 44px;
+    min-width: 44px;
+    padding-block: 12px;
+    line-height: 20px;
+  }
+}
+@media (forced-colors: active) {
+  .status-shape {
+    color: CanvasText;
+  }
+  .identity-swatch {
+    background: CanvasText;
+  }
+  .identity-monogram {
+    border-color: CanvasText;
+  }
+  .value-unknown {
+    border-color: CanvasText;
+  }
+}

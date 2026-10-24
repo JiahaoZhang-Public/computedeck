@@ -12,6 +12,7 @@ from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
 from .history import group_history
+from .identity import assign_slots, group_keys
 from .low_use import low_use
 from .summary import fresh, freshness, summarize
 from .wait_history import summarize_waits, wait_sample
@@ -698,6 +699,24 @@ def dashboard() -> dict[str, Any]:
             item, readings, now=current, interval_minutes=10, threshold=10, window_minutes=60
         )
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
+    data["identity_slots"] = assign_slots(group_keys(sources, data["instances"]), {})
+    # The component gallery exercises display states without inventing live measurements.
+    data["display_example"] = {
+        "known": 29,
+        "estimate": 41.2,
+        "last_known": 2,
+        "at": (current - timedelta(minutes=2)).isoformat(),
+        "stale_at": (current - timedelta(minutes=14)).isoformat(),
+        "qos_at": (current - timedelta(hours=6)).isoformat(),
+        "duration_seconds": 11560,
+        "hidden": 31,
+        "trace": {
+            "rule": {"code": "display_example_rule"},
+            "included": ["Cluster A", "Cluster B"],
+            "excluded": [{"source": "Cluster C", "reason": {"code": "display_example_missing"}}],
+            "as_of": observed,
+        },
+    }
     data["summary"] = summarize(data, now=current)
     # Own accounting demonstrates ranges, small samples and missing GPU counts.
     wait_samples = []

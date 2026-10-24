@@ -1,3 +1,4 @@
+@import '../ui/shapes.css';
 /* WEB_API 1 frozen class surface. Exported component DOM is unchanged. */
 .muted {
   color: var(--text-3);
@@ -274,8 +275,7 @@
 .secondary-button {
   text-decoration: none;
 }
-/* Icon-less green/amber/red WEB_API 1 pills get masks without changing their DOM. F5 shares these
-   outlines with StatusShape; existing <Status> markup is deliberately retained. */
+/* Icon-less WEB_API 1 pills share StatusShape outlines without changing their DOM. */
 .status:is(.green, .amber, .red):not(:has(i, svg))::before {
   content: '';
   width: 12px;
@@ -285,15 +285,15 @@
 }
 .status.green:not(:has(i, svg))::before {
   background: var(--status-ok-shape);
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='5'/%3E%3C/svg%3E");
+  mask-image: var(--shape-ok);
 }
 .status.amber:not(:has(i, svg))::before {
   background: var(--status-warn-shape);
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 1 11 11H1Z'/%3E%3C/svg%3E");
+  mask-image: var(--shape-warn);
 }
 .status.red:not(:has(i, svg))::before {
   background: var(--status-error-shape);
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m6 0 6 6-6 6-6-6Z'/%3E%3C/svg%3E");
+  mask-image: var(--shape-error);
 }
 .plugin-slot:empty {
   display: none;

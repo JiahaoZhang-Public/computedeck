@@ -44,7 +44,11 @@ export function Routes({ page, ctx, compat }: { page: Page; ctx: Ctx; compat: bo
   const PageComponent = routeTable[page as CorePage] ?? OverviewPage;
   return (
     <Suspense fallback={<Loading />}>
-      {page === '__gallery' ? <Gallery compat={compat} /> : <PageComponent ctx={ctx} />}
+      {page === '__gallery' ? (
+        <Gallery compat={compat} data={ctx.data} />
+      ) : (
+        <PageComponent ctx={ctx} />
+      )}
     </Suspense>
   );
 }

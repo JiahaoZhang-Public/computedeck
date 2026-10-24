@@ -6,7 +6,7 @@ export interface Group {
   label: string;
   kind: Kind;
   sources: Source[];
-  /** Palette slot, assigned by order so that no name needs its own color. */
+  /** Zero-based server identity slot; order is used only with pre-0.8 services. */
   color: number;
   initials: string;
 }
@@ -23,7 +23,9 @@ export function instanceGroupKey(item: Instance, sources: Source[]) {
   return source ? source.cluster_id : `platform:${item.platform.trim().toLowerCase()}`;
 }
 
-export function groupsOf(data: Pick<Dashboard, 'sources' | 'instances'>): Group[] {
+export function groupsOf(
+  data: Pick<Dashboard, 'sources' | 'instances' | 'identity_slots'>,
+): Group[] {
   const result = new Map<string, Omit<Group, 'color' | 'initials'>>();
   for (const source of data.sources) {
     const group = result.get(source.cluster_id);
@@ -43,7 +45,14 @@ export function groupsOf(data: Pick<Dashboard, 'sources' | 'instances'>): Group[
   }
   return [...result.values()].map((group, index) => ({
     ...group,
-    color: index % 8,
+    color:
+      (data.identity_slots?.[
+        group.kind === 'cluster'
+          ? group.key
+          : group.sources.length
+            ? `platform:${group.sources[0].name.trim().toLowerCase()}`
+            : group.key
+      ] ?? (index % 6) + 1) - 1,
     initials: initials(group.label),
   }));
 }

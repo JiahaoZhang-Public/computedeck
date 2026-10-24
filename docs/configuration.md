@@ -336,3 +336,49 @@ uses the generated fallback palette with the same colours.
 表单与面板，触屏控件至少 44 像素。示例模式也能切换，
 不写入服务端示例数据。增强对比度、强制颜色和减少动态效果跟随系统，旧版 WebKit
 （包括 iOS 16）使用生成的同色兼容样式。
+
+### Display identity and clock
+
+Identity colours belong to groups, not individual logins or status. The service persists
+six slots in its existing configuration store and includes `identity_slots` in
+`GET /api/dashboard`. Cluster keys are `cluster_id`; cloud keys are
+`platform:<source name>` and manual machine keys are `platform:<platform name>` (trimmed,
+lowercase). These are colour keys only: existing route and filter keys are unchanged.
+Two logins of one cluster share a slot. New groups take a deterministic preferred slot
+when free, otherwise the lowest free slot. After six groups, they share the least-used
+slot. Removing a group releases its slot without recolouring surviving groups. Existing
+sharing is retained when a larger fleet shrinks. Charts must distinguish shared slots
+with a neutral/patterned series and direct labels.
+
+Configuration export includes an `[identity_slots]` table. Import can override existing
+groups using integers 1–6, for example:
+
+```toml
+[identity_slots]
+"cluster-a" = 2
+"platform:runpod" = 5
+```
+
+Overrides are explicit colour choices and may deliberately share a slot. Unknown group
+keys are ignored; import creates sources and machines before applying these choices.
+Example mode has a separate deterministic map and never writes it to live configuration.
+
+**Settings → Appearance → Clock** selects 24-hour (default) or 12-hour time, stored on
+this device as `computedeck.clock`. The shared time display offers a keyboard/touch
+accessible disclosure with the full local date, time, timezone and relative age.
+Display values distinguish exact counts, lower bounds (`≥`), labelled estimates (`≈`),
+unknown values with reasons, and explicitly dated last-known readings. Stale exact values
+are displayed as unknown; a caller must explicitly supply a lower bound or a dated
+last-known reading to retain a number. Copy controls copy text only and append
+`# example data` on a new line in example mode.
+
+中文：标识颜色按集群或平台分配，并由服务端保存。同一集群的多个登录共用颜色；
+前六个组优先占用空闲色位，之后才共享使用最少的色位。删除组不会改变其他组的颜色；
+超过六组后已有的共享关系在缩减组数时保留。`identity_slots` 随仪表盘返回，配置导入导出
+使用同名表，色位为 1–6。集群键是 `cluster_id`，云平台键是 `platform:<source name>`，
+手动机器键是 `platform:<平台名称>`（去除首尾空格并转小写），现有网址与筛选键不变。
+可手动覆盖已有组的颜色，也可显式共享色位；不存在的组键会被忽略。示例模式不写入真实配置。
+设置 → 外观 → 时间格式可选 24 或 12 小时制，保存在本设备。新时间组件可通过键盘和触摸
+展开本地完整时间、时区及相对时间。数值组件区分准确值、下界、估计值、附原因的未知值和
+附时间的最后已知值；过期准确值不会当作当前数字显示。复制按钮只复制文本，示例模式
+会在新行附加 `# example data`。

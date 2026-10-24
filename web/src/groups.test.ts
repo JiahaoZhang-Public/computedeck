@@ -164,3 +164,22 @@ describe('instance counts', () => {
     expect(instanceCount([cloud({ status: 'error' })], 1)).toBe('at least 1 instance');
   });
 });
+
+it('uses the server identity map without changing any group or route key', () => {
+  const sources = [
+    source({}),
+    source({ id: 'pods', name: 'RunPod', kind: 'cloud', driver: 'runpod', cluster_id: 'pods' }),
+  ];
+  const instances = [instance({})];
+  const identity_slots = { 'cluster-a': 6, 'platform:runpod': 4, 'platform:lab workstation': 2 };
+  const groups = groupsOf({ sources, instances, identity_slots });
+  expect(groups.map(({ key, color }) => [key, color])).toEqual([
+    ['cluster-a', 5],
+    ['pods', 3],
+    ['platform:lab workstation', 1],
+  ]);
+  const reordered = groupsOf({ sources: [...sources].reverse(), instances, identity_slots });
+  for (const group of groups)
+    expect(reordered.find(({ key }) => key === group.key)?.color).toBe(group.color);
+  expect(groupsOf({ sources: sources.slice(1), instances, identity_slots })[0].color).toBe(3);
+});
