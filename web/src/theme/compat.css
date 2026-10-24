@@ -274,26 +274,24 @@
 .secondary-button {
   text-decoration: none;
 }
-/* Dot-less WEB_API 1 pills get masks without changing their DOM. F5 shares these
+/* Icon-less green/amber/red WEB_API 1 pills get masks without changing their DOM. F5 shares these
    outlines with StatusShape; existing <Status> markup is deliberately retained. */
-.status:not(:has(i))::before {
+.status:is(.green, .amber, .red):not(:has(i, svg))::before {
   content: '';
   width: 12px;
   height: 12px;
   flex: none;
-  background: var(--status-unknown-shape);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='4.5' fill='none' stroke='black' stroke-width='1.5' stroke-dasharray='3 2'/%3E%3C/svg%3E")
-    center / contain no-repeat;
+  mask: none center / contain no-repeat;
 }
-.status.green:not(:has(i))::before {
+.status.green:not(:has(i, svg))::before {
   background: var(--status-ok-shape);
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='5'/%3E%3C/svg%3E");
 }
-.status.amber:not(:has(i))::before {
+.status.amber:not(:has(i, svg))::before {
   background: var(--status-warn-shape);
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 1 11 11H1Z'/%3E%3C/svg%3E");
 }
-.status.red:not(:has(i))::before {
+.status.red:not(:has(i, svg))::before {
   background: var(--status-error-shape);
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m6 0 6 6-6 6-6-6Z'/%3E%3C/svg%3E");
 }
@@ -301,7 +299,7 @@
   display: none;
 }
 @media (forced-colors: active) {
-  .status:not(:has(i))::before {
+  .status:is(.green, .amber, .red):not(:has(i, svg))::before {
     background: CanvasText;
     forced-color-adjust: none;
   }

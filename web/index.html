@@ -15,6 +15,22 @@
       data-theme="dark"
       media="(prefers-color-scheme: dark)"
     />
+    <script>
+      // Apply device choices before the stylesheet or application bundle can paint.
+      try {
+        const theme = localStorage.getItem('computedeck.theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+          for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+            meta.media = meta.dataset.theme === theme ? 'all' : 'not all';
+          }
+        }
+        document.documentElement.dataset.density =
+          localStorage.getItem('computedeck.density') === 'compact' ? 'compact' : 'comfortable';
+      } catch {
+        // Blocked storage keeps the system theme and comfortable density.
+      }
+    </script>
     <meta
       name="description"
       content="ComputeDeck: your Slurm jobs, GPU allocations and cloud instances"

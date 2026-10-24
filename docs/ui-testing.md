@@ -306,9 +306,10 @@ external services are needed. The template itself is bilingual and skips its gre
 read in example mode, so `demo.py` needs no new server data state for F4.
 
 F4 intentionally changes every existing page's palette and shared typography/controls.
-Outside the socket-restricted sandbox, review/regenerate **all 96 existing page screenshots
-and their axe/DOM records**, plus the new fallback and hello screenshots, then run the full
-gate without `--update-snapshots`. Local macOS baselines remain ignored; Linux artifacts
+Its baseline coverage includes **all 96 existing page screenshots and their axe/DOM
+records**, plus the fallback and hello screenshots. For intentional visual changes,
+regenerate and review affected baselines, then run the full gate without `--update-snapshots`.
+Local macOS baselines remain ignored; Linux artifacts
 are reviewed and committed at PR time as before. No baseline is approved merely because a
 regeneration command succeeds. In particular, inspect 375 px layouts and the old Jobs
 reason-clip assertion. The full six-shape/raster and persisted identity assignment tests
@@ -323,8 +324,9 @@ pinned network-plugin run remain release follow-ups.
 兼容版截图门禁仅在 Chromium 运行；WebKit 保留不截图的主题测试（axe 和计算颜色
 一致性），以及 F6 后续的浮层测试。每周 WebKit 兼容版渲染属于非阻塞巡检，不纳入
 PR 门禁。界面状态只依赖设备设置和双语测试插件，
-无需修改 `demo.py`。F4 有意改变全站颜色和共享字体/控件，需在沙箱外检查并更新
-全部旧页面基线及新增兼容版/插件截图，再运行一次不更新基线的完整 UI gate。
+无需修改 `demo.py`。F4 有意改变全站颜色和共享字体/控件，基线覆盖全部旧页面及
+兼容版/插件截图。有意修改视觉效果时，重新生成并检查受影响基线，再运行一次
+不更新基线的完整 UI gate。macOS 基线不提交；Linux 基线在 PR 时生成、审核并提交。
 不得仅凭重新生成成功就接受基线；重点检查 375 像素布局和 Jobs 已知裁剪用例。
 F5 的完整状态形状/身份分配、U1 的导航与滚动边距、发布前的私有插件比较及固定版本
 network 插件巡检仍由后续项目完成。
@@ -369,11 +371,11 @@ error boundaries for banner and settings slots, with throwing-plugin fixtures pr
 frame and sibling slots survive. **Deferred to P1:** the same boundary and failure coverage
 for each overview slot. Bare wrappers and null-slot hiding alone do not isolate exceptions.
 
-**UI gate pending outside the sandbox:** review/regenerate affected page screenshots,
-particularly Jobs, Clusters, Sources, Overview and Plan at 375/900/1280 across the six locale/
-theme combinations, plus compat gallery, hello and fallback counterparts. Collapsed border
-geometry may affect any table page, so run the full gate afterward without updating snapshots.
-No screenshot baseline was regenerated or approved in this socket-restricted environment.
+**Baseline procedure:** F4's table changes affect Jobs, Clusters, Sources, Overview and
+Plan, plus the compat gallery, hello and fallback counterparts. Review intentional geometry
+and typography changes at 375/900/1280 across the six locale/theme combinations, then run
+the full gate without updating snapshots. Keep local macOS baselines ignored; regenerate,
+review and commit Linux baselines at PR time.
 
 中文：F4 评审修复让单元格继承默认字号，保留 `.mono` 字体及 12 像素字号、20 像素文本行高、
 `.num` 和概览指标的等宽数字，恢复折叠边框及插件行边框；末行保留透明的 1 像素底边框，
@@ -385,5 +387,37 @@ No screenshot baseline was regenerated or approved in this socket-restricted env
 明确记录与 §3.3 的偏差：斜线填充边缘使用墨色 `--hatch-edge`，确保底色及叠加条纹上的
 对比度达到 3:1，F5/P6 应保留。U1 负责单色 BrandMark、删除三个品牌令牌，以及横幅和设置
 插槽的独立错误边界与抛错测试；P1 负责概览插槽的对应测试和边界。
-沙箱内未更新或批准截图；沙箱外需检查受影响页面，重点为三种宽度的 Jobs、Clusters、Sources、
-Overview、Plan，以及兼容展示页、hello 和兼容渲染版，再运行不更新截图的完整 UI gate。
+基线流程：F4 表格修改影响 Jobs、Clusters、Sources、Overview、Plan，以及兼容展示页、
+hello 和兼容渲染版。按三种宽度、六组语言/主题组合检查有意修改的布局和字体，
+再运行不更新截图的完整 UI gate。macOS 基线保持忽略；Linux 基线在 PR 时生成、审核并提交。
+
+### F4 appearance review regression checks
+
+`theme.spec.ts` checks that Plan's waiting verdict retains exactly one clock, uncoloured
+and `.wait` pills gain no shape, and coloured pills never add a mask beside an existing
+icon. `checkLayout` reports visible text below 12 px or outside weights 400/600; Plan,
+Activity and Usage must have zero such findings. A probe verifies the guard detects both
+violations and ignores hidden text. The base styles set heading weights to 600 and give
+`small` a 12 px floor. The current navigation item uses a straight 2 px pseudo-element bar.
+
+Appearance selects use namespaced IDs and role/name queries. The inline head bootstrap
+applies saved theme, density and browser chrome media before the application bundle;
+unit tests cover both themes, invalid values and blocked storage. A browser test blocks
+module downloads and checks the saved appearance still applies. The scaffold test keeps
+slot/component/class coverage; rendered hit areas remain gated by plugin axe tests.
+No API, exported component DOM, locale keys or example-data states change.
+
+**Q3 CHANGELOG, For plugin authors:** retain the coarse-pointer selector list and the
+`44px !important` minimum dimensions from the [styling contract](plugins.md#styling-contract-web_api-1),
+including their effect on inline `.link` controls and compact toolbars.
+
+中文：主题测试检查 Plan 等待标签恰有一个时钟，无颜色及 `.wait` 标签不添加形状，
+带图标的彩色标签不重复添加掩码。`checkLayout` 报告可见文字小于 12 像素或字重不属于
+400/600；Plan、Activity、Usage 必须零违规，并有探针验证检测与隐藏文字排除。
+基础样式将标题字重设为 600、`small` 下限设为 12 像素；当前导航使用笔直的 2 像素指示条。
+外观控件使用带命名空间的 ID，测试按角色和名称定位。head 内联脚本在应用脚本加载前
+设置主题、密度及浏览器栏主题色；单元测试覆盖两种主题、无效值与存储受限，浏览器测试
+阻止应用脚本下载后验证设置仍生效。脚手架保留插槽、组件与类覆盖，点击区域由插件
+axe 测试验证。API、导出组件 DOM、翻译键和示例数据状态不变。
+Q3 的 CHANGELOG「For plugin authors」须保留样式约定中的粗指针选择器列表和
+`44px !important` 最小尺寸，说明对文字内 `.link` 控件和紧凑工具栏的影响。

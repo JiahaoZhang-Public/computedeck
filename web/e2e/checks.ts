@@ -51,6 +51,24 @@ export async function checkLayout(page: Page): Promise<DomFinding[]> {
       const box = node.getBoundingClientRect();
       return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
     };
+    const textNodes = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const checked = new Set<Element>();
+    while (textNodes.nextNode()) {
+      const text = textNodes.currentNode;
+      const parent = text.parentElement;
+      if (!parent || checked.has(parent) || !normalize(text.textContent ?? '')) continue;
+      if (parent.closest('script,style') || !visible(parent)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      if (![...range.getClientRects()].some((box) => box.width > 0 && box.height > 0)) continue;
+      checked.add(parent);
+      const style = getComputedStyle(parent);
+      const fontSize = parseFloat(style.fontSize);
+      const fontWeight = style.fontWeight;
+      if (fontSize < 12) issues.push({ kind: 'small-text', identity: identity(parent), fontSize });
+      if (!['400', '600'].includes(fontWeight))
+        issues.push({ kind: 'unsupported-font-weight', identity: identity(parent), fontWeight });
+    }
     for (const cell of document.querySelectorAll('td,th')) {
       if (
         visible(cell) &&

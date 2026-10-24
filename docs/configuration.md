@@ -309,8 +309,9 @@ See [Local UI checks](ui-testing.md) for the isolated service and screenshot wor
 Settings → Appearance offers Follow system (default), Light and Dark, plus Comfortable
 (default) and Compact table density. These choices live only in this browser/device's
 `localStorage` (`computedeck.theme`, `computedeck.density`), not in server configuration.
-They apply before the first application render. Follow system leaves `data-theme` absent
-on `<html>` and responds immediately to OS theme changes; an explicit choice sets
+A small inline head script applies them before first paint, even while the application
+bundle is loading; application initialization also reapplies them. Follow system leaves
+`data-theme` absent on `<html>` and responds immediately to OS theme changes; an explicit choice sets
 `data-theme="light|dark"`. Invalid saved values use the defaults. If storage is blocked,
 changes still work for the current page, but cannot survive a reload.
 
@@ -326,7 +327,8 @@ uses the generated fallback palette with the same colours.
 
 中文：设置 → 外观提供「跟随系统」（默认）、「浅色」、「深色」以及表格的「舒适」
 （默认）和「紧凑」密度。选择仅保存到当前设备的浏览器 localStorage，不写入服务器。
-页面首次渲染前应用设置；跟随系统时根元素无 `data-theme`，系统主题变化会立即生效。
+内联 head 脚本在首次绘制前应用设置，无需等待应用脚本下载；应用初始化时再次应用。
+跟随系统时根元素无 `data-theme`，系统主题变化会立即生效。
 无效的存储值使用默认设置；存储受限时仍可临时切换，刷新后恢复默认。
 舒适模式的单行/双行表格为 40/60 像素，控件为 32 像素；紧凑模式为 32/48 和
 28 像素，行高包含分隔线，较长内容可自然增高。插件的 `table.compact` 在舒适模式下

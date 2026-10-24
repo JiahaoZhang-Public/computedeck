@@ -11,6 +11,9 @@ import {
   saveDensity,
 } from './preferences';
 
+// Execute the actual head bootstrap, independently of the application module.
+const bootstrap = () => new Function(html.match(/<script>([\s\S]*?)<\/script>/)![1])();
+
 beforeEach(() => {
   document.head.innerHTML = html.match(/<meta\s+name="theme-color"[^>]+>/g)!.join('');
 });
@@ -21,6 +24,38 @@ afterEach(() => {
   localStorage.clear();
   delete document.documentElement.dataset.theme;
   delete document.documentElement.dataset.density;
+});
+it.each(['light', 'dark'] as const)('bootstraps %s and compact before the bundle runs', (theme) => {
+  localStorage.setItem('computedeck.theme', theme);
+  localStorage.setItem('computedeck.density', 'compact');
+  bootstrap();
+  expect(document.documentElement.dataset.theme).toBe(theme);
+  expect(document.documentElement.dataset.density).toBe('compact');
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
+    expect(meta.media).toBe(meta.dataset.theme === theme ? 'all' : 'not all');
+  const before = document.documentElement.outerHTML;
+  initializeAppearance();
+  expect(document.documentElement.outerHTML).toBe(before);
+});
+it.each([null, 'system', 'invalid'])('bootstraps default appearance for %s', (saved) => {
+  if (saved !== null) {
+    localStorage.setItem('computedeck.theme', saved);
+    localStorage.setItem('computedeck.density', saved);
+  }
+  bootstrap();
+  expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  expect(document.documentElement.dataset.density).toBe('comfortable');
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
+    expect(meta.getAttribute('media')).toBe(`(prefers-color-scheme: ${meta.dataset.theme})`);
+});
+it('head bootstrap tolerates blocked storage', () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  expect(bootstrap).not.toThrow();
+  expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  initializeAppearance();
+  expect(document.documentElement.dataset.density).toBe('comfortable');
 });
 it('defaults to system and comfortable and ignores invalid saved choices', () => {
   localStorage.setItem('computedeck.theme', 'invalid');

@@ -74,9 +74,18 @@ a:hover {
 ::selection {
   background: var(--accent-soft);
 }
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
 strong,
 b {
   font-weight: 600;
+}
+small {
+  font-size: max(12px, 0.85em);
 }
 svg {
   flex-shrink: 0;
@@ -165,6 +174,7 @@ kbd,
   padding: 0 8px 4px;
 }
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -180,9 +190,18 @@ kbd,
 }
 .nav-item.active {
   background: var(--sidebar-active);
-  box-shadow: inset 2px 0 var(--ink);
   color: var(--text);
   font-weight: 600;
+}
+.nav-item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  background: var(--ink);
+  border-radius: 0 2px 2px 0;
 }
 .nav-item svg {
   color: var(--text-3);

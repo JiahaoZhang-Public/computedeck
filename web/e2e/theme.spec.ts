@@ -25,6 +25,85 @@ async function computedColors(page: Page) {
   }, colors);
 }
 
+test('saved appearance applies with the application bundle unavailable', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.addInitScript(() => {
+    localStorage.setItem('computedeck.theme', 'dark');
+    localStorage.setItem('computedeck.density', 'compact');
+  });
+  await page.route('**/*.js', (route) => route.abort());
+  await page.goto('/?demo=true#/settings');
+  await expect(page.locator('#root')).toBeEmpty();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
+  await expect(page.locator('meta[name="theme-color"][data-theme="dark"]')).toHaveAttribute(
+    'media',
+    'all',
+  );
+});
+
+test('Plan wait pills keep one clock and uncoloured plugin pills have no invented status', async ({
+  page,
+}) => {
+  await page.goto('/?demo=true#/plan');
+  await ready(page);
+  const waiting = page.locator('.plan-verdict .status.wait');
+  expect(await waiting.count()).toBeGreaterThan(0);
+  for (const pill of await waiting.all()) {
+    await expect(pill.locator('svg')).toHaveCount(1);
+    expect(await pill.evaluate((node) => getComputedStyle(node, '::before').content)).toBe('none');
+  }
+  const shapes = await page.evaluate(() => {
+    const samples = ['', 'wait', 'green', 'amber', 'red'].map((tone) => {
+      const pill = document.createElement('span');
+      pill.className = `status ${tone}`;
+      pill.textContent = 'Idle';
+      document.querySelector('main')!.append(pill);
+      const content = getComputedStyle(pill, '::before').content;
+      // Coloured pills that supply an SVG must also keep just their own icon.
+      pill.append(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+      const withIcon = getComputedStyle(pill, '::before').content;
+      pill.remove();
+      return { tone, content, withIcon };
+    });
+    return samples;
+  });
+  for (const { tone, content, withIcon } of shapes) {
+    expect(content).toBe(['green', 'amber', 'red'].includes(tone) ? '""' : 'none');
+    expect(withIcon).toBe('none');
+  }
+});
+
+const typographyKinds = new Set(['small-text', 'unsupported-font-weight']);
+for (const route of ['plan', 'activity', 'usage']) {
+  test(`${route} visible text uses at least 12px and weights 400/600`, async ({ page }) => {
+    await page.goto(`/?demo=true#/${route}`);
+    await ready(page);
+    expect((await checkLayout(page)).filter(({ kind }) => typographyKinds.has(kind))).toEqual([]);
+  });
+}
+
+test('typography guard detects small and bold text but ignores hidden text', async ({ page }) => {
+  await page.goto('/?demo=true#/settings');
+  await ready(page);
+  await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.id = 'type-probe';
+    probe.innerHTML =
+      '<span style="font-size: 11px">Small probe</span>' +
+      '<span style="font-weight: 700">Bold probe</span>' +
+      '<span hidden style="font-size: 10px; font-weight: 700">Hidden probe</span>';
+    document.querySelector('main')!.append(probe);
+  });
+  expect((await checkLayout(page)).filter(({ kind }) => typographyKinds.has(kind))).toEqual([
+    { kind: 'small-text', identity: 'span: Small probe', fontSize: 11 },
+    { kind: 'unsupported-font-weight', identity: 'span: Bold probe', fontWeight: '700' },
+  ]);
+  await page.locator('#type-probe').evaluate((node) => node.remove());
+  expect((await checkLayout(page)).filter(({ kind }) => typographyKinds.has(kind))).toEqual([]);
+});
+
 for (const more of [false, true]) {
   test(`gallery compat has no axe violations, contrast-more=${more}`, async ({ page }) => {
     await page.emulateMedia({ contrast: more ? 'more' : 'no-preference' });
@@ -78,11 +157,11 @@ test('theme and table density persist, system follows the OS, forms keep their h
   await page.goto('/?demo=true#/settings');
   await ready(page);
   for (const value of ['dark', 'light']) {
-    await page.locator('#theme').selectOption(value);
+    await page.getByRole('combobox', { name: /^(Theme|主题)$/ }).selectOption(value);
     await expect(page.locator('html')).toHaveAttribute('data-theme', value);
     await page.reload();
     await ready(page);
-    await expect(page.locator('#theme')).toHaveValue(value);
+    await expect(page.getByRole('combobox', { name: /^(Theme|主题)$/ })).toHaveValue(value);
     await expect(page.locator(`meta[name="theme-color"][data-theme="${value}"]`)).toHaveAttribute(
       'media',
       'all',
@@ -90,14 +169,16 @@ test('theme and table density persist, system follows the OS, forms keep their h
     await expect(page.locator('html')).toHaveAttribute('data-theme', value);
   }
   const formHeight = await page
-    .locator('#theme')
+    .getByRole('combobox', { name: /^(Theme|主题)$/ })
     .evaluate((node) => node.getBoundingClientRect().height);
-  await page.locator('#density').selectOption('compact');
+  await page.getByRole('combobox', { name: /^(Table density|表格密度)$/ }).selectOption('compact');
   await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
-  expect(await page.locator('#theme').evaluate((node) => node.getBoundingClientRect().height)).toBe(
-    formHeight,
-  );
-  await page.locator('#theme').selectOption('system');
+  expect(
+    await page
+      .getByRole('combobox', { name: /^(Theme|主题)$/ })
+      .evaluate((node) => node.getBoundingClientRect().height),
+  ).toBe(formHeight);
+  await page.getByRole('combobox', { name: /^(Theme|主题)$/ }).selectOption('system');
   await expect(page.locator('html')).not.toHaveAttribute('data-theme');
   await page.emulateMedia({ colorScheme: 'light' });
   const light = await computedColors(page);
@@ -109,8 +190,10 @@ test('theme and table density persist, system follows the OS, forms keep their h
   expect(await computedColors(page)).not.toEqual(light);
   await page.reload();
   await ready(page);
-  await expect(page.locator('#density')).toHaveValue('compact');
-  await expect(page.locator('#theme')).toHaveValue('system');
+  await expect(page.getByRole('combobox', { name: /^(Table density|表格密度)$/ })).toHaveValue(
+    'compact',
+  );
+  await expect(page.getByRole('combobox', { name: /^(Theme|主题)$/ })).toHaveValue('system');
 });
 
 test('table row boxes include hairlines: density, compact class and coarse pointers', async ({

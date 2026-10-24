@@ -3,6 +3,8 @@ export interface DomFinding {
     | 'horizontal-overflow'
     | 'empty-plugin-slot'
     | 'duplicate-heading'
+    | 'small-text'
+    | 'unsupported-font-weight'
     | 'small-touch-target'
     | 'cell-overflow';
   identity: string;
@@ -10,6 +12,8 @@ export interface DomFinding {
   height?: number;
   scrollHeight?: number;
   viewportWidth?: number;
+  fontSize?: number;
+  fontWeight?: string;
 }
 
 /** Keep measurements in the report, not in the regression identity. */

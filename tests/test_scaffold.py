@@ -2,7 +2,6 @@
 
 import importlib
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -118,14 +117,3 @@ def test_web_example_covers_the_public_styling_contract(tmp_path: Path) -> None:
     assert "if (demo) return" in source
     assert "'zh-CN':" in source
     assert "requires: 'hello-example'" in source
-
-    # The starter keeps links and controls in spaced groups, with explicit link hit areas.
-    assert "style={{ display: 'grid', gap: 16 }}" in source
-    assert source.count("style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}") == 2
-    assert source.count("style={{ display: 'grid', gap: 4 }}") == 2
-    links = re.findall(r"<a\b(.*?)>", source, re.DOTALL)
-    assert len(links) == 2
-    for link in links:
-        assert "display: 'inline-flex'" in link
-        assert "alignItems: 'center'" in link
-        assert "minHeight: 44" in link

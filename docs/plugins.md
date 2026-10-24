@@ -1196,8 +1196,10 @@ are private primitives: components and plugins should not read them directly.
 `web/src/theme/compat.css` keeps these classes: `panel`, `panel-header`, `panel-note`,
 `button`, `primary-button`, `secondary-button`, `primary` (with `button`), `form-error`,
 `num`, `spin`, `status green|amber|red`, `table-wrap`, `table`, `compact`, `sub`, `muted`,
-`red-text`, `red`, `amber`, `link`, and `banner amber`. Dot-less status pills gain a CSS
-mask shape without an extra DOM node. A `panel` still owns its heading and padding.
+`red-text`, `red`, `amber`, `link`, and `banner amber`. The `status green|amber|red`
+pills gain a CSS mask only when they contain neither an `<i>` nor an `<svg>` icon.
+Uncoloured and `.wait` pills gain no shape; an existing icon keeps its meaning. A `panel`
+still owns its heading and padding.
 Each host slot is a bare `div.plugin-slot`; empty slots are hidden and have no host
 heading, border or padding. A plugin returning its own `Panel` gets exactly one heading.
 
@@ -1214,8 +1216,12 @@ The final row keeps a transparent 1 px bottom border for consistent collapsed ro
 in Chromium and WebKit. Table cells inherit the 13 px default but preserve font sizes set
 by cell classes, including the `.mono` family and 12 px size; `.num` remains tabular inside
 tables. Page and plugin cell-padding rules take precedence over the shared two-line rule.
-Padding sets the text-row size, so longer content and stacked cells grow instead of clipping. Touch controls are at
-least 44 px. The basic
+Padding sets the text-row size, so longer content and stacked cells grow instead of clipping.
+Under `@media (pointer: coarse)`, `button`, `input:not([type='checkbox'])`, `select`,
+`.button`, `.primary-button`, `.secondary-button`, `.link` and `.switch` receive
+`min-height: 44px !important` and `min-width: 44px !important`. These minimums override
+ordinary plugin CSS and inline styles, including compact toolbars and `.link` controls
+within text; allow room for them in plugin layouts. The basic
 button reset still has no border/background/padding; the documented control classes
 supply these. Links now have an underline by default, including ordinary `<a>` elements.
 
@@ -1235,7 +1241,9 @@ an empty-overview fixture and a page-only fixture. The test-only build flag
 使用独立 Vite 配置构建的运行时插件包不会经过该检查，生产构建也不提示。
 新代码应采用语义变量；`--p-*` 是内部实现。
 插槽使用无标题、无边框、无内边距的 `div.plugin-slot`，空插槽隐藏，插件的 Panel
-自行提供标题。根元素的 `data-theme="light|dark"` 强制主题，缺省跟随系统。
+自行提供标题。`status green|amber|red` 仅在没有 `<i>` 或 `<svg>` 图标时添加 CSS
+掩码形状；无颜色及 `.wait` 标签不添加形状，已有图标保留原意。
+根元素的 `data-theme="light|dark"` 强制主题，缺省跟随系统。
 兼容 CSS 覆盖旧版 WebKit、增强对比度和强制颜色模式。中文与英文的单行高度相同，
 不合成字重、不增加字距，说明文字行高为 1.7；不下载字体。
 控件默认 32 像素；紧凑模式只把表格行和控件改为 32/28 像素，表单不受影响，
@@ -1245,7 +1253,11 @@ an empty-overview fixture and a page-only fixture. The test-only build flag
 使 Chromium 和 WebKit 的折叠行高一致。单元格继承 13 像素默认字号，但保留单元格类指定的
 字号，包括 `.mono` 的字体及 12 像素字号；表格中的 `.num` 仍使用等宽数字；
 页面及插件的单元格内边距优先于通用双行规则。以内边距确定文字行高；更长的内容和
-堆叠单元格会自然增高，不裁剪内容。触屏控件至少 44 像素。
+堆叠单元格会自然增高，不裁剪内容。在 `@media (pointer: coarse)` 下，`button`、
+`input:not([type='checkbox'])`、`select`、`.button`、`.primary-button`、`.secondary-button`、
+`.link` 和 `.switch` 强制使用 `min-height: 44px !important` 与
+`min-width: 44px !important`。这些最小尺寸优先于插件的普通 CSS 及内联样式，
+包括紧凑工具栏和文字内的 `.link` 控件；插件布局应预留空间。
 基础 button reset 不变，尺寸由控件类提供。
 `plugin new --web` 生成的双语示例覆盖所有组件、公共类和插槽，横幅可显示或隐藏。
 UI 测试构建会启用示例模式插槽并移除示例插件的服务端依赖；正式构建不启用该标志。

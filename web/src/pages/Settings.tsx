@@ -219,9 +219,9 @@ function AppearanceSettings() {
   return (
     <Panel title={t('settings.appearance')}>
       <div className="setting-row">
-        <label htmlFor="theme">{t('settings.theme')}</label>
+        <label htmlFor="appearance-theme">{t('settings.theme')}</label>
         <select
-          id="theme"
+          id="appearance-theme"
           value={theme}
           onChange={(event) => {
             const value = event.target.value as Theme;
@@ -237,9 +237,9 @@ function AppearanceSettings() {
         </select>
       </div>
       <div className="setting-row">
-        <label htmlFor="density">{t('settings.density')}</label>
+        <label htmlFor="appearance-density">{t('settings.density')}</label>
         <select
-          id="density"
+          id="appearance-density"
           value={density}
           onChange={(event) => {
             const value = event.target.value as Density;
