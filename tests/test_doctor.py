@@ -212,7 +212,7 @@ async def test_reports_the_current_step_before_ssh_completes(monkeypatch, connec
 )
 async def test_ssh_failure_has_specific_safe_repair_guidance(monkeypatch, connected, error, hint):
     async def run(*args):
-        raise ssh.SSHError(error + " private-secret-example")
+        raise ssh.SSHError(error + " private-secret-example", returncode=255)
 
     monkeypatch.setattr(ssh, "run", run)
     result = await doctor.source_checks(source())

@@ -10,9 +10,34 @@ from typing import Any
 
 import pytest
 
+from computedeck import store as store_module
 from computedeck.store import SCHEMA_VERSION, DatabaseVersionError, Store, now
 
 AddSource = Callable[..., dict[str, Any]]
+
+
+def test_dashboard_does_not_validate_collector_lifecycle_rows(
+    monkeypatch: pytest.MonkeyPatch, store: Store, add_source: AddSource
+) -> None:
+    source = add_source()
+    ended = {"id": "cluster-a:1", "end": now(), "observed_at": now()}
+    store.save_snapshot(
+        source["id"], {"jobs": [], "lifecycle_pending": [], "lifecycle_ended": [ended]}
+    )
+    # Partial inventory updates must retain the collector's reconciliation state.
+    store.save_snapshot(source["id"], {"nodes": []})
+    validated = []
+    validate = store_module.validate_row
+
+    def track(row: dict[str, Any]) -> None:
+        validated.append(row)
+        validate(row)
+
+    monkeypatch.setattr(store_module, "validate_row", track)
+    assert store.dashboard()["jobs"] == []
+    assert ended not in validated
+    assert store.snapshot(source["id"])["lifecycle_ended"] == [ended]
+    assert ended in validated
 
 
 def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None:
@@ -658,3 +683,40 @@ def test_retained_nodes_do_not_override_collection_state(
         {**source, "last_success": None, "capabilities": [], "cluster_state": "unknown"}
     )
     assert store.dashboard()["sources"][0]["cluster_state"] == "unknown"
+
+
+def test_attention_state_upgrades_version_two_idempotently_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.sqlite"
+    old = Store(path)
+    old.db.execute("DROP TABLE attention_state")
+    old.db.close()
+    readonly = Store(path, readonly=True)
+    assert readonly.attention_state() == {}
+    readonly.db.close()
+    data = {"fingerprint": "cause", "acknowledged_at": now(), "snooze_until": None}
+    upgraded = Store(path)
+    upgraded.set_attention_state("source_failed:cluster-a", data)
+    upgraded.db.close()
+    reopened = Store(path)
+    assert reopened.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone() == (
+        "2",
+    )
+    assert reopened.attention_state() == {"source_failed:cluster-a": data}
+    readonly = Store(path, readonly=True)
+    assert readonly.attention_state() == reopened.attention_state()
+    readonly.db.close()
+    reopened.delete_attention_state(["source_failed:cluster-a"])
+    assert reopened.attention_state() == {}
+    reopened.db.close()
+
+
+def test_unreadable_attention_state_is_skipped(store: Store) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO attention_state VALUES ('broken', 'not JSON')")
+    store.set_attention_state(
+        "bad-time", {"fingerprint": "x", "acknowledged_at": now(), "snooze_until": "no time"}
+    )
+    assert store.attention_state() == {}
+    assert store.unreadable_rows()["attention_state"] == 2

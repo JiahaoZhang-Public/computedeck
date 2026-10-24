@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from computedeck import app as api
-from computedeck import cli, credentials, drivers
+from computedeck import cli, credentials, drivers, sdk
 from computedeck import plugins as plugin_host
 from computedeck.drivers.base import Batch, SourceError
 from computedeck.plugins import Plugin, PluginContext, Runtime
@@ -513,3 +513,95 @@ async def test_an_event_handler_that_works_again_is_no_longer_reported(
         await asyncio.sleep(0.01)
     assert runtime.loop_errors == {}
     task.cancel()
+
+
+@pytest.mark.parametrize(
+    "subscription",
+    [
+        None,
+        ["job.failed", "job.ended"],
+        list(sdk.EVENT_TYPES),
+        ["job.finished"],
+        ["job.finished", "job.failed", "job.ended"],
+    ],
+)
+async def test_finished_delivery_preserves_api1_and_named_opt_in(
+    store: Store, tmp_path: Path, subscription: list[str] | None
+) -> None:
+    from computedeck.events import FAILURE_OUTCOMES, OUTCOMES
+
+    runtime = plugin_host.Runtime(tmp_path)
+    runtime.store = store
+    context = plugin_host.PluginContext(plugin_host.Plugin("watcher", lambda ctx: None), runtime)
+    seen: list[dict[str, Any]] = []
+    received = asyncio.Event()
+
+    async def handle(event: dict[str, Any]) -> None:
+        seen.append(event)
+        if len(seen) == len(OUTCOMES):
+            received.set()
+
+    context.on_event(handle, subscription)
+    store.set_plugin_cursor("watcher", 0)
+    store.add_events(
+        [
+            {"key": outcome, "type": "job.finished", "data": {"outcome": outcome}}
+            for outcome in OUTCOMES
+        ]
+    )
+    task = asyncio.create_task(plugin_host.deliver(context, poll=0.01))
+    try:
+        await asyncio.wait_for(received.wait(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    expected = [
+        "job.finished"
+        if subscription and "job.finished" in subscription
+        else "job.failed"
+        if outcome in FAILURE_OUTCOMES
+        else "job.ended"
+        for outcome in OUTCOMES
+    ]
+    assert [event["type"] for event in seen] == expected
+    assert len({event["id"] for event in seen}) == len(OUTCOMES)
+    # The cursor prevents replay on restart.
+    task = asyncio.create_task(plugin_host.deliver(context, poll=0.001))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert len(seen) == len(OUTCOMES)
+
+
+def test_new_event_types_require_named_handlers() -> None:
+    from computedeck.events import for_handler
+
+    event = {"type": "source.gap", "data": {}}
+    assert for_handler(event, None) is None
+    assert for_handler(event, frozenset(["source.gap"])) == event
+    assert for_handler({"type": "change.source", "data": {}}, frozenset(["change.source"])) is None
+
+
+@pytest.mark.parametrize("field", ["array_id", "array_index"])
+def test_job_array_fields_follow_the_optional_text_contract(field: str) -> None:
+    row = {"id": "cluster-a:123_1", "source_id": "cluster-a-alice", "state": "RUNNING"}
+    Batch(jobs=[row]).validate_rows()
+    assert row.get(field) is None  # Older and third-party rows stay ungrouped.
+    row[field] = None
+    Batch(jobs=[row]).validate_rows()
+    row[field] = "123"
+    Batch(jobs=[row]).validate_rows()
+    row[field] = ["123"]
+    with pytest.raises(ValueError, match=f"Invalid collection text: {field}"):
+        Batch(jobs=[row]).validate_rows()
+
+
+@pytest.mark.parametrize("field", ["exit_status", "exit_signal"])
+@pytest.mark.parametrize("value", [True, -1, 1.5, "9"])
+def test_exit_fields_require_nonnegative_integers(field, value) -> None:
+    from computedeck.drivers.base import validate_row
+
+    with pytest.raises(ValueError, match=field):
+        validate_row({"id": "cluster-a:1001", field: value})
+    for valid in (None, 0, 9, 127):
+        validate_row({"id": "cluster-a:1001", field: valid})

@@ -26,6 +26,7 @@ from .base import (
     DriverInfo,
     SourceError,
     cluster_state,
+    integer,
     message,
     now,
     options,
@@ -423,6 +424,7 @@ def _failure(pod: dict[str, Any]) -> dict[str, Any] | None:
             "state": failed_state(status),
             "end": max(ends),
             "exit_code": _exit_code(latest),
+            "exit_signal": integer(latest.get("signal")),
             "reason": _text(status.get("reason"))
             or _disruption(status)
             or _text(latest.get("reason")),
@@ -434,6 +436,7 @@ def _failure(pod: dict[str, Any]) -> dict[str, Any] | None:
         "state": "OUT_OF_MEMORY" if latest.get("reason") == "OOMKilled" else "FAILED",
         "end": last_end,
         "exit_code": _exit_code(latest),
+        "exit_signal": integer(latest.get("signal")),
         "reason": _text(latest.get("reason")),
         "started": _time(latest.get("startedAt")),
     }
@@ -458,15 +461,58 @@ def parse_failures(
         if job is None:
             continue
         started = failure["started"]
+        deadline = integer(_dict(pod.get("spec")).get("activeDeadlineSeconds"))
         job.update(
+            time_limit=elapsed(deadline) if deadline is not None else None,
             state=failure["state"],
             reason=failure["reason"],
             elapsed=elapsed((failure["end"] - started).total_seconds()) if started else "",
             end=failure["end"].isoformat(),
+            ended_at=failure["end"].isoformat(),
+            exit_status=integer(failure["exit_code"]),
+            exit_signal=failure["exit_signal"],
             exit_code=None if failure["exit_code"] is None else str(failure["exit_code"]),
         )
         failures[job["id"]] = job
     return sorted(failures.values(), key=lambda job: job["end"], reverse=True)
+
+
+def parse_finished(
+    pods: list[dict[str, Any]],
+    source: dict[str, Any],
+    labels_by_node: dict[str, dict[str, Any]],
+    at: datetime,
+) -> list[dict[str, Any]]:
+    terminal = [
+        pod for pod in pods if _dict(pod.get("status")).get("phase") in {"Succeeded", "Failed"}
+    ]
+    rows = parse_failures(
+        [pod for pod in terminal if _dict(pod.get("status")).get("phase") == "Failed"],
+        source,
+        labels_by_node,
+        at,
+    )
+    for pod in terminal:
+        status = _dict(pod.get("status"))
+        if pod_gpus(_dict(pod.get("spec"))) == 0:
+            continue
+        if status.get("phase") == "Failed":
+            if (
+                _failure(pod) is None
+                and (job := _record(pod, source, labels_by_node, now())) is not None
+            ):
+                job.update(state=failed_state(status), end=None, exit_code=None)
+                rows.append(job)
+            continue
+        ends = [end for item in _terminations(status) if (end := _time(item.get("finishedAt")))]
+        end = max(ends, default=None)
+        if end is not None and end < at - HISTORY:
+            continue
+        job = _record(pod, source, labels_by_node, now())
+        if job is not None:
+            job.update(state="COMPLETED", end=end.isoformat() if end else None, exit_code="0")
+            rows.append(job)
+    return rows
 
 
 def node_state(node: dict[str, Any], gpu_count: int | None, gpu_allocated: int | None) -> str:
@@ -864,6 +910,7 @@ class KubernetesDriver:
         except SourceError as error:
             batch.warnings.append(_warning("qos_unavailable", error))
         batch.failures = parse_failures(pods, source, labels_by_node, at)
+        batch.finished = parse_finished(pods, source, labels_by_node, at)
         batch.capabilities.append("history")
         batch.cluster_state = cluster_state(batch.nodes)
         for entry in batch.qos or []:

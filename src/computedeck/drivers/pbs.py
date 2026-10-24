@@ -51,7 +51,7 @@ _JOBS_SCRIPT = (
 # finished jobs (-H: states F and M, history included) last modified in the past 24 hours.
 # qselect -t takes [[CC]YY]MMDDhhmm in the server's local time, hence date(1) on the remote.
 _HISTORY_SCRIPT = (
-    "set -f; now=$(date +%Y-%m-%dT%H:%M:%S) && "
+    "set -f; now=$(date +%Y-%m-%dT%H:%M:%S%z) && "
     'since=$(date -d "24 hours ago" +%Y%m%d%H%M) || exit 1; '
     'echo "$now"; qstat -B -f -F json || exit 1; '
     'ids=$(qselect -H -u "$1" -tm.gt."$since") || exit 1; '
@@ -277,8 +277,17 @@ def _job(job_id: str, job: dict[str, Any], state: str, source: dict[str, Any]) -
     resources = _mapping(job.get("Resource_List"))
     queue = str(job.get("queue") or "")
     key = f"{source['cluster_id']}:{_short_id(job_id)}"
+    array = re.fullmatch(r"(\d+)\[(\d+)\]", _short_id(job_id))
+    array_id = f"{array[1]}[]" if array else None
+    array_index = array[2] if array else None
+    parent = _short_id(str(job.get("array_id") or ""))
+    index = integer(job.get("array_index"))
+    if re.fullmatch(r"\d+\[\]", parent) and index is not None:
+        array_id, array_index = parent, str(index)
     return {
         "id": key,
+        "array_id": array_id,
+        "array_index": array_index,
         "source_id": source["id"],
         "cluster_id": source["cluster_id"],
         "name": str(job.get("Job_Name") or ""),
@@ -477,7 +486,9 @@ def _exit_status(value: Any) -> int | None:
         return None
 
 
-def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_failures(
+    output: str, source: dict[str, Any], *, terminal: bool = False
+) -> list[dict[str, Any]]:
     """Finished jobs with a non-zero exit status that ended in the last 24 hours."""
     clock, _, rest = output.partition("\n")
     try:
@@ -503,14 +514,37 @@ def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             code = _exit_status(job.get("Exit_status"))
             end = pbs_time(job.get("obittime"))
-            if not code or end is None or end < since:
+            if end is not None:
+                end = end.replace(tzinfo=remote_now.tzinfo)
+            if code is None or (code == 0 and not terminal) or end is None or end < since:
                 continue
             # Substate 91 (TERMINATED) is a job deleted with qdel; walltime and memory
             # kills keep their own exit codes and still count.
-            if _exit_status(job.get("substate")) == 91 and code not in EXIT_STATES:
+            cancelled = _exit_status(job.get("substate")) == 91 and code not in EXIT_STATES
+            if cancelled and not terminal:
                 continue
-            row = _job(job_id, job, EXIT_STATES.get(code, "FAILED"), source)
-            row.update(end=end.isoformat(), exit_code=str(code), observed_at=observed_at)
+            state = (
+                "CANCELLED"
+                if cancelled
+                else "COMPLETED"
+                if code == 0
+                else EXIT_STATES.get(code, "FAILED")
+            )
+            row = _job(job_id, job, state, source)
+            row.update(
+                end=(end if terminal else end.replace(tzinfo=None)).isoformat(),
+                ended_at=end.isoformat() if end.tzinfo else None,
+                time_limit=_mapping(job.get("Resource_List")).get("walltime") or None,
+                log_path=job.get("Output_Path") or None,
+                exit_code=str(code),
+                exit_status=code if 0 <= code <= 256 else None,
+                exit_signal=code - 256 if code > 256 else None,
+                observed_at=observed_at,
+            )
+            if terminal:
+                for field in ("submitted_at", "started_at"):
+                    if stamp := pbs_time(row.get(field)):
+                        row[field] = stamp.replace(tzinfo=remote_now.tzinfo).isoformat()
             failures[row["id"]] = row
     return sorted(failures.values(), key=lambda job: job["end"], reverse=True)
 
@@ -600,7 +634,7 @@ class PbsDriver:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
             raise SourceError("ssh_timeout") from None
-        batch = Batch(jobs=jobs, capabilities=["jobs"])
+        batch = Batch(jobs=jobs, capabilities=["jobs"], history_window_seconds=86400)
         if _unknown_gpus(jobs, "gpu_count"):
             batch.warnings.append(message("gpu_count_unknown", command="qstat"))
         qos = {
@@ -628,6 +662,7 @@ class PbsDriver:
         try:
             history = await ssh.run(alias, _script(_HISTORY_SCRIPT, username), options)
             batch.failures = parse_failures(history, source)
+            batch.finished = parse_failures(history, source, terminal=True)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

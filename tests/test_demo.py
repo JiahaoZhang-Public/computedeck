@@ -14,6 +14,15 @@ from computedeck.store import gpu_allocation, manual_state
 from computedeck.summary import RUNNING, fresh
 
 
+def test_demo_mutes_only_the_named_cluster_and_machine() -> None:
+    items = dashboard()["attention"]
+    assert {item["key"]: item["muted"]["state"] for item in items if item["muted"]} == {
+        "cluster_unavailable:example:cluster-d-alice": "acknowledged",
+        "instance_ssh_failed:example:runpod:demo-pod": "snoozed",
+    }
+    assert all(item["mutable"] for item in items if item["muted"])
+
+
 def test_demo_has_verified_planner_choices() -> None:
     data = dashboard()
     clusters = [source for source in data["sources"] if source["driver"] == "slurm"]
@@ -41,7 +50,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     data = dashboard()
     assert data["summary"]["unmonitored"] == 1
     assert data["summary"]["allocated"] is None
-    assert data["summary"]["known_allocated"] == 21
+    assert data["summary"]["known_allocated"] == 25
     assert {row["subject"]["name"] for row in data["summary"]["unmeasured"]} == {
         "build-box",
         "Cluster A · carol",
@@ -134,7 +143,11 @@ def test_demo_scenario_has_failures_staleness_and_a_capability_gap() -> None:
     assert gap["warnings"][0]["code"] == "history_unavailable"
     assert gap["id"] not in data["failure_history_sources"]
     assert not any(item["subject"]["id"] == gap["id"] for item in data["attention"])
-    assert {failure["state"] for failure in data["recent_failures"]} == {"OUT_OF_MEMORY", "TIMEOUT"}
+    assert {failure["state"] for failure in data["recent_failures"]} == {
+        "OUT_OF_MEMORY",
+        "TIMEOUT",
+        "FAILED",
+    }
     assert all(failure["end"] and failure["exit_code"] for failure in data["recent_failures"])
 
 
@@ -155,9 +168,24 @@ def test_demo_ids_are_isolated_and_references_resolve() -> None:
     assert all(identifier.startswith("example:") for identifier in machines)
     assert all(not source["node"] or source["node"] in machines for source in data["sources"])
     rows = events()
-    assert all(row["key"].startswith("example:") and row["source_id"] in sources for row in rows)
+    assert all(row["key"].startswith("example:") for row in rows)
+    for row in rows:
+        if row["type"] in {"service.gap", "change.instance", "change.tool"}:
+            assert row["source_id"] is None
+            assert "source_name" not in row["data"]
+        else:
+            assert row["source_id"] in sources
     assert [row["at"] for row in rows] == sorted((row["at"] for row in rows), reverse=True)
-    assert {row["data"]["job"]["state"] for row in rows if row["type"] == "job.failed"} == {
+    [started] = [row for row in rows if row["type"] == "job.started"]
+    assert started["at"] == started["data"]["started_at"] == started["data"]["job"]["started_at"]
+    assert datetime.fromisoformat(started["data"]["observed_at"]) - datetime.fromisoformat(
+        started["at"]
+    ) == timedelta(minutes=5)
+    assert {
+        row["data"]["job"]["state"]
+        for row in rows
+        if row["type"] == "job.finished" and row["data"]["outcome"] in {"timeout", "out_of_memory"}
+    } == {
         "OUT_OF_MEMORY",
         "TIMEOUT",
     }
@@ -242,15 +270,15 @@ def test_demo_source_failure_events_match_current_outages_or_recoveries() -> Non
 
 
 @pytest.mark.parametrize("timezone", ["UTC0", "UTC-4", "UTC+7"])
-def test_demo_failed_job_local_end_times_match_events(timezone: str) -> None:
+def test_demo_finished_job_offset_times_match_events(timezone: str) -> None:
     try:
         with pytest.MonkeyPatch.context() as patch:
             patch.setenv("TZ", timezone)
             time.tzset()
             for event in events():
-                if event["type"] == "job.failed":
+                if event["type"] == "job.finished" and event["data"]["outcome"] != "unknown":
                     end = datetime.fromisoformat(event["data"]["job"]["end"])
-                    assert end.tzinfo is None
+                    assert end.tzinfo is not None
                     assert (
                         abs(end.timestamp() - datetime.fromisoformat(event["at"]).timestamp()) < 1
                     )
@@ -334,3 +362,130 @@ def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) ->
         gaps += sum(point["at"] >= i["added_at"] for i in unprobed)
         assert point["unknown_allocation_sources"] == gaps
         assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])
+
+
+def test_demo_shows_completed_and_unavailable_outcomes() -> None:
+    rows = [row for row in events() if row["type"] == "job.finished"]
+    assert {row["data"]["outcome"] for row in rows} == {
+        "completed",
+        "timeout",
+        "out_of_memory",
+        "unknown",
+        "failed",
+    }
+    unknown = next(row for row in rows if row["data"]["outcome"] == "unknown")
+    source = next(
+        source for source in dashboard()["sources"] if source["id"] == unknown["source_id"]
+    )
+    assert "history" not in source["capabilities"]
+    assert unknown["data"]["ended_at"] is None
+    assert unknown["source_id"] == "example:cluster-a-bob"
+    assert unknown["at"] == unknown["data"]["observed_at"]
+    completed = next(row for row in rows if row["data"]["outcome"] == "completed")
+    source = next(
+        source for source in dashboard()["sources"] if source["id"] == completed["source_id"]
+    )
+    assert "history" in source["capabilities"]
+    assert completed["data"]["job"]["source_id"] == source["id"]
+    assert completed["data"]["job"]["user"] == source["username"]
+    assert completed["data"]["job"]["id"].startswith(source["cluster_id"] + ":")
+    for row in rows:
+        if row["data"]["ended_at"]:
+            assert row["at"] == row["data"]["ended_at"] < row["data"]["observed_at"]
+
+
+def test_demo_array_has_mixed_states_and_element_counts() -> None:
+    data = dashboard()
+    elements = [job for job in data["jobs"] if job.get("array_id") == "48300"]
+    assert len(elements) == 30
+    assert {job["array_index"] for job in elements} == {str(i) for i in range(1, 31)}
+    assert Counter(job["state"] for job in elements) == {
+        "RUNNING": 4,
+        "PENDING": 25,
+        "SUSPENDED": 1,
+    }
+    assert {job["id"] for job in elements} <= set(data["summary"]["jobs"]["listed_ids"])
+    assert len(data["summary"]["jobs"]["running_ids"]) >= 4
+    assert len(data["summary"]["jobs"]["pending_ids"]) >= 25
+
+
+def test_demo_failure_details_include_normalized_exits_and_known_limits() -> None:
+    from computedeck.demo import events
+
+    failures = dashboard()["recent_failures"]
+    assert all(row["ended_at"] and isinstance(row["exit_signal"], int) for row in failures)
+    timeout = next(row for row in failures if row["state"] == "TIMEOUT")
+    assert timeout["time_limit"] == timeout["elapsed"]
+    assert timeout["log_path"]
+    assert any(row["data"].get("job", {}).get("exit_signal") == 9 for row in events())
+    unknown = next(row["data"] for row in events() if row["data"].get("outcome") == "unknown")
+    assert datetime.fromisoformat(unknown["job"]["observed_at"]) < datetime.fromisoformat(
+        unknown["observed_at"]
+    )
+
+
+def test_demo_shows_source_and_service_gaps() -> None:
+    rows = events()
+    [source] = [row for row in rows if row["type"] == "source.gap"]
+    [service] = [row for row in rows if row["type"] == "service.gap"]
+    data = source["data"]
+    assert data["unobserved_from"] < data["failures_checked_from"] < data["unobserved_to"]
+    assert data["unobserved_to"] == source["at"]
+    assert any(
+        row["type"] == "source.recovered"
+        and row["source_id"] == source["source_id"]
+        and row["at"] == source["at"]
+        for row in rows
+    )
+    assert service["data"]["from"] < service["data"]["to"] == service["at"]
+    assert service["source_id"] is None
+    for row in rows:
+        observed = row["data"].get("observed_at", row["at"])
+        assert not service["data"]["from"] < observed < service["data"]["to"]
+        if row["source_id"] == source["source_id"]:
+            assert not data["unobserved_from"] < observed < data["unobserved_to"]
+
+
+def test_demo_changes_match_existing_subjects_and_contain_no_setting_values() -> None:
+    data = dashboard()
+    rows = [row for row in events() if row["type"].startswith("change.")]
+    assert len(rows) == 3
+    for row in rows:
+        assert set(row["data"]) == {"subject_id", "name", "action", "fields"}
+        if row["type"] == "change.tool":
+            from computedeck.tools.notify import plugin
+
+            assert row["data"] == {
+                "subject_id": plugin.id,
+                "name": plugin.name["en"],
+                "action": "on",
+                "fields": [],
+            }
+            continue
+        subjects = data["sources"] if row["type"] == "change.source" else data["instances"]
+        subject = next(item for item in subjects if item["id"] == row["data"]["subject_id"])
+        assert subject["name"] == row["data"]["name"]
+        if row["type"] == "change.source":
+            assert row["data"]["action"] == "edited"
+            assert row["data"]["fields"] == ["interval_minutes"]
+            assert row["source_id"] == subject["id"]
+            assert subject["enabled"] is True
+            assert not any(
+                event["type"] == "source.gap" and event["source_id"] == subject["id"]
+                for event in events()
+            )
+        else:
+            assert row["data"]["action"] == "added"
+            assert row["data"]["fields"] == ["external_id", "host", "name", "platform"]
+
+
+def test_array_failure_history_matches_activity_and_coverage() -> None:
+    data = dashboard()
+    failed = {row["id"]: row for row in data["recent_failures"]}
+    array_events = [row for row in events() if row["data"].get("job", {}).get("array_id")]
+    assert len(array_events) == 60
+    for event in array_events:
+        job = failed[event["data"]["job"]["id"]]
+        assert job["source_id"] in data["failure_history_sources"]
+        assert job["state"] == event["data"]["state"] == "FAILED"
+        assert job["end"] == event["data"]["ended_at"]

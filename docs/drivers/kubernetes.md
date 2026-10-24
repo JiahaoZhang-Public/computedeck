@@ -146,6 +146,9 @@ A GPU pod of the namespace counts as a failure when it finished within the last 
 | `state` | `OUT_OF_MEMORY` (a container was `OOMKilled`), `TIMEOUT` (`DeadlineExceeded`, from `activeDeadlineSeconds`), `PREEMPTED` (`DisruptionTarget` reason `PreemptionByScheduler`), `NODE_FAIL` (`DeletionByPodGC` or `NodeLost`), otherwise `FAILED`. |
 | `end` | The latest container `finishedAt`; for a pod without terminated containers, such as an evicted pod, the latest condition change. |
 | `exit_code` | The exit code of the latest non-zero termination, such as `137`. |
+| `exit_status`, `exit_signal` | The nonnegative container exit status and explicit termination signal, when present. A signal is never inferred from status 137. |
+| `ended_at` | The same offset-bearing time as `end`. |
+| `time_limit` | `spec.activeDeadlineSeconds`, formatted as `[D-][H:]MM:SS`; null when absent. No log path is collected. |
 | `reason` | The pod reason (e.g. `Evicted`), the disruption reason, or the container reason (e.g. `Error`). Termination messages are never read. |
 
 ## Errors

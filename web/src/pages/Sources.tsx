@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConnectionChecks } from '../ConnectionChecks';
 import { ArrowRight, Plus, RefreshCw } from 'lucide-react';
 import type { DriverInfo, Source } from '../types';
@@ -54,6 +54,8 @@ function GroupPanel({ group, ctx }: { group: Group; ctx: Ctx }) {
     primary?.key !== 'ssh_alias' && info.fields.some((field) => field.key === 'ssh_alias');
   return (
     <Panel
+      id={`source-group:${group.key}`}
+      className="source-group"
       title={
         <span className="with-mark">
           <GroupMark group={group} />
@@ -216,6 +218,16 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
   const { groups, data } = ctx;
   const collected = groups.filter((group) => group.sources.length);
   const manual = groups.filter((group) => !group.sources.length);
+  const selected =
+    ctx.group === 'all' ? undefined : groups.find((group) => group.key === ctx.group);
+  const targetId = selected
+    ? selected.sources.length
+      ? `source-group:${selected.key}`
+      : 'source-manual'
+    : null;
+  useEffect(() => {
+    if (targetId) document.getElementById(targetId)?.scrollIntoView({ block: 'start' });
+  }, [ctx.group, targetId]);
   if (!collected.length && !manual.length)
     return (
       <>
@@ -243,7 +255,7 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
       ))}
       <NodesPanel ctx={ctx} onChange={ctx.reload} />
       {manual.length > 0 && (
-        <Panel title={t('sources.manual')}>
+        <Panel id="source-manual" className="source-group" title={t('sources.manual')}>
           <ul className="rows">
             {manual.map((group) => (
               <li key={group.key}>

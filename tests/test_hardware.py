@@ -209,3 +209,47 @@ async def test_probe_rejects_endpoint_injection_before_ssh(
     monkeypatch.setattr(ssh, "run", run)
     with pytest.raises(ValueError):
         await hardware.probe_instance(instance)
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (ssh.SSHError("Permission denied (publickey)", returncode=255), "ssh_authentication"),
+        (ssh.SSHError("Host key verification failed", returncode=255), "ssh_host_key"),
+        (ssh.SSHError("REMOTE HOST IDENTIFICATION HAS CHANGED", returncode=255), "ssh_host_key"),
+        (ssh.SSHError("No route to host", returncode=255), "ssh_network"),
+        (ssh.SSHError("Could not resolve hostname box.test", returncode=255), "ssh_network"),
+        (ssh.SSHError("Connection refused", returncode=255), "ssh_refused"),
+        (
+            ssh.SSHError("Connection timed out during banner exchange", returncode=255),
+            "ssh_timeout",
+        ),
+        (TimeoutError(), "ssh_timeout"),
+        (
+            ssh.SSHError("kex_exchange_identification: Connection closed", returncode=255),
+            "ssh_closed",
+        ),
+        (ssh.SSHError("remote command failed", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Permission denied: /opt/probe.py", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Probe timed out", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Connection closed by probe", returncode=1), "ssh_failed"),
+        (
+            ssh.SSHError(
+                "kex_exchange_identification: read: Connection reset by peer", returncode=255
+            ),
+            "ssh_closed",
+        ),
+        (ssh.SSHError("Connection reset by peer", returncode=1), "ssh_failed"),
+        (ssh.SSHError("Connection reset by peer"), "ssh_failed"),
+        (ssh.SSHError("Permission denied"), "ssh_failed"),
+    ],
+)
+async def test_probe_classifies_connection_errors(monkeypatch, error, code) -> None:
+    async def fail(*args):
+        raise error
+
+    monkeypatch.setattr(ssh, "run", fail)
+    with pytest.raises(SourceError) as caught:
+        await hardware.probe_instance({"host": "192.0.2.10", "port": 22, "username": "root"})
+    assert caught.value.code == code
+    assert caught.value.detail == (str(error) or None)

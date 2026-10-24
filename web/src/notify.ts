@@ -18,6 +18,7 @@ export interface Rule {
   name: string;
   enabled: boolean;
   events: string[];
+  outcomes?: string[];
   clusters: string[];
   users: string[];
   name_pattern: string;
@@ -32,7 +33,11 @@ export type RuleInput = Omit<Rule, 'id'>;
 export interface Delivery {
   id: number;
   at: string;
-  status: 'sent' | 'failed' | 'suppressed' | 'dropped';
+  status: 'sent' | 'failed' | 'suppressed' | 'dropped' | 'grouped';
+  count?: number;
+  event?: number;
+  digest?: number;
+  events?: number[];
   rule?: string;
   rule_name?: string;
   channel?: string;
@@ -55,7 +60,16 @@ export interface NotifyState {
 export const EMPTY_RULE: RuleInput = {
   name: '',
   enabled: true,
-  events: ['job.failed'],
+  events: ['job.finished'],
+  outcomes: [
+    'failed',
+    'timeout',
+    'out_of_memory',
+    'node_fail',
+    'boot_fail',
+    'deadline',
+    'preempted',
+  ],
   clusters: [],
   users: [],
   name_pattern: '',

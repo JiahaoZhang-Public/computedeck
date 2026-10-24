@@ -1,10 +1,13 @@
-import type { Summary } from '../types';
+import { useId, useState } from 'react';
+import { api } from '../api';
+import type { Attention, Summary } from '../types';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { attentionText, nextAttemptText } from '../health';
 import { ArrowRight, ChevronRight, Cloud, Plus, Server, Terminal } from 'lucide-react';
-import { formatMessage, localized, t } from '../i18n';
+import { errorText, formatMessage, localized, t } from '../i18n';
 import { sortDrivers } from '../drivers';
 import {
+  groupArrays,
   jobCount,
   jobsMissing,
   listedJobs,
@@ -16,9 +19,10 @@ import {
 import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
 import { Empty, GroupMark, Meter, Panel, Stat, Status } from '../ui';
+import { ActivityTeaser } from './Activity';
 import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
-import { FailuresTable, JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
+import { JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
 import { recentlyReachable } from './util';
 import { capacityText, groupSummary, instanceCount } from './summary';
 
@@ -27,11 +31,12 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const summary = data.summary;
   // Current jobs first, then the last-known jobs of logins whose job list is not current.
   const { jobs: allJobs, stale } = listedJobs(data);
+  const jobRows = groupArrays(allJobs).slice(0, 8);
+  const visibleJobs = jobRows.flatMap((row) => ('jobs' in row ? row.jobs : [row]));
   const missingJobs = jobsMissing(data);
-  const failures = data.recent_failures ?? [];
   const setupNeeded =
     !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
-  const issues = ctx.attention.length;
+  const issues = data.attention_count ?? ctx.attention.length;
   const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
@@ -120,6 +125,8 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
               >
                 {t('overview.issues.some')}
               </a>
+            ) : ctx.attention.length ? (
+              t('attention.allMuted')
             ) : connected ? (
               t('overview.issues.none')
             ) : (
@@ -128,59 +135,38 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           }
         />
       </div>
-      <Panel
-        title={t('overview.attention')}
-        count={ctx.attention.length}
-        id="attention"
-        tabIndex={-1}
-      >
-        {ctx.attention.length ? (
+      <Panel title={t('overview.attention')} count={issues} id="attention" tabIndex={-1}>
+        {ctx.demo && ctx.attention.some((item) => item.mutable !== false) && (
+          <p className="panel-note" id="attention-demo-note">
+            {t('toast.demoReadOnly')}
+          </p>
+        )}
+        {ctx.attention.some((item) => !item.muted) ? (
           <ul className="attention">
-            {ctx.attention.map((item) => (
-              <li key={item.key}>
-                <button onClick={() => ctx.openAttention(item)}>
-                  <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
-                  <span>
-                    <strong>{attentionText(item, ctx.tools)}</strong>
-                    {item.details.map((detail, index) => (
-                      <small key={index}>{formatMessage(detail)}</small>
-                    ))}
-                    <small>
-                      {item.since
-                        ? t('attention.since', {
-                            time: dateTime(item.since),
-                            age: relativeTime(item.since),
-                          })
-                        : item.observed_at
-                          ? t(
-                              item.kind === 'instance_ssh_failed'
-                                ? 'attention.checked'
-                                : 'attention.lastSeen',
-                              {
-                                time: dateTime(item.observed_at),
-                                age: relativeTime(item.observed_at),
-                              },
-                            )
-                          : t('attention.sinceUnknown')}
-                      {item.next_attempt &&
-                        ` · ${nextAttemptText(
-                          item.next_attempt,
-                          item.subject.kind === 'source' &&
-                            (data.collecting?.includes(item.subject.id) ||
-                              data.sources.some(
-                                (source) =>
-                                  source.id === item.subject.id && source.status === 'syncing',
-                              )),
-                        )}`}
-                    </small>
-                  </span>
-                  <ChevronRight size={14} />
-                </button>
-              </li>
-            ))}
+            {ctx.attention
+              .filter((item) => !item.muted)
+              .map((item) => (
+                <AttentionRow key={item.key} item={item} ctx={ctx} />
+              ))}
           </ul>
         ) : (
-          <p className="panel-note">{t('overview.attention.none')}</p>
+          <p className="panel-note">
+            {t(ctx.attention.length ? 'attention.allMuted' : 'overview.attention.none')}
+          </p>
+        )}
+        {ctx.attention.some((item) => item.muted) && (
+          <details className="attention-muted">
+            <summary>
+              {t('attention.acknowledged', { count: ctx.attention.length - issues })}
+            </summary>
+            <ul className="attention">
+              {ctx.attention
+                .filter((item) => item.muted)
+                .map((item) => (
+                  <AttentionRow key={item.key} item={item} ctx={ctx} />
+                ))}
+            </ul>
+          </details>
         )}
       </Panel>
       <Panel
@@ -193,9 +179,10 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
         }
       >
         <JobsTable
-          jobs={allJobs.slice(0, 8)}
+          jobs={jobRows}
           groups={ctx.groups}
           onOpen={ctx.openJob}
+          onOpenArray={ctx.openArray}
           stale={stale}
           empty={
             missingJobs.length ? (
@@ -216,16 +203,12 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           <JobsMissingNote
             groups={ctx.groups}
             missing={missingJobs}
-            staleRows={allJobs.slice(0, 8).some((job) => stale.has(job.source_id))}
-            staleCount={allJobs.slice(0, 8).filter((job) => stale.has(job.source_id)).length}
+            staleRows={visibleJobs.some((job) => stale.has(job.source_id))}
+            staleCount={visibleJobs.filter((job) => stale.has(job.source_id)).length}
           />
         )}
       </Panel>
-      {failures.length > 0 && (
-        <Panel title={t('overview.failures')} count={failures.length}>
-          <FailuresTable jobs={failures.slice(0, 5)} groups={ctx.groups} onOpen={ctx.openJob} />
-        </Panel>
-      )}
+      <ActivityTeaser key={String(demo)} ctx={ctx} />
       <Panel
         title={t('overview.sources')}
         actions={
@@ -248,6 +231,126 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
         )}
       </div>
     </>
+  );
+}
+
+function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
+  const labelId = useId();
+  const [busy, setBusy] = useState(false);
+  async function update(action: 'acknowledge' | 'snooze' | 'clear', until?: '1h' | 'tomorrow') {
+    setBusy(true);
+    try {
+      await api(
+        `/attention/${encodeURIComponent(item.key)}`,
+        { action, until, ...(action === 'clear' ? {} : { fingerprint: item.fingerprint }) },
+        'PUT',
+      );
+      ctx.notify(
+        t(
+          action === 'acknowledge'
+            ? 'attention.acknowledgedToast'
+            : action === 'snooze'
+              ? 'attention.snoozedToast'
+              : 'attention.unmutedToast',
+        ),
+      );
+      document.getElementById('attention')?.focus();
+    } catch (error) {
+      ctx.notify(errorText(error, 'error.save'), 'error');
+    } finally {
+      await ctx.reload();
+      setBusy(false);
+    }
+  }
+  return (
+    <li>
+      <button className="attention-open" onClick={() => ctx.openAttention(item)}>
+        <span className={`dot ${item.severity === 'error' ? 'red' : 'amber'}`} />
+        <span>
+          <strong id={labelId}>{attentionText(item, ctx.tools)}</strong>
+          {item.details.map((detail, index) => (
+            <small key={index}>{formatMessage(detail)}</small>
+          ))}
+          <small>
+            {item.since
+              ? t('attention.since', {
+                  time: dateTime(item.since),
+                  age: relativeTime(item.since),
+                })
+              : item.observed_at
+                ? t(
+                    item.kind === 'instance_ssh_failed'
+                      ? 'attention.checked'
+                      : 'attention.lastSeen',
+                    {
+                      time: dateTime(item.observed_at),
+                      age: relativeTime(item.observed_at),
+                    },
+                  )
+                : t('attention.sinceUnknown')}
+            {item.next_attempt &&
+              ` · ${nextAttemptText(
+                item.next_attempt,
+                item.subject.kind === 'source' &&
+                  (ctx.data.collecting?.includes(item.subject.id) ||
+                    ctx.data.sources.some(
+                      (source) => source.id === item.subject.id && source.status === 'syncing',
+                    )),
+              )}`}
+          </small>
+        </span>
+        <ChevronRight size={14} />
+      </button>
+      {item.muted && (
+        <small className="attention-mute-note">
+          {item.muted.state === 'snoozed'
+            ? t('attention.snoozedUntil', { time: dateTime(item.muted.until) })
+            : t('attention.untilChanges')}
+        </small>
+      )}
+      {item.mutable !== false && (
+        <div className="attention-actions">
+          {item.muted ? (
+            <button
+              className="button small"
+              disabled={busy || ctx.demo}
+              aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
+              onClick={() => void update('clear')}
+            >
+              {t('attention.unmute')}
+            </button>
+          ) : (
+            <>
+              <button
+                className="button small"
+                disabled={busy || ctx.demo}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
+                title={t('attention.acknowledgeHint')}
+                onClick={() => void update('acknowledge')}
+              >
+                {t('attention.acknowledge')}
+              </button>
+              <button
+                className="button small"
+                disabled={busy || ctx.demo}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
+                onClick={() => void update('snooze', '1h')}
+              >
+                {t('attention.oneHour')}
+              </button>
+              <button
+                className="button small"
+                disabled={busy || ctx.demo}
+                aria-describedby={ctx.demo ? `${labelId} attention-demo-note` : labelId}
+                onClick={() => void update('snooze', 'tomorrow')}
+              >
+                {t('attention.tomorrow')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

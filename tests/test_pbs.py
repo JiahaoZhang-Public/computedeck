@@ -212,6 +212,8 @@ def test_running_job_reads_ngpus_queue_host_and_walltime() -> None:
     assert jobs == [
         {
             "id": "cluster-a:1001",
+            "array_id": None,
+            "array_index": None,
             "source_id": "cluster-a-alice",
             "cluster_id": "cluster-a",
             "name": "train-a",
@@ -543,6 +545,7 @@ async def test_collect_reads_jobs_nodes_queues_and_failures(
     monkeypatch.setattr(ssh, "run", fake_cluster(calls))
     batch = await pbs.PbsDriver().collect(SOURCE)
     assert batch.capabilities == ["jobs", "nodes", "qos_limits", "history"]
+    assert batch.history_window_seconds == 86400
     assert batch.warnings == []
     assert batch.jobs is not None and [job["id"] for job in batch.jobs] == ["cluster-a:1001"]
     assert batch.nodes is not None and len(batch.nodes) == 5
@@ -714,7 +717,7 @@ async def test_unsafe_connection_settings_are_rejected_before_ssh(
 FAKE_TOOL = """#!/bin/sh
 echo "$(basename "$0") $*" >> "$LOG"
 case "$(basename "$0") $*" in
-  "date +%Y-%m-%dT%H:%M:%S") echo 2026-01-05T12:00:00 ;;
+  "date +%Y-%m-%dT%H:%M:%S%z") echo 2026-01-05T12:00:00 ;;
   "date -d 24 hours ago +%Y%m%d%H%M") echo 202601041200 ;;
   "qselect -u alice.b") printf '%s\\n' "$QSELECT" ;;
   "qselect -H -u alice.b -tm.gt.202601041200") printf '%s\\n' "$QSELECT" ;;
@@ -779,3 +782,73 @@ def test_job_times_preserve_scheduler_local_text_and_ignore_pending_start() -> N
         qstat({"1001.pbs-server": qstat_job(job_state="Q", stime=stamp)}), SOURCE
     )
     assert pending[0]["started_at"] is None
+
+
+def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> None:
+    output = history(
+        {
+            "1101.pbs-server": finished(Exit_status=0, qtime="Mon Jan  5 08:00:00 2026"),
+            "1102.pbs-server": finished(Exit_status=271, substate=91),
+            "1103.pbs-server": finished(Exit_status=-29),
+        }
+    ).replace("2026-01-05T12:00:00\n", "2026-01-05T12:00:00+0400\n")
+    rows = pbs.parse_failures(output, SOURCE, terminal=True)
+    assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "TIMEOUT"}
+    assert all(row["end"].endswith("+04:00") for row in rows)
+    assert rows[0]["submitted_at"] == "2026-01-05T08:00:00+04:00"
+    assert rows[1]["submitted_at"] is None
+    assert pbs.parse_failures(output, SOURCE)[0]["end"] == "2026-01-05T10:00:00"
+
+
+@pytest.mark.parametrize(
+    ("job_id", "attributes", "array_id", "array_index"),
+    [
+        ("1010[1].pbs-server", {"array_id": "1010[].pbs-server", "array_index": 1}, "1010[]", "1"),
+        ("1010[2].pbs-server", {}, "1010[]", "2"),
+        ("1010[0].pbs-server", {}, "1010[]", "0"),
+        ("1010.pbs-server", {}, None, None),
+        ("1010[1-30].pbs-server", {}, None, None),
+        ("unknown.pbs-server", {}, None, None),
+    ],
+)
+def test_array_fields_on_queue_and_history_rows(
+    job_id: str, attributes: dict[str, Any], array_id: str | None, array_index: str | None
+) -> None:
+    rows = pbs.parse_jobs(qstat({job_id: qstat_job(**attributes)}), SOURCE)
+    rows += pbs.parse_failures(history({job_id: finished(**attributes)}), SOURCE)
+    rows += pbs.parse_failures(history({job_id: finished(**attributes)}), SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize(
+    "code,status,signal",
+    [
+        (1, 1, None),
+        (127, 127, None),
+        (137, 137, None),
+        (265, None, 9),
+        (-3, None, None),
+        (-29, None, None),
+    ],
+)
+def test_failure_exit_fields_preserve_pbs_codes(code, status, signal) -> None:
+    [row] = pbs.parse_failures(
+        history({"1001.pbs-server": finished(Exit_status=code)}, clock="2026-01-05T12:00:00+04:00"),
+        SOURCE,
+    )
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (str(code), status, signal)
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+
+
+@pytest.mark.parametrize("known", [False, True])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_failure_time_limit_and_output_path_use_existing_document(known, terminal) -> None:
+    job = finished(Resource_List={"walltime": "24:00:00"} if known else {})
+    if known:
+        job["Output_Path"] = "login01:/work/train/output.log"
+    [row] = pbs.parse_failures(history({"1001.pbs-server": job}), SOURCE, terminal=terminal)
+    assert row["time_limit"] == ("24:00:00" if known else None)
+    assert row["log_path"] == ("login01:/work/train/output.log" if known else None)

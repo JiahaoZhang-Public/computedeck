@@ -1,6 +1,7 @@
 """Read-only Slurm collection over SSH: own jobs, visible nodes, QoS limits, recent failures."""
 
 import asyncio
+import math
 import re
 import shlex
 from datetime import datetime
@@ -16,6 +17,7 @@ from .base import (
     SourceError,
     cluster_state,
     integer,
+    job_time,
     message,
     now,
     ssh_alias_field,
@@ -55,7 +57,11 @@ _HISTORY_FIELDS = (
     "Elapsed",
     "End",
     "ExitCode",
+    "Timelimit",
 )
+_FINISHED_FIELDS = (*_HISTORY_FIELDS, "Submit", "Start")
+HISTORY_MARKER = "COMPUTEDECK_TERMINAL_HISTORY"
+
 FAILURE_STATES = (
     "FAILED",
     "TIMEOUT",
@@ -103,15 +109,6 @@ def gpus_tracked(nodes_output: str) -> bool:
     return re.search(r"(?:^|\s)CfgTRES=\S*gres/gpu", nodes_output, re.M) is not None
 
 
-def job_time(value: str) -> str | None:
-    """The queue query requests an explicit UTC offset; unknown dates stay unknown."""
-    try:
-        stamp = datetime.fromisoformat(value)
-        return stamp.isoformat() if stamp.tzinfo is not None else None
-    except ValueError:
-        return None
-
-
 def parse_jobs(
     output: str, source: dict[str, Any], *, tracked: bool = False
 ) -> list[dict[str, Any]]:
@@ -144,9 +141,12 @@ def parse_jobs(
         if count is None and tracked and "gpu" not in requests.lower():
             # GPUs are accounted, so a job whose resources name none holds none.
             count = gpu_count(row["tres-alloc"])
+        array = re.fullmatch(r"(\d+)_(\d+)", row["JobArrayID"])
         job_id = f"{source['cluster_id']}:{row['JobArrayID']}"
         jobs[job_id] = {
             "id": job_id,
+            "array_id": array[1] if array else None,
+            "array_index": array[2] if array else None,
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": row["Name"],
@@ -342,29 +342,37 @@ def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
     return result
 
 
-def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_failures(
+    output: str, source: dict[str, Any], *, terminal: bool = False
+) -> list[dict[str, Any]]:
     """sacct allocations in a failure state. Only terminal accounting records count."""
+    fields = _FINISHED_FIELDS if terminal else _HISTORY_FIELDS
+    states = (*FAILURE_STATES, "COMPLETED", "CANCELLED") if terminal else FAILURE_STATES
     failures: dict[str, dict[str, Any]] = {}
     observed_at = now()
     for line in output.splitlines():
         if not line.strip():
             continue
         columns = line.split("|")
-        if len(columns) != len(_HISTORY_FIELDS):
+        if len(columns) != len(fields):
             raise SourceError("unexpected_output", command="sacct")
-        row = dict(zip(_HISTORY_FIELDS, columns, strict=True))
+        row = dict(zip(fields, columns, strict=True))
         state = row["State"].split(" ", 1)[0].rstrip("+").upper()
-        if row["User"] != source["username"] or state not in FAILURE_STATES:
+        if row["User"] != source["username"] or state not in states:
             continue
         if row["End"] in EMPTY:
             continue
+        exit_parts = re.fullmatch(r"(\d+):(\d+)", row["ExitCode"])
+        array = re.fullmatch(r"(\d+)_(\d+)", row["JobID"])
         job_id = f"{source['cluster_id']}:{row['JobID']}"
         previous = failures.get(job_id)
         # Requeued jobs can appear more than once; keep the latest attempt.
-        if previous and previous["end"] >= row["End"]:
+        if previous and (previous["end"] or "") >= row["End"]:
             continue
         failures[job_id] = {
             "id": job_id,
+            "array_id": array[1] if array else None,
+            "array_index": array[2] if array else None,
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": row["JobName"],
@@ -378,15 +386,25 @@ def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "cpu_count": integer(row["NCPUS"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
             "elapsed": row["Elapsed"],
+            "time_limit": None
+            if row["Timelimit"] in EMPTY | {"UNLIMITED", "Partition_Limit"}
+            else row["Timelimit"],
             "reason": None,
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
-            "end": row["End"],
+            "end": job_time(row["End"])
+            if terminal
+            else re.sub(r"(?:Z|[+-]\d{2}:?\d{2})$", "", row["End"]),
+            "ended_at": job_time(row["End"]),
+            "exit_status": int(exit_parts[1]) if exit_parts else None,
+            "exit_signal": int(exit_parts[2]) if exit_parts else None,
+            "submitted_at": job_time(row.get("Submit", "")),
+            "started_at": job_time(row.get("Start", "")),
             "exit_code": None if row["ExitCode"] in EMPTY else row["ExitCode"],
             "observed_at": observed_at,
         }
-    return sorted(failures.values(), key=lambda job: job["end"], reverse=True)
+    return sorted(failures.values(), key=lambda job: job["end"] or "", reverse=True)
 
 
 def _unavailable(code: str, error: BaseException) -> dict[str, Any]:
@@ -482,7 +500,7 @@ class SlurmDriver:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
             raise SourceError("ssh_timeout") from None
-        batch = Batch(capabilities=["jobs"])
+        batch = Batch(capabilities=["jobs"], history_window_seconds=86400)
         node_output = ""
         try:
             # -d adds GresUsed, the only GPU usage of clusters that do not account GPUs.
@@ -584,6 +602,8 @@ class SlurmDriver:
             # https://slurm.schedmd.com/sacct.html
             history = shlex.join(
                 [
+                    "env",
+                    "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
                     "sacct",
                     "--noheader",
                     "--parsable2",
@@ -595,7 +615,47 @@ class SlurmDriver:
                     "--format=" + ",".join(_HISTORY_FIELDS),
                 ]
             )
-            batch.failures = parse_failures(await ssh.run(alias, history, options), source)
+            minutes = 1440
+            if "history" in (source.get("capabilities") or []) and (
+                previous := job_time(source.get("last_success") or "")
+            ):
+                # Keep the five-minute overlap and collection timeout at daily polling.
+                minutes = min(
+                    1447,
+                    max(
+                        5,
+                        math.ceil(
+                            (
+                                datetime.fromisoformat(now()) - datetime.fromisoformat(previous)
+                            ).total_seconds()
+                            / 60
+                        )
+                        + 5,
+                    ),
+                )
+            terminal = shlex.join(
+                [
+                    "env",
+                    "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
+                    "sacct",
+                    "--noheader",
+                    "--parsable2",
+                    "--allocations",
+                    f"--user={username}",
+                    f"--starttime=now-{minutes}minutes",
+                    "--endtime=now",
+                    "--state=" + ",".join((*FAILURE_STATES, "COMPLETED", "CANCELLED")),
+                    "--format=" + ",".join(_FINISHED_FIELDS),
+                ]
+            )
+            output = await ssh.run(
+                alias, f"{history} && echo {HISTORY_MARKER} && {terminal}", options
+            )
+            failures, marker, finished = output.partition(HISTORY_MARKER)
+            if not marker:
+                raise SourceError("unexpected_output", command="sacct")
+            batch.failures = parse_failures(failures, source)
+            batch.finished = parse_failures(finished, source, terminal=True)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

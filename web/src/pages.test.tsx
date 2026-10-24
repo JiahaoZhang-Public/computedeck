@@ -7,12 +7,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
-import { InstanceDetail, JobDetail } from './pages/Details';
+import { jobReason } from './jobFacts';
+import { eventJob } from './events';
+import { relativeTime } from './domain';
+import { ArrayDetail, InstanceDetail, JobDetail } from './pages/Details';
 import { JobsPage } from './pages/Jobs';
 import { OverviewPage } from './pages/Overview';
 import type { Ctx } from './pages/shared';
 import { FailuresTable, JobsTable } from './pages/shared';
-import type { Dashboard, Instance, Job, Source } from './types';
+import type { Dashboard, DeckEvent, Instance, Job, Source } from './types';
 
 const now = new Date().toISOString();
 const hourAgo = new Date(Date.now() - 3600_000).toISOString();
@@ -78,6 +81,7 @@ const ctx = (input: Dashboard) =>
     query: '',
     attention: [],
     webPlugins: [],
+    tools: [],
     drivers: [],
     plugin: {},
     setGroup: () => {},
@@ -311,7 +315,7 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
       [
         t('overview.attention'),
         t('overview.jobs'),
-        t('overview.failures'),
+        t('activity.title'),
         t('overview.sources'),
         t('chart.heading'),
       ].map((heading) => heading.replaceAll('&', '&amp;')),
@@ -344,7 +348,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       (item) => item.subject.kind === 'instance',
     );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
-    expect(overview).toContain('≥ 21');
+    expect(overview).toContain('≥ 25');
     expect(overview).toContain('build-box');
     expect(overview).toContain(t('msg.summary_not_probed_yet'));
     expect(overview).toContain(t('summary.unmonitored.one'));
@@ -634,3 +638,302 @@ it('counts hand-added machines by normalized manual group and names secondary cl
   expect(manual).not.toContain(t('overview.instances', { count: 3 }));
   expect(html).toContain('RunPod secondary');
 });
+
+describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
+  it.each(['slurm', 'pbs', 'lsf'])(
+    'uses %s terms for shared drawer facts, including equal partition and QoS values',
+    (driver) => {
+      setLocale(locale);
+      const jobs = [0, 1].map((index) =>
+        job(String(index), { array_id: '1234', qos: 'long', partition: 'long' }),
+      );
+      const context = ctx(dash({ sources: [source({ driver })], jobs }));
+      const html = renderToStaticMarkup(<ArrayDetail jobs={jobs} ctx={context} />);
+      const labels = [...html.matchAll(/<dt>(.*?)<\/dt>/g)].map((match) => match[1]);
+      expect(labels).toEqual([
+        t('job.cluster'),
+        t('job.user'),
+        ...(driver === 'slurm' ? [t('job.qos'), t('job.partition')] : [t('job.queue')]),
+      ]);
+      expect(html.match(/<dd>long<\/dd>/g)).toHaveLength(driver === 'slurm' ? 2 : 1);
+    },
+  );
+
+  it.each(['RUNNING', 'PENDING', 'SUSPENDED'])(
+    'shows only nonzero array state tags for %s elements',
+    (state) => {
+      setLocale(locale);
+      const jobs = [0, 1].map((index) => job(String(index), { array_id: '1234', state }));
+      const html = renderToStaticMarkup(<JobsPage ctx={ctx(dash({ jobs }))} />);
+      const key =
+        state === 'RUNNING'
+          ? 'jobs.array.running'
+          : state === 'PENDING'
+            ? 'jobs.array.pending'
+            : 'jobs.array.other';
+      expect(html).toContain(`<span class="tag">${t(key, { count: 2 })}</span>`);
+      for (const key of ['jobs.array.running', 'jobs.array.pending', 'jobs.array.other'] as const)
+        expect(html).not.toContain(t(key, { count: 0 }));
+    },
+  );
+
+  it('groups after search, counts elements in chips, and translates summaries', () => {
+    setLocale(locale);
+    const elements = Array.from({ length: 3 }, (_, index) =>
+      job(String(index), {
+        array_id: '1234',
+        array_index: String(index),
+        name: index < 2 ? 'selected' : 'excluded',
+        state: index === 2 ? 'PENDING' : 'RUNNING',
+        gpu_count: index === 0 ? null : 2,
+        qos: index === 0 ? 'normal' : 'long',
+      }),
+    );
+    const data = dash({ jobs: elements });
+    const context = ctx(data);
+    let html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(tabs(html)).toContain(`${t('filter.all')}=3`);
+    expect(tabs(html)).toContain(`${t('status.RUNNING')}=2`);
+    expect(html.match(/class="clickable array-row/g)).toHaveLength(1);
+    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    expect(html).toContain(t('jobs.array.mixed'));
+    expect(html).toContain('≥ 2');
+    expect(html).toContain(t('jobs.array.unknownGpus', { count: 1 }));
+    context.query = '1234'; // Matches array_id even though the element ids differ.
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    context.query = 'selected';
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).toContain(t('jobs.array.count', { count: 2 }));
+    expect(html).not.toContain('excluded');
+    expect(tabs(html)).toContain(`${t('filter.all')}=2`);
+    context.query = 'excluded';
+    html = renderToStaticMarkup(<JobsPage ctx={context} />);
+    expect(html).not.toContain('array-row');
+    expect(html).toContain('a:2');
+  });
+
+  it('shows unknown fields honestly and omits a duplicate partition line', () => {
+    setLocale(locale);
+    const cases = [
+      { id: '1234', qos: null, partitions: [null, null] },
+      { id: '1235', qos: 'long', partitions: ['long', 'long'] },
+      { id: '1236', qos: 'long', partitions: ['gpu', 'gpu'] },
+      { id: '1237', qos: 'long', partitions: ['long', 'gpu'] },
+      { id: '1238', qos: 'long', partitions: [null, null] },
+    ];
+    const data = dash({
+      jobs: cases.flatMap(({ id, qos, partitions }) =>
+        partitions.map((partition, index) =>
+          job(`${id}_${index}`, {
+            array_id: id,
+            array_index: String(index),
+            qos,
+            partition,
+          }),
+        ),
+      ),
+    });
+    const html = renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
+    const rows = [...html.matchAll(/<tr class="clickable array-row\b[^>]*>.*?<\/tr>/g)].map(
+      (match) => match[0],
+    );
+    expect(rows).toHaveLength(cases.length);
+    const row = (id: string) => {
+      // Match the exact array label, regardless of the page's row ordering.
+      const matches = rows.filter((html) => html.includes(`<span class="sub mono">[${id}] ·`));
+      expect(matches).toHaveLength(1);
+      for (const other of cases.filter((item) => item.id !== id))
+        expect(matches[0]).not.toContain(`<span class="sub mono">[${other.id}] ·`);
+      return matches[0];
+    };
+    const unknown = row('1234');
+    expect(unknown).not.toContain(t('jobs.array.mixed'));
+    expect(unknown).toContain('<span class="sub">—</span>');
+    const sameQueue = row('1235');
+    expect(sameQueue).toContain('<span class="sub">long</span>');
+    expect(sameQueue).not.toContain(t('jobs.array.partition', { name: 'long' }));
+    expect(row('1236')).toContain(t('jobs.array.partition', { name: 'gpu' }));
+    expect(row('1237')).toContain(t('jobs.array.partition', { name: t('jobs.array.mixed') }));
+    const unknownPartition = row('1238');
+    expect(unknownPartition).not.toContain(t('jobs.array.mixed'));
+    expect(unknownPartition).toContain('<span class="sub">long</span>');
+    expect(unknownPartition).toContain(t('jobs.array.partition', { name: '—' }));
+  });
+
+  it('takes eight rows after grouping and tags an array with any stale element', () => {
+    setLocale(locale);
+    const elements = Array.from({ length: 12 }, (_, index) =>
+      job(`1234_${index}`, {
+        array_id: '1234',
+        array_index: String(index),
+        elapsed: '2:00:00',
+        source_id: index === 11 ? 'a-bob' : 'a-alice',
+      }),
+    );
+    const data = dash({
+      jobs: [...elements, ...Array.from({ length: 9 }, (_, index) => job(`ordinary-${index}`))],
+      sources: [source(), source({ id: 'a-bob', username: 'bob', stale: true })],
+    });
+    const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
+    const table = html.slice(
+      html.indexOf('class="table jobs-table'),
+      html.indexOf('</table>', html.indexOf('class="table jobs-table')),
+    );
+    expect(table.match(/class="clickable/g)).toHaveLength(8);
+    expect(table).toContain('array-row stale-row');
+    expect(table).toContain(t('jobs.array.count', { count: 12 }));
+    expect(table).toContain('a:ordinary-6');
+    expect(table).not.toContain('a:ordinary-7');
+    expect(html).toContain(t('jobs.lastKnownCount', { count: 1 }));
+  });
+});
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows failure facts, known limits and log paths without live meters in %s',
+  (locale) => {
+    setLocale(locale);
+    const item = job('failed', {
+      state: 'FAILED',
+      end: null,
+      exit_code: '0:9',
+      exit_status: 0,
+      exit_signal: 9,
+      elapsed: '01:00:00',
+      time_limit: '02:00:00',
+      log_path: '/work/train.log',
+      gpu_utilization: 80,
+    });
+    const data = dash({ failure_history_observed_at: hourAgo });
+    const html = renderToStaticMarkup(<JobDetail job={item} ctx={ctx(data)} />);
+    expect(html).toContain(t('failure.sigkill'));
+    expect(html).toContain(t('failure.signalEvidence', { signal: 9 }));
+    expect(html).toContain(t('failure.ranLimit', { elapsed: '01:00:00', limit: '02:00:00' }));
+    expect(html).toContain('/work/train.log');
+    expect(html).toContain(t('failure.historyUpdated'));
+    expect(html).toContain(t('failure.copyInspection'));
+    expect(html).not.toContain('drawer-metrics');
+    for (const key of ['job.submitted', 'job.started', 'job.waiting', 'common.sampledAt'] as const)
+      expect(html).not.toContain(`<dt>${t(key)}</dt>`);
+    const reported = renderToStaticMarkup(
+      <JobDetail
+        job={{ ...item, state: 'OUT_OF_MEMORY', reason: 'TERM_MEMLIMIT: raw scheduler detail' }}
+        ctx={ctx(data)}
+      />,
+    );
+    expect(reported).toContain(
+      `${locale === 'en' ? 'Scheduler reason:' : '调度器原因：'} <code>TERM_MEMLIMIT: raw scheduler detail</code>`,
+    );
+    expect(reported).not.toContain('SIGKILL');
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains raw pending states only for live jobs in %s',
+  (locale) => {
+    setLocale(locale);
+    const context = ctx(dash({}));
+    for (const state of ['PENDING', 'PD', 'Q', 'PEND', 'QUEUED', 'queued']) {
+      const item = job('waiting', { state, reason: 'Priority' });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
+      expect(html).toContain(`<strong>${t('job.reason')}</strong>`);
+      expect(html).toContain(jobReason(item, 'slurm')!.summary);
+      expect(html).toContain(`<dt>${t('job.requestedGpus')}</dt>`);
+      const historical = renderToStaticMarkup(
+        <JobDetail job={{ ...item, end: hourAgo }} ctx={context} />,
+      );
+      expect(historical).not.toContain(`<strong>${t('job.reason')}</strong>`);
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'shows uninterpreted exit codes once and omits missing codes in %s',
+  (locale) => {
+    setLocale(locale);
+    for (const code of ['unknown-code', null]) {
+      const html = renderToStaticMarkup(
+        <JobDetail
+          job={job('failure', { state: 'FAILED', exit_code: code })}
+          ctx={ctx(dash({}))}
+        />,
+      );
+      expect(html.split(`<dt>${t('jobs.col.exitCode')}</dt>`).length - 1).toBe(
+        code == null ? 0 : 1,
+      );
+      if (code != null) expect(html.split(code).length - 1).toBe(1);
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps failure next steps and omits missing elapsed time in %s',
+  (locale) => {
+    setLocale(locale);
+    const context = ctx(dash({}));
+    for (const state of [
+      'OUT_OF_MEMORY',
+      'TIMEOUT',
+      'DEADLINE',
+      'NODE_FAIL',
+      'BOOT_FAIL',
+      'PREEMPTED',
+      'FAILED',
+    ]) {
+      const item = job('failure', { state, end: null, exit_code: '1:0', elapsed: '' });
+      const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
+      expect(html).toContain(t('job.failureReason'));
+      expect(html).toContain(t('job.nextStep'));
+      expect(html).toContain(jobReason(item, 'slurm')!.next);
+      const table = renderToStaticMarkup(
+        <FailuresTable jobs={[{ ...item, end: null, exit_code: '1:0' }]} groups={context.groups} />,
+      );
+      expect(table).not.toContain(t('failure.ran', { elapsed: '—' }));
+    }
+    for (const state of ['COMPLETED', 'CANCELLED', 'UNKNOWN']) {
+      expect(
+        renderToStaticMarkup(
+          <JobDetail job={job('ended', { state, end: hourAgo })} ctx={context} />,
+        ),
+      ).not.toContain(t('job.nextStep'));
+    }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'explains unknown outcomes in full sentences and only offers useful inspection in %s',
+  (locale) => {
+    setLocale(locale);
+    for (const reason of ['outcomes_unavailable', 'outcome_not_reported'] as const) {
+      const event: DeckEvent = {
+        id: 1,
+        type: 'job.finished',
+        at: hourAgo,
+        source_id: 'a-alice',
+        data: {
+          driver: 'slurm',
+          outcome: 'unknown',
+          outcome_reason: reason,
+          observed_at: now,
+          job: job('ended'),
+        },
+      };
+      const html = renderToStaticMarkup(
+        <JobDetail job={eventJob(event)!} event={event} ctx={ctx(dash({}))} />,
+      );
+      expect(html).toContain(
+        t(
+          reason === 'outcomes_unavailable'
+            ? 'event.unknownUnavailable'
+            : 'event.unknownNotReported',
+        ),
+      );
+      expect(html.includes(t('failure.copyInspection'))).toBe(reason !== 'outcomes_unavailable');
+      expect(html.includes('sacct -j')).toBe(reason !== 'outcomes_unavailable');
+      expect(html).not.toContain(t('job.nextStep'));
+      expect(html).toContain(t('event.lastSeenEnded', { time: relativeTime(hourAgo) }));
+      expect(html).toContain(`<dt>${t('event.observedAt')}</dt>`);
+      expect(html).toContain(`>${relativeTime(now)}</dd>`);
+    }
+  },
+);

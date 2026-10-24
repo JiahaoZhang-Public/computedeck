@@ -232,8 +232,9 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "notification_failed",
     ]
-    assert data["attention"][-1]["subject"]["id"] == "example:runpod:demo-pod"
+    assert data["attention"][-2]["subject"]["id"] == "example:runpod:demo-pod"
     pod = next(row for row in data["instances"] if row["id"] == "example:runpod:demo-pod")
     for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
         assert pod[metric] is None
@@ -248,3 +249,110 @@ def test_collector_commit_fault_names_the_source_without_changing_its_id_or_acti
     assert item["action"] == "health"
     assert item["since"] is None
     assert item["observed_at"] == NOW.isoformat()
+
+
+def saved(item: dict[str, Any], until: datetime | None = None) -> dict[str, Any]:
+    return {
+        item["key"]: {
+            "fingerprint": item["fingerprint"],
+            "acknowledged_at": NOW.isoformat(),
+            "snooze_until": until.isoformat() if until else None,
+        }
+    }
+
+
+def test_acknowledgement_ignores_names_stderr_and_observation_times() -> None:
+    row = source(error={"code": "ssh_failed", "detail": "first stderr"}, failures=2)
+    [item] = derive([row])
+    state = saved(item)
+    before = deepcopy(state)
+    row.update(name="Renamed cluster", last_attempt=(NOW + timedelta(minutes=1)).isoformat())
+    row["error"]["detail"] = "different stderr"
+    [muted] = derive([row], state=state)
+    assert muted["fingerprint"] == item["fingerprint"]
+    assert muted["muted"] == {"state": "acknowledged", "at": NOW.isoformat(), "until": None}
+    row["error"]["code"] = "ssh_timeout"
+    assert derive([row], state=state)[0]["muted"] is None
+    assert state == before
+
+
+@pytest.mark.parametrize("snoozed", [False, True])
+def test_severity_escalation_reopens_acknowledged_and_snoozed_items(snoozed: bool) -> None:
+    row = source(stale=True, last_success=(NOW - timedelta(minutes=20)).isoformat())
+    [item] = derive([row])
+    state = saved(item, NOW + timedelta(hours=1) if snoozed else None)
+    assert derive([row], state=state)[0]["muted"] is not None
+    row["last_success"] = (NOW - timedelta(minutes=31)).isoformat()
+    [reopened] = derive([row], state=state)
+    assert reopened["severity"] == "error"
+    assert reopened["muted"] is None
+    assert reopened["fingerprint"] != item["fingerprint"]
+
+
+@pytest.mark.parametrize("seconds,muted", [(-1, False), (0, False), (1, True)])
+def test_snooze_expires_on_read(seconds: int, muted: bool) -> None:
+    row = source(error={"code": "ssh_failed"})
+    [item] = derive([row])
+    state = saved(item, NOW + timedelta(seconds=seconds))
+    assert (derive([row], state=state)[0]["muted"] is not None) is muted
+
+
+def test_service_faults_cannot_be_muted_even_with_saved_state() -> None:
+    kwargs = {
+        "loop_errors": {"collector:schedule": {"error": "failed"}},
+        "unreadable_rows": {"sources": 1},
+    }
+    items = derive([], **kwargs)
+    state = {key: value for item in items for key, value in saved(item).items()}
+    assert all(item["muted"] is None for item in derive([], state=state, **kwargs))
+    assert all(item["mutable"] is False for item in items)
+
+
+def test_warning_order_is_stable_but_changed_status_reopens() -> None:
+    row = source(warnings=[{"code": "one", "status": 429}, {"code": "two"}])
+    [item] = derive([row])
+    state = saved(item)
+    row["warnings"].reverse()
+    assert derive([row], state=state)[0]["muted"] is not None
+    row["warnings"][1]["status"] = 503
+    assert derive([row], state=state)[0]["muted"] is None
+
+
+def test_demo_contains_acknowledged_and_snoozed_items() -> None:
+    data = demo.dashboard()
+    assert {item["muted"]["state"] for item in data["attention"] if item["muted"]} == {
+        "acknowledged",
+        "snoozed",
+    }
+    assert data["attention_count"] == 4
+    assert all(item["mutable"] is True for item in data["attention"])
+
+
+def test_notification_warning_reopens_for_error_code_but_not_channel_label() -> None:
+    def status(code: str = "send_timeout", name: str = "Team") -> dict[str, Any]:
+        return {
+            "notify": {
+                "enabled": True,
+                "delivery_failures": [
+                    {
+                        "channel": "team",
+                        "channel_name": name,
+                        "error_code": code,
+                        "at": NOW.isoformat(),
+                    }
+                ],
+            }
+        }
+
+    [item] = derive([], plugin_status=status())
+    state = {
+        item["key"]: {
+            "fingerprint": item["fingerprint"],
+            "acknowledged_at": NOW.isoformat(),
+            "snooze_until": None,
+        }
+    }
+    [renamed] = derive([], plugin_status=status(name="New name"), state=state)
+    assert renamed["muted"]["state"] == "acknowledged"
+    [changed] = derive([], plugin_status=status(code="credential_unavailable"), state=state)
+    assert changed["muted"] is None

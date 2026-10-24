@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { useVisibleInterval } from '../useVisibleInterval';
 import { errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { relativeTime } from '../domain';
+import { OUTCOME_LABELS } from '../events';
 import { channelSummary, EMPTY_RULE, listOf, smtpPortFor } from '../notify';
 import type { Channel, NotifyState, Rule, RuleInput } from '../notify';
 import { readSettings } from '../settingValues';
@@ -15,6 +17,7 @@ import type { Ctx } from './shared';
 
 const BASE = '/plugins/notify';
 const EVENT_LABELS: Record<string, MessageKey> = {
+  'job.finished': 'notify.event.finished',
   'job.failed': 'notify.event.failed',
   'job.started': 'notify.event.started',
   'job.ended': 'notify.event.ended',
@@ -25,6 +28,7 @@ const STATUS: Record<string, string> = {
   sent: 'ready',
   failed: 'error',
   suppressed: 'stale',
+  grouped: 'unknown',
   dropped: 'stale',
 };
 
@@ -155,6 +159,7 @@ function RuleEditor({
       users: listOf(String(data.get('users') ?? '')),
       name_pattern: String(data.get('name_pattern') ?? '').trim(),
       channels: all('channels'),
+      outcomes: all('outcomes'),
       subject: String(data.get('subject') ?? '').trim(),
       body: String(data.get('body') ?? '').trim(),
       include_log: data.get('include_log') === 'on',
@@ -186,7 +191,8 @@ function RuleEditor({
           ...body,
           name: body.name || 'preview',
           channels: body.channels.length ? body.channels : ['preview'],
-          events: body.events.length ? body.events : ['job.failed'],
+          events: body.events.length ? body.events : EMPTY_RULE.events,
+          outcomes: body.events.length ? body.outcomes : EMPTY_RULE.outcomes,
         }),
       );
       setError(null);
@@ -220,6 +226,22 @@ function RuleEditor({
                 defaultChecked={start.events.includes(type)}
               />
               <span>{EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type}</span>
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="span-two choice-group">
+          <legend>
+            {t('notify.rule.outcomes')} <small>{t('notify.rule.outcomesHint')}</small>
+          </legend>
+          {Object.entries(OUTCOME_LABELS).map(([outcome, label]) => (
+            <label key={outcome} className="checkbox">
+              <input
+                type="checkbox"
+                name="outcomes"
+                value={outcome}
+                defaultChecked={start.outcomes?.includes(outcome)}
+              />
+              <span>{t(label)}</span>
             </label>
           ))}
         </fieldset>
@@ -382,9 +404,10 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
         .catch((reason) => setError(errorText(reason, 'error.service'))),
     [],
   );
-  useEffect(() => {
-    if (tool?.enabled) void load();
+  const poll = useCallback(() => {
+    if (tool?.enabled) return load();
   }, [tool?.enabled, load]);
+  useVisibleInterval(poll, 30000);
 
   if (!tool?.enabled)
     return (
@@ -459,7 +482,19 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                   </strong>
                   <span className="sub">
                     {rule.events
-                      .map((type) => (EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type))
+                      .map((type) => {
+                        const label = EVENT_LABELS[type] ? t(EVENT_LABELS[type]) : type;
+                        return type === 'job.finished' && rule.outcomes?.length
+                          ? t('notify.rule.filteredOutcomes', {
+                              event: label,
+                              outcomes: rule.outcomes
+                                .map((outcome) =>
+                                  OUTCOME_LABELS[outcome] ? t(OUTCOME_LABELS[outcome]) : outcome,
+                                )
+                                .join(t('common.listSeparator')),
+                            })
+                          : label;
+                      })
                       .join(', ')}
                     {' → '}
                     {rule.channels.map(channelName).join(', ')}
@@ -563,6 +598,12 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                     <td className="nowrap">{relativeTime(row.at)}</td>
                     <td className="wrap">
                       {row.subject ?? '—'}
+                      {row.count &&
+                      row.channel &&
+                      row.status !== 'grouped' &&
+                      row.status !== 'suppressed' ? (
+                        <span className="sub">{t('notify.groupCount', { count: row.count })}</span>
+                      ) : null}
                       <span className="sub">
                         {row.test ? t('notify.testRow') : (row.rule_name ?? row.rule ?? '')}
                         {row.notes?.length ? ` · ${row.notes.join(', ')}` : ''}
@@ -572,7 +613,16 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                     <td className="wrap">
                       <Status
                         state={STATUS[row.status] ?? 'unknown'}
-                        label={t(`notify.status.${row.status}`)}
+                        label={
+                          (row.status === 'grouped' || row.status === 'suppressed') && row.count
+                            ? t(
+                                row.status === 'grouped'
+                                  ? 'notify.groupedCount'
+                                  : 'notify.suppressedCount',
+                                { count: row.count },
+                              )
+                            : t(`notify.status.${row.status}`)
+                        }
                       />
                       {row.error && (
                         <span className="sub red-text">{formatMessage(row.error)}</span>

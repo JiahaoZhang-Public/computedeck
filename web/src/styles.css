@@ -1222,7 +1222,7 @@ form > .form-error {
 .attention li + li {
   border-top: 1px solid var(--border);
 }
-.attention button {
+.attention .attention-open {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -1230,13 +1230,13 @@ form > .form-error {
   padding: 10px 16px;
   text-align: left;
 }
-.attention button:hover {
+.attention .attention-open:hover {
   background: var(--surface-hover);
 }
 .attention .dot {
   margin-top: 6px;
 }
-.attention button > span:nth-child(2) {
+.attention .attention-open > span:nth-child(2) {
   flex: 1;
   min-width: 0;
 }
@@ -1255,6 +1255,21 @@ form > .form-error {
 }
 .attention {
   list-style: none;
+}
+.attention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px 34px;
+}
+.attention-muted > summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  color: var(--text-3);
+  border-top: 1px solid var(--border);
+}
+.attention .attention-mute-note {
+  padding: 0 16px 8px 34px;
 }
 .setup {
   padding: 16px 18px;
@@ -1960,6 +1975,15 @@ form > .form-error {
 
 /* ---------- Sources ---------- */
 
+.source-group {
+  scroll-margin-top: 64px;
+}
+@media (max-width: 560px) {
+  .source-group {
+    scroll-margin-top: 104px;
+  }
+}
+
 .capabilities {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2039,6 +2063,31 @@ form > .form-error {
   padding: 7px 16px;
   font-size: 13px;
 }
+.activity-job {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.activity a.activity-job {
+  text-decoration: none;
+}
+.activity-job:hover .grow {
+  text-decoration: underline;
+}
+.failure-explanation code,
+.failure-inspection pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .activity li + li {
   border-top: 1px solid var(--border);
 }
@@ -2054,7 +2103,47 @@ form > .form-error {
 .activity time {
   color: var(--text-3);
   font-size: 12px;
-  white-space: nowrap;
+  max-width: 45%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.activity .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.activity .activity-group {
+  display: block;
+  padding: 0;
+}
+.activity-group details {
+  width: 100%;
+}
+.activity-group details > .activity {
+  margin: 0 0 6px 18px;
+  border-left: 1px solid var(--border);
+}
+.activity-group summary {
+  position: relative;
+  display: flex;
+  list-style: none;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.activity-group summary::-webkit-details-marker {
+  display: none;
+}
+.activity-group summary::before {
+  content: '▸';
+  position: absolute;
+  left: 2px;
+  width: 10px;
+}
+.activity-group details[open] > summary::before {
+  content: '▾';
 }
 
 /* ---------- Toolbox ---------- */
@@ -2862,4 +2951,71 @@ td.wrap {
 }
 .account-qos[open] summary {
   margin-bottom: 6px;
+}
+
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.activity-filters > .search {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.activity-filters > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.activity-filters select {
+  min-width: 0;
+  max-width: 100%;
+}
+.activity-day {
+  margin: 16px 16px 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.activity-details {
+  padding: 12px 16px 12px 20px;
+  overflow-wrap: anywhere;
+}
+.activity-details .kv {
+  margin-bottom: 12px;
+}
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.activity-arrivals:has(button),
+.activity-feed-action {
+  margin: 8px 16px;
+}
+.table.jobs-table .num {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.jobs-table .num .sub {
+  white-space: normal;
+}
+.array-states {
+  flex-wrap: wrap;
+  max-width: 8rem;
+}
+@media (max-width: 560px) {
+  .page-activity .activity-filters .chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+  }
+  .page-activity .activity-filters .chips button,
+  .attention-actions .button {
+    min-height: 44px;
+    white-space: normal;
+  }
 }

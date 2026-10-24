@@ -2,7 +2,7 @@ import { useRouteParam } from '../useRouteParam';
 import { ArrowRight } from 'lucide-react';
 import { groupLabel } from '../groups';
 import { t } from '../i18n';
-import { jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
+import { groupArrays, jobCount, jobsMissing, listedJobs, relativeTime } from '../domain';
 import { routeHash } from '../routes';
 import { Chips, Empty, Panel } from '../ui';
 import type { Ctx } from './shared';
@@ -33,6 +33,7 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         query,
         job.name,
         job.id,
+        job.array_id,
         job.user,
         job.qos,
         job.partition,
@@ -131,9 +132,10 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         ) : (
           <>
             <JobsTable
-              jobs={shown}
+              jobs={groupArrays(shown)}
               groups={groups}
               onOpen={ctx.openJob}
+              onOpenArray={ctx.openArray}
               stale={stale}
               empty={
                 query ? (
@@ -173,7 +175,14 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
           </>
         )}
       </Panel>
-      <ActivityPanel demo={ctx.demo} token={data.token} />
+      <ActivityPanel
+        key={String(ctx.demo)}
+        sources={data.sources}
+        tools={ctx.tools}
+        demo={ctx.demo}
+        token={data.token}
+        onOpen={ctx.openEvent}
+      />
     </>
   );
 }

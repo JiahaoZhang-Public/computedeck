@@ -13,6 +13,7 @@ import {
   Cloud,
   Compass,
   Gauge,
+  History,
   LayoutDashboard,
   Loader2,
   Menu,
@@ -29,6 +30,7 @@ import type {
   Attention,
   CollectionNode,
   Dashboard,
+  DeckEvent,
   DriverInfo,
   Health,
   Instance,
@@ -38,8 +40,9 @@ import type {
   SSHConfig,
   Tool,
 } from './types';
-import { dateTime, partialCount, uniqueJobs } from './domain';
+import { arrayLabel, dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
+import { eventJob } from './events';
 import { api } from './api';
 import { groupsOf } from './groups';
 import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
@@ -63,6 +66,7 @@ import { BrandMark, Status } from './ui';
 import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
 import { OverviewPage } from './pages/Overview';
+import { ActivityPage } from './pages/Activity';
 import { JobsPage } from './pages/Jobs';
 import { ClustersPage } from './pages/Clusters';
 import { CloudPage } from './pages/Cloud';
@@ -75,7 +79,7 @@ import { PageBoundary } from './PageBoundary';
 import { NotifyPage } from './pages/Notify';
 import { ChatPage } from './pages/Chat';
 import { enabledToolPages } from './tools';
-import { InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
+import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
 
 type Modal =
   | { kind: 'instance'; item?: Instance }
@@ -83,7 +87,11 @@ type Modal =
   | { kind: 'diagnosis'; sourceId: string }
   | { kind: 'ssh'; data: SSHConfig }
   | null;
-type Detail = { kind: 'job'; item: Job } | { kind: 'instance'; item: Instance } | null;
+type Detail =
+  | { kind: 'job'; item: Job; event?: DeckEvent }
+  | { kind: 'instance'; item: Instance }
+  | { kind: 'array'; item: { id: string; name: string; jobs: Job[] } }
+  | null;
 type Toast = { text: string; tone: 'ok' | 'error' } | null;
 
 const startPages = [...corePages, ...pagesOf(buildTimePlugins).map((page) => page.id)];
@@ -101,6 +109,7 @@ const navGroups: {
     label: 'nav.resources',
     items: [
       { id: 'jobs', label: 'nav.jobs', icon: Activity },
+      { id: 'activity', label: 'nav.activity', icon: History },
       { id: 'resources', label: 'nav.clusters', icon: Server },
       { id: 'cloud', label: 'nav.cloud', icon: Cloud },
       { id: 'usage', label: 'nav.usage', icon: Gauge },
@@ -114,7 +123,16 @@ const navGroups: {
     ],
   },
 ];
-const dataPages: Page[] = ['overview', 'plan', 'jobs', 'resources', 'cloud', 'usage', 'sources'];
+const dataPages: Page[] = [
+  'overview',
+  'plan',
+  'jobs',
+  'activity',
+  'resources',
+  'cloud',
+  'usage',
+  'sources',
+];
 const pageTitles: Record<CorePage, MessageKey> = {
   overview: 'nav.overview',
   plan: 'nav.plan',
@@ -123,6 +141,7 @@ const pageTitles: Record<CorePage, MessageKey> = {
   notify: 'nav.notify',
   chat: 'nav.chat',
   jobs: 'nav.jobs',
+  activity: 'nav.activity',
   resources: 'nav.clusters',
   cloud: 'nav.cloud',
   usage: 'nav.usage',
@@ -154,7 +173,45 @@ export default function App() {
   const [healthOpen, setHealthOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const params = routeParams(hash);
-  const detailId = params.get('job') || params.get('failure') || params.get('instance');
+  const eventId = params.get('event');
+  const [selectedEvent, setSelectedEvent] = useState<{ demo: boolean; event: DeckEvent } | null>(
+    null,
+  );
+  const selected =
+    selectedEvent?.demo === demo && String(selectedEvent.event.id) === eventId
+      ? selectedEvent.event
+      : null;
+  const [eventResult, setEventResult] = useState<{
+    id: string;
+    demo: boolean;
+    status: 'error' | 'done';
+  } | null>(null);
+  const eventLoad =
+    eventResult?.id === eventId && eventResult.demo === demo ? eventResult.status : 'loading';
+  useEffect(() => {
+    if (!eventId || selected) return;
+    let cancelled = false;
+    void api<DeckEvent[]>(`/events?id=${encodeURIComponent(eventId)}&demo=${demo}`).then(
+      (rows) => {
+        if (cancelled) return;
+        if (rows[0]) setSelectedEvent({ demo, event: rows[0] });
+        setEventResult({ id: eventId, demo, status: 'done' });
+      },
+      () => {
+        if (!cancelled) setEventResult({ id: eventId, demo, status: 'error' });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, demo, selected]);
+  const historicalJob = selected ? eventJob(selected) : null;
+  const detailId =
+    params.get('job') ||
+    params.get('failure') ||
+    params.get('instance') ||
+    params.get('array') ||
+    eventId;
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -163,21 +220,47 @@ export default function App() {
   const instance = params.get('instance')
     ? data?.instances.find((item) => item.id === params.get('instance'))
     : null;
-  const detail: Detail = job
-    ? { kind: 'job', item: job }
-    : instance
-      ? { kind: 'instance', item: instance }
-      : null;
-  const setDetail = useCallback((next: Detail) => {
-    setRouteParams(
-      {
-        job: next?.kind === 'job' && !next.item.end ? next.item.id : null,
-        failure: next?.kind === 'job' && next.item.end ? next.item.id : null,
-        instance: next?.kind === 'instance' ? next.item.id : null,
-      },
-      !!next,
-    );
-  }, []);
+  const arrayJobs =
+    params.get('array') && data
+      ? listedJobs(data).jobs.filter(
+          (item) => item.array_id && `${item.cluster_id}:${item.array_id}` === params.get('array'),
+        )
+      : [];
+  const detail: Detail =
+    historicalJob && selected
+      ? { kind: 'job', item: historicalJob, event: selected }
+      : job
+        ? { kind: 'job', item: job }
+        : instance
+          ? { kind: 'instance', item: instance }
+          : arrayJobs.length
+            ? {
+                kind: 'array',
+                item: {
+                  id: params.get('array')!,
+                  name: `${arrayJobs[0].name} ${arrayLabel(arrayJobs[0].array_id!)}`,
+                  jobs: arrayJobs,
+                },
+              }
+            : null;
+  const setDetail = useCallback(
+    (next: Detail) => {
+      const failure =
+        next?.kind === 'job' &&
+        (!!next.item.end || data?.recent_failures?.some((item) => item === next.item));
+      setRouteParams(
+        {
+          event: null,
+          job: next?.kind === 'job' && !failure ? next.item.id : null,
+          failure: next?.kind === 'job' && failure ? next.item.id : null,
+          instance: next?.kind === 'instance' ? next.item.id : null,
+          array: next?.kind === 'array' ? next.item.id : null,
+        },
+        !!next,
+      );
+    },
+    [data?.recent_failures],
+  );
   const closeDetail = useCallback(() => {
     if (window.history.state?.detail) window.history.back();
     else setDetail(null);
@@ -210,6 +293,9 @@ export default function App() {
   const lastAuxLoad = useRef(-Infinity);
   const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
   const [followUntil, setFollowUntil] = useState(0);
+  const followSources = useRef<string[] | null>(null);
+  const latestCollecting = useRef<string[]>([]);
+  const followLoaded = useRef(false);
   const notify = useCallback(
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
     [],
@@ -281,8 +367,10 @@ export default function App() {
       ])
         .then(([next, status, toolbox, machines]) => {
           if (requestId !== loadId.current) return;
+          followLoaded.current = true;
           if (!('unchanged' in next)) {
             dashboardToken.current = next.token;
+            latestCollecting.current = next.collecting ?? [];
             setData(next);
           }
           if (!dashboardOnly) {
@@ -322,7 +410,14 @@ export default function App() {
     [load],
   );
   const poll = useCallback(() => {
-    if (followUntil && Date.now() >= followUntil) {
+    if (
+      followUntil &&
+      (Date.now() >= followUntil ||
+        (followLoaded.current &&
+          !latestCollecting.current.some(
+            (id) => followSources.current === null || followSources.current.includes(id),
+          )))
+    ) {
       setFollowUntil(0);
       return;
     }
@@ -336,7 +431,14 @@ export default function App() {
     });
   }, [load, followUntil]);
   useVisibleInterval(poll, followUntil ? 1000 : 10000);
-  const followCollection = useCallback(() => setFollowUntil(Date.now() + 60000), []);
+  const followCollection = useCallback((sourceIds: string[] | null = null) => {
+    followSources.current = sourceIds;
+    followLoaded.current = false;
+    // A poll started before this action cannot tell us whether its collection finished.
+    loadId.current += 1;
+    activePoll.current = null;
+    setFollowUntil(Date.now() + 60000);
+  }, []);
   const [, setClock] = useState(Date.now);
   const tickClock = useCallback(() => setClock(Date.now()), []);
   useVisibleInterval(tickClock, 30000);
@@ -373,7 +475,7 @@ export default function App() {
           '/refresh',
           sourceId ? { source_id: sourceId } : {},
         );
-        followCollection();
+        followCollection(sourceId ? [sourceId] : null);
         notify(result.status === 'running' ? t('toast.collecting') : t('toast.collectStarted'));
       }
     } catch (reason) {
@@ -385,12 +487,8 @@ export default function App() {
   async function mutate<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
     setBusy(true);
     try {
-      const followsCollection =
-        path.endsWith('/probe') ||
-        (method === 'POST' && (path === '/sources' || path === '/instances'));
       const result = await api<T>(path, body, method);
-      if (followsCollection) followCollection();
-      else await load();
+      await load();
       return result;
     } finally {
       setBusy(false);
@@ -428,7 +526,7 @@ export default function App() {
   async function collect(source: Source) {
     try {
       await api('/refresh', { source_id: source.id });
-      followCollection();
+      followCollection([source.id]);
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
       );
@@ -480,7 +578,7 @@ export default function App() {
     [data],
   );
   const attention = data?.attention ?? [];
-  const problems = attention.length;
+  const problems = data?.attention_count ?? attention.length;
   const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
   const diagnosisSource =
     modal?.kind === 'diagnosis'
@@ -493,7 +591,8 @@ export default function App() {
     } else if (item.action === 'instance') {
       const instance = data?.instances.find((instance) => instance.id === item.subject.id);
       if (instance) setDetail({ kind: 'instance', item: instance });
-    } else if (item.action === 'toolbox') navigate('toolbox');
+    } else if (item.action === 'notify') navigate('notify');
+    else if (item.action === 'toolbox') navigate('toolbox');
     else setHealthOpen(true);
   };
   const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
@@ -539,6 +638,14 @@ export default function App() {
         addInstance,
         showSSH,
         openJob: (item) => setDetail({ kind: 'job', item }),
+        openEvent: (event) => {
+          setSelectedEvent({ demo, event });
+          setRouteParams(
+            { event: String(event.id), job: null, failure: null, instance: null, array: null },
+            true,
+          );
+        },
+        openArray: (item) => setDetail({ kind: 'array', item }),
         openInstance: (item) => setDetail({ kind: 'instance', item }),
         copy,
         notify,
@@ -807,6 +914,8 @@ export default function App() {
               <OverviewPage ctx={ctx} />
             ) : page === 'jobs' ? (
               <JobsPage ctx={ctx} />
+            ) : page === 'activity' ? (
+              <ActivityPage ctx={ctx} />
             ) : page === 'resources' ? (
               <ClustersPage ctx={ctx} />
             ) : page === 'cloud' ? (
@@ -845,10 +954,18 @@ export default function App() {
       {healthOpen && (
         <HealthPanel
           state={healthState}
-          data={data}
+          data={needsToken ? null : data}
           busy={refreshing || needsToken}
           refresh={refresh}
           close={() => setHealthOpen(false)}
+          addSource={
+            !demo && !needsToken && data && data.sources.length === 0
+              ? () => {
+                  setHealthOpen(false);
+                  configure();
+                }
+              : undefined
+          }
         />
       )}
       {modal && (
@@ -936,9 +1053,8 @@ export default function App() {
                   );
                   if (saved.enabled) {
                     await api('/refresh', { source_id: saved.id });
-                    followCollection();
+                    followCollection([saved.id]);
                   }
-                  await load();
                   if (modal.source) notify(t('toast.sourceSaved'));
                   return saved;
                 }}
@@ -975,8 +1091,12 @@ export default function App() {
             aria-labelledby="detail-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 id="detail-title">{t('drawer.unavailable')}</h2>
-            <p>{t('drawer.unavailableHint')}</p>
+            <h2 id="detail-title">
+              {t(eventId && eventLoad === 'loading' ? 'chart.loading' : 'drawer.unavailable')}
+            </h2>
+            <p>
+              {t(eventId && eventLoad === 'error' ? 'event.loadError' : 'drawer.unavailableHint')}
+            </p>
             <button className="button" onClick={closeDetail}>
               {t('common.close')}
             </button>
@@ -997,35 +1117,32 @@ export default function App() {
             <header className="drawer-header">
               <div>
                 <span className="drawer-kind">
-                  {detail.kind === 'job' ? t('drawer.job') : t('drawer.instance')}
+                  {detail.kind === 'job'
+                    ? t('drawer.job')
+                    : detail.kind === 'array'
+                      ? t('drawer.array')
+                      : t('drawer.instance')}
                 </span>
                 <h2 id="detail-title">{detail.item.name}</h2>
-                <Status state={detail.item.state} />
+                {detail.kind !== 'array' && <Status state={detail.item.state} />}
               </div>
               <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
                 <X size={16} />
               </button>
             </header>
-            {detail.kind === 'job' ? (
-              <JobDetail job={detail.item} ctx={ctx} />
+            {detail.kind === 'array' ? (
+              <ArrayDetail key={detail.item.id} jobs={detail.item.jobs} ctx={ctx} />
+            ) : detail.kind === 'job' ? (
+              <JobDetail job={detail.item} ctx={ctx} event={detail.event} />
             ) : (
               <InstanceDetail
                 item={detail.item}
                 ctx={ctx}
                 onProbe={async () => {
                   try {
-                    const item = await mutate<Instance>(
+                    await mutate<Instance>(
                       `/instances/${encodeURIComponent(detail.item.id)}/probe`,
                       {},
-                    );
-                    setData(
-                      (current) =>
-                        current && {
-                          ...current,
-                          instances: current.instances.map((row) =>
-                            row.id === item.id ? item : row,
-                          ),
-                        },
                     );
                     notify(t('toast.probed'));
                   } catch (reason) {

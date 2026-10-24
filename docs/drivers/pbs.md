@@ -45,6 +45,7 @@ When an optional command fails, its data is left as it was and the source shows 
 | ComputeDeck | PBS |
 |---|---|
 | `id` | `<cluster id>:<job id without the server suffix>`, e.g. `cluster-c:1234[5]` |
+| `array_id`, `array_index` | `qstat`'s `array_id` / `array_index` attributes or the short subjob id: `1234[7].server` gives `1234[]` / `7`; null for ordinary jobs |
 | `state` | `job_state`: Q, H, W, T → `PENDING`; R → `RUNNING`; E → `COMPLETING`; S, U → `SUSPENDED` |
 | `reason` | `Held` for held (`H`) jobs and `BeginTime` for waiting (`W`, begin time) jobs, regardless of any comment; other pending jobs carry `comment` without the `Not Running:` prefix |
 | `gpu_count` | `Resource_List.ngpus`; otherwise the sum of `ngpus` over `exec_vnode` (running) or `select` chunks; `0` when the request names no GPU resource; unknown when it names another GPU-like resource |
@@ -101,6 +102,15 @@ Enabled and started execution queues are read. Routing queues are skipped.
 Finished jobs (`F`, or `X` for subjobs) of the login user with a non-zero `Exit_status` whose `obittime` lies within 24 hours of the server's clock. `qselect -H` narrows the read to jobs modified in that window.
 
 `Exit_status` -29 (walltime exceeded) is shown as `TIMEOUT`, -27 and -26 (memory exceeded) as `OUT_OF_MEMORY`, everything else as `FAILED` with the status as `exit_code`. `end` is the server's local time, like Slurm's `End`.
+
+Failure rows also expose `ended_at` with the remote clock's offset while preserving
+`end`. Nonnegative `Exit_status` values up to 256 become `exit_status`; values above
+256 become `exit_signal = Exit_status - 256`. Negative scheduler codes keep their raw
+`exit_code` and have no program status. The drawer never interprets a raw 137 as OOM.
+
+`time_limit` reads `Resource_List.walltime` and `log_path` reads `Output_Path` from the
+same history document. Values are kept as reported, including the output path's `host:`
+prefix. Missing values are null; no extra command is run.
 
 If job history is not enabled, `qselect -H` selects nothing without an error; the driver checks `job_history_enable` first and reports `history_unavailable` instead of "no failures".
 

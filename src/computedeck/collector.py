@@ -8,10 +8,10 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import drivers, events, nodes
+from . import attention, drivers, events, nodes
 from .errors import SourceError, message
 from .hardware import probe_instance
-from .plugins import Runtime
+from .plugins import PluginContext, Runtime
 from .ssh_config import write_config
 from .store import PROBE_INTERVAL, Store, manual_state, now
 
@@ -51,15 +51,49 @@ class ProbeConflict(Exception):
 
 
 class Collector:
-    def __init__(self, runtime: Runtime) -> None:
+    def __init__(self, runtime: Runtime, *, contexts: list[PluginContext] | None = None) -> None:
         self.runtime = runtime
+        self.contexts = contexts or []
         self.pending: set[str] = set()
         self.probes: set[str] = set()
+        self.probe_semaphore = asyncio.Semaphore(2)
         self.tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def store(self) -> Store:
         return self.runtime.store
+
+    def attention_items(self, dashboard: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        state = self.store.attention_state()
+        return attention.derive(
+            self.store.dashboard() if dashboard is None else dashboard,
+            [drivers.describe(name) for name in drivers.names()],
+            now=datetime.fromisoformat(now()),
+            state=state,
+            loop_errors=self.runtime.loop_errors,
+            unreadable_rows=self.store.unreadable_rows(),
+            plugin_status={
+                context.id: {**context.status(), "enabled": context.enabled}
+                for context in self.contexts
+            },
+        )
+
+    def clear_resolved_attention(self) -> None:
+        state = self.store.attention_state()
+        # Invalid acknowledgement rows are disposable, unlike collected records.
+        self.store.delete_attention_state(list(self.store.unreadable.get("attention_state", ())))
+        if not state:
+            return
+        current = {item["key"]: item["fingerprint"] for item in self.attention_items()}
+        self.store.delete_attention_state(
+            [key for key, saved in state.items() if current.get(key) != saved["fingerprint"]]
+        )
+
+    def try_clear_resolved_attention(self) -> None:
+        try:
+            self.clear_resolved_attention()
+        except Exception:
+            logger.exception("Attention cleanup failed")
 
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         task = asyncio.create_task(coroutine)
@@ -108,18 +142,28 @@ class Collector:
         self.store.save_source(source)
         changes: list[dict[str, Any]] = []
         try:
-            batch = await asyncio.wait_for(self._batch(source), timeout=120)
+            old = self.store.snapshot(source_id)
+            # An upgrade needs a full history baseline even with a recent 0.5 success.
+            collection_source = (
+                {**source, "last_success": None}
+                if not old or "lifecycle_pending" not in old
+                else source
+            )
+            batch = await asyncio.wait_for(self._batch(collection_source), timeout=120)
             batch.validate_rows()
             current = self.store.source(source_id)
             if not current or any(current.get(key) != source.get(key) for key in CONNECTION_KEYS):
                 # The response belongs to a deleted source or an old connection. New
                 # settings are collected on the next scheduler tick.
                 return
+            # A refresh may finish after waking, before the next scheduler tick.
+            self.store.record_heartbeat(now())
             changes = events.collected(
                 {**source, "status_before": status_before},
-                self.store.snapshot(source_id),
+                old,
                 batch,
                 first=not source.get("last_success"),
+                service_gap=self.store.service_gap(),
             )
             # Write only a successful collection. Failures preserve last good snapshots.
             self.store.save_snapshot(source_id, batch.snapshot())
@@ -129,6 +173,7 @@ class Collector:
                 error=None,
                 failures=0,
                 capabilities=batch.capabilities,
+                history_window_seconds=batch.history_window_seconds,
                 capabilities_seen=sorted(
                     set(source.get("capabilities_seen", []))
                     | set(source.get("capabilities", []))
@@ -173,6 +218,7 @@ class Collector:
         if source["status"] == "ready":
             self.store.record_history()
             write_config(self.store.dashboard()["instances"], self.runtime.data_dir)
+        self.try_clear_resolved_attention()
 
     async def _batch(self, source: dict[str, Any]) -> drivers.Batch:
         """Collect here, or on the node the source names."""
@@ -209,7 +255,6 @@ class Collector:
         if instance_id in self.probes:
             raise ProbeConflict("probe_in_progress")
         self.probes.add(instance_id)
-        attempt = now()
         endpoint = {
             key: instance.get(key)
             for key in ("host", "port", "username", "identity_file", "existing_alias")
@@ -243,18 +288,35 @@ class Collector:
             return current
 
         try:
-            async with self.runtime.semaphore:
-                result = measured(
-                    instance_id, await asyncio.wait_for(probe_instance(instance), timeout=45)
-                )
+            async with self.probe_semaphore:
+                for retry in range(2):
+                    attempt = now()
+                    try:
+                        result = measured(
+                            instance_id,
+                            await asyncio.wait_for(probe_instance(instance), timeout=45),
+                        )
+                        break
+                    except SourceError as error:
+                        if retry or error.code not in {"ssh_timeout", "ssh_closed"}:
+                            raise
+                        await asyncio.sleep(2)
+                        current = self._instance(instance_id)
+                        if not current or any(
+                            current.get(key) != value for key, value in endpoint.items()
+                        ):
+                            raise ProbeConflict("endpoint_changed") from None
             current = persist({**result, "ssh_error": None})
             self.store.record_history()
-            return current
         except ProbeConflict:
             raise
         except Exception as error:
             persist({"ssh_status": "error", "ssh_error": _error(error)})
+            self.try_clear_resolved_attention()
             raise
+        else:
+            self.try_clear_resolved_attention()
+            return current
         finally:
             self.probes.discard(instance_id)
 
@@ -284,6 +346,7 @@ class Collector:
             await asyncio.sleep(15)
 
     def _schedule(self) -> None:
+        self._heartbeat()
         for source in self.store.sources():
             if source["enabled"]:
                 due = source.get("next_due_at")
@@ -297,6 +360,9 @@ class Collector:
                     or datetime.now(UTC) - datetime.fromisoformat(attempted) >= PROBE_INTERVAL
                 ):
                     self.spawn(self._auto_probe(instance["id"]))
+
+    def _heartbeat(self) -> None:
+        self.store.record_heartbeat(now())
 
     async def _auto_probe(self, instance_id: str) -> None:
         with suppress(Exception):

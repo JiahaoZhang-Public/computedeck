@@ -10,7 +10,7 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 [![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
 
-*All screenshots use built-in example data from an earlier preview; the 0.5.0 layout and figures have changed. Click the overview for the 20-second demo.*
+*All screenshots use built-in example data from an earlier preview; the 0.6.0 layout and figures have changed. Click the overview for the 20-second demo.*
 
 ## Features
 
@@ -36,13 +36,16 @@ for upgrade details, including possible steps in the history chart.
 
 **0.5.0 — Understand and resolve problems** adds progressive connection checks, job explanations and timestamps, narrow-screen tables, and shareable view state. See the [changelog](CHANGELOG.md).
 
+**0.6.0 — Know what changed** adds searchable activity, recorded job outcomes and array summaries, notification digests and delivery status, visible observation gaps, and attention acknowledgement and snoozing. See the [changelog](CHANGELOG.md).
+
 ## Version preview
 
 Planned work; scope and priorities may change.
 
 - [x] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
-- [ ] **v0.6 — Know what changed:** a searchable activity page, deduplicated job and array notifications, attention acknowledgement and snoozing, delivery status, and visible collection gaps.
+- [x] **v0.6 — Know what changed:** a searchable activity page, one recorded outcome per job with failure explanations, grouped job and array notifications with delivery status, attention acknowledgement and snoozing, and visible observation gaps.
 - [ ] **v0.7 — Choose resources with confidence:** explainable resource comparisons, cost estimates and usage trends, sustained low-utilization hints, and wait estimates only where history supports them.
+- [ ] **v1.0 — A redesigned interface:** a rebuilt visual system, navigation organised around your questions, a command palette, a phone layout with bottom tabs, and one place to add and repair connections.
 
 ## Terms in the interface
 
@@ -55,7 +58,7 @@ Planned work; scope and priorities may change.
 | Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
 | GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with compute processes on SSH machines. This is not GPU utilization. |
 | “usable GPUs” in the capacity reading | Capacity on usable nodes across all users, not a promise that your login can allocate it. |
-| Needs attention | The single list of current faults and warnings; its badge, tile and panel use the same count. |
+| Needs attention | The single list of current faults and warnings; its badge, tile and panel count only items that are not acknowledged or snoozed. |
 
 Job details use the scheduler's terms: Account / Partition / QoS for Slurm,
 Account / Queue for PBS, Project / Queue for LSF, and Namespace / Node pool /

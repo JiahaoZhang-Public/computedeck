@@ -227,7 +227,20 @@ def test_reimport_preserves_runtime_state_and_deletes_nothing(store: Store) -> N
     job = {"id": "cluster-a:1", "source_id": "cluster-a-alice", "state": "RUNNING"}
     store.save_snapshot("cluster-a-alice", {"jobs": [job]})
     [gpu1] = [row for row in store.manual_instances() if row["external_id"] == "gpu1"]
-    gpu1.update(ssh_status="reachable", observed_at=collected_at, last_probe_attempt=collected_at)
+    measurements = {
+        "ssh_status": "reachable",
+        "observed_at": collected_at,
+        "last_probe_attempt": collected_at,
+        "ssh_error": None,
+        "gpu_allocated": 1,
+        "gpu_observed_count": 2,
+        "probe_warnings": [],
+        "metrics_scope": "host_visible",
+        "gpu_utilization": 30,
+        "cpu_utilization": 20,
+        "memory_utilization": 40,
+    }
+    gpu1.update(measurements)
     store.save_instance(gpu1)
 
     changed = """
@@ -268,6 +281,7 @@ gpu_count = 4
     assert gpu1["ssh_status"] == "reachable"
     assert gpu1["observed_at"] == collected_at
     assert gpu1["last_probe_attempt"] == collected_at
+    assert {key: gpu1[key] for key in measurements} == measurements
     assert store.settings()["language"] == "zh-CN"
 
 
@@ -392,6 +406,7 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
         last_success=now(),
         capabilities=["jobs", "nodes", "history"],
         capabilities_seen=["jobs", "nodes", "history"],
+        history_window_seconds=86400,
         warnings=[{"code": "partitions_unavailable"}],
         cluster_state="degraded",
     )
@@ -403,6 +418,7 @@ def test_import_changed_source_connection_clears_capability_history(store: Store
     assert saved["last_success"] is None
     assert saved["capabilities"] == []
     assert saved["capabilities_seen"] == []
+    assert saved["history_window_seconds"] is None
     assert saved["warnings"] == []
     assert saved["cluster_state"] == "unknown"
 
@@ -415,6 +431,7 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
         last_success=now(),
         capabilities=["jobs"],
         capabilities_seen=["jobs", "history"],
+        history_window_seconds=86400,
         warnings=[{"code": "partitions_unavailable"}],
         cluster_state="degraded",
     )
@@ -432,6 +449,7 @@ def test_import_enabled_toggle_preserves_capability_history(store: Store) -> Non
         assert saved["enabled"] is enabled
         assert saved["capabilities"] == ["jobs"]
         assert saved["capabilities_seen"] == ["jobs", "history"]
+        assert saved["history_window_seconds"] == 86400
         assert saved["last_success"] is None
         assert saved["warnings"] == source["warnings"]
         assert saved["cluster_state"] == "degraded"

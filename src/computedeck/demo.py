@@ -216,6 +216,31 @@ def dashboard() -> dict[str, Any]:
         )
     )
     jobs[-1]["node"] = "a-gpu-02"
+    # One mixed-state sweep occupies one list row, while counts still include every element.
+    for index in range(1, 31):
+        state = "RUNNING" if index <= 4 else "PENDING" if index < 30 else "SUSPENDED"
+        element = _job(
+            index,
+            (
+                "example:cluster-a-alice",
+                "vision / parameter sweep",
+                state,
+                1,
+                None,
+                None,
+                "00:24:00" if state == "RUNNING" else "00:00:00",
+            ),
+            observed,
+        )
+        element.update(
+            id=f"example:cluster-a:48300_{index}",
+            array_id="48300",
+            array_index=str(index),
+            node=f"a-gpu-{4 + (index - 1) // 2:02}" if state == "RUNNING" else None,
+            qos="long",
+            reason=("Resources" if index < 25 else "Priority") if state == "PENDING" else None,
+        )
+        jobs.append(element)
     local_current = current.astimezone().replace(tzinfo=None)
     failure = {
         **_job(
@@ -234,6 +259,9 @@ def dashboard() -> dict[str, Any]:
         "state": "OUT_OF_MEMORY",
         "end": (local_current - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:125",
+        "exit_status": 0,
+        "exit_signal": 125,
+        "ended_at": (current - timedelta(hours=5)).isoformat(),
     }
     timeout = {
         **_job(
@@ -243,6 +271,11 @@ def dashboard() -> dict[str, Any]:
         ),
         "end": (local_current - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": "0:0",
+        "exit_status": 0,
+        "exit_signal": 0,
+        "ended_at": (current - timedelta(hours=2)).isoformat(),
+        "time_limit": "02:00:00",
+        "log_path": "/work/vision/logs/train.log",
     }
     instances = [
         {
@@ -266,7 +299,10 @@ def dashboard() -> dict[str, Any]:
             "observed_at": observed,
             # A failed check survives provider listings without changing held GPUs.
             "ssh_status": "error",
-            "ssh_error": {"code": "ssh_timeout"},
+            "ssh_error": {
+                "code": "ssh_authentication",
+                "detail": "Permission denied (publickey).",
+            },
             "last_probe_attempt": probed,
         },
         {
@@ -382,6 +418,26 @@ def dashboard() -> dict[str, Any]:
             source["cluster_state"] = cluster_state(
                 [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
             )
+    array_failures = []
+    for index in range(60):
+        ended = (current - timedelta(minutes=45 + index)).isoformat()
+        array_failures.append(
+            {
+                **_job(
+                    index,
+                    ("example:cluster-b-alice", "train-sweep", "FAILED", 1, None, None, "00:10:00"),
+                    observed,
+                ),
+                "id": f"example:cluster-b:48200_{index}",
+                "array_id": "48200",
+                "array_index": str(index),
+                "end": ended,
+                "ended_at": ended,
+                "exit_code": "0:9" if index == 0 else "1:0",
+                "exit_status": 0 if index == 0 else 1,
+                "exit_signal": 9 if index == 0 else 0,
+            }
+        )
     data = {
         "mode": "demo",
         "sources": sources,
@@ -393,7 +449,7 @@ def dashboard() -> dict[str, Any]:
         "refreshing": True,
         "collecting": [sources[1]["id"]],
         **freshness(sources),
-        "recent_failures": [timeout, failure],
+        "recent_failures": [timeout, failure, *array_failures],
         "failure_history_sources": [source["id"] for source in sources if fresh(source, "history")],
         "failure_history_observed_at": min(
             source["last_success"] for source in sources if fresh(source, "history")
@@ -403,8 +459,41 @@ def dashboard() -> dict[str, Any]:
     data["summary"] = summarize(data)
     data["history"] = demo_history(24, data)
     data["attention"] = attention.derive(
-        data, [drivers.describe(name) for name in drivers.names()], now=current
+        data,
+        [drivers.describe(name) for name in drivers.names()],
+        now=current,
+        plugin_status={
+            "notify": {
+                "enabled": True,
+                "delivery_failures": [
+                    {
+                        "channel": "example:team",
+                        "channel_name": "Team alerts",
+                        "error_code": "send_timeout",
+                        "at": (current - timedelta(minutes=3)).isoformat(),
+                    }
+                ],
+            }
+        },
     )
+    # Example acknowledgement is isolated from the service's saved state.
+    muted = {
+        "cluster_unavailable:example:cluster-d-alice": None,
+        "instance_ssh_failed:example:runpod:demo-pod": timedelta(hours=1),
+    }
+    for item in data["attention"]:
+        if item["kind"] == "notification_failed":
+            item["subject"]["id"] = "example:notify"
+            item["key"] = "notification_failed:example:notify:team"
+        if item["key"] not in muted:
+            continue
+        duration = muted[item["key"]]
+        item["muted"] = {
+            "state": "snoozed" if duration else "acknowledged",
+            "at": (current - timedelta(minutes=10)).isoformat(),
+            "until": (current + duration).isoformat() if duration else None,
+        }
+    data["attention_count"] = sum(item["muted"] is None for item in data["attention"])
     return data
 
 
@@ -413,10 +502,12 @@ def events() -> list[dict[str, Any]]:
     data = dashboard()
     sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
-    timeout, oom = data["recent_failures"]
+    timeout, oom = data["recent_failures"][:2]
     at = datetime.now(UTC).replace(second=0, microsecond=0)
 
-    def context(source_id: str) -> dict[str, Any]:
+    def context(source_id: str | None) -> dict[str, Any]:
+        if source_id is None:
+            return {}
         source = sources[source_id]
         return {
             "source_name": source["name"],
@@ -425,7 +516,55 @@ def events() -> list[dict[str, Any]]:
             "driver": source["driver"],
         }
 
-    rows = [
+    rows: list[tuple[str, str | None, int, dict[str, Any]]] = [
+        (
+            "change.tool",
+            None,
+            360,
+            {"subject_id": "notify", "name": "Notifications", "action": "on", "fields": []},
+        ),
+        (
+            "change.source",
+            "example:cluster-b-alice",
+            8,
+            {
+                "subject_id": "example:cluster-b-alice",
+                "name": "Cluster B",
+                "action": "edited",
+                "fields": ["interval_minutes"],
+            },
+        ),
+        (
+            "change.instance",
+            None,
+            45,
+            {
+                "subject_id": "example:manual:lab-workstation-buildbox",
+                "name": "build-box",
+                "action": "added",
+                "fields": ["external_id", "host", "name", "platform"],
+            },
+        ),
+        ("source.recovered", "example:cluster-d-alice", 10, {}),
+        (
+            "source.gap",
+            "example:cluster-d-alice",
+            10,
+            {
+                "unobserved_from": (at - timedelta(hours=48)).isoformat(),
+                "unobserved_to": (at - timedelta(minutes=10)).isoformat(),
+                "failures_checked_from": (at - timedelta(hours=24, minutes=10)).isoformat(),
+            },
+        ),
+        (
+            "service.gap",
+            None,
+            450,
+            {
+                "from": (at - timedelta(hours=8)).isoformat(),
+                "to": (at - timedelta(minutes=450)).isoformat(),
+            },
+        ),
         (
             "source.failed",
             "example:runpod-secondary",
@@ -439,27 +578,99 @@ def events() -> list[dict[str, Any]]:
             150,
             {"error": sources["example:cluster-c-alice"]["error"]},
         ),
-        ("job.failed", timeout["source_id"], 120, {"job": timeout}),
-        ("job.failed", oom["source_id"], 300, {"job": oom}),
+        ("job.finished", timeout["source_id"], 120, {"job": timeout, "outcome": "timeout"}),
+        ("job.finished", oom["source_id"], 300, {"job": oom, "outcome": "out_of_memory"}),
         (
-            "job.ended",
-            "example:cluster-a-bob",
+            "job.finished",
+            "example:cluster-b-alice",
             210,
-            {"job": {**jobs["example:cluster-a:48212"], "name": "speech-asr / prep"}},
+            {
+                "job": {
+                    **jobs["example:cluster-b:48211"],
+                    "id": "example:cluster-b:48001",
+                    "name": "vit-pretrain / prepare",
+                    "state": "COMPLETED",
+                },
+                "outcome": "completed",
+            },
+        ),
+        (
+            "job.finished",
+            "example:cluster-a-bob",
+            90,
+            {
+                "job": {
+                    "id": "example:cluster-a:48000",
+                    "name": "data / prepare",
+                    "state": "UNKNOWN",
+                    "observed_at": (at - timedelta(minutes=120)).isoformat(),
+                },
+                "outcome": "unknown",
+                "outcome_reason": "outcomes_unavailable",
+            },
         ),
         ("source.recovered", "example:cluster-b-alice", 390, {}),
         ("source.failed", "example:cluster-b-alice", 420, {"error": {"code": "timeout"}}),
     ]
+    for kind, _, minutes, extra in rows:
+        if kind == "job.started":
+            started = (at - timedelta(minutes=minutes)).isoformat()
+            extra.update(
+                started_at=started,
+                observed_at=(at - timedelta(minutes=minutes - 5)).isoformat(),
+            )
+            extra["job"]["started_at"] = started
+        if kind == "job.finished":
+            ended = (at - timedelta(minutes=minutes)).isoformat()
+            extra.update(
+                ended_at=None if extra["outcome"] == "unknown" else ended,
+                observed_at=ended
+                if extra["outcome"] == "unknown"
+                else (at - timedelta(minutes=minutes - 5)).isoformat(),
+            )
+            extra["job"].update(
+                end=extra["ended_at"],
+                exit_code="0:0"
+                if extra["outcome"] == "completed"
+                else extra["job"].get("exit_code"),
+            )
+    for index, job in enumerate(data["recent_failures"][2:]):
+        rows.append(
+            (
+                "job.finished",
+                job["source_id"],
+                45 + index,
+                {
+                    "job": job,
+                    "outcome": "failed",
+                    "state": "FAILED",
+                    "exit_code": job["exit_code"],
+                    "ended_at": job["ended_at"],
+                    "observed_at": (at - timedelta(minutes=40)).isoformat(),
+                    "since": (at - timedelta(hours=3)).isoformat(),
+                },
+            )
+        )
+    for day in range(1, 29):
+        rows.append(("source.recovered", "example:cluster-b-alice", day * 1440, {}))
+        rows.append(
+            (
+                "source.failed",
+                "example:cluster-b-alice",
+                day * 1440 + 10,
+                {"error": {"code": "timeout"}},
+            )
+        )
     rows.sort(key=lambda row: row[2])
     return [
         {
-            "id": 100 - index,
+            "id": len(rows) - index,
             "key": f"example:{index}",
             "type": kind,
             "at": (at - timedelta(minutes=minutes)).isoformat(),
             "source_id": source_id,
             "silent": False,
-            "data": {**context(source_id), **extra},
+            "data": extra if kind.startswith("change.") else {**context(source_id), **extra},
         }
         for index, (kind, source_id, minutes, extra) in enumerate(rows)
     ]
@@ -477,10 +688,36 @@ def nodes() -> list[dict[str, Any]]:
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
             "status": "ok",
-            "version": "0.5.1",
+            "version": "0.6.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,
             "error": None,
         }
     ]
+
+
+def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fictional notification outcomes, isolated from the live delivery log."""
+    result = []
+    for row in rows:
+        group = row.get("group")
+        if group:
+            children = delivery_status(group["events"])
+            statuses = sorted({status for child in children for status in child["delivery"]})
+            result.append({**row, "delivery": statuses, "group": {**group, "events": children}})
+            continue
+        statuses = []
+        if row["type"] == "job.finished":
+            if row["data"].get("job", {}).get("array_id"):
+                statuses = (
+                    ["failed", "grouped"]
+                    if row["data"]["job"].get("array_index") == "0"
+                    else ["grouped"]
+                )
+            elif row["data"].get("outcome") == "unknown":
+                statuses = ["suppressed"]
+            else:
+                statuses = ["sent"]
+        result.append({**row, "delivery": statuses})
+    return result

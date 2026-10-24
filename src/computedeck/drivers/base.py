@@ -36,6 +36,16 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def job_time(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        stamp = datetime.fromisoformat(value)
+        return stamp.isoformat() if stamp.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
@@ -67,6 +77,9 @@ TEXT_FIELDS = (
     "elapsed",
     "reason",
     "exit_code",
+    "ended_at",
+    "time_limit",
+    "log_path",
     "platform",
     "host",
     "username",
@@ -77,6 +90,8 @@ TEXT_FIELDS = (
     "external_id",
     "metrics_scope",
     "observed_at",
+    "array_id",
+    "array_index",
     "submitted_at",
     "started_at",
     "last_probe_attempt",
@@ -123,7 +138,7 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
     if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
         raise ValueError("Invalid collection port")
     _check_message(row.get("ssh_error"), "ssh_error")
-    for key in ("gpu_count", "gpu_allocated", "gpu_observed_count"):
+    for key in ("gpu_count", "gpu_allocated", "gpu_observed_count", "exit_status", "exit_signal"):
         value = row.get(key)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or value < 0
@@ -184,18 +199,29 @@ class Batch(BaseModel):
     nodes: list[dict[str, Any]] | None = None
     instances: list[dict[str, Any]] | None = None
     failures: list[dict[str, Any]] | None = None
+    finished: list[dict[str, Any]] | None = None
+    # Reconciliation state only; terminal history itself is never snapshotted.
+    lifecycle_pending: list[dict[str, Any]] | None = None
+    lifecycle_ended: list[dict[str, Any]] | None = None
     qos: list[dict[str, Any]] | None = None
     cluster_state: Literal["available", "degraded", "unavailable", "unknown"] = "unknown"
     # What a cloud provider says about the account, e.g. {"balance": 12.5, "currency": "USD"}.
     account: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    # Failure-history lookback, not a guarantee that the scheduler retained every job.
+    history_window_seconds: int | None = Field(default=None, ge=0, strict=True)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
     observed_at: str = Field(default_factory=now)
 
     def validate_rows(self) -> None:
         """Reject malformed driver rows before events or the last-good snapshot change."""
+        window = self.history_window_seconds
+        if window is not None and (
+            isinstance(window, bool) or not isinstance(window, int) or window < 0
+        ):
+            raise ValueError("history_window_seconds must be a nonnegative integer or None")
         json.dumps(self.model_dump(), allow_nan=False, ensure_ascii=False).encode("utf-8")
-        for rows in (self.jobs, self.nodes, self.instances, self.failures):
+        for rows in (self.jobs, self.nodes, self.instances, self.failures, self.finished):
             for row in rows or []:
                 validate_row(row, complete=True)
         for entry in self.qos or []:
@@ -227,7 +253,14 @@ class Batch(BaseModel):
         return {
             key: value
             for key, value in self.model_dump(
-                include={"jobs", "nodes", "instances", "failures"}
+                include={
+                    "jobs",
+                    "nodes",
+                    "instances",
+                    "failures",
+                    "lifecycle_pending",
+                    "lifecycle_ended",
+                }
             ).items()
             if value is not None
         }

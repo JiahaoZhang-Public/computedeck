@@ -3,12 +3,18 @@
 All sample outputs are hand-written from the documented formats and use fictional data.
 """
 
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from computedeck import collector, events
 from computedeck.drivers import slurm, ssh
 from computedeck.drivers.base import SourceError
+from computedeck.plugins import Runtime
+from computedeck.store import Store
 
 SOURCE: dict[str, Any] = {
     "id": "cluster-a-alice",
@@ -63,9 +69,17 @@ def sacct_line(**changes: str) -> str:
         "Elapsed": "01:02:03",
         "End": "2026-01-05T10:00:00",
         "ExitCode": "1:0",
+        "Timelimit": "02:00:00",
     }
     row.update(changes)
     return "|".join(row[field] for field in slurm._HISTORY_FIELDS)
+
+
+def terminal_line(**changes: str) -> str:
+    return (
+        sacct_line(**{"End": "2026-01-05T10:00:00+0400", **changes})
+        + "|2026-01-05T08:00:00+0400|2026-01-05T09:00:00+0400"
+    )
 
 
 NODES = (
@@ -379,7 +393,7 @@ def fake_cluster(
 ) -> Any:
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, command, options))
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             return job_line(UserName=SOURCE["username"]) + "\n"
         if failure is not None:
             raise failure
@@ -396,8 +410,8 @@ def fake_cluster(
             )
         if command.startswith("sacctmgr"):
             return "cluster-a|lab|alice||normal,debug,long\n"
-        if command.startswith("sacct"):
-            return sacct_line() + "\n"
+        if " sacct " in command:
+            return sacct_line() + "\n" + slurm.HISTORY_MARKER + "\n" + terminal_line()
         raise AssertionError(f"Unexpected command: {command}")
 
     return run
@@ -409,19 +423,26 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     calls: list[tuple[str, str, list[str] | None]] = []
 
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
-        if command.startswith("env SLURM_TIME_FORMAT="):
+        if " squeue " in command:
             calls.append((destination, command, options))
             return job_line(UserName=user, QOS="long") + "\n"
         if command.startswith("sacctmgr"):
             calls.append((destination, command, options))
             return f"cluster-a|lab|{user}||normal,debug,long\n"
-        if command.startswith("sacct"):
+        if " sacct " in command:
             calls.append((destination, command, options))
-            return sacct_line(User=user) + "\n"
+            return (
+                sacct_line(User=user)
+                + "\n"
+                + slurm.HISTORY_MARKER
+                + "\n"
+                + terminal_line(User=user)
+            )
         return await fake_cluster(calls)(destination, command, options)
 
     monkeypatch.setattr(ssh, "run", run)
     batch = await slurm.SlurmDriver().collect(source)
+    assert batch.history_window_seconds == 86400
     assert batch.capabilities == [
         "jobs",
         "nodes",
@@ -446,12 +467,13 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
 
     assert all(dest == "cluster-a" and opts == ["-l", user] for dest, _, opts in calls)
     commands = [command for _, command, _ in calls]
-    squeue = next(command for command in commands if command.startswith("env SLURM_TIME_FORMAT="))
+    squeue = next(command for command in commands if " squeue " in command)
     assert f"--user={user}" in squeue
     assert "--array" in squeue
     assert squeue.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z squeue ")
     assert "SubmitTime" in squeue and "StartTime" in squeue
-    sacct = next(command for command in commands if command.startswith("sacct "))
+    sacct = next(command for command in commands if " sacct " in command)
+    assert sacct.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct ")
     assert f"--user={user}" in sacct
     assert "--allocations" in sacct and "--parsable2" in sacct
     # sacct needs both time bounds when filtering by state.
@@ -461,7 +483,6 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     assert {command.split()[0] for command in commands} == {
         "env",
         "scontrol",
-        "sacct",
         "sacctmgr",
     }
     for command in commands:
@@ -513,7 +534,7 @@ async def test_malformed_optional_output_becomes_a_warning(
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         if command == "scontrol -d show nodes -o":
             return "garbage\n"
-        if command.startswith("sacct"):
+        if " sacct " in command:
             return "1|2|3\n"
         return await healthy(destination, command, options)
 
@@ -727,3 +748,169 @@ def test_job_timestamps_keep_offsets_and_do_not_treat_estimated_starts_as_actual
     assert pending["started_at"] is None
     unknown = slurm.parse_jobs(job_line(SubmitTime="Unknown", StartTime="N/A"), SOURCE)[0]
     assert unknown["submitted_at"] is None and unknown["started_at"] is None
+
+
+def test_terminal_history_has_offsets_and_keeps_failure_end_unchanged() -> None:
+    output = "\n".join(
+        [
+            terminal_line(State="COMPLETED", JobID="20"),
+            terminal_line(State="CANCELLED by 1000", JobID="21"),
+            terminal_line(State="BOOT_FAIL", JobID="22"),
+            terminal_line(State="DEADLINE", JobID="23"),
+        ]
+    )
+    rows = slurm.parse_failures(output, SOURCE, terminal=True)
+    assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "BOOT_FAIL", "DEADLINE"}
+    assert all(row["end"] == "2026-01-05T10:00:00+04:00" for row in rows)
+    assert rows[0]["submitted_at"] == "2026-01-05T08:00:00+04:00"
+    assert rows[0]["started_at"] == "2026-01-05T09:00:00+04:00"
+    assert slurm.parse_failures(sacct_line(), SOURCE)[0]["end"] == "2026-01-05T10:00:00"
+
+
+@pytest.mark.parametrize(
+    "minutes,capabilities,window",
+    [
+        (10, ["history"], 15),
+        (1440, ["history"], 1445),
+        (1441, ["history"], 1446),
+        (3000, ["history"], 1447),
+        (10, [], 1440),
+        (10, None, 1440),
+    ],
+)
+async def test_terminal_window_overlaps_previous_success_and_is_capped(
+    monkeypatch: pytest.MonkeyPatch, minutes: int, capabilities: list[str] | None, window: int
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    clock = datetime.now(UTC)
+    monkeypatch.setattr(slurm, "now", lambda: clock.isoformat())
+    calls: list[tuple[str, str, list[str] | None]] = []
+    monkeypatch.setattr(ssh, "run", fake_cluster(calls))
+    batch = await slurm.SlurmDriver().collect(
+        {
+            **SOURCE,
+            "last_success": (clock - timedelta(minutes=minutes)).isoformat(),
+            "capabilities": capabilities,
+        }
+    )
+    command = next(command for _, command, _ in calls if slurm.HISTORY_MARKER in command)
+    assert "\n" not in command
+    assert f"--starttime=now-{window}minutes" in command
+    assert "--starttime=now-24hours" in command
+    assert "env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct" in command
+    assert batch.finished and batch.failures
+    assert "finished" not in batch.snapshot()
+
+
+async def test_upgrade_seeds_full_history_before_an_accounting_outage(
+    monkeypatch: pytest.MonkeyPatch,
+    store: Store,
+    add_source: Callable[..., dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    clock = datetime.now(UTC)
+    for module in (slurm, collector, events):
+        monkeypatch.setattr(module, "now", lambda: clock.isoformat())
+    source = add_source()
+    source.update(
+        last_success=(clock - timedelta(minutes=10)).isoformat(), capabilities=["history"]
+    )
+    store.save_source(source)
+    store.save_snapshot(source["id"], {"jobs": []})  # A pre-upgrade snapshot.
+    end = (clock - timedelta(hours=3)).isoformat()
+    history_calls: list[str] = []
+    run = fake_cluster([])
+
+    async def ssh_run(alias: str, command: str, options: list[str] | None = None) -> str:
+        if " squeue " in command:
+            return ""
+        if slurm.HISTORY_MARKER in command:
+            history_calls.append(command)
+            if len(history_calls) == 2:
+                raise SourceError("timeout")
+            finished = (
+                "\n".join(
+                    terminal_line(JobID=job_id, State=state, End=end)
+                    for job_id, state in [("1001", "FAILED"), ("1002", "COMPLETED")]
+                )
+                if "--starttime=now-1440minutes" in command
+                else ""
+            )
+            return sacct_line(End=end[:19]) + "\n" + slurm.HISTORY_MARKER + "\n" + finished
+        return await run(alias, command, options)
+
+    monkeypatch.setattr(ssh, "run", ssh_run)
+    runtime = Runtime(tmp_path)
+    runtime.store = store
+    runner = collector.Collector(runtime)
+    for _ in range(3):
+        await runner.collect(source["id"])
+        # Accounting is unavailable, but the scheduler stays awake between collections.
+        for _ in range(10):
+            clock += timedelta(minutes=1)
+            runner._heartbeat()
+    assert len(history_calls) == 3
+    assert "--starttime=now-1440minutes" in history_calls[0]
+    assert "--starttime=now-15minutes" in history_calls[1]
+    assert "--starttime=now-1440minutes" in history_calls[2]
+    assert len(store.events()) == 2
+    assert all(row["silent"] for row in store.events())
+    assert store.recent_events() == []
+
+
+@pytest.mark.parametrize(
+    ("job_id", "array_id", "array_index"),
+    [
+        ("1234_7", "1234", "7"),
+        ("1234_0", "1234", "0"),
+        ("1234", None, None),
+        ("1234+0", None, None),
+        ("1234_[1-30]", None, None),
+        ("1234_7.batch", None, None),
+        ("unknown", None, None),
+    ],
+)
+def test_array_fields_on_queue_and_accounting_rows(
+    job_id: str, array_id: str | None, array_index: str | None
+) -> None:
+    rows = slurm.parse_jobs(job_line(JobArrayID=job_id), SOURCE)
+    rows += slurm.parse_failures(sacct_line(JobID=job_id), SOURCE)
+    rows += slurm.parse_failures(terminal_line(JobID=job_id), SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize(
+    "code,status,signal",
+    [
+        ("0:9", 0, 9),
+        ("127:0", 127, 0),
+        ("0:125", 0, 125),
+        ("137", None, None),
+        ("Unknown", None, None),
+    ],
+)
+def test_failure_exit_fields_and_offset_preserve_raw_end(code, status, signal) -> None:
+    [row] = slurm.parse_failures(sacct_line(ExitCode=code, End="2026-01-05T10:00:00+0400"), SOURCE)
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (
+        None if code in slurm.EMPTY else code,
+        status,
+        signal,
+    )
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+    assert slurm.parse_failures(sacct_line(), SOURCE)[0]["ended_at"] is None
+
+
+@pytest.mark.parametrize(
+    "limit", ["02:00:00", "2-00:00:00", "UNLIMITED", "Partition_Limit", *sorted(slurm.EMPTY)]
+)
+@pytest.mark.parametrize("terminal", [False, True])
+def test_history_time_limit_is_known_or_null(limit, terminal) -> None:
+    line = terminal_line if terminal else sacct_line
+    [row] = slurm.parse_failures(line(Timelimit=limit), SOURCE, terminal=terminal)
+    assert row["time_limit"] == (limit if limit in {"02:00:00", "2-00:00:00"} else None)
+    with pytest.raises(SourceError, match="unexpected_output"):
+        slurm.parse_failures(line(Timelimit=limit).rsplit("|", 1)[0], SOURCE, terminal=terminal)

@@ -34,6 +34,7 @@ export interface Source {
   interval_minutes: number;
   capabilities: string[];
   capabilities_seen?: string[];
+  history_window_seconds?: number | null;
   qos: QosLimit[];
   warnings?: (Message | string)[];
   stale?: boolean;
@@ -94,13 +95,15 @@ export interface DriverInfo {
 }
 export interface Job {
   id: string;
+  array_id?: string | null;
+  array_index?: string | null;
   source_id: string;
   cluster_id: string;
   name: string;
   user: string;
   account: string;
-  partition: string;
-  qos: string;
+  partition: string | null;
+  qos: string | null;
   state: string;
   gpu_count: number | null;
   gpu_type: string | null;
@@ -111,6 +114,11 @@ export interface Job {
   started_at?: string | null;
   end?: string | null;
   exit_code?: string | null;
+  exit_status?: number | null;
+  exit_signal?: number | null;
+  ended_at?: string | null;
+  time_limit?: string | null;
+  log_path?: string | null;
   reason: string | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;
@@ -232,6 +240,9 @@ export interface FleetSummary extends Summary {
 }
 export interface Attention {
   key: string;
+  fingerprint?: string;
+  mutable?: boolean;
+  muted?: { state: 'acknowledged' | 'snoozed'; at: string; until: string | null } | null;
   kind: string;
   subject: { kind: 'source' | 'instance' | 'service' | 'plugin'; id: string; name: string };
   severity: 'error' | 'warn';
@@ -240,11 +251,12 @@ export interface Attention {
   since: string | null;
   observed_at: string | null;
   next_attempt: string | null;
-  action: 'diagnose' | 'instance' | 'health' | 'toolbox';
+  action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
 export interface Dashboard {
   token?: string;
   attention?: Attention[];
+  attention_count?: number;
   summary: FleetSummary;
   mode: string;
   sources: Source[];
@@ -332,11 +344,51 @@ export interface Tool {
 /** Something that changed between two collections, from `GET /api/events`. */
 export interface DeckEvent {
   id: number;
-  type: 'job.started' | 'job.ended' | 'job.failed' | 'source.failed' | 'source.recovered' | string;
+  group?: {
+    count: number;
+    ids: number[];
+    first_at: string;
+    last_at: string;
+    names: { name: string; count: number }[];
+    outcomes?: Record<string, number>;
+    observed_time?: boolean;
+    since?: string | null;
+    events: DeckEvent[];
+  };
+  delivery?: ('sent' | 'failed' | 'suppressed' | 'grouped' | 'dropped')[];
+  type:
+    | 'job.finished'
+    | 'job.started'
+    | 'job.ended'
+    | 'job.failed'
+    | 'source.failed'
+    | 'source.recovered'
+    | string;
   at: string;
   source_id: string | null;
   data: {
+    subject_id?: string;
+    name?: string;
+    action?: string;
+    fields?: string[];
+    counts?: { sources: number; nodes: number; instances: number };
+    outcome?: string;
+    failure_announced?: boolean;
+    outcome_reason?: 'outcomes_unavailable' | 'outcome_not_reported' | 'outside_lookback' | null;
+    state?: string | null;
+    exit_code?: string | null;
+    submitted_at?: string | null;
+    started_at?: string | null;
+    ended_at?: string | null;
+    observed_at?: string;
+    since?: string;
+    from?: string;
+    to?: string;
+    unobserved_from?: string;
+    unobserved_to?: string;
+    failures_checked_from?: string | null;
     source_name?: string;
+    driver?: string;
     cluster_id?: string;
     username?: string;
     job?: Partial<Job> & { exit_code?: string | null; end?: string | null };

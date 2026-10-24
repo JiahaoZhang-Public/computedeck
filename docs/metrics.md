@@ -1,6 +1,6 @@
 # Reading the numbers
 
-In 0.4.0, the service computes the headline figures once for the fleet, each cluster
+The service computes the headline figures once for the fleet, each cluster
 or platform, and each source. Overview, Usage, cluster views and new history points
 read those figures. `—` means unknown or no measurement; `≥ n` is a known subtotal,
 with named missing evidence. Neither means zero.
@@ -34,9 +34,50 @@ health severity rules for its fictional sources; the example banner identifies t
 An SSH check has its own timestamp and does not refresh the provider's listing.
 
 Browser polling is separate from collection: hidden tabs pause requests, unchanged
-dashboards reuse the previous response, and Refresh or a new SSH check gets a short
-period of faster polling. These actions do not turn retained observations into new
-measurements. Example timestamps advance once per minute.
+dashboards reuse the previous response, and returning to a tab triggers one refresh.
+After Refresh or adding a source, faster polling stops when the requested sources finish,
+or after sixty seconds. Completed machine checks and manual additions reload once.
+These actions do not turn retained observations into new measurements. Example timestamps
+advance once per minute. Once an authenticated dashboard reports no sources, the health
+panel’s “Add source” button opens the add-source dialog directly; it is hidden in example mode.
+
+浏览器轮询与采集相互独立：隐藏标签页暂停请求，未变化的仪表盘复用先前响应，
+返回标签页时刷新一次。刷新或添加数据源后，快速轮询在目标数据源采集结束时停止，
+最长持续六十秒。机器检查完成或手动添加机器后只重新加载一次。
+这些操作不会把保留的观测变成新测量。示例时间每分钟更新一次。
+通过身份验证且仪表盘已加载并确认没有数据源时，健康面板的“添加来源”按钮直接打开添加对话框；示例模式下隐藏该按钮。
+
+## Machine checks / 机器检查
+
+Editing a hand-added machine or importing its configuration keeps its last SSH check
+and measurements when the host, port, username, identity file and alias mode are unchanged.
+Renaming it, changing its price or switching monitoring does not erase the check. Changing
+its connection clears the check and readings until it is checked again. GPU inventory
+fields supplied in the form or import still take effect.
+
+“Recently reachable” uses the SSH check time (`last_probe_attempt`), never a provider's
+listing time. A missing check time is unknown. SSH sources record this time when they
+successfully check the machine during collection.
+
+Machine checks have two concurrent slots separate from source collections. A timeout or
+closed or reset SSH connection is retried once after two seconds. Authentication, host-key,
+unreachable-network and refused-connection failures have specific guidance and are not
+retried automatically. Remote command failures (SSH exit status other than 255) retain
+their detail as a generic error, without connection guidance or retries. Unknown errors
+remain generic. A first transient failure is not
+saved as a failed check while its retry is pending.
+
+编辑手动添加的机器或导入配置时，如果主机、端口、用户名、密钥文件和别名模式未改变，
+会保留上次 SSH 检查和测量。重命名、修改价格或切换监控不会清除检查；连接设置改变后，
+检查和测量会清空，直到再次检查。表单或导入中的 GPU 数量与型号仍会生效。
+
+“最近可连接”使用 SSH 检查时间（`last_probe_attempt`），不使用云平台的列表更新时间。
+缺少检查时间表示未知。SSH 数据源在采集时成功检查机器后也会记录该时间。
+
+机器检查使用独立于数据源采集的两个并发名额。SSH 超时、连接关闭或重置后，等待两秒重试一次。
+认证失败、主机密钥验证失败、网络不可达及连接被拒绝都有具体指引，不会自动重试。
+未知错误保留通用说明。在重试期间，不会将第一次瞬时故障保存为检查失败。
+远程命令失败（SSH 退出码不是 255）保留原始详情并使用通用错误说明，不提供连接指引或重试。
 
 ## Upgrading from 0.3
 
@@ -48,35 +89,364 @@ because it now follows the oldest enabled source instead of the newest one.
 
 ## Needs attention
 
-The Overview tile, navigation badge and attention panel count the same server
-list. The first collection failure appears as a warning; two consecutive failures
-or stale data make it an error. Stale data becomes an error after three collection
-intervals. Built-in drivers classify cluster availability using the node-health
-rule over GPU-capable nodes (positive or unknown GPU counts), so healthy CPU-only
-nodes cannot hide a GPU outage. One item per cluster uses the worst state reported
-by its current logins. Source-failure and stale-data items replace retained cluster
-faults and collection warnings.
-A capability warning counts only when the source has
-delivered that capability before; permanent gaps stay on Sources. Other warnings
-are all included. Unchecked connections and machines with monitoring off do not
-produce attention items; failed SSH checks on monitored machines and provider
-instances do. Disabled sources and plugins do not produce items.
-Disabling or re-enabling a source clears its collection error and retry count while
-preserving retained observations and capability history. It clears `last_success`
-so the next collection establishes a silent event baseline. Retained inventories
-do not override the cluster state reported by the latest collection.
+The Overview tile, navigation badge and attention panel count the same server list of
+unmuted items. The first collection failure appears as a warning; two consecutive
+failures or stale data make it an error. Stale data becomes an error after three
+collection intervals. Built-in drivers classify cluster availability using the
+node-health rule over GPU-capable nodes (positive or unknown GPU counts), so healthy
+CPU-only nodes cannot hide a GPU outage. One item per cluster uses the worst state
+reported by its current logins. Source-failure and stale-data items replace retained
+cluster faults and collection warnings. A capability warning counts only when the source
+has delivered that capability before; permanent gaps stay on Sources. Other warnings are
+all included. Unchecked connections and machines with monitoring off do not produce
+attention items; failed SSH checks on monitored machines and provider instances do.
+Disabled sources and plugins do not produce items. Disabling or re-enabling a source
+clears its collection error and retry count while preserving retained observations and
+capability history. It clears `last_success` so the next collection establishes a silent
+event baseline. Retained inventories do not override the cluster state reported by the
+latest collection.
 
-Rows link to diagnosis (the last error and an explicit Test connection button),
-the instance, service health or Toolbox. Their times use existing observations:
-`since` is the last successful collection for a failing or stale source: no good
-data has arrived since then. It is null for all other cases. `observed_at` records
-the latest observation, shown as "Last seen": the collection that observed a
-source condition, the latest failed attempt for a source that never succeeded,
-an SSH check, or a background error report. Repeated observations do not imply a
-new incident onset. Unreadable rows and plugin health errors have neither time.
-Attention is derived on every dashboard read; there is no acknowledge, snooze or
-additional collection request.
+Rows link to diagnosis (the last error and an explicit Test connection button), the
+instance, service health, Toolbox or Notifications (channel delivery warnings). Their
+times use existing observations: `since` is the last successful collection for a failing
+or stale source: no good data has arrived since then. It is null for all other cases.
+`observed_at` records the latest observation, shown as "Last seen": the collection that
+observed a source condition, the latest failed attempt for a source that never
+succeeded, an SSH check, or a background error report. Repeated observations do not
+imply a new incident onset. Unreadable rows and plugin health errors have neither time.
+Attention is derived on every dashboard read without an additional collection request.
+Acknowledge keeps an item quiet until its cause or severity changes. Snooze keeps it
+quiet for one hour or until the next midnight in the service host's timezone; a changed
+cause or severity also ends a snooze early. Names, observation times and free-text error
+output do not reopen items. A resolved item loses its saved acknowledgement after the
+next collection, machine check, attention action, source or machine edit/removal, or
+tool update. Unreadable acknowledgement rows are discarded during the same cleanup;
+dashboard reads never delete saved state.
+
+The tile, badge and panel count only unmuted items. Muted items remain in the collapsed
+"Acknowledged (N)" group with Unmute and their snooze expiry, when applicable. This
+state is saved on the service and shared by all viewers. The health pill still reports
+source health. Background-task faults and unreadable rows cannot be muted. Example data
+shows acknowledged and snoozed items, but its controls cannot change saved state.
+
+确认会让待处理项保持静默，直到原因或严重程度发生变化。暂缓可持续一小时，或持续到服务主机
+时区的次日零点；原因或严重程度变化也会提前结束暂缓。名称、观测时间和错误输出文本变化
+不会重新提醒。问题解决后，下次采集、机器检查、待处理项操作、数据源或机器的编辑/删除，
+或工具更新会清除其已保存的确认状态。无法读取的确认记录也会在清理时删除；读取概览不会删除保存的状态。
+
+概览卡片、导航徽标和面板只统计未静默的项目。静默项目保留在默认折叠的“已确认（N）”中，
+可恢复提醒，并显示暂缓截止时间。状态保存在服务端，所有查看者共享。健康状态标记仍反映
+数据源健康状况。后台任务故障和无法读取的数据行不能静默。示例数据包含已确认和暂缓项目，
+但其中的控件不能修改保存的状态。
 
 Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
 `instances_skipped` as driver capability checks or coverage-only conditions.
 They currently count as partial data, including when the gap is permanent.
+
+## Job times / 作业时间
+
+Submitted and started times are shown when the scheduler reports them. Times with an
+explicit offset are displayed in the viewer's timezone; times without an offset stay
+labelled as scheduler time. A pending Slurm start estimate is not an actual start.
+For pending jobs, waiting time runs from submission to the last observation, not the
+current clock, so an old sample never implies that the job is still waiting. Missing or
+unreliable times stay unknown. Historical job drawers hide unknown submitted, started
+and waiting values rather than inventing them.
+
+调度器报告提交或开始时间时，界面会显示这些时间。带时区偏移的时间转换为查看者所在时区；
+没有偏移的时间保留“调度器时间”标注。Slurm 排队作业的预计开始时间不视为实际开始时间。
+排队作业的等待时长从提交时间计算到最后一次观测，不延伸到当前时刻，因此旧数据不会暗示作业仍在等待。
+缺失或不可靠的时间保持未知；历史作业详情隐藏未知的提交、开始及等待时间，不进行推测。
+
+## Job lifecycle and Activity
+
+Activity shows one reconciled ending per job attempt, with a scheduler outcome where
+available. Jobs that start and end between collections can be found in terminal history.
+A job leaving the queue is not assumed successful: sources without accounting say that
+they do not report outcomes. With history, an unmatched departure waits for the next successful accounting
+collection before being reported as unknown, bounded by 24 hours during an outage. A later accounting row does not announce it twice.
+
+End times with offsets are displayed in the viewer's timezone; the hover text states
+how many minutes later ComputeDeck observed the ending. Without a reliable end time,
+the event is labelled as an observation. Activity sorts the fetched page by event time.
+The Failed tab still reads the existing 24-hour failure list. Kubernetes container
+failures remain in that list while a pod is running. When the pod disappears without a
+terminal record, its last observed container failure supplies the ending, unless it
+predates the job start. A reported terminal outcome takes precedence. Container failures
+also retain their `job.failed` notifications while the pod is running or when it later
+succeeds. Pre-upgrade Activity rows remain visible alongside new endings.
+
+After an observation gap, completed, cancelled and unknown endings remain visible and
+deliverable; Notify groups catch-up messages. Only the upgrade baseline stays silent.
+When accounting cannot cover the full unobserved period, unknown outcomes explain that
+lookback limit instead of implying the scheduler has not reported the job.
+
+中文：动态为每次作业结束显示一条记录，优先使用调度器报告的结果与带时区的结束时间。
+没有记账能力时会明确说明结果不可用；有历史能力时等待下一次成功的记账采集，记账中断期间最多等待 24 小时。悬停可查看观测延迟，
+未知结束时间不会伪装成精确时间。失败标签页仍保留原有的 24 小时失败记录。
+Kubernetes Pod 运行期间的容器失败保留在失败列表中；Pod 消失且没有终态记录时，使用此前观测到的容器失败作为结果，但不使用早于作业开始的失败。已有终态记录优先。
+Pod 运行中或最终成功时，此前的容器失败仍产生 `job.failed` 通知；升级前的动态记录继续显示。
+观测中断后的完成、取消和未知结果仍可见并发送通知，由任务提醒合并补收消息；仅升级基线保持静默。
+记账窗口无法覆盖完整空档时，未知结果会说明历史查询范围的限制。
+
+## Exploring activity / 浏览动态
+
+Open **Activity** from the sidebar, or **All activity** on Overview or Jobs. Choose
+Failed, Jobs, Sources, Gaps, My changes or Plugins; Plugins currently shows changes to
+tool switches and settings. Scope by cluster/platform, search names and job IDs, and choose
+24 hours, 7 days or 30 days. Filters are kept in the URL. A job's **All activity for this
+job** link uses `job_filter` on the page (the existing `job` URL parameter still opens a
+live-job drawer). Search ignores case for ASCII letters; other characters match exactly.
+
+Rows are grouped by day, with absolute times on hover. Expand a row for recorded state,
+exit code, nodes, elapsed time and translated errors. End times use your local timezone
+when an offset is known; otherwise they are labelled as scheduler time. Open the live job
+if still listed, otherwise its immutable event snapshot; connections and existing machines
+have their own links. **Load older** pages back without splitting collection groups. New
+arrivals appear behind an **N new** button until you choose to refresh. Loading, fetch
+errors with Retry, an empty history and filters with no matches are shown separately;
+errors retain the last successfully loaded rows. If there is no activity in the selected
+24-hour or 7-day range, **Show 30 days** widens the range. **Clear filters** removes type,
+search, job and scope filters and returns to the default 24 hours, wherever you click it.
+Time ranges use the event's own time: a late-observed job ending outside the range will not
+appear in that view or its **N new** button. Overview's teaser has no time-range filter.
+
+Overview shows up to five recent changes, with failures and connection problems or
+recoveries first. **Mark seen** marks the current activity as read; the teaser then shows
+changes that arrive afterward, under **Since you last looked**. Before the first mark,
+the heading is **Activity**. Opening Activity does not mark anything seen. Read state
+stays in this browser and is not shared with other viewers. Without browser storage,
+the teaser shows recent activity and hides the read controls. Example mode also shows
+recent activity without reading or changing your read state. The Jobs Failed tab still
+includes failures found during the first collection, which do not appear in Activity.
+
+中文：从侧栏进入**动态**，或点击概览及作业页的**全部动态**。可按失败、作业、来源、观测空档、
+我的更改、插件筛选；插件目前显示工具开关和设置的更改。支持集群或平台范围、名称及作业 ID 搜索，
+以及 24 小时、7 天、30 天范围，筛选保存在 URL 中。作业动态链接使用 `job_filter`，
+原有 `job` 参数仍用于打开实时作业抽屉。搜索忽略 ASCII 字母的大小写，其他字符按原样匹配。
+
+动态按日期分组，悬停可查看绝对时间。展开后显示已记录的状态、退出码、节点、运行时长及翻译后的错误。
+已知时区的结束时间显示为本地时间，否则标注为调度器时间。
+仍在列表中的作业打开实时详情，其余打开事件快照；存在的连接和机器也有详情链接。**加载更早的动态**
+不会拆分采集合并组，新动态通过按钮提示，点击后才刷新列表。加载中、加载失败并重试、历史为空及筛选无匹配
+分别显示，失败时保留上次成功加载的内容。所选的 24 小时或 7 天内没有动态时，点击**查看 30 天**可扩大范围。
+两处**清除筛选**都会移除类型、搜索、作业和集群或平台筛选，并恢复默认的 24 小时。
+时间范围按事件自身的时间筛选：延迟观测到的作业结束若不在范围内，不会出现在该视图或新动态按钮中。
+概览摘要不按时间范围筛选。
+
+概览最多显示五条最近动态，优先显示失败及连接故障和恢复。**标为已读**将当前动态标记为已读，
+此后摘要显示新到达的动态，并使用“自上次查看以来”标题；首次标记前标题为“动态”。
+打开动态页不会自动标记。已读状态仅保留在当前浏览器，不与其他查看者共享。
+浏览器存储不可用时，摘要显示最近动态并隐藏已读控件。示例模式同样显示最近动态，不读取或更改你的已读状态。
+作业页的失败标签仍包括首次采集发现的失败，这些记录不会出现在动态中。
+
+## Observation gaps / 观测空档
+
+Activity shows grey rows with absolute times when job sources go unobserved long enough
+to risk missing history. The row gives the full interval between observations. When a
+known history window does not cover it, a second sentence says which earlier failures
+could not be checked. Unknown windows and unavailable history never imply complete
+coverage. Slurm and PBS check 24 hours; LSF is limited by its readable `CLEAN_PERIOD`
+(at most 24 hours); Kubernetes cannot recover deleted pods. Collection lookbacks and
+the Failed tab are unchanged. Normal daily scheduling does not produce a gap each day.
+With a known history window, a gap must exceed the largest of the window minus one
+hour, one collection interval plus 15 minutes, and one hour. For example, a daily
+source produces a row after 24 hours 15 minutes; a one-hour window with a 10-minute
+interval produces one after an hour. Unknown or unavailable history instead requires
+a gap longer than both one hour and two collection intervals.
+
+A separate row says that ComputeDeck was not running or the computer was asleep when
+more than five minutes pass between service heartbeats. Source gaps covered by that
+service gap are suppressed unless a known history window leaves part of the unobserved
+period unchecked. In that case the source warning remains alongside the service gap.
+An unknown history window adds no coverage boundary, so the covering service gap is shown
+alone. These are Activity records, never Notify alerts; plugins must explicitly subscribe to `source.gap` or `service.gap`. Cloud and SSH-host sources
+do not produce source gap events.
+
+中文：作业来源长时间未被观测时，动态显示灰色空档记录，并以绝对时间标明两次观测之间的完整区间。
+如果已知的历史窗口无法覆盖该区间，会补充说明哪个时间之前的失败记录无法检查。
+历史窗口未知或本次历史采集失败时，不会暗示记录完整。Slurm 和 PBS 检查最近 24 小时；
+LSF 受可读取的 `CLEAN_PERIOD` 限制，最多 24 小时；Kubernetes 无法恢复已删除的 Pod。
+采集回溯范围与失败标签页保持不变，正常的每日采集不会每天生成空档记录。
+历史窗口已知时，空档必须超过以下三者中的最大值：历史窗口减一小时、一个采集间隔加 15 分钟、一小时。
+例如，每日采集的来源超过 24 小时 15 分钟后才显示空档；历史窗口为一小时且每 10 分钟采集时，超过一小时后显示。
+历史窗口未知或历史不可用时，空档必须同时超过一小时和两个采集间隔才会显示。
+服务心跳间隔超过五分钟时，会单独说明 ComputeDeck 未运行或电脑处于睡眠状态，
+被服务空档覆盖的来源空档通常不再单独显示；如果已知记账窗口无法覆盖完整的未观测区间，
+仍保留来源空档以说明无法检查的历史。窗口未知时没有额外的覆盖边界信息，仅显示覆盖该区间的服务空档。
+这些记录只出现在动态中，不触发 Notify 通知；
+插件需明确订阅 `source.gap` 或 `service.gap`。云来源和 SSH 主机不生成来源空档事件。
+
+## Understanding a failure
+
+Failure rows open the job drawer. The Result column shows how long the attempt ran;
+Ended is relative, with the absolute time on hover, only when its timezone is known.
+Old records without an offset keep their labelled scheduler time. The drawer distinguishes
+"What happened" (a scheduler-reported cause and its verbatim reason) from "Likely" hints.
+Signal 9 supports the SIGKILL hint; status 127 supports command not found. Each hint shows
+its evidence; hints are suppressed when a scheduler reason is present. Statuses 1–125
+remain factual program exits even with a reason, PBS negative codes are scheduler codes,
+and other raw codes remain unexplained. Exit 137 alone is never treated as proof of OOM.
+
+The drawer shows ran-for versus time limit and the log path when supplied; missing values
+are not inferred. Slurm reads the accounting time limit, PBS reads requested walltime
+and the output path (including any host prefix), and Kubernetes reads the pod deadline.
+LSF limits and log paths remain unavailable; Slurm does not query version-sensitive
+stdout/stderr fields. Failure cards retain a "Next step" below the explanation.
+A copy-only inspection command (`sacct`, `qstat -fx`, `bhist -l`, or `kubectl describe pod`)
+helps inspect those details on the matching cluster or Kubernetes context. ComputeDeck
+never runs it. Unknown outcomes on clusters without history do not offer an inspection
+command. History freshness is labelled "Failure history updated".
+
+Job rows in Activity, including expanded group children, open an event snapshot addressed
+by `?event=<id>`. Links remain usable after the attempt leaves the 24-hour failure list,
+within event retention. Event snapshots hide utilization meters. Legacy `job.ended` records
+and unknown `job.finished` outcomes say "Last seen …; ended between collections", using
+the job snapshot's observation time separately from "Event observed". The latter uses
+the event's `data.observed_at`, or its `at` collection time for legacy records. Unknown outcomes
+also keep their reason for being unknown. Missing or expired events show an unavailable drawer.
+
+中文：失败记录可打开作业详情；结果列显示运行时长。只有已知时区的结束时间才显示相对时间，
+悬停显示绝对时间；旧记录仍标注为调度器时间。“发生了什么”区分调度器报告的原因、原始原因文本
+和附有依据的“可能原因”。只有信号 9 才提示 SIGKILL，状态 127 提示找不到命令；已有调度器原因时不显示推测。
+1–125 是程序退出状态，即使有原因文本也保留该事实；PBS 负值属于调度器代码，其余退出码不作解释。仅凭 137 不推断内存不足。
+已提供时才显示运行时长与时间限制、日志路径：Slurm 读取记账时间限制，PBS 读取申请的运行时限
+及输出路径（保留主机前缀），Kubernetes 读取 Pod 截止时长。LSF 暂不读取限制与日志路径；
+Slurm 不查询依赖版本的标准输出或错误路径字段。失败解释下方保留“下一步”建议。
+检查命令只复制、不执行，请在对应集群或 Kubernetes 上下文中运行。没有历史能力的集群，其未知结果不提供检查命令。历史新鲜度标为“失败历史更新于”。
+动态中的作业记录（含展开的分组子项）通过 `?event=<id>` 打开事件快照，在事件保留期内不受
+24 小时失败列表限制。快照不显示利用率仪表；旧的结束事件和未知结果均标注作业快照的最后观测时间与
+“在两次采集之间结束”，与“事件观测时间”分开显示。后者使用事件的 `data.observed_at`，旧记录则使用 `at` 采集时间。
+未知结果还保留其原因。已过期或不存在的事件显示不可用提示。
+
+## Job arrays
+
+Jobs and Overview group two or more listed elements with the same cluster and array id
+into one row. Filtering by tab, cluster or search happens first, so a summary includes only
+the matching elements; a single matching element remains an ordinary job row. Searching
+matches the array id as well as element ids. Overview takes its first eight rows after grouping.
+Tiles, navigation badges, tabs and panel counts still count elements using the server summary.
+
+The array row shows nonzero running (including configuring and completing), pending and other
+counts, queue or QoS and partition (`mixed` when they differ), and the most common reported pending
+reason plus the number of other reported reasons. Missing reasons are not counted. GPUs held sum
+only elements holding an allocation: a missing GPU count makes the result `≥ N`, or `—` if no
+positive subtotal is known. Pending requests are not
+held GPUs. Any stale element marks the array as last-known, and the row shows its oldest
+observation time. CPU and elapsed totals are not inferred; inspect the individual elements.
+
+Click or press Enter on an array row to open its `?array=<cluster>:<array_id>` drawer.
+It lists all currently listed members of that array, independently of the page filters,
+including retained last-known jobs. Shared cluster, user, queue or QoS and partition facts
+appear once above a compact element table (`mixed` for differing values, `—` for unknowns).
+The drawer uses the scheduler's terms: Partition and QoS for Slurm, or a single Queue for PBS and LSF.
+Each row shows the element index and full job id, state, allocated or requested GPUs,
+node or pending reason, run or wait time, and a stale tag when needed.
+The first 50 are shown, with **Show next 50** and
+**Show all** controls. Opening an element uses its existing job drawer; Back returns to the
+array. The drawer follows membership on each poll, and explains when the array is no longer
+listed. It does not run scheduler commands. The Failed table lists array elements individually.
+
+作业页和总览把同一集群、同一数组中至少两个已列出的元素合并为一行。先按标签、集群和
+搜索条件筛选，再分组，因此摘要只包含匹配的元素；仅匹配一个元素时仍显示普通作业行。
+搜索同时匹配数组 ID 和元素 ID。总览在分组后取前八行。卡片、导航徽标、标签和面板的
+计数仍按元素计算，使用服务端汇总。
+
+数组摘要显示数量非零的运行中（含配置和收尾）、等待中及其他状态、队列或 QoS、分区
+（不同则显示“混合”），以及最常见的已报告等待原因和其他已报告原因的种类数，不计入缺失原因。
+GPU 占用仅汇总已占用资源的元素；部分数量未知时显示 `≥ N`，没有已知的正数小计时显示 `—`，不会把等待请求当成
+占用。任一元素过期时整组标记为上次已知状态，观测时间取最早值。CPU 和运行时长不推算总数，
+可查看单个元素。
+
+点击数组行或按 Enter 可打开独立的 `?array=<cluster>:<array_id>` 抽屉。抽屉不受页面筛选
+条件限制，列出当前已列出的全部成员（含保留的上次观测作业）。集群、用户、队列或 QoS 和分区
+只在紧凑元素表上方显示一次，值不同时显示“混合”，未知时显示 `—`。抽屉使用调度器自身的术语：
+Slurm 显示“分区”和“QoS”，PBS 和 LSF 仅显示一个“队列”。每行显示元素索引及完整作业 ID、
+状态、占用或请求的 GPU、节点或等待原因、运行或等待时长，以及必要的过期标记。
+先显示 50 个，可“再显示 50 个”
+或“显示全部”。打开元素进入原有作业抽屉，返回可回到数组。每次轮询更新成员，数组不再列出时
+明确提示；不执行调度器命令。失败表目前逐个列出数组元素。
+
+## Activity collection groups / 动态采集合并
+
+Activity collapses three or more events of the same type and source collected together.
+Expand a row to see up to 50 events, prioritizing failures, then unknown outcomes,
+then other events (newest ID first within each class), followed by “and N more”
+for larger groups. Totals, names, outcome counts, failure indicators and time ranges
+cover the entire group, with failures first and a red dot if any child failed. Known job times
+always take precedence: children retain their own end/start times, and a group whose
+children all have known times shows their first-to-last range. Only children without a
+known time use the previous-success-to-observation window after a gap; a group containing
+such children also shows that window. Equal range endpoints display a single time.
+Unknown times keep their observation-time labels, including on group rows when any
+child lacks its own time, even without a collection gap. Grouping does not change job
+or failure totals.
+
+动态将同一来源、同一类型、同一轮采集中的三个及以上事件合为一行，展开后可查看最多
+50 个事件及结果，依次优先显示失败、未知和其他结果，同类按事件 ID 从新到旧排列，更多事件显示为“另有 N 个事件”。合并行的总数、名称、结果数量
+（失败优先）、失败标记及时间范围仍涵盖全部事件，含失败事件时显示红点。
+已知作业时间优先：子事件显示自身结束或开始时间；全部子事件时间已知时，合并行显示
+最早至最晚时间。只有时间未知的补收事件及包含这些事件的合并行，才显示上次成功采集
+至本次观测的区间；区间起止相同时只显示一个时间。未知时间保留观测时间标注；
+只要任一子事件自身时间未知，合并行也显示该标注，即使没有采集中断。
+合并展示不改变作业数或失败总数。
+
+## Your changes / 你的更改
+
+Recent activity includes successful changes you make in ComputeDeck: adding, editing,
+pausing, resuming or removing sources; adding, editing or removing collection machines
+and hand-added machines; switching tools on/off or saving their settings; and importing
+configuration. These are grey rows, separate from job outcomes and collection gaps. A
+source change scrolls its Sources group into view while that source still exists, keeping
+all groups visible; removed sources have no link. The recorded name is the name at the
+time of the action. Installed tools use their current localized name; removed tools keep
+the recorded name. Saving unchanged source, machine or tool settings produces no row.
+
+Records contain changed field names, never their values; tool settings omit even the
+field names. Edited rows show raw changed field names, never values; pause/resume rows
+show any other changed fields except `enabled`, while added, removed, tool and import
+rows show no field list. Imports produce one summary with counts. Pausing and immediately resuming
+keeps both records. These records are kept for 30 days and never trigger notifications or
+plugin handlers. Language and server-name preferences do not produce records. Activity
+requests `include=changes`; API event lists omit them unless requested explicitly.
+
+最近动态会显示你在 ComputeDeck 中成功保存的更改：添加、编辑、暂停、恢复或移除数据源；
+添加、编辑或移除采集机器和手动添加的机器；开启、关闭工具或保存工具设置；以及导入配置。
+这些灰色记录与作业结果、采集空白分开显示。数据源仍存在时，更改记录会滚动到对应的数据源分组，同时保留其他分组；
+已移除的数据源不再显示链接。名称保留为操作发生时的名称。
+已安装的工具使用当前语言的名称；已卸载的工具保留记录时的名称。保存未更改的数据源、机器或工具设置不会产生记录。
+
+记录只包含更改的字段名，不包含字段值；工具设置连字段名也不记录。
+编辑记录显示更改的原始字段名，不显示字段值；暂停或恢复记录只显示 `enabled` 之外的更改字段，
+添加、移除、工具和导入记录不显示字段列表。每次导入只生成一条带数量的摘要。
+暂停后立即恢复会保留两条记录。这些记录保留 30 天，不会触发通知或插件处理程序。
+语言和服务器名称偏好设置不产生记录。动态面板会请求 `include=changes`；API 默认不返回这些记录。
+
+## Notification delivery / 通知发送状态
+
+Notifications refreshes its recent-message log about every 30 seconds while the page is
+visible and the tool is on. A configured channel whose latest recorded attempt in the
+last 24 hours failed appears as a Notifications warning in Needs attention, with its
+channel label and last error code. Pending retries count too. Opening the warning goes
+to Notifications. A later successful attempt or test clears the warning; switching the
+tool off hides it. The time shown is the last failed attempt, not when the problem began.
+
+Activity shows recorded notification outcomes beside the event: Sent, Failed, Suppressed,
+Grouped or Dropped. Grouped means included in a digest, not delivery success; mixed
+outcomes can mean different rules or channels. Channel delivery results are shown on
+the digest leader and aggregate row; siblings show Grouped rather than implying each
+had a separate message. Suppressed siblings retain the rate-limit status. Outcomes use the retained 500-row log,
+so a missing label means unknown. Activity reads these outcomes when it loads the rows;
+Notifications has the automatically refreshed delivery log. Example mode shows fictional
+outcomes and a failing Team alerts channel, without reading live deliveries.
+
+中文：任务提醒页面在可见且工具开启时，约每 30 秒刷新近期消息。已配置渠道在最近 24 小时内的
+最后一次发送尝试失败时，待处理列表显示带有“任务提醒”标签的警告，列出渠道名称和最后的错误代码，
+等待重试的失败也包括在内。点击警告进入任务提醒页面；之后发送或测试成功会清除警告，关闭工具会隐藏它。
+显示的时间是最后一次失败尝试的时间，不代表问题开始时间。
+
+动态在事件旁显示已记录的通知状态：已发送、失败、已抑制、已合并或已丢弃。已合并表示包含在摘要中，
+不代表发送成功；多个结果可能来自不同规则或渠道。摘要首条事件和汇总行显示消息发送结果，
+其余事件仅显示“已合并”，避免误以为每个事件都单独发送了消息；限流事件仍显示“已抑制”。状态来自保留的最近 500 条日志，未显示状态表示未知。
+动态加载记录时读取这些状态；任务提醒页面的发送日志会自动刷新。示例模式使用虚构状态和发送失败的
+Team alerts 渠道，不读取真实发送记录。

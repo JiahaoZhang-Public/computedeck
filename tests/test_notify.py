@@ -15,8 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from computedeck import app as api
-from computedeck import credentials, plugins
-from computedeck.drivers.base import SourceError
+from computedeck import credentials, events, plugins
+from computedeck.drivers.base import Batch, SourceError
 from computedeck.plugins import Plugin, PluginContext, Runtime
 from computedeck.store import Store
 from computedeck.tools import channels, notify
@@ -366,7 +366,18 @@ def test_api_creates_channels_and_rules_and_previews(
         preview = client.post(
             "/api/plugins/notify/rules/preview", json=rule, headers=HEADERS
         ).json()
-        assert preview["example"] is True and "failed on Cluster A" in preview["subject"]
+        assert preview["example"] is True and ": failed on Cluster A" in preview["subject"]
+        default_rule = {"name": "Failures", "channels": [channel["id"]]}
+        default_created = client.post(
+            "/api/plugins/notify/rules", json=default_rule, headers=HEADERS
+        ).json()
+        assert default_created["events"] == ["job.finished"]
+        assert default_created["outcomes"] == list(notify.FAILURE_OUTCOMES)
+        default_preview = client.post(
+            "/api/plugins/notify/rules/preview", json=default_rule, headers=HEADERS
+        ).json()
+        assert default_preview["example"] is True
+        assert ": failed on Cluster A" in default_preview["subject"]
         tested = client.post(
             f"/api/plugins/notify/channels/{channel['id']}/test", json={}, headers=HEADERS
         )
@@ -924,10 +935,10 @@ async def test_a_rule_that_raises_is_logged_and_other_rules_still_send(
     sent: list[Message] = []
     compose = notify.compose
 
-    async def flaky(store: Store, settings: Any, rule: Any, event: Any) -> Any:
+    async def flaky(store: Store, settings: Any, rule: Any, event: Any, **kwargs: Any) -> Any:
         if rule["id"] == "broken":
             raise RuntimeError("unexpected")
-        return await compose(store, settings, rule, event)
+        return await compose(store, settings, rule, event, **kwargs)
 
     async def send(config: dict[str, Any], mail: Message) -> None:
         sent.append(mail)
@@ -1084,3 +1095,687 @@ def test_api_checks_the_ai_address_and_saves_each_channel_once(tmp_path: Path) -
         rule = {"name": "Twice", "channels": [channel["id"], channel["id"]]}
         saved = client.post("/api/plugins/notify/rules", json=rule, headers=HEADERS).json()
         assert saved["channels"] == [channel["id"]]
+
+
+@pytest.mark.parametrize(
+    "kinds,outcomes",
+    [
+        (["job.failed"], list(notify.FAILURE_OUTCOMES)),
+        (["job.ended"], []),
+        (["job.failed", "job.ended"], []),
+    ],
+)
+def test_stored_legacy_rules_migrate_on_read_without_rewriting(
+    store: Store, kinds: list[str], outcomes: list[str]
+) -> None:
+    notify._prepare(store)
+    rule = {
+        "id": "r",
+        "events": [*kinds, "source.failed"],
+        "channels": ["team"],
+        "subject": "Custom {state}",
+    }
+    notify._save(store, "notify_rules", rule)
+    raw = store.db.execute("SELECT data FROM notify_rules").fetchone()[0]
+    notify._prepare(store)
+    migrated = notify.migrate_rule(notify._rows(store, "notify_rules")[0])
+    assert migrated == {**rule, "events": ["job.finished", "source.failed"], "outcomes": outcomes}
+    notify._prepare(store)
+    assert notify._rows(store, "notify_rules") == [rule]
+    assert store.db.execute("SELECT data FROM notify_rules").fetchone()[0] == raw
+    assert notify.matches(rule, notify.sample_event("job.finished", "failed"))
+    assert notify.matches(migrated, notify.sample_event("job.finished", "failed"))
+    assert notify.matches(migrated, notify.sample_event("job.finished", "completed")) == (
+        not outcomes
+    )
+    assert notify.matches(migrated, event())
+
+
+def test_outcome_filter_only_applies_to_finished_jobs() -> None:
+    rule = {"events": ["job.finished", "source.failed"], "outcomes": ["timeout"]}
+    assert notify.matches(rule, notify.sample_event("job.finished", "timeout"))
+    assert not notify.matches(rule, notify.sample_event("job.finished", "completed"))
+    assert notify.matches(rule, {"type": "source.failed", "data": {}})
+    with pytest.raises(ValueError, match="setting_invalid"):
+        notify.check_rule(
+            notify.RuleInput(name="test", channels=["team"], outcomes=["invented"]), {"team"}
+        )
+
+
+@pytest.mark.parametrize("legacy", ["job.failed", "job.ended"])
+def test_mixed_rule_preserves_explicit_outcomes(legacy: str) -> None:
+    rule = {"events": ["job.finished", legacy], "outcomes": ["completed"]}
+    migrated = notify.migrate_rule(rule)
+    assert migrated == {"events": ["job.finished"], "outcomes": ["completed"]}
+    assert notify.matches(migrated, notify.sample_event("job.finished", "completed"))
+    assert not notify.matches(migrated, notify.sample_event("job.finished", "failed"))
+    assert notify.migrate_rule(migrated) == migrated
+
+
+@pytest.mark.parametrize("language,word", [("en", "out of memory"), ("zh-CN", "内存不足")])
+async def test_finished_template_translates_outcome(store: Store, language: str, word: str) -> None:
+    store.save_settings({"language": language})
+    mail, _ = await notify.compose(
+        store, {}, {}, notify.sample_event("job.finished", "out_of_memory")
+    )
+    assert word in mail.subject and word in mail.body
+
+
+@pytest.mark.parametrize(
+    "language,state_label,exit_label,end_label",
+    [("en", "State: ", "Exit code: ", "Ended: "), ("zh-CN", "状态：", "退出码：", "结束时间：")],
+)
+async def test_unknown_departure_message_uses_reconciled_fields(
+    store: Store, language: str, state_label: str, exit_label: str, end_label: str
+) -> None:
+    store.save_settings({"language": language})
+    source = {"id": "cluster-a-alice", "name": "Cluster A", "driver": "slurm"}
+    last_seen = event(state="RUNNING", exit_code="0:0", end="Unknown")["data"]["job"]
+    row = events.collected(
+        source,
+        {"jobs": [last_seen], "lifecycle_pending": []},
+        Batch(jobs=[]),
+        first=False,
+    )[0]
+    assert row["data"]["job"] == last_seen
+    mail, _ = await notify.compose(store, {}, {}, row)
+    assert "RUNNING" not in mail.body
+    assert f"{state_label}—" in mail.body
+    assert f"{exit_label}—" in mail.body
+    assert f"{end_label}—" in mail.body
+
+    # Failed endings retain their reconciled state/code and either form of end time.
+    for end in ("2026-01-01T12:00:00+00:00", "2026-01-01T12:00:00"):
+        row = events.collected(
+            source,
+            {"lifecycle_pending": []},
+            Batch(
+                jobs=[], finished=[{**last_seen, "state": "FAILED", "exit_code": "1:0", "end": end}]
+            ),
+            first=False,
+        )[0]
+        mail, _ = await notify.compose(store, {}, {}, row)
+        assert f"{state_label}FAILED" in mail.body
+        assert f"{exit_label}1:0" in mail.body
+        assert f"{end_label}{end}" in mail.body
+
+
+@pytest.mark.parametrize("kind", ["job.started", "job.ended", "job.failed"])
+def test_legacy_notification_facts_keep_job_fields(kind: str) -> None:
+    row = event(kind, state="RUNNING", exit_code="0:0", end="Unknown")
+    row["data"].update(state=None, exit_code=None, ended_at=None, outcome="unknown")
+    values = notify.facts(row)
+    assert values["state"] == "RUNNING"
+    assert values["exit_code"] == "0:0"
+    assert values["end"] == "Unknown"
+
+
+def test_finished_notification_facts_prefer_reconciled_fields() -> None:
+    row = event("job.finished", state="RUNNING", exit_code="0:0", end="Unknown")
+    row["data"].update(
+        state="FAILED", exit_code="1:0", ended_at="2026-01-01T12:00:00+00:00", outcome="failed"
+    )
+    values = notify.facts(row)
+    assert values["state"] == "FAILED"
+    assert values["exit_code"] == "1:0"
+    assert values["end"] == "2026-01-01T12:00:00+00:00"
+    sample = notify.facts(notify.sample_event())
+    assert sample["state"] == "FAILED"
+    assert sample["exit_code"] == "1:0"
+
+
+def digest_events(count: int = 50) -> list[dict[str, Any]]:
+    from datetime import UTC, datetime, timedelta
+
+    observed = datetime.now(UTC)
+    rows = []
+    for outcome in ("failed", "completed"):
+        for index in range(count):
+            row = event(
+                "job.finished",
+                id=f"cluster-a:100_{outcome}_{index}",
+                name="train-sweep",
+                array_id="100",
+                array_index=str(index),
+            )
+            row.pop("id")
+            row["key"] = row["data"]["job"]["id"]
+            row["at"] = (observed - timedelta(seconds=index)).isoformat()
+            row["data"].update(
+                outcome=outcome,
+                observed_at=observed.isoformat(),
+                ended_at=row["at"],
+                state=outcome.upper(),
+            )
+            rows.append(row)
+    unrelated = event("job.finished", id="cluster-a:200", name="eval-b")
+    unrelated.pop("id")
+    unrelated.update(key="unrelated", at=observed.isoformat())
+    unrelated["data"].update(outcome="failed", observed_at=observed.isoformat())
+    return [*rows, unrelated]
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+async def test_array_digests_leave_budget_for_unrelated_failure_and_replay_nothing(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store, language: str
+) -> None:
+    store.save_settings({"language": language})
+    store.save_plugin_settings("notify", {"max_per_hour": 3})
+    add_channel(store)
+    for outcome in ("failed", "completed"):
+        add_rule(store, outcome, "team", events=["job.finished"], outcomes=[outcome])
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    store.add_events(digest_events())
+    rows = store.events(limit=200)
+    for row in rows:
+        await notifier.on_event(row)
+    assert len(sent) == 3
+    assert all("digest" not in mail.event for mail in sent)
+    assert "eval-b" in sent[-1].body
+    assert "train-sweep [100] ×49" in sent[0].body
+    assert sent[0].body.count("100_failed_") == 11
+    assert sent[0].body.count("cluster-a:100_failed_") == 1
+    entries = notify._recent_log(store, 200)
+    assert sum(row["status"] == "grouped" for row in entries) == 2
+    assert sum(row["status"] == "sent" for row in entries) == 3
+    assert all(
+        len(row["events"]) == row["count"] - 1 == 49
+        for row in entries
+        if row["status"] == "grouped"
+    )
+    assert all(
+        row["digest"] in {rows[0]["id"], rows[50]["id"]}
+        for row in entries
+        if row["status"] == "grouped"
+    )
+    # API-1 plugins still receive every job, with the appropriate legacy type.
+    assert [events.for_handler(row, None)["type"] for row in rows].count("job.failed") == 51
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == 3 and len(notify._recent_log(store, 200)) == 5
+    next_row = digest_events(1)[-1]
+    next_row["key"] = "next-failure"
+    store.add_events([next_row])
+    await notifier.on_event(store.recent_events(1)[0])
+    assert len(sent) == 4 and "eval-b" in sent[-1].body
+    notice = "已达到通知上限" if language == "zh-CN" else "Limit reached"
+    assert notice in sent[-1].body
+    assert sum(notice in mail.body for mail in sent) == 1
+    next_row["key"] = "over-limit"
+    store.add_events([next_row])
+    await notifier.on_event(store.recent_events(1)[0])
+    assert len(sent) == 4
+    assert notify._recent_log(store)[0]["status"] == "suppressed"
+
+
+async def test_digest_filters_silent_siblings_and_groups_catchup_by_type(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(
+        store,
+        "r",
+        "team",
+        events=["job.finished", "job.started"],
+        outcomes=["failed"],
+        users=["alice"],
+        clusters=["cluster-a"],
+        name_pattern="train*",
+    )
+    rows = digest_events(4)[:4]
+    for row in rows:
+        row["data"]["job"].pop("array_id")
+        row["data"]["since"] = row["at"]
+    rows[0]["silent"] = True
+    filtered = {
+        **rows[1],
+        "key": "filtered",
+        "data": {**rows[1]["data"], "job": {**rows[1]["data"]["job"], "name": "other"}},
+    }
+    started = {**rows[1], "key": "started", "type": "job.started"}
+    store.add_events([*rows, filtered, started])
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    for row in store.events(include_silent=False):
+        await notifier.on_event(row)
+    assert len(sent) == 2
+    assert "and 2 more" in sent[0].body and "digest" not in sent[0].event
+    assert "between" in sent[0].body
+    assert "other" not in sent[0].body
+    assert sent[1].event["type"] == "job.started" and "digest" not in sent[1].event
+
+
+async def test_suppressed_digest_logs_all_siblings_and_does_not_replay(
+    notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.save_plugin_settings("notify", {"max_per_hour": 0})
+    store.add_events(digest_events(3)[:3])
+    for row in store.events():
+        await notifier.on_event(row)
+    assert [row["status"] for row in notify._recent_log(store)] == ["suppressed"]
+    store.save_plugin_settings("notify", {"max_per_hour": 20})
+    restarted = notify.Notifier(notifier.ctx)
+    for row in store.events():
+        await restarted.on_event(row)
+    assert len(notify._recent_log(store)) == 1 and queue(store) == []
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize("agent_enabled", [False, True])
+async def test_digest_reads_only_leader_log_and_passes_siblings_to_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    notifier: notify.Notifier,
+    store: Store,
+    language: str,
+    agent_enabled: bool,
+) -> None:
+    store.save_settings({"language": language})
+    store.save_plugin_settings("notify", {"max_per_hour": 1})
+    add_channel(store)
+    add_rule(
+        store,
+        "r",
+        "team",
+        events=["job.finished"],
+        outcomes=["failed"],
+        include_log=True,
+        agent=agent_enabled,
+        body="Template body",
+        subject="Custom {job}",
+    )
+    logs: list[int] = []
+    agents: list[dict[str, Any]] = []
+    sent: list[Message] = []
+
+    async def job_log(store: Store, row: dict[str, Any]) -> str:
+        logs.append(row["id"])
+        return "log tail"
+
+    async def agent(settings: Any, rule: Any, row: Any, log: Any, language: Any) -> str:
+        agents.append(row)
+        return "Summary"
+
+    async def send(config: Any, mail: Message) -> None:
+        sent.append(mail)
+
+    monkeypatch.setattr(notify, "job_log", job_log)
+    monkeypatch.setattr(notify, "agent_text", agent)
+    use_sender(monkeypatch, send)
+    rows = digest_events(3)[:3]
+    for row in rows:
+        row["data"]["since"] = "2026-01-01T00:00:00Z"
+    store.add_events(rows)
+    for row in store.events():
+        await notifier.on_event(row)
+    assert logs == [1]
+    assert len(agents) == int(agent_enabled)
+    if agent_enabled:
+        assert len(agents[0]["digest"]) == 2
+    assert sent[0].subject == "Custom train-sweep"
+    body = sent[0].body
+    window, tail, notice, heading = (
+        ("采集窗口", "另有 2 个事件", "已达到通知上限", "--- 作业日志最后几行 ---")
+        if language == "zh-CN"
+        else (
+            "Collection window",
+            "and 2 more",
+            "Limit reached",
+            "--- Last lines of the job log ---",
+        )
+    )
+    assert body.startswith("Summary" if agent_enabled else "Template body")
+    assert body.index(window) < body.index(tail) < body.index(notice) < body.index(heading)
+    assert body.endswith(f"{heading}\nlog tail")
+
+
+async def test_interrupted_digest_resumes_queue_without_recomposing_or_resending_children(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(3)[:3])
+    started, finish = asyncio.Event(), asyncio.Event()
+    sent: list[Message] = []
+
+    async def send(config: Any, mail: Message) -> None:
+        # The complete reservation exists before any network delivery.
+        assert len(queue(store)) == 1
+        assert [row["status"] for row in notify._recent_log(store)] == ["grouped"]
+        started.set()
+        await finish.wait()
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    rows = store.events()
+    task = asyncio.create_task(notifier.on_event(rows[0]))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    finish.set()
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == 1 and "and 2 more" in sent[0].body
+    assert "digest" not in sent[0].event
+    assert len(notify._recent_log(store)) == 2
+
+
+async def test_broken_digest_rule_is_logged_once(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(3)[:3])
+
+    async def broken(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("invalid template")
+
+    monkeypatch.setattr(notify, "compose", broken)
+    for row in store.events():
+        await notifier.on_event(row)
+    [entry] = notify._recent_log(store)
+    assert entry["status"] == "failed" and entry["count"] == 3
+
+
+async def test_digest_reads_collection_once_per_rule(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.add_events(digest_events(50)[:50])
+    calls = []
+    lookup = store.events_in_collection
+
+    def counted(*args: Any) -> Any:
+        calls.append(args)
+        return lookup(*args)
+
+    async def send(config: Any, mail: Message) -> None:
+        pass
+
+    monkeypatch.setattr(store, "events_in_collection", counted)
+    use_sender(monkeypatch, send)
+    for row in store.events():
+        await notifier.on_event(row)
+    assert len(calls) == 1
+    assert [row["status"] for row in notify._recent_log(store)] == ["sent", "grouped"]
+    assert notifier.digests
+    next_event = event("source.recovered")
+    next_event["at"] = "2027-01-01T00:00:00Z"
+    await notifier.on_event(next_event)
+    assert not notifier.digests
+    # Replaying an old collection reads it again and still sends nothing twice.
+    await notifier.on_event(store.events()[0])
+    assert len(calls) == 2
+    assert [row["status"] for row in notify._recent_log(store)] == ["sent", "grouped"]
+
+
+@pytest.mark.parametrize("limit", [0, 20])
+async def test_large_digest_preserves_log_history_and_replays_nothing(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store, limit: int
+) -> None:
+    add_channel(store)
+    add_rule(store, "r", "team", events=["job.finished"], outcomes=["failed"])
+    store.save_plugin_settings("notify", {"max_per_hour": limit})
+    notify._log(store, {"status": "sent", "event": -1, "rule": "earlier"})
+    burst = digest_events(600)[:600]
+    for sibling in burst[1:]:
+        sibling["data"]["job"]["unused"] = "x" * 10000
+    store.add_events(burst)
+    sent = []
+
+    async def send(config: Any, mail: Message) -> None:
+        [queued] = store.db.execute("SELECT data FROM notify_queue").fetchall()
+        assert len(queued[0].encode()) < 16000
+        payload = json.loads(queued[0])
+        assert "digest" not in payload["event"]
+        assert "unused" not in queued[0]
+        assert payload["entry"]["count"] == 600
+        assert len(payload["entry"]["events"]) == 599
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    rows = store.events(limit=1000)
+    for row in rows:
+        await notifier.on_event(row)
+    log = notify._recent_log(store)
+    assert log[-1]["rule"] == "earlier"
+    assert len(log) == (3 if limit else 2)
+    grouped = next(row for row in log if row["status"] == ("grouped" if limit else "suppressed"))
+    assert grouped["digest"] == rows[0]["id"]
+    assert grouped["count"] == 600
+    assert grouped["events"] == [row["id"] for row in rows[1:]]
+    if limit:
+        assert log[0]["count"] == 600  # channel result includes the leader too
+    restarted = notify.Notifier(notifier.ctx)
+    for row in rows:
+        await restarted.on_event(row)
+    assert len(sent) == (1 if limit else 0)
+    assert notify._recent_log(store) == log
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+async def test_agent_digest_prompt_has_count_summary_and_at_most_twenty_facts(
+    monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    monkeypatch.setenv("AI_KEY", "test-key")
+    row = event("job.finished")
+    row["digest"] = digest_events(200)[:200]
+    for index, sibling in enumerate(row["digest"]):
+        sibling["data"]["job"].update(name=f"train-{index}", unused="x" * 10000)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][0]["content"]
+        digest = json.loads(prompt.split("Other events in this digest (JSON):\n\n")[1])
+        assert digest["count"] == 201
+        assert digest["summary"] == notify.digest_tail(row, language)
+        assert len(digest["sample"]) == 20
+        assert digest["sample"] == [notify.facts(sibling) for sibling in row["digest"][:20]]
+        assert "unused" not in prompt and len(prompt) < 16000
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "Summary"}]})
+
+    mock_http(monkeypatch, handler)
+    assert await notify.agent_text({"ai_key": "env:AI_KEY"}, {}, row, None, language) == "Summary"
+
+
+async def test_chinese_digest_punctuation_and_observation_window(store: Store) -> None:
+    store.save_settings({"language": "zh-CN"})
+    row = event("job.finished")
+    row["data"].update(
+        since="2026-01-01T08:10:00.123456+00:00",
+        observed_at="2026-01-01T11:20:00.654321+00:00",
+    )
+    row["digest"] = digest_events(3)[:3]
+    row["digest"][-1]["data"]["job"]["name"] = "eval-b"
+    mail, _ = await notify.compose(store, {}, {}, row)
+    assert "采集窗口：2026-01-01 08:10:00+00:00 至 2026-01-01 11:20:00+00:00" in mail.body
+    tail = notify.digest_tail(row, "zh-CN")
+    assert "（失败；100_failed_0，100_failed_1）" in tail and "；eval-b" in tail
+    assert "cluster-a:" not in tail
+    assert "(" not in tail and ", " not in tail and "; " not in tail
+
+
+async def test_delivery_health_tracks_retry_restart_recovery_and_expiry(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+
+    async def fail(config: dict[str, Any], mail: Message) -> None:
+        raise SourceError("send_timeout", detail="https://example.com/private-token")
+
+    use_sender(monkeypatch, fail)
+    await notifier.deliver({"id": "r", "channels": ["team"]}, event())
+    [problem] = notifier.delivery_failures()
+    assert problem == {
+        "channel": "team",
+        "channel_name": "Team",
+        "error_code": "send_timeout",
+        "at": problem["at"],
+    }
+    assert "private-token" not in json.dumps(problem)
+    restarted = notify.Notifier(notifier.ctx)
+    assert restarted.delivery_failures() == [problem]
+    assert notify._recent_log(store) == []  # Pending retries are not terminal log rows.
+
+    async def success(config: dict[str, Any], mail: Message) -> None:
+        pass
+
+    use_sender(monkeypatch, success)
+    await restarted._attempt(("r", 7, "team"))
+    assert restarted.delivery_failures() == []
+    assert notify._recent_log(store)[0]["status"] == "sent"
+    notify._log(store, {"channel": "team", "status": "failed", "error": {"code": "send_failed"}})
+    assert restarted.delivery_failures()[0]["error_code"] == "send_failed"
+    store.db.execute("UPDATE notify_log SET at='2000-01-01T00:00:00+00:00'")
+    assert restarted.delivery_failures() == []
+
+
+def test_channel_health_ignores_removed_channels_and_clears_on_test_success(
+    notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    notify._log(
+        store,
+        {
+            "channel": "team",
+            "status": "failed",
+            "error": {"code": "credential_unavailable", "reference": "env:PRIVATE"},
+        },
+    )
+    assert notifier.delivery_failures()[0]["error_code"] == "credential_unavailable"
+    notify._log(store, {"channel": "team", "status": "sent", "test": True})
+    assert notifier.delivery_failures() == []
+    notify._log(store, {"channel": "team", "status": "failed", "error": "secret"})
+    assert notifier.delivery_failures()[0]["error_code"] == "send_failed"
+    notify._delete(store, "notify_channels", "team")
+    assert notifier.delivery_failures() == []
+
+
+def test_delivery_status_preserves_channels_rules_and_digest_members(store: Store) -> None:
+    rows = [{**event(), "id": key} for key in range(1, 5)]
+    assert notify.delivery_status(store, rows) == rows  # Notify was never enabled.
+    notify._prepare(store)
+    entries = [
+        {"event": 1, "events": [2, 3], "digest": 1, "rule": "r", "status": "grouped"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "a", "status": "failed"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "a", "status": "sent"},
+        {"event": 1, "events": [2, 3], "rule": "r", "channel": "b", "status": "failed"},
+        {"event": 3, "rule": "other", "status": "suppressed"},
+        {"event": 4, "status": "sent", "test": True},
+        {"status": "sent"},  # Old/unlinked records must not invent an association.
+    ]
+    for entry in entries:
+        notify._log(store, {**entry, "subject": "private", "error": {"detail": "secret"}})
+    store.db.execute("INSERT INTO notify_log(at, data) VALUES ('now', 'not json')")
+    result = notify.delivery_status(store, rows)
+    assert result[0]["delivery"] == ["failed", "grouped", "sent"]
+    assert result[1]["delivery"] == ["grouped"]
+    assert result[2]["delivery"] == ["grouped", "suppressed"]
+    assert result[3]["delivery"] == []
+    assert all("delivery" not in row for row in rows)
+    # A failure outside the displayed children still counts for the group.
+    group = {**rows[-1], "group": {"ids": [1, 2, 3, 4], "events": [rows[-1]]}}
+    [result] = notify.delivery_status(store, [group])
+    assert result["delivery"] == ["failed", "grouped", "sent", "suppressed"]
+    assert result["group"]["events"][0]["delivery"] == []
+
+
+def test_delivery_health_is_exposed_and_attention_clears_when_off(tmp_path: Path) -> None:
+    with TestClient(api.create_app(tmp_path, polling=False, plugins=[notify.plugin])) as client:
+        client.put("/api/toolbox/notify", json={"enabled": True}, headers=HEADERS)
+        store = Store(tmp_path / "computedeck.sqlite")
+        try:
+            add_channel(store)
+            notify._log(
+                store,
+                {
+                    "channel": "team",
+                    "status": "failed",
+                    "error": {"code": "credential_unavailable", "reference": "env:PRIVATE"},
+                },
+            )
+            health = client.get("/api/health").json()["plugins"]["notify"]
+            assert health["delivery_failures"][0]["channel_name"] == "Team"
+            [item] = client.get("/api/dashboard").json()["attention"]
+            assert item["kind"] == "notification_failed"
+            assert item["severity"] == "warn" and item["action"] == "notify"
+            assert item["subject"]["kind"] == "plugin"
+            assert item["message"]["error_code"] == "credential_unavailable"
+            assert "PRIVATE" not in json.dumps(item)
+            client.put("/api/toolbox/notify", json={"enabled": False}, headers=HEADERS)
+            assert client.get("/api/dashboard").json()["attention"] == []
+        finally:
+            store.db.close()
+
+
+@pytest.mark.parametrize("query", ["", "&group=1", "&id=1", "&range=30d", "&group=1&range=30d"])
+def test_activity_delivery_is_opt_in_and_never_uses_live_logs_for_demo(
+    tmp_path: Path, query: str
+) -> None:
+    with TestClient(api.create_app(tmp_path, polling=False, plugins=[])) as client:
+        store = Store(tmp_path / "computedeck.sqlite")
+        try:
+            store.add_events([stored_event()])
+            notify._prepare(store)
+            notify._log(store, {"event": 1, "rule": "r", "status": "suppressed"})
+            plain = client.get(f"/api/events?limit=10{query}").json()
+            result = client.get(f"/api/events?limit=10&delivery=true{query}").json()
+            assert all("delivery" not in row for row in plain)
+            assert result[0]["delivery"] == ["suppressed"]
+            assert [
+                {key: value for key, value in row.items() if key != "delivery"} for row in result
+            ] == plain
+            demo = client.get("/api/events?demo=true&delivery=true&limit=200&group=1").json()
+            statuses = {status for row in demo for status in row["delivery"]}
+            assert statuses == {"sent", "failed", "grouped", "suppressed"}
+            assert client.get("/api/events?delivery=true&id=999999").json() == []
+        finally:
+            store.db.close()
+
+
+def test_corrupt_queue_row_is_counted_once_across_health_and_delivery(
+    notifier: notify.Notifier, store: Store, caplog: pytest.LogCaptureFixture
+) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO notify_queue VALUES ('r', 7, 'team', 0, 0, 0, 'not json')")
+    assert notifier.delivery_failures() == []
+    assert store.unreadable_rows()["notify_queue"] == 1
+    assert notifier.start_due() == []
+    assert store.unreadable_rows()["notify_queue"] == 1
+    assert notifier.delivery_failures() == []
+    assert caplog.text.count("Skipped unreadable notify_queue row") == 1
+
+
+async def test_mixed_digest_leads_with_failure_for_legacy_all_outcomes_rule(
+    monkeypatch: pytest.MonkeyPatch, notifier: notify.Notifier, store: Store
+) -> None:
+    add_channel(store)
+    add_rule(store, "all", "team", events=["job.ended"])
+    rows = digest_events(3)
+    store.add_events([rows[3], *rows[:3]])  # The latest ending, inserted first, completed.
+    sent: list[Message] = []
+
+    async def send(config: dict[str, Any], mail: Message) -> None:
+        sent.append(mail)
+
+    use_sender(monkeypatch, send)
+    for row in store.events():
+        await notifier.on_event(row)
+    assert len(sent) == 1
+    assert sent[0].event["data"]["outcome"] == "failed"
+    assert "failed" in sent[0].subject
+    assert sent[0].body.index("100_failed_1") < sent[0].body.index("100_completed_0")
+    assert all(row["count"] == 4 for row in notify._recent_log(store))

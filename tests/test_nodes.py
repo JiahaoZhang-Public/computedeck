@@ -45,7 +45,7 @@ class NodeOnlyDriver:
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
         }
-        return Batch(jobs=[job], capabilities=["jobs"])
+        return Batch(jobs=[job], capabilities=["jobs"], history_window_seconds=86400)
 
 
 @pytest.fixture
@@ -96,6 +96,7 @@ SOURCE = {
 
 async def test_a_source_is_collected_on_its_node(fake_node: list[dict[str, Any]]) -> None:
     batch = await nodes.collect(NODE, SOURCE)
+    assert batch.history_window_seconds == 86400
     assert batch.jobs and batch.jobs[0]["id"] == "cluster-b:7"
     [call] = fake_node
     assert call["destination"] == "lab-gateway"
@@ -254,15 +255,17 @@ def test_collect_command_answers_on_stdout(
         {"id": None},
     ],
 )
+@pytest.mark.parametrize("collection", ["instances", "failures", "finished"])
 async def test_node_replies_cannot_cross_source_scope(
     monkeypatch: pytest.MonkeyPatch,
     changes: dict[str, Any],
+    collection: str,
 ) -> None:
     source = {"id": "cloud-user", "cluster_id": "cloud", "driver": "runpod"}
     row = {"id": "cloud:pod", "source_id": "cloud-user", "state": "running", **changes}
 
     async def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {"batch": {"instances": [row]}}
+        return {"batch": {collection: [row]}}
 
     monkeypatch.setattr(nodes, "request", request)
     with pytest.raises(SourceError, match="node_bad_response"):
@@ -491,3 +494,16 @@ def test_a_node_error_is_passed_on_only_in_the_expected_shape(
 
     monkeypatch.setattr(ssh, "ssh_command", ssh_command)
     assert check(node_client).json()["error"] == expected
+
+
+async def test_node_finished_rows_normalize_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = {"id": "c-alice", "cluster_id": "c", "driver": "slurm"}
+
+    async def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "batch": {"finished": [{"id": "c:1", "source_id": "c-alice", "state": "COMPLETED"}]}
+        }
+
+    monkeypatch.setattr(nodes, "request", request)
+    batch = await nodes.collect(NODE, source)
+    assert batch.finished and batch.finished[0]["cluster_id"] == "c"

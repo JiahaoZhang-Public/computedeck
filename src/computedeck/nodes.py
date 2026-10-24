@@ -161,7 +161,7 @@ async def collect(node: dict[str, Any], source: dict[str, Any]) -> Batch:
         batch = Batch.model_validate(response["batch"])
         batch.validate_rows()
         prefix = f"{source['cluster_id']}:"
-        for rows in (batch.jobs, batch.nodes, batch.instances, batch.failures):
+        for rows in (batch.jobs, batch.nodes, batch.instances, batch.failures, batch.finished):
             for row in rows or []:
                 if not row["id"].startswith(prefix) or row["source_id"] != source["id"]:
                     raise ValueError("Collection row belongs to another source")

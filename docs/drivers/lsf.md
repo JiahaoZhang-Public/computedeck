@@ -33,7 +33,7 @@ Each line is one SSH command; the login name is quoted.
 | Your jobs (`bjobs`) | `bjobs -u alice -o "jobid jobindex job_name user queue stat pend_reason exec_host slots run_time proj_name gpu_num gpu_alloc" -json` | yes |
 | Visible hosts (`bhosts`) | `bhosts -o "host_name status max njobs ngpus ngpus_alloc" -json` and `lshosts -gpu -w` | no |
 | Limits | `bqueues -u alice -o "queue_name status max_runlimit" -json` and `blimits -a -w -u alice` | no |
-| Failures (`bjobs -d`) | `date +%Y-%m-%dT%H:%M:%S; bjobs -d -u alice -o "<history fields> exit_reason gpu_num gpu_alloc" -json` | no |
+| Failures (`bjobs -d`) | `date +%Y-%m-%dT%H:%M:%S%z; sh -c 'bparams -l 2>/dev/null \|\| true'; echo COMPUTEDECK_LSF_HISTORY; bjobs -d -u alice -o "<history fields> exit_reason gpu_num gpu_alloc" -json` | no |
 
 If `bjobs` or `bhosts` rejects the field list, it is run once more without the GPU fields (and, for history, without `exit_reason`). If `blimits` rejects `-a` together with `-w`, it is run as `blimits -w -u alice`, which lists only limits that jobs currently use. "No unfinished job found", "No job found" and "No resource usage found" are empty results, not errors.
 
@@ -44,6 +44,7 @@ When an optional command fails, its data is left as it was and the source shows 
 | ComputeDeck | LSF |
 |---|---|
 | `id` | `<cluster id>:<jobid>`, or `<jobid>[<jobindex>]` for an array element |
+| `array_id`, `array_index` | `jobid` / `jobindex` when `jobindex > 0`, or parsed from an element id such as `1234[7]`: `1234` / `7`; null for ordinary jobs |
 | `state` | `STAT`: PEND, PSUSP, WAIT → `PENDING`; RUN → `RUNNING`; USUSP, SSUSP → `SUSPENDED`; PROV → `CONFIGURING`; UNKWN → `UNKNOWN`. DONE and EXIT are not listed. |
 | `reason` | `Held` for jobs suspended while pending (`PSUSP`); other pending jobs carry `pend_reason` |
 | `gpu_count` | `gpu_num`. A running or suspended job with `-` for both `gpu_num` and `gpu_alloc` counts as `0`; otherwise a missing count is unknown |
@@ -89,6 +90,20 @@ ComputeDeck keeps limits in the shape of Slurm QoS records and compares each lim
 
 `exit_reason` with `TERM_RUNLIMIT` is shown as `TIMEOUT`, `TERM_MEMLIMIT` as `OUT_OF_MEMORY`, everything else as `FAILED`. Jobs killed by their owner or an administrator (`TERM_OWNER`, `TERM_ADMIN`, `TERM_FORCE_*`) are cancellations and are left out, as Slurm's `CANCELLED` jobs are. `end` is the cluster's local time, like Slurm's `End`.
 
+Failure rows preserve the full `EXIT_REASON` as `reason` and the raw `exit_code`.
+`exit_status` is its nonnegative integer value when known; no signal is inferred.
+`ended_at` adds the remote clock's offset without changing the legacy local `end`.
+The drawer shows the scheduler reason verbatim and offers a copy-only `bhist -l` command.
+Time limits and log paths are not collected: the optional field lists remain unchanged
+for compatibility with older LSF releases.
+
+The history SSH request also reads `bparams -l` to learn `CLEAN_PERIOD`, using its
+value in seconds capped at 24 hours as `history_window_seconds`. If that optional
+read fails or the value is absent, the window stays unknown and job history still
+loads. This does not add an SSH connection or widen the history query. Activity uses
+the window to explain observation gaps; it does not assume that LSF retained records
+outside that window.
+
 ## Warnings
 
 | Code | Meaning |
@@ -103,6 +118,7 @@ ComputeDeck keeps limits in the shape of Slurm QoS records and compares each lim
 
 - The GPU fields of `bjobs -o` and `bhosts -o` are documented without the fix pack that introduced them, and without their value for jobs and hosts without GPUs. Pending jobs that show `-` for `gpu_num` have an unknown GPU request.
 - Failure history reaches back only `CLEAN_PERIOD`, which defaults to one hour; `bhist` and `bacct` are not read.
+- When `bjobs -d` reports "No job found", the history output is empty and the window stays unknown for that collection.
 - The format of `exit_reason` is not documented; a cancellation that does not mention `TERM_OWNER`, `TERM_ADMIN` or "killed by owner" is listed as a failure.
 - `blimits` limits that span several queues or all queues, and limits on user groups, are not shown, because ComputeDeck compares a limit only with the jobs of one queue. Rows that cannot be aligned with their header (a value containing spaces) are skipped.
 - `bhosts` and `lshosts -gpu` list the whole cluster; the job queries read only your jobs.
@@ -111,5 +127,5 @@ ComputeDeck keeps limits in the shape of Slurm QoS records and compares each lim
 
 Checked against documentation only, not against a running cluster:
 
-- IBM Spectrum LSF 10.1.0 command reference: [bjobs -o](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.o.1.html), [bjobs -json](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.json.1.html), [bjobs -d](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.d.1.html), [bhosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bhosts.1.html), [lshosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/lshosts.1.html), [bqueues](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bqueues.1.html), [blimits](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/blimits.1.html).
+- IBM Spectrum LSF 10.1.0 command reference: [bjobs -o](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.o.1.html), [bjobs -json](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.json.1.html), [bjobs -d](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bjobs.d.1.html), [bhosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bhosts.1.html), [lshosts](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/lshosts.1.html), [bqueues](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bqueues.1.html), [blimits](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/blimits.1.html), [bparams](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_command_ref/bparams.1.html).
 - [LSF 10.1 Fix Pack 2 release notes](https://www.ibm.com/docs/en/SSWRJV_10.1.0/lsf_release_notes/lsf_relnotes_cmdout10.1.0.2.html) (`-json` for `bjobs`, `bhosts`, `bqueues`).

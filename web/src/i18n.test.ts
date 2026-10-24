@@ -54,6 +54,43 @@ describe('translations', () => {
     expect(errorText(new ApiError(500, null), 'error.save')).toBe('Request failed (HTTP 500)');
     expect(errorText('nonsense', 'error.save')).toBe('Could not save');
   });
+  it.each([
+    {
+      code: 'ssh_authentication',
+      detail: 'Permission denied (publickey).',
+      en: 'SSH authentication rejected (check the login name and key on the collecting machine): Permission denied (publickey).',
+      zh: 'SSH 认证被拒绝（检查采集机器上的登录用户名和密钥）: Permission denied (publickey).',
+    },
+    {
+      code: 'ssh_host_key',
+      detail: 'Host key verification failed.',
+      en: 'SSH host identity verification failed (verify the host key with its administrator before updating known_hosts): Host key verification failed.',
+      zh: 'SSH 主机身份验证失败（更新 known_hosts 前，请向管理员核实主机密钥）: Host key verification failed.',
+    },
+    {
+      code: 'ssh_network',
+      detail: 'No route to host',
+      en: 'SSH could not reach the host (check the network, VPN and jump-host route): No route to host',
+      zh: 'SSH 无法到达主机（检查网络、VPN 和跳板路由）: No route to host',
+    },
+    {
+      code: 'ssh_refused',
+      detail: 'Connection refused',
+      en: 'The host refused SSH (check the port and whether its SSH service is running): Connection refused',
+      zh: '主机拒绝了 SSH 连接（检查端口及远端 SSH 服务是否运行）: Connection refused',
+    },
+    {
+      code: 'ssh_closed',
+      detail: 'kex_exchange_identification: Connection closed by remote host',
+      en: 'The SSH connection closed before the check completed (retry the check): kex_exchange_identification: Connection closed by remote host',
+      zh: 'SSH 连接在检查完成前关闭（请重试检查）: kex_exchange_identification: Connection closed by remote host',
+    },
+  ])('renders $code with remote detail in both languages', ({ code, detail, en, zh }) => {
+    const ssh_error = { code, detail };
+    expect(formatMessage(ssh_error)).toBe(en);
+    setLocale('zh-CN');
+    expect(formatMessage(ssh_error)).toBe(zh);
+  });
 });
 
 it.each(['en', 'zh-CN'] as const)('renders unreadable-row counts in %s', (locale) => {
@@ -82,4 +119,30 @@ it.each(['en', 'zh-CN'] as const)('uses singular count hints in %s', (locale) =>
       '2 nodes have unknown state or measurements',
     );
   }
+});
+
+it.each(['en', 'zh-CN'] as const)('pluralizes array hints in %s', (locale) => {
+  setLocale(locale);
+  expect(t('jobs.array.elements', { count: 1 })).toBe(
+    locale === 'en'
+      ? 'The 1 listed element, including any last-known job. Open it for details.'
+      : '共 1 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
+  );
+  expect(t('jobs.array.elements', { count: 2 })).toBe(
+    locale === 'en'
+      ? 'All 2 listed elements, including any last-known jobs. Open an element for details.'
+      : '共 2 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
+  );
+  expect(t('jobs.array.otherReasons', { count: 1 })).toBe(
+    locale === 'en' ? '+1 other reason' : '另有 1 种等待原因',
+  );
+  expect(t('jobs.array.otherReasons', { count: 2 })).toBe(
+    locale === 'en' ? '+2 other reasons' : '另有 2 种等待原因',
+  );
+  expect(t('jobs.array.unknownGpus', { count: 1 })).toBe(
+    locale === 'en' ? 'GPU count unknown for 1 allocated job' : '1 个占用资源的作业 GPU 数量未知',
+  );
+  expect(t('jobs.array.unknownGpus', { count: 2 })).toBe(
+    locale === 'en' ? 'GPU count unknown for 2 allocated jobs' : '2 个占用资源的作业 GPU 数量未知',
+  );
 });

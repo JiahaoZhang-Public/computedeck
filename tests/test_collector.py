@@ -696,7 +696,7 @@ async def test_non_json_safe_batch_never_reaches_storage(
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [
-        (Batch(jobs=[], capabilities=["jobs"]), ["source.recovered"]),
+        (Batch(jobs=[], capabilities=["jobs"]), ["source.gap", "source.recovered"]),
         (SourceError("ssh_timeout"), []),
     ],
 )
@@ -817,3 +817,274 @@ async def test_capabilities_seen_survive_regression_failure_and_recovery(
     await collector.collect(source["id"])
     assert store.source(source["id"])["capabilities_seen"] == ["history", "jobs", "nodes"]
     assert store.source(source["id"])["warnings"] == []
+
+
+async def test_collection_clears_resolved_acknowledgement_before_same_fault_returns(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+) -> None:
+    source = add_source()
+    source.update(error={"code": "timeout"}, failures=2, status="error")
+    store.save_source(source)
+    [item] = collector.attention_items()
+    store.set_attention_state(
+        item["key"],
+        {"fingerprint": item["fingerprint"], "acknowledged_at": now(), "snooze_until": None},
+    )
+    use_driver(monkeypatch, lambda source: Batch(capabilities=["jobs"]))
+    await collector.collect(source["id"])
+    assert store.attention_state() == {}
+
+    def fail(source: dict[str, Any]) -> Batch:
+        raise TimeoutError()
+
+    use_driver(monkeypatch, fail)
+    await collector.collect(source["id"])
+    await collector.collect(source["id"])
+    [returned] = collector.attention_items()
+    assert returned["fingerprint"] == item["fingerprint"]
+    assert returned["muted"] is None
+
+
+async def test_collection_clears_changed_fingerprint_but_keeps_unchanged_acknowledgement(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store, add_source: AddSource
+) -> None:
+    source = add_source()
+    source.update(error={"code": "timeout"}, failures=2, status="error")
+    store.save_source(source)
+    [item] = collector.attention_items()
+    store.set_attention_state(
+        item["key"],
+        {"fingerprint": item["fingerprint"], "acknowledged_at": now(), "snooze_until": None},
+    )
+
+    def fail(source: dict[str, Any]) -> Batch:
+        raise TimeoutError()
+
+    use_driver(monkeypatch, fail)
+    await collector.collect(source["id"])
+    assert collector.attention_items()[0]["muted"] is not None
+
+    def changed(source: dict[str, Any]) -> Batch:
+        raise SourceError("ssh_failed")
+
+    use_driver(monkeypatch, changed)
+    await collector.collect(source["id"])
+    assert store.attention_state() == {}
+    assert collector.attention_items()[0]["muted"] is None
+
+
+async def test_successful_machine_check_clears_acknowledgement(
+    monkeypatch: pytest.MonkeyPatch, collector: Collector, store: Store
+) -> None:
+    instance = manual_instance(store, monitoring=True)
+    instance.update(ssh_status="error", ssh_error={"code": "timeout"})
+    store.save_instance(instance)
+    [item] = collector.attention_items()
+    store.set_attention_state(
+        item["key"],
+        {"fingerprint": item["fingerprint"], "acknowledged_at": now(), "snooze_until": None},
+    )
+
+    async def probe(row: dict[str, Any]) -> dict[str, Any]:
+        return {"ssh_status": "reachable", "observed_at": now()}
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    await collector.probe(instance["id"])
+    assert store.attention_state() == {}
+    assert collector.attention_items() == []
+
+
+@pytest.mark.parametrize("outcome", ["conflict", "error", "success"])
+async def test_attention_cleanup_never_replaces_probe_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    outcome: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    instance = manual_instance(store, monitoring=True)
+    probe_error = SourceError("ssh_failed")
+    cleanup_calls = []
+
+    async def probe(row: dict[str, Any]) -> dict[str, Any]:
+        if outcome == "error":
+            raise probe_error
+        if outcome == "conflict":
+            store.save_instance({**instance, "host": "192.0.2.31"})
+        return {"ssh_status": "reachable", "observed_at": now()}
+
+    def cleanup() -> None:
+        cleanup_calls.append(True)
+        raise ValueError("cleanup failed")
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    monkeypatch.setattr(collector, "clear_resolved_attention", cleanup)
+    if outcome == "conflict":
+        with pytest.raises(ProbeConflict, match="endpoint_changed"):
+            await collector.probe(instance["id"])
+        assert cleanup_calls == []
+    elif outcome == "error":
+        with pytest.raises(SourceError) as raised:
+            await collector.probe(instance["id"])
+        assert raised.value is probe_error
+        assert store.manual_instances()[0]["ssh_error"] == {"code": "ssh_failed"}
+        assert cleanup_calls == [True]
+    else:
+        result = await collector.probe(instance["id"])
+        assert result["ssh_status"] == "reachable"
+        assert store.manual_instances()[0]["ssh_status"] == "reachable"
+        assert store.manual_instances()[0]["ssh_error"] is None
+        assert store.dashboard()["history"]
+        assert cleanup_calls == [True]
+    if outcome != "conflict":
+        assert "Attention cleanup failed" in caplog.text
+    assert not collector.probes
+
+
+async def test_collection_writes_history_and_config_before_attention_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: Collector,
+    store: Store,
+    add_source: AddSource,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = add_source()
+    use_driver(monkeypatch, lambda source: Batch(capabilities=["jobs"]))
+    steps = []
+    write_config = collector_module.write_config
+
+    def config(instances: list[dict[str, Any]], data_dir: Path) -> None:
+        assert store.dashboard()["history"]
+        steps.append("config")
+        write_config(instances, data_dir)
+
+    def cleanup() -> None:
+        steps.append("cleanup")
+        raise ValueError("cleanup failed")
+
+    monkeypatch.setattr(collector_module, "write_config", config)
+    monkeypatch.setattr(collector, "clear_resolved_attention", cleanup)
+    await collector.collect(source["id"])
+    assert steps == ["config", "cleanup"]
+    assert store.source(source["id"])["status"] == "ready"
+    assert collector.runtime.loop_errors == {}
+    assert "Attention cleanup failed" in caplog.text
+
+
+def test_attention_cleanup_discards_unreadable_state(collector: Collector, store: Store) -> None:
+    with store.db:
+        store.db.execute("INSERT INTO attention_state VALUES ('broken', 'not JSON')")
+        store.db.execute("INSERT INTO sources VALUES ('broken-source', 'not JSON')")
+    store.set_attention_state(
+        "bad-time", {"fingerprint": "x", "acknowledged_at": now(), "snooze_until": "no time"}
+    )
+    assert any(
+        item["key"] == "unreadable_rows:attention_state" for item in collector.attention_items()
+    )
+    collector.clear_resolved_attention()
+    assert store.db.execute("SELECT * FROM attention_state").fetchall() == []
+    assert store.unreadable_rows() == {"sources": 1}
+    assert [item["key"] for item in collector.attention_items()] == ["unreadable_rows:sources"]
+
+
+@pytest.mark.parametrize(
+    "code,retries",
+    [
+        ("ssh_timeout", 1),
+        ("ssh_closed", 1),
+        ("ssh_authentication", 0),
+        ("ssh_host_key", 0),
+        ("ssh_refused", 0),
+        ("ssh_network", 0),
+        ("ssh_failed", 0),
+    ],
+)
+@pytest.mark.parametrize("recovers", [False, True])
+async def test_machine_retry_is_bounded_and_cause_specific(
+    monkeypatch, collector, store, code, retries, recovers
+):
+    instance = manual_instance(store)
+    attempts = []
+    delays = []
+
+    async def probe(row):
+        attempts.append(row)
+        if len(attempts) == 1 or not recovers:
+            raise SourceError(code)
+        return {"ssh_status": "reachable"}
+
+    async def delay(seconds):
+        delays.append(seconds)
+        # A transient first failure is never committed or turned into attention.
+        assert store.manual_instances()[0]["ssh_status"] == "unverified"
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", delay)
+    if retries and recovers:
+        result = await collector.probe(instance["id"])
+        assert result["ssh_status"] == "reachable"
+        assert result["ssh_error"] is None
+    else:
+        with pytest.raises(SourceError, match=code):
+            await collector.probe(instance["id"])
+        assert store.manual_instances()[0]["ssh_error"] == {"code": code}
+    assert len(attempts) == 1 + retries
+    assert delays == [2] * retries
+    assert not collector.probes
+
+
+async def test_machine_checks_have_two_slots_independent_of_collections(
+    monkeypatch, collector, runtime, store
+):
+    original = manual_instance(store)
+    ids = [original["id"]]
+    for index in range(2):
+        row = {**original, "id": f"manual:lab-box-{index}"}
+        store.save_instance(row)
+        ids.append(row["id"])
+    runtime.semaphore = asyncio.Semaphore(0)
+    entered = []
+    two_running = asyncio.Event()
+    release = asyncio.Event()
+
+    async def probe(row):
+        entered.append(row["id"])
+        if len(entered) == 2:
+            two_running.set()
+        await release.wait()
+        return {"ssh_status": "reachable"}
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    tasks = [asyncio.create_task(collector.probe(key)) for key in ids]
+    try:
+        await asyncio.wait_for(two_running.wait(), 10)
+        assert len(entered) == 2
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), 10)
+        assert len(entered) == 3
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_machine_endpoint_changed_during_retry_is_not_checked_again(
+    monkeypatch, collector, store
+):
+    instance = manual_instance(store)
+    calls = []
+
+    async def probe(row):
+        calls.append(row)
+        raise SourceError("ssh_closed")
+
+    async def delay(seconds):
+        store.save_instance({**instance, "host": "192.0.2.99"})
+
+    monkeypatch.setattr(collector_module, "probe_instance", probe)
+    monkeypatch.setattr(collector_module.asyncio, "sleep", delay)
+    with pytest.raises(ProbeConflict, match="endpoint_changed"):
+        await collector.probe(instance["id"])
+    assert len(calls) == 1
+    assert store.manual_instances()[0]["ssh_status"] == "unverified"
+    assert not collector.probes

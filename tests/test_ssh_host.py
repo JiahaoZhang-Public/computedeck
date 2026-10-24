@@ -80,6 +80,7 @@ def test_one_running_instance_with_gpus_and_processes() -> None:
     assert instance["name"] == "gpu-box"
     assert instance["state"] == "running"
     assert instance["ssh_status"] == "reachable"
+    assert instance["last_probe_attempt"] == instance["observed_at"]
     assert instance["observed_at"]
     assert instance["gpu_count"] == 2
     assert instance["gpu_type"] == "NVIDIA A100 80GB"

@@ -4,6 +4,7 @@ Sample outputs are hand-written from the IBM Spectrum LSF 10.1 command reference
 fictional data.
 """
 
+import asyncio
 import json
 import re
 import shutil
@@ -147,6 +148,8 @@ def test_running_job_reads_gpus_hosts_and_run_time() -> None:
     assert jobs == [
         {
             "id": "cluster-b:2001",
+            "array_id": None,
+            "array_index": None,
             "source_id": "cluster-b-alice",
             "cluster_id": "cluster-b",
             "name": "train-b",
@@ -426,7 +429,8 @@ def test_failures_keep_own_exits_of_the_last_24_hours() -> None:
     assert timeout["end"] == "2026-01-05T11:00:00"
     assert (timeout["gpu_count"], timeout["cpu_count"], timeout["node"]) == (None, 4, "node003")
     assert failures[1]["gpu_count"] == 4
-    assert timeout["reason"] is None and timeout["observed_at"]
+    assert timeout["reason"] == "TERM_RUNLIMIT: job killed after reaching LSF run time limit"
+    assert timeout["observed_at"]
 
 
 def test_failure_history_framing() -> None:
@@ -521,7 +525,9 @@ async def test_collect_reads_jobs_hosts_limits_and_failures(
     )
     assert "bqueues -u alice -o 'queue_name status max_runlimit' -json" in commands
     assert "blimits -a -w -u alice" in commands
-    assert commands[-1].startswith("date +%Y-%m-%dT%H:%M:%S; bjobs -d -u alice -o ")
+    assert commands[-1].startswith(
+        f"{lsf.CLOCK}; {lsf.HISTORY_CONFIG}; echo {lsf.HISTORY_MARKER}; bjobs -d -u alice -o "
+    )
     # Collection is read-only.
     words = set(" ".join(commands).replace("'", " ").replace(";", " ").split())
     assert not {"bsub", "bkill", "bmod", "bstop", "bresume", "brequeue", "badmin"} & words
@@ -744,7 +750,7 @@ def test_history_command_runs_under_common_login_shells(tmp_path: Path, shell: s
     )
     assert result.returncode == 0, result.stderr
     assert log.read_text().splitlines() == [
-        "<+%Y-%m-%dT%H:%M:%S>",
+        "<+%Y-%m-%dT%H:%M:%S%z>",
         "<-d><-u><alice.b><-o><" + " ".join(lsf.HISTORY_FIELDS) + "><-json>",
     ]
     assert lsf.parse_failures(result.stdout, SOURCE) == []
@@ -779,3 +785,127 @@ def test_job_times_preserve_scheduler_text_without_inventing_a_timezone() -> Non
     assert running["started_at"] == "Jan 5 09:00"
     pending = parse(job(STAT="PEND", START_TIME="Jan 5 13:00"))[0]
     assert pending["started_at"] is None
+
+
+def test_terminal_outcomes_use_remote_offset_without_changing_failure_rows() -> None:
+    text = history(
+        failed(JOBID="1", STAT="DONE", EXIT_CODE="0"),
+        failed(JOBID="2", EXIT_REASON="TERM_OWNER: job killed by owner"),
+        failed(JOBID="3", EXIT_REASON="TERM_MEMLIMIT"),
+        clock="2026-01-05T12:00:00+0400",
+    )
+    rows = lsf.parse_failures(text, SOURCE, terminal=True)
+    assert {row["state"] for row in rows} == {"COMPLETED", "CANCELLED", "OUT_OF_MEMORY"}
+    assert all(row["end"].endswith("+04:00") for row in rows)
+    assert lsf.parse_failures(text, SOURCE)[0]["end"] == "2026-01-05T10:00:00"
+
+
+@pytest.mark.parametrize(
+    ("job_id", "index", "array_id", "array_index"),
+    [
+        ("2002", "1", "2002", "1"),
+        ("2002[7]", "7", "2002", "7"),
+        ("2002", "0", None, None),
+        ("2002[0]", "0", None, None),
+        ("2002", "-", None, None),
+        ("2002", "1-30", None, None),
+    ],
+)
+def test_array_fields_on_queue_and_history_rows(
+    job_id: str, index: str, array_id: str | None, array_index: str | None
+) -> None:
+    rows = parse(job(JOBID=job_id, JOBINDEX=index))
+    text = f"{CLOCK}\n" + bjobs(failed(JOBID=job_id, JOBINDEX=index))
+    rows += lsf.parse_failures(text, SOURCE)
+    rows += lsf.parse_failures(text, SOURCE, terminal=True)
+    assert len(rows) == 3
+    for row in rows:
+        assert (row["array_id"], row["array_index"]) == (array_id, array_index)
+
+
+@pytest.mark.parametrize("code,status", [("1", 1), ("127", 127), ("137", 137), ("-", None)])
+def test_failure_exit_fields_and_reason(code, status) -> None:
+    [row] = lsf.parse_failures(
+        history(
+            failed(EXIT_CODE=code, EXIT_REASON="TERM_MEMLIMIT"), clock="2026-01-05T12:00:00+04:00"
+        ),
+        SOURCE,
+    )
+    assert row["exit_status"] == status
+    assert row["exit_signal"] is None
+    assert row["reason"] == "TERM_MEMLIMIT"
+    assert row["end"] == "2026-01-05T10:00:00"
+    assert row["ended_at"] == "2026-01-05T10:00:00+04:00"
+
+
+@pytest.mark.parametrize(
+    "config,window",
+    [
+        ("    CLEAN_PERIOD = 3600 (seconds)\n", 3600),
+        ("CLEAN_PERIOD = 172800 (seconds)\n", 86400),
+        ("CLEAN_PERIOD = 0 (seconds)\n", 0),
+        ("", None),
+        ("CLEAN_PERIOD = unknown\n", None),
+        ("CLEAN_PERIOD = -1\n", None),
+    ],
+)
+async def test_history_window_uses_readable_clean_period(
+    monkeypatch: pytest.MonkeyPatch, config: str, window: int | None
+) -> None:
+    clock, _, rows = history(failed()).partition("\n")
+    framed = f"{clock}\n{config}{lsf.HISTORY_MARKER}\n{rows}"
+    calls: Calls = []
+    monkeypatch.setattr(ssh, "run", fake_cluster(calls, history=framed))
+    batch = await lsf.LsfDriver().collect(SOURCE)
+    assert batch.history_window_seconds == window
+    assert "history" in batch.capabilities
+    assert batch.failures and batch.failures[0]["id"] == "cluster-b:2101"
+    # Configuration rides on the existing history request, without another SSH call.
+    assert len([command for _, command, _ in calls if "bparams" in command]) == 1
+    assert len(calls) == 6
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash", "tcsh"])
+@pytest.mark.parametrize("config_available", [True, False])
+async def test_history_config_is_optional_under_login_shells(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, config_available: bool
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    calls: Calls = []
+    monkeypatch.setattr(ssh, "run", fake_cluster(calls))
+    await lsf.LsfDriver().collect(SOURCE)
+    command = calls[-1][1]
+    for tool in ("date", "bjobs", "bparams"):
+        script = FAKE_TOOL
+        if tool == "bparams":
+            script = (
+                '#!/bin/sh\necho "    CLEAN_PERIOD = 3600 (seconds)"\n'
+                if config_available
+                else '#!/bin/sh\necho "permission denied" >&2\nexit 1\n'
+            )
+        (tmp_path / tool).write_text(script)
+        (tmp_path / tool).chmod(0o755)
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [shell, "-c", command],
+        cwd=tmp_path,
+        env={"PATH": f"{tmp_path}:/usr/bin:/bin", "LOG": str(tmp_path / "log")},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert lsf.HISTORY_MARKER in result.stdout
+    assert (
+        "CLEAN_PERIOD" in result.stdout if config_available else "CLEAN_PERIOD" not in result.stdout
+    )
+    assert (
+        lsf.parse_failures(
+            result.stdout.splitlines()[0]
+            + "\n"
+            + result.stdout.split(lsf.HISTORY_MARKER + "\n")[1],
+            SOURCE,
+        )
+        == []
+    )

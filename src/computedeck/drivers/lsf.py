@@ -81,7 +81,11 @@ GPU_HOST_FIELDS = ("ngpus", "ngpus_alloc")
 QUEUE_FIELDS = ("queue_name", "status", "max_runlimit")
 GPU_INVENTORY_COMMAND = "lshosts -gpu -w"
 # Remote local time, so finish times without a year can be dated and windowed.
-CLOCK = shlex.join(["date", "+%Y-%m-%dT%H:%M:%S"])
+CLOCK = shlex.join(["date", "+%Y-%m-%dT%H:%M:%S%z"])
+HISTORY_MARKER = "COMPUTEDECK_LSF_HISTORY"
+# Optional configuration read in the existing history SSH call. Failure leaves the
+# retention window unknown and must not prevent bjobs from running.
+HISTORY_CONFIG = shlex.join(["sh", "-c", "bparams -l 2>/dev/null || true"])
 
 STATES = {
     "PEND": "PENDING",
@@ -195,11 +199,17 @@ def job_gpu_count(row: dict[str, str], state: str) -> int | None:
 
 
 def _job(row: dict[str, str], state: str, source: dict[str, Any], command: str) -> dict[str, Any]:
-    key = f"{source['cluster_id']}:{_job_id(row, command)}"
+    job_id = _job_id(row, command)
+    key = f"{source['cluster_id']}:{job_id}"
+    array = re.fullmatch(r"(\d+)\[(\d+)\]", job_id)
+    if array and int(array[2]) == 0:
+        array = None
     elapsed = run_seconds(row.get("RUN_TIME", ""))
     queue = row.get("QUEUE", "")
     return {
         "id": key,
+        "array_id": array[1] if array else None,
+        "array_index": array[2] if array else None,
         "source_id": source["id"],
         "cluster_id": source["cluster_id"],
         "name": row.get("JOB_NAME", ""),
@@ -413,7 +423,13 @@ def finish_time(value: str, remote_now: datetime) -> datetime | None:
     for candidate in years:
         try:
             stamp = datetime(
-                candidate, MONTHS[month], int(day), int(hour), int(minute), int(second or 0)
+                candidate,
+                MONTHS[month],
+                int(day),
+                int(hour),
+                int(minute),
+                int(second or 0),
+                tzinfo=remote_now.tzinfo,
             )
         except ValueError:
             continue
@@ -431,7 +447,9 @@ def _failure_state(reason: str) -> str:
     return "FAILED"
 
 
-def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_failures(
+    output: str, source: dict[str, Any], *, terminal: bool = False
+) -> list[dict[str, Any]]:
     """``date; bjobs -d``: the user's EXIT jobs that finished in the last 24 hours.
 
     ``bjobs -d`` only keeps jobs for CLEAN_PERIOD (lsb.params, one hour by default), so the
@@ -450,17 +468,29 @@ def parse_failures(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     observed_at = now()
     for row in records(rest, "bjobs -d", empty=True):
         reason = row.get("EXIT_REASON", "")
-        if row.get("USER") != source["username"] or row.get("STAT", "").upper() != "EXIT":
+        states = {"EXIT", "DONE"} if terminal else {"EXIT"}
+        if row.get("USER") != source["username"] or row.get("STAT", "").upper() not in states:
             continue
-        if CANCELLED.search(reason):
+        if CANCELLED.search(reason) and not terminal:
             continue
         end = finish_time(row.get("FINISH_TIME", ""), remote_now)
         if end is None or end < since:
             continue
-        job = _job(row, _failure_state(reason), source, "bjobs -d")
+        state = (
+            "COMPLETED"
+            if row.get("STAT", "").upper() == "DONE"
+            else "CANCELLED"
+            if CANCELLED.search(reason)
+            else _failure_state(reason)
+        )
+        job = _job(row, state, source, "bjobs -d")
         job.update(
-            end=end.isoformat(),
+            end=(end if terminal else end.replace(tzinfo=None)).isoformat(),
+            ended_at=end.isoformat() if end.tzinfo else None,
             exit_code=None if _blank(row.get("EXIT_CODE")) else row["EXIT_CODE"],
+            exit_status=integer(row.get("EXIT_CODE")),
+            exit_signal=None,
+            reason=None if _blank(reason) else reason,
             observed_at=observed_at,
         )
         failures[job["id"]] = job
@@ -526,11 +556,11 @@ class LsfDriver:
             "zh-CN": "通过 SSH 读取 IBM Spectrum LSF 上你的作业、可见主机和队列上限。",
         },
         details={
-            "en": "Read-only bjobs, bhosts, lshosts, bqueues and blimits queries through an SSH "
-            "host alias on {where}. ProxyJump and keys come from that SSH config. Needs LSF 10.1 "
-            "Fix Pack 2 or later for JSON output.",
+            "en": "Read-only bjobs, bhosts, lshosts, bqueues, blimits and bparams queries through "
+            "an SSH host alias on {where}. ProxyJump and keys come from that SSH config. "
+            "Needs LSF 10.1 Fix Pack 2 or later for JSON output.",
             "zh-CN": "通过{where}的 SSH Host 别名只读调用 bjobs、bhosts、lshosts、"
-            "bqueues 和 blimits。ProxyJump 和密钥沿用该 SSH 配置。"
+            "bqueues、blimits 和 bparams。ProxyJump 和密钥沿用该 SSH 配置。"
             "JSON 输出需要 LSF 10.1 Fix Pack 2 或更高版本。",
         },
         fields=[username_field(), ssh_alias_field()],
@@ -649,12 +679,24 @@ class LsfDriver:
             history_query = _formatted("bjobs", "-d", "-u", username)
             output = await _with_optional(
                 alias,
-                lambda fields: f"{CLOCK}; {history_query(fields)}",
+                lambda fields: (
+                    f"{CLOCK}; {HISTORY_CONFIG}; echo {HISTORY_MARKER}; {history_query(fields)}"
+                ),
                 HISTORY_FIELDS,
                 HISTORY_EXTRA_FIELDS,
                 options,
             )
+            clock, _, rest = output.partition("\n")
+            config, marker, history = rest.partition(HISTORY_MARKER + "\n")
+            if marker:
+                period = re.search(
+                    r"(?m)^\s*CLEAN_PERIOD\s*=\s*(\d+)\s*(?:\(seconds\))?\s*$", config
+                )
+                if period:
+                    batch.history_window_seconds = min(86400, int(period[1]))
+                output = f"{clock}\n{history}"
             batch.failures = parse_failures(output, source)
+            batch.finished = parse_failures(output, source, terminal=True)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))

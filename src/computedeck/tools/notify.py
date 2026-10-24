@@ -19,6 +19,7 @@ import secrets
 import shlex
 import time
 from collections import deque
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -27,13 +28,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..drivers import ssh
 from ..errors import SourceError, message
-from ..events import TYPES
+from ..events import FAILURE_OUTCOMES, OUTCOMES
 from ..plugins import Plugin, PluginContext, SettingField
 from ..ssh_config import validate_alias
 from ..store import Store, now
 from ..toolbox import _coerce
 from . import channels
 from .channels import Message
+
+NOTIFY_TYPES = ("job.started", "job.finished", "source.failed", "source.recovered")
 
 logger = logging.getLogger("computedeck")
 
@@ -66,6 +69,11 @@ PERMANENT_ERRORS = ("credential_unavailable", "webhook_url_invalid", "channel_ki
 
 DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
     "en": {
+        "job.finished": (
+            "{job}: {outcome} on {cluster}",
+            "{job} ({job_id}): {outcome} on {cluster}.\nState: {state}\n"
+            "Exit code: {exit_code}\nEnded: {end}",
+        ),
         "job.failed": (
             "{job} failed on {cluster}",
             "{job} ({job_id}) failed on {cluster}.\n\nState: {state}\nExit code: {exit_code}\n"
@@ -86,6 +94,10 @@ DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
         "source.recovered": ("{source} is collected again", "{source} is collected again."),
     },
     "zh-CN": {
+        "job.finished": (
+            "{job}：{outcome}（{cluster}）",
+            "{job}（{job_id}）：{outcome}（{cluster}）。\n状态：{state}\n退出码：{exit_code}\n结束时间：{end}",
+        ),
         "job.failed": (
             "{job} 在 {cluster} 上失败",
             "{job}（{job_id}）在 {cluster} 上失败。\n\n状态：{state}\n退出码：{exit_code}\n"
@@ -104,8 +116,35 @@ DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
         "source.recovered": ("{source} 已恢复采集", "{source} 已恢复采集。"),
     },
 }
+OUTCOME_TEXT = {
+    "en": {
+        "completed": "completed",
+        "cancelled": "cancelled",
+        "failed": "failed",
+        "timeout": "time limit reached",
+        "out_of_memory": "out of memory",
+        "node_fail": "node failure",
+        "boot_fail": "boot failure",
+        "deadline": "deadline reached",
+        "preempted": "preempted",
+        "unknown": "outcome unknown",
+    },
+    "zh-CN": {
+        "completed": "已完成",
+        "cancelled": "已取消",
+        "failed": "失败",
+        "timeout": "达到时间限制",
+        "out_of_memory": "内存不足",
+        "node_fail": "节点故障",
+        "boot_fail": "启动失败",
+        "deadline": "达到截止时间",
+        "preempted": "被抢占",
+        "unknown": "结果未知",
+    },
+}
 PLACEHOLDERS = (
     "event",
+    "outcome",
     "source",
     "cluster",
     "user",
@@ -134,6 +173,7 @@ def facts(event: dict[str, Any]) -> dict[str, str]:
         error = ": ".join(str(part) for part in (error.get("code"), error.get("detail")) if part)
     values = {
         "event": event.get("type"),
+        "outcome": data.get("outcome"),
         "source": data.get("source_name"),
         "cluster": data.get("source_name") or data.get("cluster_id"),
         "user": job.get("user") or data.get("username"),
@@ -151,6 +191,13 @@ def facts(event: dict[str, Any]) -> dict[str, str]:
         "error": error,
         "time": event.get("at"),
     }
+    if event.get("type") == "job.finished":
+        values.update(
+            state=data.get("state"),
+            exit_code=data.get("exit_code"),
+            end=data.get("ended_at")
+            or (job.get("end") if data.get("outcome") != "unknown" else None),
+        )
     return {key: "—" if value in (None, "") else str(value) for key, value in values.items()}
 
 
@@ -173,7 +220,8 @@ class RuleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
     enabled: bool = True
-    events: list[str] = Field(default_factory=lambda: ["job.failed"], min_length=1)
+    events: list[str] = Field(default_factory=lambda: ["job.finished"], min_length=1)
+    outcomes: list[str] = Field(default_factory=lambda: list(FAILURE_OUTCOMES))
     clusters: list[str] = Field(default_factory=list, max_length=50)
     users: list[str] = Field(default_factory=list, max_length=50)
     name_pattern: str = Field(default="", max_length=200)
@@ -210,6 +258,24 @@ def _prepare(store: Store) -> None:
         """)
 
 
+def migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    kinds = rule.get("events", [])
+    if not {"job.failed", "job.ended"}.intersection(kinds):
+        return rule
+    outcomes = [] if "job.ended" in kinds else list(FAILURE_OUTCOMES)
+    if "job.finished" in kinds:
+        outcomes = rule.get("outcomes", [])
+    return {
+        **rule,
+        "events": list(
+            dict.fromkeys(
+                "job.finished" if kind in {"job.failed", "job.ended"} else kind for kind in kinds
+            )
+        ),
+        "outcomes": outcomes,
+    }
+
+
 def _rows(store: Store, table: str) -> list[dict[str, Any]]:
     rows = store.db.execute(f"SELECT rowid, data FROM {table} ORDER BY rowid")
     records = [store.record(table, key, data, {"id": str}) for key, data in rows]
@@ -229,14 +295,15 @@ def _delete(store: Store, table: str, row_id: str) -> bool:
         return store.db.execute(f"DELETE FROM {table} WHERE id=?", (row_id,)).rowcount == 1
 
 
+def _write_log(store: Store, entry: dict[str, Any]) -> None:
+    # The caller owns the transaction, including when reserving a whole digest.
+    store.db.execute("INSERT INTO notify_log (at, data) VALUES (?, ?)", (now(), json.dumps(entry)))
+    store.db.execute("DELETE FROM notify_log WHERE id <= (SELECT MAX(id) - 500 FROM notify_log)")
+
+
 def _log(store: Store, entry: dict[str, Any]) -> None:
     with store.db:
-        store.db.execute(
-            "INSERT INTO notify_log (at, data) VALUES (?, ?)", (now(), json.dumps(entry))
-        )
-        store.db.execute(
-            "DELETE FROM notify_log WHERE id <= (SELECT MAX(id) - 500 FROM notify_log)"
-        )
+        _write_log(store, entry)
 
 
 def _recent_log(store: Store, limit: int = 50) -> list[dict[str, Any]]:
@@ -245,6 +312,64 @@ def _recent_log(store: Store, limit: int = 50) -> list[dict[str, Any]]:
     )
     entries = ((row[0], row[1], store.record("notify_log", row[0], row[2], {})) for row in rows)
     return [{"id": key, "at": at, **entry} for key, at, entry in entries if entry is not None]
+
+
+def _error_code(error: Any) -> str:
+    # Only the machine-readable code belongs on health/Activity, never error details.
+    code = error.get("code") if isinstance(error, dict) else None
+    return (
+        code
+        if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code)
+        else "send_failed"
+    )
+
+
+def delivery_status(store: Store, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate API copies using the retained log; absence is not a delivery verdict."""
+    if (
+        not rows
+        or not store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='notify_log'"
+        ).fetchone()
+    ):
+        return rows
+    wanted = {key for row in rows for key in row.get("group", {}).get("ids", [row["id"]])}
+    by_event: dict[int, set[str]] = {}
+    seen: set[tuple[Any, ...]] = set()
+    for entry in _recent_log(store, 500):
+        status = entry.get("status")
+        if entry.get("test") or status not in {
+            "sent",
+            "failed",
+            "suppressed",
+            "grouped",
+            "dropped",
+        }:
+            continue
+        ids = [entry.get("event")]
+        if status in {"grouped", "suppressed"}:
+            ids.extend(entry.get("events") or [])
+        for event_id in ids:
+            if not isinstance(event_id, int) or event_id <= 0 or event_id not in wanted:
+                continue
+            # Group reservations and channel outcomes are separate facts. A later
+            # success replaces an earlier failure only for this rule and channel.
+            key = (event_id, entry.get("rule"), entry.get("channel"), status == "grouped")
+            if key in seen:
+                continue
+            seen.add(key)
+            by_event.setdefault(event_id, set()).add(status)
+
+    def annotate(row: dict[str, Any]) -> dict[str, Any]:
+        group = row.get("group")
+        ids = group["ids"] if group else [row["id"]]
+        statuses = set().union(*(by_event.get(key, set()) for key in ids))
+        result = {**row, "delivery": sorted(statuses)}
+        if group:
+            result["group"] = {**group, "events": [annotate(child) for child in group["events"]]}
+        return result
+
+    return [annotate(row) for row in rows]
 
 
 def _new_id(name: str) -> str:
@@ -275,8 +400,10 @@ def check_channel(body: ChannelInput) -> dict[str, Any]:
 
 
 def check_rule(body: RuleInput, known_channels: set[str]) -> None:
-    if any(event not in TYPES for event in body.events):
+    if any(event not in (*NOTIFY_TYPES, "job.failed", "job.ended") for event in body.events):
         raise ValueError("event_type_unknown")
+    if any(outcome not in OUTCOMES for outcome in body.outcomes):
+        raise ValueError("setting_invalid")
     if any(channel not in known_channels for channel in body.channels):
         raise ValueError("channel_not_found")
     for value in [*body.clusters, *body.users]:
@@ -285,10 +412,29 @@ def check_rule(body: RuleInput, known_channels: set[str]) -> None:
 
 
 def matches(rule: dict[str, Any], event: dict[str, Any]) -> bool:
+    rule = migrate_rule(rule)
+    # Pre-upgrade events can still be waiting behind the plugin cursor.
+    if event["type"] in {"job.failed", "job.ended"} and "job.finished" in rule.get("events", []):
+        data = event.get("data") or {}
+        state = str((data.get("job") or {}).get("state", "")).lower()
+        outcome = (
+            state
+            if state in FAILURE_OUTCOMES
+            else "failed"
+            if event["type"] == "job.failed"
+            else "unknown"
+        )
+        event = {**event, "type": "job.finished", "data": {**data, "outcome": outcome}}
     if not rule.get("enabled", True) or event["type"] not in rule.get("events", []):
         return False
     data = event.get("data") or {}
     job = data.get("job") or {}
+    if (
+        event["type"] == "job.finished"
+        and rule.get("outcomes")
+        and (data.get("failure_announced") or data.get("outcome") not in rule["outcomes"])
+    ):
+        return False
     if rule.get("clusters") and data.get("cluster_id") not in rule["clusters"]:
         return False
     if rule.get("users") and not {job.get("user"), data.get("username")} & set(rule["users"]):
@@ -434,6 +580,18 @@ async def agent_text(
             {**facts(event), "job": (event.get("data") or {}).get("job")}, ensure_ascii=False
         ),
     ]
+    if event.get("digest"):
+        parts += [
+            "Other events in this digest (JSON):",
+            json.dumps(
+                {
+                    "count": len(event["digest"]) + 1,
+                    "summary": digest_tail(event, language),
+                    "sample": [facts(sibling) for sibling in event["digest"][:20]],
+                },
+                ensure_ascii=False,
+            ),
+        ]
     if log:
         parts += ["Last lines of the job log:", log]
     if rule.get("instructions"):
@@ -472,13 +630,93 @@ async def agent_text(
     return text.strip()
 
 
+def digest_scope(event: dict[str, Any]) -> str | None:
+    """Normal standalone jobs keep their own message, even alongside an array burst."""
+    if not event["type"].startswith("job."):
+        return None
+    data = event.get("data") or {}
+    if (data.get("job") or {}).get("array_id"):
+        return "arrays"
+    return "catchup" if data.get("since") else None
+
+
+def digest_tail(event: dict[str, Any], language: str) -> str:
+    siblings = event.get("digest") or []
+    if not siblings:
+        return ""
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for sibling in siblings:
+        data = sibling["data"]
+        job = data.get("job") or {}
+        key = (
+            str(job.get("array_id") or ""),
+            str(job.get("name") or job.get("id") or "—"),
+            str(data.get("outcome") or ""),
+        )
+        groups.setdefault(key, []).append(str(job.get("id") or "—").rsplit(":", 1)[-1])
+    parts = []
+    remaining = 10
+    comma, semicolon, left, right = (
+        ("，", "；", "（", "）") if language == "zh-CN" else (", ", "; ", " (", ")")
+    )
+    for (array, name, outcome), ids in list(groups.items())[:10]:
+        label = OUTCOME_TEXT.get(language, OUTCOME_TEXT["en"]).get(outcome, outcome)
+        shown = ids[:remaining]
+        remaining -= len(shown)
+        detail = comma.join(shown) + (f"{comma}…" if len(shown) < len(ids) else "")
+        detail = semicolon.join(part for part in (label, detail if shown else "") if part)
+        parts.append(
+            f"{name}"
+            + (f" [{array}]" if array else "")
+            + f" ×{len(ids)}"
+            + (f"{left}{detail}{right}" if detail else "")
+        )
+    cluster = facts(event)["cluster"]
+    omitted = sum(len(ids) for ids in list(groups.values())[10:])
+    if omitted:
+        parts.append(
+            f"另有 {omitted} 个事件" if language == "zh-CN" else f"and {omitted} more events"
+        )
+    summary = semicolon.join(parts)
+    return (
+        f"另有 {len(siblings)} 个事件（{cluster}）：{summary}"
+        if language == "zh-CN"
+        else f"and {len(siblings)} more on {cluster}: {summary}"
+    )
+
+
 async def compose(
-    store: Store, settings: dict[str, Any], rule: dict[str, Any], event: dict[str, Any]
+    store: Store,
+    settings: dict[str, Any],
+    rule: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    limit_reached: bool = False,
 ) -> tuple[Message, list[str]]:
     """The message for one event under one rule, and notes about anything left out."""
     language = store.settings().get("language") or "en"
     defaults = DEFAULTS.get(language, DEFAULTS["en"]).get(event["type"], ("{event}", "{event}"))
     values = facts(event)
+    outcome = (event.get("data") or {}).get("outcome")
+    if outcome:
+        values["outcome"] = OUTCOME_TEXT.get(language, OUTCOME_TEXT["en"]).get(outcome, outcome)
+        if outcome == "unknown":
+            reasons = {
+                "outcomes_unavailable": (
+                    "this connection cannot read job accounting",
+                    "此连接无法读取作业记账信息",
+                ),
+                "outside_lookback": (
+                    "accounting could not cover the full unobserved period",
+                    "记账历史无法覆盖完整的未观测区间",
+                ),
+            }
+            words = reasons.get(
+                str((event.get("data") or {}).get("outcome_reason")),
+                ("no outcome was reported by this observation", "截至此次观测，调度器尚未报告结果"),
+            )
+            reason = words[1 if language == "zh-CN" else 0]
+            values["outcome"] += f" ({reason})"
     subject = render(rule.get("subject") or defaults[0], values)
     body = render(rule.get("body") or defaults[1], values)
     notes: list[str] = []
@@ -490,10 +728,33 @@ async def compose(
             body = await agent_text(settings, rule, event, log, language)
         except SourceError as error:
             notes.append(f"agent_failed:{error.code}")
+    since = (event.get("data") or {}).get("since")
+    if since:
+        observed = event["data"].get("observed_at") or event["at"]
+        since = datetime.fromisoformat(since).isoformat(sep=" ", timespec="seconds")
+        observed = datetime.fromisoformat(observed).isoformat(sep=" ", timespec="seconds")
+        window = (
+            f"采集窗口：{since} 至 {observed}"
+            if language == "zh-CN"
+            else f"Collection window: between {since} and {observed}"
+        )
+        body += f"\n\n{window}"
+    tail = digest_tail(event, language)
+    if tail:
+        body += f"\n\n{tail}"
+    if limit_reached:
+        notice = (
+            "已达到通知上限；后续事件列在动态中。"
+            if language == "zh-CN"
+            else "Limit reached; further events are listed in Activity."
+        )
+        body += f"\n\n{notice}"
     if log:
         heading = "作业日志最后几行" if language == "zh-CN" else "Last lines of the job log"
         body = f"{body}\n\n--- {heading} ---\n{log}"
-    return Message(subject=subject, body=body, event=event), notes
+    # Siblings are only needed while composing. Keep queue rows and JSON webhooks lean.
+    message_event = {key: value for key, value in event.items() if key != "digest"}
+    return Message(subject=subject, body=body, event=message_event), notes
 
 
 # ---- Plugin ----
@@ -506,6 +767,11 @@ class Notifier:
     def __init__(self, ctx: PluginContext) -> None:
         self.ctx = ctx
         self.sent: dict[str, deque[float]] = {}
+        # Current collection only; share one read across its array and catch-up digests.
+        self.digests: dict[
+            tuple[str, str | None, str, str],
+            tuple[dict[str, Any], dict[str, dict[str, Any]]],
+        ] = {}
         # Deliveries being attempted right now, each in its own task.
         self.sending: dict[Key, asyncio.Task[None]] = {}
         # Channels whose last attempt failed but may work later, and until when (Unix
@@ -522,8 +788,40 @@ class Notifier:
     def channels(self) -> dict[str, dict[str, Any]]:
         return {row["id"]: row for row in _rows(self.store, "notify_channels")}
 
+    def delivery_failures(self) -> list[dict[str, Any]]:
+        """Channels whose latest recorded attempt in the last day failed."""
+        latest: dict[str, dict[str, Any]] = {}
+        cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        for entry in _recent_log(self.store, 500):
+            channel = entry.get("channel")
+            if channel and entry.get("status") in {"sent", "failed"}:
+                latest.setdefault(channel, entry)
+        for rule_id, event_id, channel_id, raw in self.store.db.execute(
+            "SELECT rule, event, channel, data FROM notify_queue"
+        ):
+            key = (rule_id, event_id, channel_id)
+            row = self.store.record("notify_queue", key, raw, {"entry": dict})
+            if not row or not row.get("last_attempt_at"):
+                continue
+            channel = row["entry"].get("channel")
+            at = row["last_attempt_at"]
+            if channel and at > latest.get(channel, {}).get("at", ""):
+                latest[channel] = {"at": at, "status": "failed", "error": row["last_error"]}
+        return [
+            {
+                "channel": channel_id,
+                "channel_name": channel["name"],
+                "error_code": _error_code(latest[channel_id].get("error")),
+                "at": latest[channel_id]["at"],
+            }
+            for channel_id, channel in self.channels().items()
+            if channel_id in latest
+            and latest[channel_id]["status"] == "failed"
+            and latest[channel_id]["at"] >= cutoff
+        ]
+
     def rules(self) -> list[dict[str, Any]]:
-        return _rows(self.store, "notify_rules")
+        return [migrate_rule(rule) for rule in _rows(self.store, "notify_rules")]
 
     def queued(self) -> int:
         return int(self.store.db.execute("SELECT COUNT(*) FROM notify_queue").fetchone()[0])
@@ -532,6 +830,13 @@ class Notifier:
         # The runtime advances its persistent event cursor after this returns; by then each
         # delivery is stored, and sent, being sent or waiting for its retry. Cancellation
         # leaves the event pending for delivery after restart. Rules run side by side.
+        source = event.get("source_id")
+        observed = (event.get("data") or {}).get("observed_at") or event["at"]
+        self.digests = {
+            key: value
+            for key, value in self.digests.items()
+            if key[1] == source and key[3] == observed
+        }
         await asyncio.gather(
             *(self.deliver(rule, event) for rule in self.rules() if matches(rule, event))
         )
@@ -547,24 +852,101 @@ class Notifier:
         window.append(time.monotonic())
         return True
 
+    def _handled(self, rule: dict[str, Any], event: dict[str, Any]) -> bool:
+        rows = self.store.db.execute(
+            "SELECT data FROM notify_log WHERE CASE WHEN json_valid(data) THEN "
+            "json_extract(data, '$.rule')=? AND json_extract(data, '$.event')=? END",
+            (rule["id"], event["id"]),
+        )
+        entries = [json.loads(row[0]) for row in rows]
+        if any(
+            row.get("status") in {"grouped", "suppressed"}
+            or (row.get("status") == "failed" and not row.get("channel"))
+            for row in entries
+        ):
+            return True
+        finished = {
+            row.get("channel")
+            for row in entries
+            if row.get("status") in {"sent", "failed", "dropped"}
+        }
+        queued = {
+            row[0]
+            for row in self.store.db.execute(
+                "SELECT channel FROM notify_queue WHERE rule=? AND event=?",
+                (rule["id"], event["id"]),
+            )
+        }
+        return bool(rule.get("channels")) and set(rule["channels"]) <= finished | queued
+
+    def _digest(self, rule: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+        scope = digest_scope(event)
+        if scope is None:
+            return event
+        key = (
+            rule["id"],
+            event.get("source_id"),
+            event["type"],
+            event["data"].get("observed_at") or event["at"],
+        )
+        cached = self.digests.get(key)
+        if cached is None or cached[0] != rule:
+            groups: dict[str, list[dict[str, Any]]] = {}
+            for row in self.store.events_in_collection(key[1], key[3], key[2]):
+                row_scope = digest_scope(row)
+                if row_scope and matches(rule, row):
+                    groups.setdefault(row_scope, []).append(row)
+            for rows in groups.values():
+                rows.sort(
+                    key=lambda row: (row["data"].get("outcome") not in FAILURE_OUTCOMES, row["id"])
+                )
+            digests = {
+                name: {**rows[0], **({"digest": rows[1:]} if len(rows) > 1 else {})}
+                for name, rows in groups.items()
+            }
+            self.digests[key] = (dict(rule), digests)
+        return self.digests[key][1].get(scope, event)
+
     async def deliver(self, rule: dict[str, Any], event: dict[str, Any]) -> None:
         """Send one event under one rule to each of the rule's channels.
 
         Every delivery is queued first, then attempted at once, all channels together. A
         channel whose last attempt failed is not tried again before its retry is due.
         """
+        event = self._digest(rule, event)
+        if self._handled(rule, event):
+            keys = self.store.db.execute(
+                "SELECT rule, event, channel FROM notify_queue WHERE rule=? AND event=? AND due<=?",
+                (rule["id"], event["id"], time.time()),
+            ).fetchall()
+            await self._first_attempts([tuple(key) for key in keys])
+            return
         entry: dict[str, Any] = {
             "rule": rule["id"],
             "rule_name": rule.get("name"),
             "event": event.get("id"),
             "event_type": event.get("type"),
         }
+        siblings = event.get("digest") or []
+        if siblings:
+            entry.update(
+                count=len(siblings) + 1,
+                digest=event["id"],
+                events=[sibling["id"] for sibling in siblings],
+            )
         if not self._allowed(rule):
             _log(self.store, {**entry, "status": "suppressed"})
             return
         reservation = self.sent[rule["id"]][-1]
         try:
-            mail, notes = await compose(self.store, self.settings(), rule, event)
+            # Put the notice in the last allowed message: never exceed the user's cap.
+            mail, notes = await compose(
+                self.store,
+                self.settings(),
+                rule,
+                event,
+                limit_reached=len(self.sent[rule["id"]]) == self.settings()["max_per_hour"],
+            )
             entry["subject"] = mail.subject
             await self._first_attempts(self._queue(rule, event, mail, notes, entry))
         except asyncio.CancelledError:
@@ -601,7 +983,8 @@ class Notifier:
                     "SELECT 1 FROM notify_log WHERE json_valid(data) AND "
                     "CASE WHEN json_valid(data) THEN json_extract(data, '$.rule')=? "
                     "AND json_extract(data, '$.event')=? AND json_extract(data, '$.channel')=? "
-                    "AND json_extract(data, '$.status')='sent' END LIMIT 1",
+                    "AND json_extract(data, '$.status') IN ('sent', 'failed', 'dropped') "
+                    "END LIMIT 1",
                     key,
                 ).fetchone():
                     continue
@@ -617,6 +1000,8 @@ class Notifier:
                     (*key, max(clock, self.resting.get(key[2], 0)), clock, json.dumps(data)),
                 )
                 keys.append(key)
+            if event.get("digest"):
+                _write_log(self.store, {**entry, "status": "grouped"})
         return keys
 
     async def _first_attempts(self, keys: list[Key]) -> None:
@@ -680,11 +1065,18 @@ class Notifier:
         elif retry:
             self.resting[key[2]] = time.time() + RETRY_DELAYS[0]
             if attempts <= len(RETRY_DELAYS):
+                data["last_error"] = {"code": _error_code(error)}
+                data["last_attempt_at"] = now()
                 with self.store.db:
                     self.store.db.execute(
-                        "UPDATE notify_queue SET attempts=?, due=? "
+                        "UPDATE notify_queue SET attempts=?, due=?, data=? "
                         "WHERE rule=? AND event=? AND channel=?",
-                        (attempts, time.time() + RETRY_DELAYS[attempts - 1], *key),
+                        (
+                            attempts,
+                            time.time() + RETRY_DELAYS[attempts - 1],
+                            json.dumps(data),
+                            *key,
+                        ),
                     )
                 return
         self._finish(
@@ -774,7 +1166,7 @@ async def send_once(channel: dict[str, Any], mail: Message) -> tuple[dict[str, A
     return None, False
 
 
-def sample_event(kind: str = "job.failed") -> dict[str, Any]:
+def sample_event(kind: str = "job.finished", outcome: str = "failed") -> dict[str, Any]:
     """An example used by "Send test" and previews when no real event matches."""
     return {
         "id": 0,
@@ -782,6 +1174,15 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
         "at": now(),
         "source_id": None,
         "data": {
+            "outcome": outcome,
+            "state": outcome.upper() if outcome != "unknown" else None,
+            "exit_code": None
+            if outcome == "unknown"
+            else "0:0"
+            if outcome == "completed"
+            else "1:0",
+            "observed_at": now(),
+            "ended_at": now(),
             "source_name": "Cluster A",
             "cluster_id": "cluster-a",
             "username": "alice",
@@ -789,8 +1190,8 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
                 "id": "cluster-a:12345",
                 "name": "example / test notification",
                 "user": "alice",
-                "state": "FAILED",
-                "exit_code": "1:0",
+                "state": outcome.upper(),
+                "exit_code": "0:0" if outcome == "completed" else "1:0",
                 "partition": "gpu",
                 "qos": "normal",
                 "gpu_count": 4,
@@ -805,7 +1206,7 @@ def sample_event(kind: str = "job.failed") -> dict[str, Any]:
 def setup(ctx: PluginContext) -> None:
     notifier = Notifier(ctx)
     ctx.on_startup(lambda: _prepare(ctx.store))
-    ctx.on_event(notifier.on_event)
+    ctx.on_event(notifier.on_event, types=(*NOTIFY_TYPES, "job.failed", "job.ended"))
     ctx.background(notifier.retry_loop)
 
     def validate_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -849,6 +1250,7 @@ def setup(ctx: PluginContext) -> None:
             "queued": queued,
             "invalid_settings": {key: str(value)[:80] for key, value in invalid.items()},
             "last": log[0] if log else None,
+            "delivery_failures": notifier.delivery_failures(),
             "summary": {"en": en, "zh-CN": zh},
         }
 
@@ -870,7 +1272,7 @@ def setup(ctx: PluginContext) -> None:
                 }
                 for kind in channels.kinds()
             ],
-            "event_types": list(TYPES),
+            "event_types": list(NOTIFY_TYPES),
             "placeholders": list(PLACEHOLDERS),
             "log": _recent_log(ctx.store),
             "ai_ready": bool(ctx.settings().get("ai_key")),
@@ -944,7 +1346,7 @@ def setup(ctx: PluginContext) -> None:
         row = {"id": rule_id, **body.model_dump()}
         # A channel listed twice still gets one message.
         row["channels"] = list(dict.fromkeys(row["channels"]))
-        return row
+        return migrate_rule(row)
 
     @ctx.router.post("/rules", status_code=201)
     async def add_rule(body: RuleInput) -> dict[str, Any]:
@@ -972,7 +1374,7 @@ def setup(ctx: PluginContext) -> None:
 
         The AI step is skipped here so a preview never sends event data anywhere.
         """
-        rule = {"id": "preview", **body.model_dump(), "agent": False}
+        rule = migrate_rule({"id": "preview", **body.model_dump(), "agent": False})
         event = next(
             (
                 row
@@ -982,7 +1384,10 @@ def setup(ctx: PluginContext) -> None:
             None,
         )
         mail, notes = await compose(
-            ctx.store, notifier.settings(), rule, event or sample_event(body.events[0])
+            ctx.store,
+            notifier.settings(),
+            rule,
+            event or sample_event(rule["events"][0], next(iter(rule["outcomes"]), "failed")),
         )
         return {
             "subject": mail.subject,

@@ -255,6 +255,10 @@ it.each(['en', 'zh-CN'] as const)(
     vi.stubGlobal('crypto', webcrypto);
     const read = fetchMock.getMockImplementation()!;
     let unlocked = false;
+    let dashboardLoaded!: () => void;
+    const authenticatedDashboard = new Promise<void>((resolve) => {
+      dashboardLoaded = resolve;
+    });
     fetchMock.mockImplementation(async (path: string, init: RequestInit) => {
       if (path === '/api/session') {
         expect(init.method).toBe('POST');
@@ -274,6 +278,7 @@ it.each(['en', 'zh-CN'] as const)(
       if (path.startsWith('/api/dashboard')) {
         if (!unlocked) return new Response('{}', { status: 401 });
         expect(new Headers(init.headers).get('X-ComputeDeck-Token')).toBe('example-session');
+        dashboardLoaded();
       }
       return read(path, init);
     });
@@ -288,17 +293,14 @@ it.each(['en', 'zh-CN'] as const)(
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await click(button(t('token.save')));
-    await act(async () => {
-      await vi.waitFor(() => {
-        expect(unlocked).toBe(true);
-        expect(container.querySelector('.token-gate')).toBeNull();
-        expect(container.querySelector('.demo-banner')).not.toBeNull();
-        expect(window.location.search).toContain('demo=true');
-        expect(container.querySelector('.health-age')?.textContent).toBe(
-          t('time.hoursAgo', { count: 2 }),
-        );
-      });
-    });
+    await act(async () => authenticatedDashboard);
+    expect(unlocked).toBe(true);
+    expect(container.querySelector('.token-gate')).toBeNull();
+    expect(container.querySelector('.demo-banner')).not.toBeNull();
+    expect(window.location.search).toContain('demo=true');
+    expect(container.querySelector('.health-age')?.textContent).toBe(
+      t('time.hoursAgo', { count: 2 }),
+    );
     await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET');
     expect(writes).toHaveLength(1);

@@ -11,9 +11,9 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -26,10 +26,12 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import attention, auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
+from .demo import delivery_status as demo_delivery_status
 from .errors import SourceError, message
+from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -37,11 +39,13 @@ from .records import (
     SourceUpdate,
     instance_id,
     instance_record,
+    keep_instance_probe,
     slug,
     source_record,
 )
 from .ssh_config import install_config, quote_path, render_config, write_config
 from .store import Store, now
+from .tools.notify import delivery_status
 
 logger = logging.getLogger("computedeck")
 # How long stopping waits for requests in flight, then for background work to end.
@@ -50,6 +54,12 @@ SHUTDOWN_SECONDS = 10
 
 class RefreshInput(BaseModel):
     source_id: str | None = None
+
+
+class AttentionInput(BaseModel):
+    action: Literal["acknowledge", "snooze", "clear"]
+    fingerprint: str | None = None
+    until: Literal["1h", "tomorrow"] | None = None
 
 
 class ConfirmInput(BaseModel):
@@ -106,10 +116,10 @@ def create_app(
     paths.secure_data_dir(data_dir)
     drivers._policy_dir = data_dir
     runtime = plugin_host.Runtime(data_dir)
-    collector = Collector(runtime)
     contexts = plugin_host.load(
         plugin_host.discover(data_dir) if plugins is None else plugins, runtime
     )
+    collector = Collector(runtime, contexts=contexts)
     token = auth.ensure_token(data_dir) if auth.enabled() else None
     browser_token = secrets.token_urlsafe(32)
     session_nonce = secrets.token_hex(32)
@@ -323,17 +333,8 @@ def create_app(
             result = store().dashboard()
             result["refreshing"] = bool(collector.pending)
             result["collecting"] = sorted(collector.pending)
-            result["attention"] = attention.derive(
-                result,
-                [drivers.describe(name) for name in drivers.names()],
-                now=datetime.now(UTC),
-                loop_errors=runtime.loop_errors,
-                unreadable_rows=store().unreadable_rows(),
-                plugin_status={
-                    context.id: {**context.status(), "enabled": context.enabled}
-                    for context in contexts
-                },
-            )
+            result["attention"] = collector.attention_items(result)
+        result["attention_count"] = sum(item["muted"] is None for item in result["attention"])
         # Hash the complete response, including time-derived state and pending work.
         # Reuse these bytes so the large dashboard is serialized only once.
         body = bytes(EncodableJSON(jsonable_encoder(result)).body)
@@ -344,6 +345,41 @@ def create_app(
             content=body[:-1] + f',"token":"{token}"}}'.encode(),
             media_type="application/json",
         )
+
+    @app.put("/api/attention/{key}")
+    async def update_attention(key: str, body: AttentionInput) -> dict[str, str]:
+        collector.clear_resolved_attention()
+        item = next((item for item in collector.attention_items() if item["key"] == key), None)
+        if item is None:
+            raise HTTPException(404, message("attention_not_found"))
+        if not item["mutable"]:
+            raise HTTPException(422, message("attention_not_mutable"))
+        if body.action == "clear":
+            store().delete_attention_state([key])
+        else:
+            if body.fingerprint is not None and body.fingerprint != item["fingerprint"]:
+                raise HTTPException(409, message("attention_changed"))
+            current = datetime.now(UTC)
+            until = None
+            if body.action == "snooze":
+                if body.until is None:
+                    raise HTTPException(422, message("attention_snooze_required"))
+                until = (
+                    current + timedelta(hours=1)
+                    if body.until == "1h"
+                    else datetime.combine(
+                        current.astimezone().date() + timedelta(days=1), datetime.min.time()
+                    ).astimezone(UTC)
+                ).isoformat()
+            store().set_attention_state(
+                key,
+                {
+                    "fingerprint": item["fingerprint"],
+                    "acknowledged_at": current.isoformat(),
+                    "snooze_until": until,
+                },
+            )
+        return {"status": "ok"}
 
     @app.get("/api/history")
     async def history(
@@ -447,6 +483,14 @@ def create_app(
         if source["enabled"]:
             source["next_due_at"] = now()
         store().save_source(source)
+        store().add_change(
+            "change.source",
+            source["id"],
+            source["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
+            source["id"],
+        )
         return store().source(source["id"]) or source
 
     @app.put("/api/sources/{source_id}")
@@ -458,6 +502,7 @@ def create_app(
         # Sources saved before options existed have none; an empty dict is the same.
         source.setdefault("options", {})
         source.setdefault("node", "")
+        fields = [key for key, value in changes.items() if value != source.get(key)]
         connection_changed = any(
             key in changes and changes[key] != source.get(key)
             for key in ("ssh_alias", "credential", "username", "options", "node")
@@ -479,11 +524,18 @@ def create_app(
                 last_success=None,
                 capabilities=[],
                 capabilities_seen=[],
+                history_window_seconds=None,
                 warnings=[],
                 cluster_state="unknown",
             )
         store().save_source(source)
+        action = ("enabled" if source["enabled"] else "disabled") if enabled_changed else "edited"
+        if fields:
+            store().add_change(
+                "change.source", source_id, source["name"], action, fields, source_id
+            )
         collector.clear_inactive_commit_errors()
+        collector.try_clear_resolved_attention()
         return store().source(source_id) or source
 
     def check_node(source: dict[str, Any]) -> None:
@@ -503,6 +555,13 @@ def create_app(
         if store().node(node["id"]):
             raise HTTPException(409, message("node_exists"))
         store().save_node(node)
+        store().add_change(
+            "change.node",
+            node["id"],
+            node["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
+        )
         return node
 
     @app.put("/api/nodes/{node_id}")
@@ -515,6 +574,9 @@ def create_app(
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
         store().save_node(node)
+        fields = [key for key in body.model_dump() if node.get(key) != current.get(key)]
+        if fields:
+            store().add_change("change.node", node_id, node["name"], "edited", fields)
         for source in store().sources():
             if source.get("node") == node_id:
                 # A different machine or command is a different connection.
@@ -525,8 +587,10 @@ def create_app(
     async def delete_node(node_id: str) -> dict[str, bool]:
         if any(source.get("node") == node_id for source in store().sources()):
             raise HTTPException(409, message("node_in_use"))
+        node = store().node(node_id)
         if not store().delete_node(node_id):
             raise HTTPException(404, message("node_not_found", node=node_id))
+        store().add_change("change.node", node_id, (node or {}).get("name", node_id), "removed", [])
         return {"deleted": True}
 
     @app.post("/api/nodes/{node_id}/check")
@@ -551,15 +615,26 @@ def create_app(
 
     @app.delete("/api/sources/{source_id}")
     async def delete_source(source_id: str) -> dict[str, bool]:
+        source = store().source(source_id)
         if not store().delete_source(source_id):
             raise HTTPException(404, message("source_not_found"))
+        store().add_change(
+            "change.source",
+            source_id,
+            (source or {}).get("name", source_id),
+            "removed",
+            [],
+            source_id,
+        )
         collector.clear_inactive_commit_errors()
+        collector.try_clear_resolved_attention()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
     def save_manual(body: InstanceInput, existing: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
             instance = instance_record(body)
+            keep_instance_probe(instance, existing)
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
         if existing and existing["id"] != instance["id"]:
@@ -587,16 +662,32 @@ def create_app(
             raise HTTPException(422, message(str(error))) from None
         if any(row["id"] == key for row in store().manual_instances()):
             raise HTTPException(409, message("instance_exists"))
-        return save_manual(body)
+        instance = save_manual(body)
+        store().add_change(
+            "change.instance",
+            instance["id"],
+            instance["name"],
+            "added",
+            list(body.model_dump(exclude_unset=True, exclude_none=True)),
+        )
+        return instance
 
     @app.put("/api/instances/{instance_id}")
     async def update_instance(instance_id: str, body: InstanceInput) -> dict[str, Any]:
-        return save_manual(body, manual(instance_id))
+        current = manual(instance_id)
+        instance = save_manual(body, current)
+        fields = [key for key in body.model_dump() if instance.get(key) != current.get(key)]
+        if fields:
+            store().add_change("change.instance", instance_id, instance["name"], "edited", fields)
+        collector.try_clear_resolved_attention()
+        return instance
 
     @app.delete("/api/instances/{instance_id}")
     async def delete_instance(instance_id: str) -> dict[str, bool]:
-        manual(instance_id)
+        instance = manual(instance_id)
         store().delete_instance(instance_id)
+        store().add_change("change.instance", instance_id, instance["name"], "removed", [])
+        collector.try_clear_resolved_attention()
         write_config(store().dashboard()["instances"], data_dir)
         return {"deleted": True}
 
@@ -693,10 +784,26 @@ def create_app(
     @app.put("/api/toolbox/{plugin_id}")
     async def toolbox_update(plugin_id: str, body: toolbox.ToolboxUpdate) -> dict[str, Any]:
         context = plugin_context(plugin_id)
+        was_enabled = context.enabled
+        previous_settings = context.settings()
         try:
             toolbox.update(context, body)
         except toolbox.SettingsError as error:
             raise HTTPException(422, message(str(error), **error.params)) from None
+        action = None
+        if body.enabled is not None and body.enabled != was_enabled:
+            action = "on" if body.enabled else "off"
+        elif body.settings is not None and context.settings() != previous_settings:
+            action = "settings"
+        if action:
+            store().add_change(
+                "change.tool",
+                plugin_id,
+                (context.plugin.name or {}).get("en", plugin_id),
+                action,
+                [],
+            )
+        collector.try_clear_resolved_attention()
         return toolbox.entry(context, runtime)
 
     @app.get("/api/marketplace")
@@ -728,9 +835,98 @@ def create_app(
 
     @app.get("/api/events")
     async def recent_events(
-        limit: int = Query(default=50, ge=1, le=200), demo: bool = False
+        limit: int = Query(default=50, ge=1, le=200),
+        demo: bool = False,
+        group: bool = False,
+        delivery: bool = False,
+        include: str | None = None,
+        id: int | None = Query(default=None, ge=1, le=2**63 - 1),
+        before_id: int | None = Query(default=None, ge=1, le=2**63 - 1),
+        after_id: int | None = Query(default=None, ge=0, le=2**63 - 1),
+        type: Annotated[list[str] | None, Query()] = None,
+        category: Literal["failed", "jobs", "sources", "gaps", "changes", "plugins"] | None = None,
+        source_id: str | None = None,
+        cluster_id: str | None = None,
+        job: str | None = None,
+        range: Literal["24h", "7d", "30d"] | None = None,
+        since: datetime | None = None,
+        q: str | None = Query(default=None, max_length=64),
     ) -> list[dict[str, Any]]:
-        return demo_events()[:limit] if demo else store().recent_events(limit)
+        def with_delivery(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if not delivery:
+                return rows
+            return demo_delivery_status(rows) if demo else delivery_status(store(), rows)
+
+        include_changes = include == "changes"
+        if type and any(kind not in (*TYPES, *GAP_TYPES, *CHANGE_TYPES) for kind in type):
+            raise HTTPException(422, message("event_type_unknown"))
+        if id is not None:
+            rows = demo_events() if demo else store().events(id - 1, 1)
+            return with_delivery(
+                [
+                    row
+                    for row in rows
+                    if row["id"] == id
+                    and not row.get("silent")
+                    and (include_changes or not row["type"].startswith("change."))
+                ]
+            )
+        if since is not None:
+            try:
+                since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
+            except OverflowError:
+                raise HTTPException(422, message("event_since_invalid")) from None
+        if range:
+            cutoff = datetime.now(UTC) - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
+            since = max(since, cutoff) if since else cutoff
+        filters: dict[str, Any] = dict(
+            types=type,
+            category=category,
+            source_id=source_id,
+            cluster_id=cluster_id,
+            job=job,
+            since=since.isoformat() if since else None,
+            q=q,
+            include_changes=include_changes,
+        )
+        if demo:
+            rows = filter_events(
+                demo_events(), **filters, dashboard=demo_dashboard() if cluster_id else None
+            )
+            rows = group_events(rows) if group else rows
+            return with_delivery(
+                [
+                    row
+                    for row in rows
+                    if (before_id is None or row["id"] < before_id)
+                    and (after_id is None or row["id"] > after_id)
+                ][:limit]
+            )
+        if not any(
+            (
+                before_id is not None,
+                after_id is not None,
+                type,
+                category,
+                source_id is not None,
+                cluster_id is not None,
+                job is not None,
+                since,
+                q,
+            )
+        ):
+            if group:
+                return with_delivery(
+                    group_events(
+                        store().recent_event_collections(limit, include_changes=include_changes)
+                    )[:limit]
+                )
+            return with_delivery(store().recent_events(limit, include_changes=include_changes))
+        return with_delivery(
+            store().query_events(
+                limit, before_id=before_id, after_id=after_id, group=group, **filters
+            )
+        )
 
     @app.post("/api/backup")
     async def backup() -> dict[str, str]:

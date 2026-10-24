@@ -3,6 +3,7 @@
 All objects are hand-written from the Kubernetes API reference and use fictional data.
 """
 
+import asyncio
 import json
 import re
 import shlex
@@ -15,8 +16,11 @@ from typing import Any
 
 import pytest
 
+from computedeck import events, plugins
 from computedeck.drivers import kubernetes, ssh
-from computedeck.drivers.base import SourceError
+from computedeck.drivers.base import Batch, SourceError
+from computedeck.store import Store
+from computedeck.tools import notify
 
 AT = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
 SOURCE: dict[str, Any] = {
@@ -685,6 +689,7 @@ async def test_collect_reads_jobs_nodes_quotas_and_failures(
     source = {**SOURCE, "options": {"context": "alice@cluster-a"}}
     batch = await kubernetes.KubernetesDriver().collect(source)
     assert batch.capabilities == ["jobs", "nodes", "qos_limits", "history"]
+    assert batch.history_window_seconds is None  # Deleted pods cannot be recovered.
     assert batch.warnings == []
     assert batch.jobs is not None and [job["id"] for job in batch.jobs] == [
         "cluster-a:ml-team/train-a-x7k2p"
@@ -1057,3 +1062,162 @@ def test_fractional_cpu_counts_are_valid_collection_rows() -> None:
     jobs = kubernetes.parse_jobs([workload], SOURCE, {}, AT)
     assert jobs[0]["cpu_count"] == 0.5
     Batch(jobs=jobs).validate_rows()
+
+
+def test_terminal_pods_include_success_but_not_running_container_failures() -> None:
+    pods = [
+        pod(
+            "done",
+            status={
+                "phase": "Succeeded",
+                "containerStatuses": [
+                    {"state": terminated(0, "Completed", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+        pod(
+            "failed",
+            status={
+                "phase": "Failed",
+                "containerStatuses": [
+                    {"state": terminated(137, "OOMKilled", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+        pod(
+            "restarting",
+            status={
+                "phase": "Running",
+                "containerStatuses": [
+                    {"lastState": terminated(1, "Error", ago(hours=1), ago(minutes=5))}
+                ],
+            },
+        ),
+    ]
+    rows = kubernetes.parse_finished(pods, SOURCE, {}, AT)
+    assert {row["state"] for row in rows} == {"COMPLETED", "OUT_OF_MEMORY"}
+    assert len(rows) == 2
+    assert all(row["end"].endswith("+00:00") for row in rows)
+    assert len(kubernetes.parse_failures(pods, SOURCE, {}, AT)) == 2
+
+
+@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("terminal", [False, True])
+async def test_deleted_pod_uses_last_observed_container_failure(
+    monkeypatch: pytest.MonkeyPatch, store: Store, tmp_path: Path, held: bool, terminal: bool
+) -> None:
+    at = datetime.now(UTC)
+    monkeypatch.setattr(events, "now", lambda: at.isoformat())
+    pods = [
+        pod(
+            status={
+                "containerStatuses": [
+                    {
+                        "lastState": terminated(
+                            137,
+                            "OOMKilled",
+                            (at - timedelta(hours=1)).isoformat(),
+                            (at - timedelta(minutes=5)).isoformat(),
+                        )
+                    }
+                ]
+            }
+        )
+    ]
+    running = Batch(
+        jobs=kubernetes.parse_jobs(pods, SOURCE, {}, at),
+        failures=kubernetes.parse_failures(pods, SOURCE, {}, at),
+        finished=kubernetes.parse_finished(pods, SOURCE, {}, at),
+        capabilities=["history"],
+    )
+    assert running.finished == []
+    [container_failure] = events.collected(
+        SOURCE, {"jobs": running.jobs, "lifecycle_pending": []}, running, first=False
+    )
+    assert container_failure["type"] == "job.failed"
+    assert not container_failure["silent"]
+    assert notify.matches({"events": ["job.failed"]}, container_failure)
+    store.add_events([container_failure])
+    old = running.snapshot()
+    if held:
+        old["lifecycle_pending"], old["jobs"] = old["jobs"], []
+    deleted = Batch(jobs=[], failures=[], finished=[], capabilities=["history"])
+    if terminal:
+        deleted.finished = [{**running.failures[0], "state": "COMPLETED", "exit_code": "0"}]
+    store.add_events(events.collected(SOURCE, old, deleted, first=False))
+    store.add_events(events.collected(SOURCE, deleted.snapshot(), deleted, first=False))
+    rows = store.events()
+    assert len(rows) == len(store.recent_events()) == 2
+    [row] = [row for row in rows if row["type"] == "job.finished"]
+    assert row["data"]["outcome"] == ("completed" if terminal else "out_of_memory")
+    assert row["data"]["outcome_reason"] is None
+    assert bool(row["data"].get("failure_announced")) == (not terminal)
+    rule = notify.migrate_rule({"events": ["job.failed"]})
+    assert sum(notify.matches(rule, row) for row in rows) == 1
+    assert all(notify.matches({"events": ["job.ended"]}, row) for row in rows)
+
+    runtime = plugins.Runtime(tmp_path)
+    runtime.store = store
+    context = plugins.PluginContext(plugins.Plugin("watcher", lambda ctx: None), runtime)
+    delivered = []
+    received = asyncio.Event()
+
+    async def handle(event: dict[str, Any]) -> None:
+        delivered.append(event["type"])
+        if len(delivered) == 2:
+            received.set()
+
+    context.on_event(handle)  # API-1 wildcard subscription.
+    store.set_plugin_cursor("watcher", 0)
+    task = asyncio.create_task(plugins.deliver(context, poll=0.01))
+    try:
+        await asyncio.wait_for(received.wait(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert delivered == ["job.failed", "job.ended"]
+
+
+def test_kubernetes_jobs_do_not_infer_arrays_from_names() -> None:
+    [job] = kubernetes.parse_jobs([pod("1234_7")], SOURCE, {}, AT)
+    assert job.get("array_id") is None
+    assert job.get("array_index") is None
+
+
+@pytest.mark.parametrize("signal", [None, 9])
+@pytest.mark.parametrize("code", [137, -1])
+def test_failure_exit_status_does_not_infer_a_signal_from_137(signal, code) -> None:
+    state = terminated(code, "Error", ago(hours=3), ago(hours=2))
+    if signal is not None:
+        state["terminated"]["signal"] = signal
+    workload = pod(
+        "killed",
+        status={"phase": "Failed", "containerStatuses": [{"name": "train", "state": state}]},
+    )
+    [row] = kubernetes.parse_failures([workload], SOURCE, {}, AT)
+    assert (row["exit_code"], row["exit_status"], row["exit_signal"]) == (
+        str(code),
+        code if code >= 0 else None,
+        signal,
+    )
+    assert row["reason"] == "Error"
+    assert row["ended_at"] == row["end"]
+
+
+@pytest.mark.parametrize("deadline,limit", [(None, None), (7200, "2:00:00"), (90061, "1-01:01:01")])
+def test_failure_time_limit_uses_pod_deadline(deadline, limit) -> None:
+    workload = pod(
+        "train",
+        status={
+            "phase": "Failed",
+            "containerStatuses": [
+                {"name": "train", "state": terminated(1, "Error", ago(hours=3), ago(hours=2))}
+            ],
+        },
+    )
+    if deadline is not None:
+        workload["spec"]["activeDeadlineSeconds"] = deadline
+    for parse in (kubernetes.parse_failures, kubernetes.parse_finished):
+        [row] = parse([workload], SOURCE, {}, AT)
+        assert row["time_limit"] == limit
+        assert row.get("log_path") is None

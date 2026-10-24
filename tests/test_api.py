@@ -1091,6 +1091,7 @@ def test_attention_reads_live_staleness_and_keeps_demo_isolated(
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "notification_failed",
     ]
     assert all(item["subject"]["id"].startswith("example:") for item in example["attention"])
     assert source["id"] not in {item["id"] for item in example["sources"]}
@@ -1118,6 +1119,7 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
                 **source,
                 "capabilities": capabilities,
                 "capabilities_seen": capabilities,
+                "history_window_seconds": 86400,
                 "warnings": [{"code": "partitions_unavailable"}],
                 "cluster_state": "degraded",
             }
@@ -1131,6 +1133,11 @@ def test_connection_edits_reset_capability_history_but_other_edits_keep_it(
     expected = [] if changed_connection else capabilities
     assert response.json()["capabilities"] == expected
     assert response.json()["capabilities_seen"] == expected
+    expected_window = None if changed_connection else 86400
+    assert response.json()["history_window_seconds"] == expected_window
+    assert client.get("/api/dashboard").json()["sources"][0]["history_window_seconds"] == (
+        expected_window
+    )
     assert response.json()["warnings"] == (
         [] if changed_connection else [{"code": "partitions_unavailable"}]
     )
@@ -1206,7 +1213,719 @@ def test_reenable_starts_a_silent_event_baseline(
         rows = store.events()
     finally:
         store.db.close()
+    assert [row["data"]["action"] for row in rows if row["type"] == "change.source"] == [
+        "added",
+        "disabled",
+        "enabled",
+    ]
+    rows = [row for row in rows if row["type"] != "change.source"]
     if outcome == "jobs_ended":
-        assert [(row["type"], row["silent"]) for row in rows] == [("job.failed", True)]
+        assert [(row["type"], row["silent"]) for row in rows] == [
+            ("job.started", True),
+            ("job.finished", True),
+        ]
     else:
-        assert [row["type"] for row in rows] == ["source.failed"]
+        assert [(row["type"], row["silent"]) for row in rows] == [
+            ("job.started", True),
+            ("source.failed", False),
+        ]
+
+
+def test_event_grouping_is_opt_in_and_limits_groups_not_children(client: TestClient) -> None:
+    plain = client.get("/api/events?demo=true&limit=200").json()
+    assert all("group" not in row for row in plain)
+    grouped = client.get("/api/events?demo=true&group=1&limit=200").json()
+    [digest] = [row for row in grouped if "group" in row]
+    assert digest["group"]["count"] == 60
+    assert digest["group"]["names"] == [{"name": "train-sweep", "count": 60}]
+    assert len(digest["group"]["ids"]) == 60
+    assert [row["id"] for row in digest["group"]["events"]] == digest["group"]["ids"][:50]
+    assert len(grouped) == len(plain) - 59
+    assert digest["group"]["first_at"] < digest["group"]["last_at"]
+    assert digest["at"] == digest["group"]["last_at"]
+
+
+def test_live_event_grouping_caps_children_but_retains_totals_and_ids(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    at = now()
+    rows = [
+        {
+            "key": str(i),
+            "type": "job.finished",
+            "at": at,
+            "source_id": "cluster-a",
+            "data": {
+                "observed_at": at,
+                "ended_at": at if i else None,
+                "since": None if i else "2026-01-01T00:00:00Z",
+                "outcome": "completed" if i else "failed",
+                "job": {"name": "sweep"},
+            },
+        }
+        for i in range(250)
+    ]
+    store.add_events(rows)
+    store.db.close()
+    result = client.get("/api/events?group=1&limit=1").json()
+    assert len(result) == 1 and result[0]["group"]["count"] == 250
+    group = result[0]["group"]
+    assert group["ids"] == list(range(250, 0, -1))
+    assert [row["id"] for row in group["events"]] == [1, *group["ids"][:49]]
+    assert group["observed_time"] is True
+    assert group["since"] == "2026-01-01T00:00:00Z"
+    assert group["outcomes"] == {"completed": 249, "failed": 1}
+    assert len(client.get("/api/events?limit=1").json()) == 1
+
+
+def test_grouped_events_keep_interleaved_sources_types_and_collections(
+    client: TestClient, data_dir: Path
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    clock = datetime.now(UTC)
+    at = clock.isoformat()
+    earlier = (clock - timedelta(minutes=10)).isoformat()
+    keys = [
+        ("a", "job.finished", earlier),
+        ("b", "job.finished", at),
+        ("a", "job.started", at),
+        ("a", "job.finished", at),
+        (None, "source.failed", at),
+    ]
+    rows = []
+    for index in range(3):
+        for source, kind, observed in keys:
+            rows.append(
+                {
+                    "key": str(len(rows)),
+                    "type": kind,
+                    "source_id": source,
+                    "at": at,
+                    "data": {
+                        "observed_at": observed,
+                        "outcome": "completed" if index else "failed",
+                    },
+                }
+            )
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events([*rows, {**rows[-1], "key": "silent", "silent": True}])
+    statements: list[str] = []
+    store.db.set_trace_callback(statements.append)
+    assert len(store.recent_event_collections(3)) == 9
+    assert len(statements) == 1
+    store.db.close()
+    result = client.get("/api/events?group=1&limit=3").json()
+    assert [(row["source_id"], row["type"], row["data"]["observed_at"]) for row in result] == keys[
+        :1:-1
+    ]
+    assert all(row["group"]["count"] == 3 for row in result)
+    assert result[0]["group"]["ids"] == [15, 10, 5]
+    assert result[1]["group"]["outcomes"] == {"completed": 2, "failed": 1}
+    assert result[2]["group"]["outcomes"] == {}
+
+
+def test_event_id_lookup_is_exact_and_excludes_silent_rows(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": str(i),
+                "type": "job.failed",
+                "at": now(),
+                "silent": i == 2,
+                "data": {"job": {"id": f"cluster-a:{i}"}},
+            }
+            for i in range(1, 4)
+        ]
+    )
+    store.db.close()
+    [row] = client.get("/api/events?id=1").json()
+    assert row["id"] == 1 and row["data"]["job"]["id"] == "cluster-a:1"
+    assert client.get("/api/events?id=2").json() == []
+    assert client.get("/api/events?id=999").json() == []
+    assert client.get("/api/events?id=0").status_code == 422
+    assert client.get("/api/events?id=invalid").status_code == 422
+    assert client.get(f"/api/events?id={2**63 - 1}").json() == []
+    for event_id in [2**63, 100000000000000000000]:
+        assert client.get(f"/api/events?id={event_id}").status_code == 422
+    demo = client.get("/api/events?demo=true").json()[0]
+    [row] = client.get(f"/api/events?demo=true&id={demo['id']}").json()
+    assert row["id"] == demo["id"] and row["type"] == demo["type"]
+
+
+def test_gap_events_are_visible_in_plain_grouped_and_id_reads(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.demo import events
+
+    rows = [row for row in events() if row["type"] in {"source.gap", "service.gap"}]
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(rows)
+    stored = store.recent_events()
+    store.db.close()
+    for query in ("", "?group=1"):
+        assert client.get(f"/api/events{query}").json() == stored
+    for row in stored:
+        assert client.get(f"/api/events?id={row['id']}").json() == [row]
+    demo = client.get("/api/events?demo=true&group=1").json()
+    assert {row["type"] for row in demo} >= {"source.gap", "service.gap"}
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "type=job.started",
+        "type=job.started&type=source.failed",
+        "category=failed",
+        "category=jobs",
+        "category=sources",
+        "category=gaps",
+        "category=changes",
+        "category=plugins",
+        "source_id=example:cluster-b-alice",
+        "cluster_id=example:cluster-b",
+        "cluster_id=platform:lab%20workstation",
+        "job=example:cluster-b:48211",
+        "q=train-sweep",
+        "q=CLUSTER",
+        "q=%25",
+        "q=_",
+        "q=build-box",
+        "range=7d",
+        "range=30d",
+        "since=2026-01-01T00:00:00%2B04:00",
+        "before_id=30",
+        "after_id=30",
+        "after_id=10&before_id=30",
+        "category=failed&range=7d&group=1",
+        "group=1&before_id=30",
+        "group=1&after_id=30",
+    ],
+)
+def test_activity_filters_match_example_mode(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    from computedeck import demo
+
+    rows = demo.events()
+    data = demo.dashboard()
+    monkeypatch.setattr(api, "demo_events", lambda: rows)
+    monkeypatch.setattr(api, "demo_dashboard", lambda: data)
+    store = Store(data_dir / "computedeck.sqlite")
+    for source in data["sources"]:
+        store.save_source(source)
+    for instance in data["instances"]:
+        if instance["source_id"] == "manual":
+            store.save_instance(instance)
+    store.add_events(list(reversed(rows)))
+    store.add_events([{**rows[0], "key": "silent", "silent": True}])
+    store.db.close()
+    url = f"/api/events?include=changes&limit=200&{query}"
+    live = client.get(url)
+    example = client.get(url + "&demo=true")
+    assert live.status_code == example.status_code == 200
+    assert live.json() == example.json()
+
+
+def test_activity_scope_skips_corrupt_sources_and_instances(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.save_source({"id": "source-a", "cluster_id": "cluster-a"})
+    store.save_instance({"id": "machine-a", "platform": "  AWS  "})
+    with store.db:
+        store.db.execute("INSERT INTO sources VALUES ('bad', 'not json')")
+        store.db.execute("INSERT INTO instances VALUES ('bad', 'not json')")
+    store.add_events(
+        [
+            {
+                "key": "source-change",
+                "type": "change.source",
+                "source_id": "source-a",
+                "at": now(),
+                "data": {"subject_id": "source-a", "action": "edited"},
+            },
+            {
+                "key": "machine-change",
+                "type": "change.instance",
+                "at": now(),
+                "data": {"subject_id": "machine-a", "action": "edited"},
+            },
+        ]
+    )
+    store.db.close()
+    for scope, kind, subject in (
+        ("cluster-a", "change.source", "source-a"),
+        ("platform:aws", "change.instance", "machine-a"),
+    ):
+        response = client.get("/api/events", params={"cluster_id": scope, "include": "changes"})
+        assert response.status_code == 200
+        [row] = response.json()
+        assert row["type"] == kind
+        assert row["data"]["subject_id"] == subject
+
+
+@pytest.mark.parametrize("group", [False, True])
+def test_activity_paging_never_loses_interleaved_rows(
+    client: TestClient, data_dir: Path, group: bool
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    at = now()
+    # A group of three interleaved with a pair (which must remain two display rows).
+    rows = [
+        {
+            "key": str(i),
+            "type": "job.finished",
+            "source_id": source,
+            "at": at,
+            "data": {"observed_at": at, "outcome": "failed" if i % 2 else "completed"},
+        }
+        for i, source in enumerate(["a", "b", "a", "b", "a"])
+    ]
+    store.add_events(rows)
+    store.db.close()
+    base = f"/api/events?group={str(group).lower()}&range=30d"
+    expected = client.get(base).json()
+    paged = []
+    cursor = ""
+    while page := client.get(base + "&limit=1" + cursor).json():
+        paged.extend(page)
+        cursor = f"&before_id={page[-1]['id']}"
+        assert len(paged) <= 5
+    assert paged == expected
+    assert sorted(i for row in paged for i in row.get("group", {}).get("ids", [row["id"]])) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    fresh = client.get(base + "&after_id=4").json()
+    assert [row["id"] for row in fresh] == [5]
+    if group:
+        assert fresh[0]["group"]["ids"] == [5, 3, 1]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=201",
+        "limit=0",
+        "before_id=0",
+        "after_id=-1",
+        f"after_id={2**63}",
+        "type=not.real",
+        "category=invalid",
+        "range=3d",
+        "since=not-a-date",
+        "since=0001-01-01T00:00:00%2B05:00",
+        "since=9999-12-31T23:59:59-05:00",
+        "q=" + "x" * 65,
+    ],
+)
+@pytest.mark.parametrize("demo", [False, True])
+def test_activity_rejects_invalid_filters(client: TestClient, query: str, demo: bool) -> None:
+    assert client.get(f"/api/events?demo={str(demo).lower()}&{query}").status_code == 422
+
+
+@pytest.mark.parametrize(
+    "query, matches", [("É", True), ("é", False), ("POCH", True), ("训练", True)]
+)
+def test_activity_search_matches_sqlite_case_rules(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, query: str, matches: bool
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": "unicode-name",
+                "type": "job.started",
+                "at": now(),
+                "source_id": "source-a",
+                "data": {"job": {"id": "source-a:1", "name": "Époch 训练"}},
+            }
+        ]
+    )
+    rows = store.recent_events()
+    store.db.close()
+    monkeypatch.setattr(api, "demo_events", lambda: rows)
+    live = client.get("/api/events", params={"q": query})
+    example = client.get("/api/events", params={"q": query, "demo": "true"})
+    assert live.status_code == example.status_code == 200
+    assert live.json() == example.json() == (rows if matches else [])
+
+
+def test_activity_example_only_builds_scope_dashboard_when_needed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from computedeck import demo
+
+    calls = []
+
+    def dashboard() -> dict[str, Any]:
+        calls.append(True)
+        return demo.dashboard()
+
+    monkeypatch.setattr(api, "demo_dashboard", dashboard)
+    assert client.get("/api/events?demo=true").status_code == 200
+    assert calls == []
+    response = client.get("/api/events?demo=true&cluster_id=example:cluster-b")
+    assert response.status_code == 200
+    assert response.json()
+    assert calls == [True]
+
+
+def test_activity_since_compares_instants_and_search_is_literal(
+    client: TestClient, data_dir: Path
+) -> None:
+    from computedeck.store import now
+
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {
+                "key": "a",
+                "type": "job.finished",
+                "at": now(),
+                "source_id": "a",
+                "data": {"outcome": "failed", "job": {"id": "a:1", "name": "50%_done"}},
+            },
+        ]
+    )
+    # Fixed offset-bearing instants avoid lexical timestamp comparison.
+    store.db.execute("UPDATE events SET at = '2026-10-21T10:00:00+04:00'")
+    store.db.commit()
+    store.db.close()
+    assert len(client.get("/api/events?since=2026-10-21T05:59:00Z&q=%25_").json()) == 1
+    assert client.get("/api/events?since=2026-10-21T06:01:00Z").json() == []
+    assert client.get("/api/events?category=changes").json() == []
+
+
+def test_activity_categories_keep_changes_opt_in_and_filter_before_limit(
+    client: TestClient,
+) -> None:
+    for category in ("changes", "plugins"):
+        assert client.get(f"/api/events?demo=true&category={category}").json() == []
+    assert client.get("/api/events?demo=true&type=change.tool").json() == []
+    [tool] = client.get("/api/events?demo=true&include=changes&category=plugins&limit=1").json()
+    assert tool["type"] == "change.tool"
+    [failed] = client.get("/api/events?demo=true&category=failed&limit=1").json()
+    assert failed["type"] == "source.failed"
+    recent = client.get("/api/events?demo=true&range=24h&group=1").json()
+    older = client.get("/api/events?demo=true&range=30d&group=1").json()
+    assert len(older) > 30 > len(recent)
+
+
+def attention_fault(client: TestClient, data_dir: Path) -> dict[str, Any]:
+    source = post(client, "/api/sources", CLUSTER).json()
+    store = Store(data_dir / "computedeck.sqlite")
+    source.update(error={"code": "ssh_timeout"}, status="error", failures=2)
+    store.save_source(source)
+    store.db.close()
+    return client.get("/api/dashboard").json()["attention"][0]
+
+
+@pytest.mark.parametrize("mutation", ["connection", "disable", "delete"])
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+def test_source_mutation_clears_attention_before_same_failure_returns(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mutation: str, action: str
+) -> None:
+    async def fail(self: SlurmDriver, source: dict[str, Any]) -> Batch:
+        raise SourceError("ssh_failed")
+
+    monkeypatch.setattr(SlurmDriver, "collect", fail)
+    source = post(client, "/api/sources", CLUSTER).json()
+    path = f"/api/sources/{source['id']}"
+    assert post(client, "/api/refresh").status_code == 202
+    [item] = wait_until_idle(client)["attention"]
+    assert (
+        client.put(
+            f"/api/attention/{item['key']}",
+            json={"action": action, "until": "1h"},
+            headers=HEADERS,
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/dashboard").json()["attention_count"] == 0
+
+    if mutation == "delete":
+        assert client.delete(path, headers=HEADERS).status_code == 200
+    else:
+        body = {"ssh_alias": "cluster-a-new"} if mutation == "connection" else {"enabled": False}
+        assert client.put(path, json=body, headers=HEADERS).status_code == 200
+    assert client.get("/api/dashboard").json()["attention"] == []
+    if mutation == "delete":
+        assert post(client, "/api/sources", CLUSTER).json()["id"] == source["id"]
+    elif mutation == "disable":
+        assert client.put(path, json={"enabled": True}, headers=HEADERS).status_code == 200
+
+    assert post(client, "/api/refresh").status_code == 202
+    data = wait_until_idle(client)
+    [returned] = data["attention"]
+    assert returned["fingerprint"] == item["fingerprint"]
+    assert returned["muted"] is None
+    assert data["attention_count"] == 1
+
+
+@pytest.mark.parametrize("mutation", ["edit", "delete"])
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+def test_machine_mutation_clears_attention_before_same_probe_failure_returns(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mutation: str, action: str
+) -> None:
+    async def fail(instance: dict[str, Any]) -> dict[str, Any]:
+        raise SourceError("ssh_failed")
+
+    monkeypatch.setattr(collector_module, "probe_instance", fail)
+    body = {**INSTANCE, "monitoring": True}
+    instance = post(client, "/api/instances", body).json()
+    path = f"/api/instances/{instance['id']}"
+    assert post(client, f"{path}/probe").status_code == 502
+    [item] = client.get("/api/dashboard").json()["attention"]
+    assert (
+        client.put(
+            f"/api/attention/{item['key']}",
+            json={"action": action, "until": "1h"},
+            headers=HEADERS,
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/dashboard").json()["attention_count"] == 0
+
+    if mutation == "delete":
+        assert client.delete(path, headers=HEADERS).status_code == 200
+    else:
+        assert (
+            client.put(path, json={**body, "host": "192.0.2.2"}, headers=HEADERS).status_code == 200
+        )
+    assert client.get("/api/dashboard").json()["attention"] == []
+    if mutation == "delete":
+        assert post(client, "/api/instances", body).json()["id"] == instance["id"]
+    assert post(client, f"{path}/probe").status_code == 502
+    data = client.get("/api/dashboard").json()
+    [returned] = data["attention"]
+    assert returned["fingerprint"] == item["fingerprint"]
+    assert returned["muted"] is None
+    assert data["attention_count"] == 1
+
+
+def test_attention_acknowledge_snooze_clear_and_unknown(client: TestClient, data_dir: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    item = attention_fault(client, data_dir)
+    path = f"/api/attention/{item['key']}"
+    before = client.get("/api/dashboard").json()
+    for body in (
+        {"action": "acknowledge"},
+        {"action": "snooze", "until": "1h"},
+        {"action": "snooze", "until": "tomorrow"},
+    ):
+        assert client.put(path, json=body, headers=HEADERS).status_code == 200
+        data = client.get("/api/dashboard").json()
+        [muted] = data["attention"]
+        assert data["attention_count"] == 0
+        assert muted["fingerprint"] == item["fingerprint"]
+        assert data["token"] != before["token"]
+        state = muted["muted"]
+        if body["action"] == "acknowledge":
+            assert state["state"] == "acknowledged" and state["until"] is None
+        elif body["until"] == "1h":
+            assert datetime.fromisoformat(state["until"]) - datetime.fromisoformat(
+                state["at"]
+            ) == timedelta(hours=1)
+        else:
+            until = datetime.fromisoformat(state["until"]).astimezone()
+            assert until.date() == datetime.now(UTC).astimezone().date() + timedelta(days=1)
+            assert (until.hour, until.minute, until.second) == (0, 0, 0)
+    assert client.put(path, json={"action": "clear"}, headers=HEADERS).status_code == 200
+    assert client.get("/api/dashboard").json()["attention_count"] == 1
+    assert client.put(path, json={"action": "snooze"}, headers=HEADERS).status_code == 422
+    assert (
+        client.put(path, json={"action": "snooze", "until": "forever"}, headers=HEADERS).status_code
+        == 422
+    )
+    for key in ("missing", "source_failed:example:cluster-a"):
+        assert (
+            client.put(
+                f"/api/attention/{key}", json={"action": "acknowledge"}, headers=HEADERS
+            ).status_code
+            == 404
+        )
+
+
+def test_attention_write_requires_origin_and_header(client: TestClient, data_dir: Path) -> None:
+    item = attention_fault(client, data_dir)
+    for headers in (
+        {},
+        {k: v for k, v in HEADERS.items() if k != "Origin"},
+        {k: v for k, v in HEADERS.items() if k != "X-ComputeDeck"},
+        {**HEADERS, "Origin": "https://evil.example"},
+    ):
+        assert (
+            client.put(
+                f"/api/attention/{item['key']}", json={"action": "acknowledge"}, headers=headers
+            ).status_code
+            == 403
+        )
+    assert client.get("/api/dashboard").json()["attention_count"] == 1
+
+
+@pytest.mark.parametrize("action", ["acknowledge", "snooze", "clear"])
+def test_service_attention_cannot_be_muted(client: TestClient, data_dir: Path, action: str) -> None:
+    store = Store(data_dir / "computedeck.sqlite")
+    with store.db:
+        store.db.execute("INSERT INTO sources VALUES ('broken', 'bad JSON')")
+    store.db.close()
+    item = client.get("/api/dashboard").json()["attention"][0]
+    assert item["kind"] == "unreadable_rows"
+    response = client.put(
+        f"/api/attention/{item['key']}", json={"action": action, "until": "1h"}, headers=HEADERS
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "attention_not_mutable"
+
+
+def test_resolved_attention_is_pruned_on_put_but_never_get(
+    client: TestClient, data_dir: Path
+) -> None:
+    item = attention_fault(client, data_dir)
+    path = f"/api/attention/{item['key']}"
+    assert client.put(path, json={"action": "acknowledge"}, headers=HEADERS).status_code == 200
+    store = Store(data_dir / "computedeck.sqlite")
+    source = store.sources()[0]
+    source.update(error=None, status="ready", failures=0)
+    store.save_source(source)
+    assert client.get("/api/dashboard").json()["attention"] == []
+    assert item["key"] in store.attention_state()
+    assert client.put(path, json={"action": "clear"}, headers=HEADERS).status_code == 404
+    assert store.attention_state() == {}
+    store.db.close()
+
+
+@pytest.mark.parametrize("action", ["acknowledge", "snooze"])
+@pytest.mark.parametrize("fingerprint", ["matching", "stale", "omitted"])
+def test_attention_checks_the_viewers_fingerprint(
+    client: TestClient, data_dir: Path, action: str, fingerprint: str
+) -> None:
+    item = attention_fault(client, data_dir)
+    body = {"action": action, "until": "1h"}
+    if fingerprint != "omitted":
+        body["fingerprint"] = item["fingerprint"]
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        if fingerprint == "stale":
+            source = store.sources()[0]
+            source["error"] = {"code": "ssh_failed"}
+            store.save_source(source)
+        response = client.put(f"/api/attention/{item['key']}", json=body, headers=HEADERS)
+        if fingerprint == "stale":
+            assert response.status_code == 409
+            assert response.json() == {"detail": {"code": "attention_changed"}}
+            assert store.attention_state() == {}
+            assert client.get("/api/dashboard").json()["attention_count"] == 1
+        else:
+            assert response.status_code == 200
+            assert store.attention_state()[item["key"]]["fingerprint"] == item["fingerprint"]
+            assert client.get("/api/dashboard").json()["attention_count"] == 0
+            assert (
+                client.put(
+                    f"/api/attention/{item['key']}",
+                    json={"action": "clear", "fingerprint": "outdated"},
+                    headers=HEADERS,
+                ).status_code
+                == 200
+            )
+            assert store.attention_state() == {}
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize(
+    "change,kept",
+    [
+        ({"name": "Renamed box"}, True),
+        ({"hourly_cost": 0.5}, True),
+        ({"monitoring": True}, True),
+        ({"monitoring": False}, True),
+        ({"host": "192.0.2.99"}, False),
+        ({"port": 3333}, False),
+        ({"username": "bob"}, False),
+        ({"identity_file": "~/.ssh/other"}, False),
+        ({"existing_alias": True}, False),
+    ],
+)
+def test_manual_edits_keep_checks_only_for_the_same_connection(client, data_dir, change, kept):
+    from computedeck.store import now
+
+    instance = post(client, "/api/instances", INSTANCE).json()
+    readings = {
+        "ssh_status": "error",
+        "ssh_error": {"code": "ssh_authentication"},
+        "observed_at": now(),
+        "last_probe_attempt": now(),
+        "gpu_allocated": 1,
+        "gpu_observed_count": 2,
+        "metrics_scope": "host_visible",
+        "gpu_utilization": 25,
+        "cpu_utilization": 30,
+        "memory_utilization": 40,
+        "probe_warnings": [{"code": "gpu_processes_unavailable"}],
+    }
+    store = Store(data_dir / "computedeck.sqlite")
+    store.save_instance({**instance, **readings})
+    response = client.put(
+        f"/api/instances/{instance['id']}", json={**INSTANCE, **change}, headers=HEADERS
+    )
+    assert response.status_code == 200
+    saved = response.json()
+    for key, value in change.items():
+        assert saved[key] == value
+    if kept:
+        assert {key: saved[key] for key in readings} == readings
+    else:
+        assert saved["ssh_status"] == "unverified"
+        assert saved["observed_at"] is None
+        assert saved["gpu_utilization"] is None
+        assert "ssh_error" not in saved
+        assert "last_probe_attempt" not in saved
+        assert "gpu_allocated" not in saved
+
+
+def test_catchup_completion_is_visible_and_keeps_legacy_delivery(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from computedeck import events, sdk
+
+    at = datetime.now(UTC)
+    monkeypatch.setattr(events, "now", lambda: at.isoformat())
+    source = {"id": "cluster-a-alice", "last_success": (at - timedelta(hours=3)).isoformat()}
+    [ending] = events.collected(
+        source,
+        {"lifecycle_pending": []},
+        Batch(
+            jobs=[], finished=[{"id": "cluster-a:1", "state": "COMPLETED", "end": at.isoformat()}]
+        ),
+        first=False,
+    )
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events([ending])
+    store.db.close()
+    rows = client.get("/api/events").json()
+    assert len(rows) == 1 and rows[0]["data"]["since"] == source["last_success"]
+    assert rows[0]["type"] == "job.finished"
+    assert events.for_handler(rows[0], frozenset(sdk.EVENT_TYPES))["type"] == "job.ended"

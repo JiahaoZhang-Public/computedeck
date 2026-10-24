@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import node_health, validate_row
+from .drivers.base import job_time, node_health, validate_row
 from .drivers.cloud import instance_lifecycle
 from .errors import SourceError, checked
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
@@ -86,7 +87,7 @@ def _keep_probe(row: dict[str, Any], old: dict[str, Any] | None) -> dict[str, An
     return {**row, **{key: old[key] for key in PROBE_RESULT if key in old}}
 
 
-def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
+def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, Any], bool]:
     """Keep readable records from snapshots written before row validation existed."""
     try:
         snapshot = json.loads(encoded)
@@ -96,7 +97,9 @@ def _read_snapshot(encoded: str) -> tuple[dict[str, Any], bool]:
         return {}, True
     invalid = False
     result: dict[str, Any] = {}
-    for key in ("jobs", "nodes", "instances", "failures"):
+    for key in ("jobs", "nodes", "instances", "failures", "lifecycle_pending", "lifecycle_ended"):
+        if not lifecycle and key.startswith("lifecycle_"):
+            continue
         if key not in snapshot:
             continue
         result[key] = []
@@ -139,6 +142,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS attention_state (key TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS snapshots (source_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -208,6 +212,45 @@ class Store:
     def unreadable_rows(self) -> dict[str, int]:
         return {table: len(keys) for table, keys in sorted(self.unreadable.items()) if keys}
 
+    def attention_state(self) -> dict[str, dict[str, Any]]:
+        # A read-only doctor may open a version-2 database before the service upgrades it.
+        if not self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attention_state'"
+        ).fetchone():
+            return {}
+        result = {}
+        for key, raw in self.db.execute("SELECT key, data FROM attention_state"):
+            data = self._read(
+                "attention_state", key, raw, {"fingerprint": str, "acknowledged_at": str}
+            )
+            if data is None:
+                continue
+            until = data.get("snooze_until")
+            try:
+                if until is not None and datetime.fromisoformat(until).tzinfo is None:
+                    raise ValueError("snooze time needs an offset")
+            except (ValueError, TypeError):
+                self._skip("attention_state", key, "invalid snooze time")
+                continue
+            self._repaired("attention_state", key)
+            result[key] = data
+        return result
+
+    def set_attention_state(self, key: str, data: dict[str, Any]) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO attention_state VALUES (?, ?)", (key, json.dumps(data))
+            )
+        self._repaired("attention_state", key)
+
+    def delete_attention_state(self, keys: list[str]) -> None:
+        if not keys:
+            return
+        with self.db:
+            self.db.executemany("DELETE FROM attention_state WHERE key=?", ((key,) for key in keys))
+        for key in keys:
+            self._repaired("attention_state", key)
+
     def settings(self) -> dict[str, Any]:
         result = dict(DEFAULT_SETTINGS)
         for key, value in self.db.execute("SELECT key, value FROM meta WHERE key LIKE 'setting:%'"):
@@ -276,6 +319,41 @@ class Store:
 
     # ---- Events: what changed between collections ----
 
+    def service_gap(self) -> dict[str, str] | None:
+        value = self._meta("service:last_gap")
+        return value if isinstance(value, dict) else None
+
+    def record_heartbeat(self, at: str) -> dict[str, str] | None:
+        """Record a heartbeat and any gap together; ordinary ticks write at most once a minute."""
+        gap = None
+        updates: dict[str, Any] = {}
+        with self.db:
+            previous = job_time(self._meta("service:alive_at"))
+            elapsed = (
+                (datetime.fromisoformat(at) - datetime.fromisoformat(previous)).total_seconds()
+                if previous
+                else None
+            )
+            if previous is not None and elapsed is not None and elapsed > 300:
+                gap = {"from": previous, "to": at}
+                self.db.execute(
+                    "INSERT OR IGNORE INTO events (key, type, at, source_id, silent, data) "
+                    "VALUES (?, 'service.gap', ?, NULL, 0, ?)",
+                    (f"service.gap:{previous}", at, json.dumps(gap)),
+                )
+                self._prune_events()
+                updates["service:last_gap"] = gap
+            if elapsed is None or elapsed >= 60 or elapsed < 0:
+                updates["service:alive_at"] = at
+            if updates:
+                self.db.executemany(
+                    "INSERT OR REPLACE INTO meta VALUES (?, ?)",
+                    [(key, json.dumps(value)) for key, value in updates.items()],
+                )
+        for key in updates:
+            self._repaired("meta", key)
+        return gap
+
     def add_events(self, events: list[dict[str, Any]]) -> int:
         """Store events; one whose ``key`` was seen before is ignored. Returns how many are new."""
         added = 0
@@ -293,17 +371,59 @@ class Store:
                         json.dumps(event.get("data") or {}),
                     ),
                 ).rowcount
-            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-            self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+            self._prune_events()
         return added
 
+    def add_change(
+        self,
+        type: str,
+        subject_id: str,
+        name: str,
+        action: str,
+        fields: list[str],
+        source_id: str | None = None,
+        *,
+        counts: dict[str, int] | None = None,
+    ) -> None:
+        """Record a saved user action, with field names only; never pass setting values."""
+        at = now()
+        data: dict[str, Any] = {
+            "subject_id": subject_id,
+            "name": name,
+            "action": action,
+            "fields": sorted(fields),
+        }
+        if counts is not None:
+            data["counts"] = counts
+        self.add_events(
+            [
+                {
+                    "key": f"change:{type}:{subject_id}:{at}:{secrets.token_hex(8)}",
+                    "type": type,
+                    "at": at,
+                    "source_id": source_id,
+                    "data": data,
+                }
+            ]
+        )
+
+    def _prune_events(self) -> None:
+        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        self.db.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+
     def events(
-        self, after: int = 0, limit: int = 100, *, include_silent: bool = True
+        self,
+        after: int = 0,
+        limit: int = 100,
+        *,
+        include_silent: bool = True,
+        include_changes: bool = True,
     ) -> list[dict[str, Any]]:
         rows = self.db.execute(
             "SELECT id, key, type, at, source_id, silent, data FROM events "
-            "WHERE id > ? AND (? OR silent = 0) ORDER BY id LIMIT ?",
-            (after, int(include_silent), limit),
+            "WHERE id > ? AND (? OR silent = 0) "
+            "AND (? OR type NOT LIKE 'change.%') ORDER BY id LIMIT ?",
+            (after, int(include_silent), int(include_changes), limit),
         )
         result = []
         for row in rows:
@@ -323,16 +443,205 @@ class Store:
             )
         return result
 
-    def recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_events(
+        self, limit: int = 50, *, include_changes: bool = False
+    ) -> list[dict[str, Any]]:
         """The latest events people should see, newest first."""
         rows = self.db.execute(
-            "SELECT id FROM events WHERE silent = 0 ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id FROM events WHERE silent = 0 "
+            "AND (? OR type NOT LIKE 'change.%') ORDER BY id DESC LIMIT ?",
+            (int(include_changes), limit),
         ).fetchall()
         if not rows:
             return []
         oldest = rows[-1][0]
-        events = self.events(oldest - 1, limit, include_silent=False)
+        events = self.events(
+            oldest - 1, limit, include_silent=False, include_changes=include_changes
+        )
         return [event for event in reversed(events) if not event["silent"]]
+
+    def query_events(
+        self,
+        limit: int = 50,
+        *,
+        before_id: int | None = None,
+        after_id: int | None = None,
+        types: list[str] | None = None,
+        category: str | None = None,
+        source_id: str | None = None,
+        cluster_id: str | None = None,
+        job: str | None = None,
+        since: str | None = None,
+        q: str | None = None,
+        include_changes: bool = False,
+        group: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Visible Activity rows. Filters precede grouping; cursors address display rows."""
+        # Local import: events also uses Store's clock.
+        from .events import FAILURE_OUTCOMES, group_events
+
+        where = ["silent = 0", "json_valid(data)"]
+        args: list[Any] = []
+        if not include_changes:
+            where.append("type NOT LIKE 'change.%'")
+        if types:
+            where.append("type IN (" + ",".join("?" for _ in types) + ")")
+            args.extend(types)
+        if category == "failed":
+            where.append(
+                "(type IN ('job.failed', 'source.failed') OR (type = 'job.finished' "
+                "AND json_extract(data, '$.outcome') IN ("
+                + ",".join("?" for _ in FAILURE_OUTCOMES)
+                + ")))"
+            )
+            args.extend(FAILURE_OUTCOMES)
+        elif category:
+            where.append(
+                {
+                    "jobs": "type LIKE 'job.%'",
+                    "sources": "type IN ('source.failed', 'source.recovered')",
+                    "gaps": "type IN ('source.gap', 'service.gap')",
+                    "changes": "type LIKE 'change.%'",
+                    "plugins": "type = 'change.tool'",
+                }[category]
+            )
+        for column, value in (("source_id", source_id), ("json_extract(data, '$.job.id')", job)):
+            if value is not None:
+                where.append(f"{column} = ?")
+                args.append(value)
+        if cluster_id is not None:
+            where.append(
+                "(json_extract(data, '$.cluster_id') = ? OR source_id IN "
+                "(SELECT id FROM sources WHERE json_valid(data) "
+                "AND json_extract(data, '$.cluster_id') = ?) OR "
+                "(type = 'change.instance' AND json_extract(data, '$.subject_id') IN "
+                "(SELECT id FROM instances WHERE json_valid(data) AND 'platform:' || "
+                "lower(trim(json_extract(data, '$.platform'))) = ?)))"
+            )
+            args.extend([cluster_id] * 3)
+        if since is not None:
+            where.append("julianday(at) >= julianday(?)")
+            args.append(since)
+        if q:
+            # Treat LIKE metacharacters as literal search text.
+            pattern = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+            fields = ("cluster_id", "job.id", "job.name", "source_name", "name")
+            where.append(
+                "("
+                + " OR ".join(
+                    f"json_extract(data, '$.{field}') LIKE ? ESCAPE '!'" for field in fields
+                )
+                + ")"
+            )
+            args.extend([pattern] * len(fields))
+        cursor = []
+        for operator, cursor_id in (("<", before_id), (">", after_id)):
+            if cursor_id is not None:
+                cursor.append(f"display_id {operator} ?")
+                args.append(cursor_id)
+        cursor_sql = " AND ".join(cursor) or "1"
+        filtered = "SELECT * FROM events WHERE " + " AND ".join(where)
+        if group:
+            sql = (
+                "WITH filtered AS (" + filtered + "), collections AS ("
+                "SELECT *, CASE WHEN type LIKE 'change.%' THEN key ELSE "
+                "COALESCE(json_extract(data, '$.observed_at'), at) END AS observed FROM filtered), "
+                "sizes AS (SELECT source_id, type, observed, COUNT(*) AS n, MAX(id) AS newest "
+                "FROM collections GROUP BY source_id, type, observed), keyed AS ("
+                "SELECT c.*, CASE WHEN s.n >= 3 THEN s.newest ELSE c.id END AS display_id "
+                "FROM collections c JOIN sizes s ON c.source_id IS s.source_id "
+                "AND c.type = s.type AND c.observed = s.observed), page AS ("
+                "SELECT DISTINCT display_id FROM keyed WHERE "
+                + cursor_sql
+                + " ORDER BY display_id DESC LIMIT ?) SELECT id, key, type, at, source_id, data "
+                "FROM keyed WHERE display_id IN (SELECT display_id FROM page) ORDER BY id DESC"
+            )
+        else:
+            sql = (
+                "WITH keyed AS (SELECT *, id AS display_id FROM (" + filtered + ")) "
+                "SELECT id, key, type, at, source_id, data FROM keyed WHERE "
+                + cursor_sql
+                + " ORDER BY id DESC LIMIT ?"
+            )
+        args.append(limit)
+        result = []
+        for key, event_key, kind, at, source, raw in self.db.execute(sql, args):
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    dict(
+                        id=key,
+                        key=event_key,
+                        type=kind,
+                        at=at,
+                        source_id=source,
+                        silent=False,
+                        data=data,
+                    )
+                )
+        return group_events(result) if group else result
+
+    def events_in_collection(
+        self, source_id: str | None, observed_at: str, kind: str
+    ) -> list[dict[str, Any]]:
+        """Non-silent siblings, in delivery order; pre-0.6 rows use their event time."""
+        rows = self.db.execute(
+            "SELECT id, key, type, at, source_id, data FROM events WHERE silent = 0 "
+            "AND source_id IS ? AND type = ? AND CASE WHEN json_valid(data) THEN "
+            "COALESCE(json_extract(data, '$.observed_at'), at) END = ? ORDER BY id",
+            (source_id, kind, observed_at),
+        )
+        result = []
+        for key, event_key, event_type, at, source, raw in rows:
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    {
+                        "id": key,
+                        "key": event_key,
+                        "type": event_type,
+                        "at": at,
+                        "source_id": source,
+                        "silent": False,
+                        "data": data,
+                    }
+                )
+        return result
+
+    def recent_event_collections(
+        self, limit: int, *, include_changes: bool = False
+    ) -> list[dict[str, Any]]:
+        """Complete collections for display, so a burst does not consume the row limit."""
+        rows = self.db.execute(
+            "WITH collections AS ("
+            "SELECT id, source_id, type, CASE WHEN type LIKE 'change.%' THEN key "
+            "ELSE COALESCE(json_extract(data, '$.observed_at'), at) END "
+            "AS observed FROM events WHERE silent = 0 AND json_valid(data) "
+            "AND (? OR type NOT LIKE 'change.%')), "
+            "latest AS (SELECT source_id, type, observed FROM collections "
+            "GROUP BY source_id, type, observed ORDER BY MAX(id) DESC LIMIT ?) "
+            "SELECT e.id, e.key, e.type, e.at, e.source_id, e.data FROM latest "
+            "JOIN collections c ON c.source_id IS latest.source_id "
+            "AND c.type = latest.type AND c.observed = latest.observed "
+            "JOIN events e ON e.id = c.id ORDER BY e.id DESC",
+            (int(include_changes), limit),
+        )
+        result = []
+        for key, event_key, kind, at, source, raw in rows:
+            data = self.record("events", key, raw, {})
+            if data is not None:
+                result.append(
+                    {
+                        "id": key,
+                        "key": event_key,
+                        "type": kind,
+                        "at": at,
+                        "source_id": source,
+                        "silent": False,
+                        "data": data,
+                    }
+                )
+        return result
 
     def last_event_id(self) -> int:
         row = self.db.execute("SELECT MAX(id) FROM events").fetchone()
@@ -375,8 +684,10 @@ class Store:
         self._repaired("nodes", node_id)
         return deleted
 
-    def _snapshot(self, source_id: str, encoded: str) -> tuple[dict[str, Any], bool]:
-        snapshot, invalid = _read_snapshot(encoded)
+    def _snapshot(
+        self, source_id: str, encoded: str, *, lifecycle: bool = False
+    ) -> tuple[dict[str, Any], bool]:
+        snapshot, invalid = _read_snapshot(encoded, lifecycle=lifecycle)
         if invalid:
             self._skip("snapshots", source_id, "malformed snapshot")
         return snapshot, invalid
@@ -385,7 +696,7 @@ class Store:
         row = self.db.execute(
             "SELECT data FROM snapshots WHERE source_id = ?", (source_id,)
         ).fetchone()
-        return self._snapshot(source_id, row[0])[0] if row else None
+        return self._snapshot(source_id, row[0], lifecycle=True)[0] if row else None
 
     def sources(self) -> list[dict[str, Any]]:
         result = []
