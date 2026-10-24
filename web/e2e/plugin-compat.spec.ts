@@ -48,6 +48,11 @@ test('scaffold hello plugin page, public components/classes and all slots', asyn
     '[role=tab]',
   ])
     await expect(page.locator(`main ${selector}`).first()).toBeVisible();
+  await expect(page.locator('main .table')).toHaveCSS('border-collapse', 'collapse');
+  await expect(page.locator('main .table td.num')).toHaveCSS(
+    'font-variant-numeric',
+    'tabular-nums',
+  );
   const banner = page
     .locator('.plugin-slot[data-plugin="hello-example"]')
     .filter({ has: page.locator('.banner') });

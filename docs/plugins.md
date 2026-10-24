@@ -1209,8 +1209,12 @@ line height (English 1.5). New controls are 32 px tall; Compact makes **table** 
 28 px and rows 32 px, leaving forms alone. Row sizes include the hairline: single/two-line
 text rows are 40/60 px in Comfortable, 32/48 px in Compact, and 44/60 px with a coarse pointer.
 `table.compact` also selects 32/48 px rows in Comfortable; device Compact and coarse-pointer
-minimums still apply. Tables use separate borders with zero spacing. Padding sets the text-row
-size, so longer content and stacked cells grow instead of clipping. Touch controls are at
+minimums still apply. Tables retain collapsed borders, including plugin borders on rows.
+The final row keeps a transparent 1 px bottom border for consistent collapsed row heights
+in Chromium and WebKit. Table cells inherit the 13 px default but preserve font sizes set
+by cell classes, including the `.mono` family and 12 px size; `.num` remains tabular inside
+tables. Page and plugin cell-padding rules take precedence over the shared two-line rule.
+Padding sets the text-row size, so longer content and stacked cells grow instead of clipping. Touch controls are at
 least 44 px. The basic
 button reset still has no border/background/padding; the documented control classes
 supply these. Links now have an underline by default, including ordinary `<a>` elements.
@@ -1237,7 +1241,10 @@ an empty-overview fixture and a page-only fixture. The test-only build flag
 控件默认 32 像素；紧凑模式只把表格行和控件改为 32/28 像素，表单不受影响，
 行高包含分隔线：舒适模式单行/双行为 40/60 像素，紧凑为 32/48 像素，粗指针为
 44/60 像素。`table.compact` 在舒适模式下也使用 32/48 像素，设备紧凑模式和粗指针
-最小尺寸仍然生效。表格使用独立边框、零间距，以内边距确定文字行高；更长的内容和
+最小尺寸仍然生效。表格保留折叠边框（包括插件的行边框），末行保留透明的 1 像素底边框，
+使 Chromium 和 WebKit 的折叠行高一致。单元格继承 13 像素默认字号，但保留单元格类指定的
+字号，包括 `.mono` 的字体及 12 像素字号；表格中的 `.num` 仍使用等宽数字；
+页面及插件的单元格内边距优先于通用双行规则。以内边距确定文字行高；更长的内容和
 堆叠单元格会自然增高，不裁剪内容。触屏控件至少 44 像素。
 基础 button reset 不变，尺寸由控件类提供。
 `plugin new --web` 生成的双语示例覆盖所有组件、公共类和插槽，横幅可显示或隐藏。

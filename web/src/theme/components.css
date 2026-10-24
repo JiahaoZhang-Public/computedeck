@@ -68,8 +68,6 @@
 :lang(zh) {
   font-synthesis: none;
   text-autospace: normal;
-  letter-spacing: normal;
-  text-transform: none;
 }
 .prose {
   font-size: 14px;

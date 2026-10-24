@@ -26,7 +26,7 @@
   color: var(--amber);
 }
 .banner.red {
-  background: var(--red-soft);
+  background: var(--status-error-bg);
   color: var(--red);
 }
 .banner .link {
@@ -57,7 +57,7 @@
     border-color var(--dur-fast);
 }
 .button:hover:not(:disabled) {
-  background: var(--surface-hover);
+  background: var(--bg-hover);
   text-decoration: none;
 }
 .primary-button,
@@ -78,13 +78,15 @@
   gap: 4px;
   color: var(--accent-text);
   font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .link:hover {
   text-decoration: underline;
 }
 .form-error {
   color: var(--red);
-  background: var(--red-soft);
+  background: var(--status-error-bg);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 13px;
@@ -139,9 +141,8 @@
 }
 .table {
   width: 100%;
-  /* Separate hairlines avoid engine-dependent half-pixel collapsed borders. */
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .table th {
@@ -156,7 +157,7 @@
 }
 .table td {
   --cell-border-h: 1px;
-  font: var(--type-small);
+  line-height: 20px;
   padding: calc((var(--row-h) - 20px - var(--cell-border-h)) / 2) 12px;
   border-bottom: var(--cell-border-h) solid var(--border);
   vertical-align: middle;
@@ -174,8 +175,8 @@
   padding-right: 16px;
 }
 .table tbody tr:last-child td {
-  --cell-border-h: 0px;
-  border-bottom: 0;
+  /* Keep the same collapsed hairline width in Chromium and WebKit. */
+  border-bottom-color: transparent;
 }
 .table .num {
   text-align: right;
@@ -185,7 +186,7 @@
   cursor: pointer;
 }
 .table tr.clickable:hover td {
-  background: var(--surface-hover);
+  background: var(--bg-hover);
 }
 .table tr.clickable:focus-visible {
   outline: 2px solid var(--accent);
@@ -249,14 +250,14 @@
 }
 .status.green:not(:has(i)) {
   background: var(--green-soft);
-  color: var(--green);
+  color: var(--fg-default);
 }
 .status.amber:not(:has(i)) {
   background: var(--amber-soft);
   color: var(--amber);
 }
 .status.red:not(:has(i)) {
-  background: var(--red-soft);
+  background: var(--status-error-bg);
 }
 
 .num {
@@ -267,10 +268,6 @@
 }
 .amber {
   color: var(--amber);
-}
-.link {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 .button,
 .primary-button,
@@ -287,9 +284,6 @@
   background: var(--status-unknown-shape);
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='4.5' fill='none' stroke='black' stroke-width='1.5' stroke-dasharray='3 2'/%3E%3C/svg%3E")
     center / contain no-repeat;
-}
-.status.green:not(:has(i)) {
-  color: var(--fg-default);
 }
 .status.green:not(:has(i))::before {
   background: var(--status-ok-shape);
@@ -318,7 +312,7 @@
   }
 }
 
-.table tr:has(.sub) td {
+.table :where(tr:has(.sub)) td {
   /* Two 20px lines and the existing .sub margin; content can always grow. */
   padding-block: calc((var(--row-two-h) - 41px - var(--cell-border-h)) / 2);
 }

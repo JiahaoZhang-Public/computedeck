@@ -337,3 +337,53 @@ network 插件巡检仍由后续项目完成。
 显示模式 td/th 的 scrollHeight 大于 clientHeight + 1；种类、身份和数量纳入基线，
 像素值仅供报告。hello 开关点击可见 label，按角色断言 checked 状态，截图使用统一
 稳定捕获流程；兼容版基线采用可读的 `gallery-…` / `overview-…` 名称。
+
+
+### F4 review corrections and follow-ups
+
+Table cells inherit the default font size so `.mono` keeps its family and 12 px size,
+while cell text keeps a 20 px line height and `.num` keeps tabular figures; headings and
+`.stat-value` also preserve inherited numeric variants. Collapsed
+borders remain part of the frozen table contract, including borders supplied on plugin
+rows. The last row keeps a transparent 1 px bottom border so Chromium and WebKit use the
+same collapsed hairline width; the existing exact row-height assertions remain unchanged.
+The two-line padding selector has specificity (0,1,1), letting Plan and plugin padding
+overrides win. The phone selector no longer needs
+its extra `tr`. Compatibility styles use semantic hover/error backgrounds directly; a unit
+test ensures their variables are all defined without legacy page styles.
+
+`theme.spec.ts` checks computed table numeric variants, 12 px monospace cells and Overview
+metrics, collapsed borders, zero stacked Plan cell padding and the option/explanation seam
+in table layout. The hello plugin also asserts tabular numbers and collapsed borders.
+Browser theme-colour metadata now uses the canvas colours and honours the device theme
+choice, restoring OS media queries in System mode; unit and browser checks cover this.
+No API, exported component DOM, locale keys or example-data states change.
+
+**Deviation from proposal §3.3:** the hatch uses a dashed `--hatch-edge` (ink) instead of
+`--border-strong`. This is deliberate: the edge must reach 3:1 against both the base and
+composited stripe, including contrast-more. F5/P6 should keep this edge and its contrast tests.
+
+**Deferred to U1:** make BrandMark monochrome (`currentColor`/ink) and remove
+`brand-top`/`brand-middle`/`brand-base` from the token table and regenerated CSS. Add per-slot
+error boundaries for banner and settings slots, with throwing-plugin fixtures proving the
+frame and sibling slots survive. **Deferred to P1:** the same boundary and failure coverage
+for each overview slot. Bare wrappers and null-slot hiding alone do not isolate exceptions.
+
+**UI gate pending outside the sandbox:** review/regenerate affected page screenshots,
+particularly Jobs, Clusters, Sources, Overview and Plan at 375/900/1280 across the six locale/
+theme combinations, plus compat gallery, hello and fallback counterparts. Collapsed border
+geometry may affect any table page, so run the full gate afterward without updating snapshots.
+No screenshot baseline was regenerated or approved in this socket-restricted environment.
+
+中文：F4 评审修复让单元格继承默认字号，保留 `.mono` 字体及 12 像素字号、20 像素文本行高、
+`.num` 和概览指标的等宽数字，恢复折叠边框及插件行边框；末行保留透明的 1 像素底边框，
+使 Chromium 和 WebKit 使用相同的折叠分隔线宽度，原有精确行高断言不变。双行内边距规则的
+优先级降为 (0,1,1)，Plan 与插件可覆盖；移除手机选择器中多余的 `tr`。兼容样式直接使用
+语义背景变量，并以单元测试保证不依赖旧页面变量。新增浏览器断言覆盖计算字体、12 像素字号、数字、
+折叠边框、Plan 堆叠零内边距及桌面选项与解释之间的间距。浏览器栏主题色改为画布颜色，
+跟随显式设备选择，系统模式恢复媒体查询；没有 API、导出组件 DOM、翻译键或示例数据变化。
+明确记录与 §3.3 的偏差：斜线填充边缘使用墨色 `--hatch-edge`，确保底色及叠加条纹上的
+对比度达到 3:1，F5/P6 应保留。U1 负责单色 BrandMark、删除三个品牌令牌，以及横幅和设置
+插槽的独立错误边界与抛错测试；P1 负责概览插槽的对应测试和边界。
+沙箱内未更新或批准截图；沙箱外需检查受影响页面，重点为三种宽度的 Jobs、Clusters、Sources、
+Overview、Plan，以及兼容展示页、hello 和兼容渲染版，再运行不更新截图的完整 UI gate。

@@ -2561,7 +2561,7 @@ td.wrap {
   .table.stack-on-phone tr.has-note {
     border-bottom: 0;
   }
-  .table.stack-on-phone tr td {
+  .table.stack-on-phone td {
     padding: 3px 16px;
     border: 0;
     text-align: left;
@@ -2998,13 +2998,19 @@ td.wrap {
   line-height: 20px;
 }
 .panel-header h2 {
-  font: var(--type-title-s);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
 }
 .topbar h1 {
-  font: var(--type-title-l);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
 }
 .stat-value {
-  font: var(--type-metric);
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 600;
 }
 .panel-note,
 .page-note {

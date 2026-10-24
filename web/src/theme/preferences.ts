@@ -21,6 +21,15 @@ export function readDensity(): Density {
 export function applyTheme(theme: Theme) {
   if (theme === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const scheme = meta.dataset.theme;
+    meta.media =
+      theme === 'system'
+        ? `(prefers-color-scheme: ${scheme})`
+        : theme === scheme
+          ? 'all'
+          : 'not all';
+  }
 }
 export function saveTheme(theme: Theme) {
   applyTheme(theme);

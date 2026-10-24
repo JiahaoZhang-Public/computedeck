@@ -80,3 +80,15 @@ it('warns only for external build-time plugin source, not core or unrelated file
     deprecatedPluginTokens('.x { color: var(--ink); }', '/example/plugin/style.css', core),
   ).toEqual([]);
 });
+
+it('keeps frozen class variables independent of legacy page styles', () => {
+  const compat = readFileSync(new URL('./compat.css', import.meta.url), 'utf8');
+  const components = readFileSync(new URL('./components.css', import.meta.url), 'utf8');
+  const defined = new Set([
+    ...Object.keys(tokens).map((name) => `--${name}`),
+    ...Object.keys(map),
+    ...[...(components + compat).matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1]),
+  ]);
+  for (const [, name] of compat.matchAll(/var\((--[\w-]+)/g))
+    expect(defined.has(name), `Undefined compatibility variable: ${name}`).toBe(true);
+});

@@ -83,6 +83,10 @@ test('theme and table density persist, system follows the OS, forms keep their h
     await page.reload();
     await ready(page);
     await expect(page.locator('#theme')).toHaveValue(value);
+    await expect(page.locator(`meta[name="theme-color"][data-theme="${value}"]`)).toHaveAttribute(
+      'media',
+      'all',
+    );
     await expect(page.locator('html')).toHaveAttribute('data-theme', value);
   }
   const formHeight = await page
@@ -97,6 +101,10 @@ test('theme and table density persist, system follows the OS, forms keep their h
   await expect(page.locator('html')).not.toHaveAttribute('data-theme');
   await page.emulateMedia({ colorScheme: 'light' });
   const light = await computedColors(page);
+  await expect(page.locator('meta[name="theme-color"][data-theme="light"]')).toHaveAttribute(
+    'media',
+    '(prefers-color-scheme: light)',
+  );
   await page.emulateMedia({ colorScheme: 'dark' });
   expect(await computedColors(page)).not.toEqual(light);
   await page.reload();
@@ -111,6 +119,7 @@ test('table row boxes include hairlines: density, compact class and coarse point
   await page.goto('/?demo=true#/__gallery?compat');
   await ready(page);
   const table = page.locator('.gallery .table');
+  await expect(table).toHaveCSS('border-collapse', 'collapse');
   // Reuse the translated gallery sample, checking both bordered and last rows.
   await table.evaluate((node) => {
     const body = node.querySelector('tbody')!;
@@ -145,7 +154,7 @@ test('table row boxes include hairlines: density, compact class and coarse point
         single,
         two,
       ]);
-      // Include the borderless single-line last row, too.
+      // Include the single-line last row with its transparent bottom border, too.
       await table.evaluate((node) => node.querySelector('tbody')!.lastElementChild!.remove());
       expect(
         await table
@@ -227,4 +236,63 @@ test('forced colours override explicit themes in both builds', async ({ page, fr
       }, theme);
     expect(await computedColors(freshPage)).toEqual(await computedColors(page));
   }
+});
+
+test('table numbers and metrics stay tabular and job timings stay monospace', async ({ page }) => {
+  await page.goto('/?demo=true#/__gallery?compat');
+  await ready(page);
+  const number = page.locator('.gallery .table td.num').first();
+  await expect(number).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  // Exercise both frozen classes together on the same plugin-style table cell.
+  await number.evaluate((cell) => cell.classList.add('mono'));
+  await expect(number).toHaveCSS('font-family', /ui-monospace/);
+  await expect(number).toHaveCSS('font-size', '12px');
+  await expect(number).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  for (const route of ['jobs', 'resources', 'sources']) {
+    await page.goto(`/?demo=true#/${route}`);
+    await ready(page);
+    const cells = page.locator('.table td.mono');
+    if (route === 'jobs') expect(await cells.count()).toBeGreaterThan(0);
+    for (const cell of await cells.all()) {
+      await expect(cell).toHaveCSS('font-family', /ui-monospace/);
+      await expect(cell).toHaveCSS('font-size', '12px');
+    }
+    for (const cell of await page.locator('.table td.num').all())
+      await expect(cell).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  }
+  await page.goto('/?demo=true#/overview');
+  await ready(page);
+  const metrics = page.locator('.stat-value');
+  expect(await metrics.count()).toBeGreaterThan(0);
+  for (const metric of await metrics.all())
+    await expect(metric).toHaveCSS('font-variant-numeric', 'tabular-nums');
+});
+
+test('Plan keeps stacked cells unpadded and explanations attached to their options', async ({
+  page,
+}) => {
+  await page.goto('/?demo=true#/plan');
+  await ready(page);
+  const options = page.locator('.plan-table .plan-option-row > td');
+  const explanations = page.locator('.plan-table .plan-explanation-row > td');
+  expect(await options.count()).toBeGreaterThan(0);
+  expect(await explanations.count()).toBeGreaterThan(0);
+  const stacked = await page
+    .locator('.plan-table tr')
+    .last()
+    .evaluate((row) => getComputedStyle(row).display === 'grid');
+  if (stacked) {
+    for (const cell of await page.locator('.plan-table td').all())
+      await expect(cell).toHaveCSS('padding', '0px');
+  }
+  // Also cover table layout even when this project's viewport stacks the options.
+  await page.locator('.plan-options').evaluate((node) => {
+    node.style.minWidth = '1100px';
+  });
+  await expect(page.locator('.plan-table .plan-option-row').first()).toHaveCSS(
+    'display',
+    'table-row',
+  );
+  for (const cell of await options.all()) await expect(cell).toHaveCSS('padding-bottom', '0px');
+  for (const cell of await explanations.all()) await expect(cell).toHaveCSS('padding-top', '0px');
 });
