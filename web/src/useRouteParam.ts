@@ -14,7 +14,8 @@ export function setRouteParams(values: Record<string, string | null>, push = fal
     else params.delete(name);
   }
   const path = canonicalHash(url.hash).split('?')[0] || '#/overview';
-  url.hash = canonicalHash(path + (params.size ? `?${params}` : ''));
+  const query = params.toString();
+  url.hash = canonicalHash(path + (query ? `?${query}` : ''));
   if (url.href === before) return;
   if (push) window.history.pushState({ detail: true }, '', url);
   else window.history.replaceState(null, '', url);

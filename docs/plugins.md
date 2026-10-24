@@ -576,7 +576,7 @@ register({
 
 `window.ComputeDeck` offers `React`, `jsxRuntime`, `components` (`Panel`, `Empty`, `Status`,
 `Switch`, `Chips`, `Stat`, `Meter`, `BrandMark`), `request(path, body?, method?)` for the
-API, `format.relativeTime` and `format.dateTime`, `routeHash`, `locale()` and
+API, `format.relativeTime` and `format.dateTime`, `routeHash`, `routeAliases`, `locale()` and
 `localized(text)`. Page components receive `{ request, demo, remote, locale, page, health,
 navigate }`. `computedeck plugin new --web` sets up the build: Vite in library mode, IIFE
 output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
@@ -586,12 +586,15 @@ folder with `artifacts` (hatch) or package data.
 `routeHash(page, group?)` and the page prop `navigate(page)` share the built-in
 aliases: `clusters` → `resources`, `nodes` → `resources?tab=nodes`, and
 `marketplace` → `toolbox?tab=market`. The read-only `routeAliases` map on
-`window.ComputeDeck` exposes these targets (without `#/`). Existing core and
-plugin page IDs keep their meaning; this is additive and `WEB_API` remains 1.
+`window.ComputeDeck` exposes these targets (without `#/`). `clusters`, `nodes` and
+`marketplace` are reserved route names that resolve to core pages; plugin pages
+must not use them. Other existing core and plugin page IDs keep their meaning;
+`WEB_API` remains 1.
 
 中文：`routeHash(page, group?)` 和页面属性 `navigate(page)` 共用上述别名。
 `window.ComputeDeck.routeAliases` 提供只读映射，目标字符串不含 `#/`。
-现有核心及插件页面 ID 保持有效，`WEB_API` 仍为 1。
+`clusters`、`nodes` 和 `marketplace` 是指向核心页面的保留路由名称，插件页面不得使用。
+其他现有核心及插件页面 ID 保持有效，`WEB_API` 仍为 1。
 
 While example data is on, the host's `request` rejects every non-GET request before
 fetching, except the access-token check (`POST /session`). This includes requests

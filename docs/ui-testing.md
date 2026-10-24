@@ -90,6 +90,18 @@ these interaction checks. They use the existing page layouts and require no new 
 baselines. The full gate still compares all existing screenshots. Vitest also renders the
 0.7 URL fixture table in English and Chinese and tests hash changes during startup,
 plugin navigation, alias history replacement and preservation of new view parameters.
+The routing suite also runs with `URLSearchParams.size` unavailable, covering query
+preservation on older supported engines during alias rewrites and filter updates.
+
+P6 follow-up: clearing `nodes` leaves `tab=nodes` in place. Conversely, clearing
+only `tab` while `nodes` is set restores `tab=nodes` through the legacy rewrite.
+When switching away from Nodes, clear both keys or set an explicit destination tab
+such as `tab=overview`; cover both directions in the P6 tab-switching tests.
+
+中文：路由测试也在 `URLSearchParams.size` 不可用时运行，检查旧版受支持浏览器在
+别名重写和筛选更新时保留查询参数。P6 待办：清除 `nodes` 后仍会保留 `tab=nodes`；
+保留 `nodes` 而仅清除 `tab` 时，旧链接重写又会补回 `tab=nodes`。离开节点标签页时，
+应同时清除两个参数，或明确设置目标标签（如 `tab=overview`），并在 P6 中测试两个方向。
 
 The initial 0.7 DOM findings include small touch targets across the 375 px pages and
 horizontal overflow in Marketplace at 375 px. F1 records these without changing the 0.7

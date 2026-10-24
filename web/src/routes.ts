@@ -37,7 +37,8 @@ export function canonicalHash(hash: string): string {
   const legacyNodes = page === 'resources' && params.has('nodes') && !params.has('tab');
   if (legacyNodes) params.set('tab', 'nodes');
   if (!alias && !legacyNodes) return hash;
-  return `#/${page}${params.size ? `?${params}` : ''}`;
+  const query = params.toString();
+  return `#/${page}${query ? `?${query}` : ''}`;
 }
 
 function subscribe(update: () => void) {
