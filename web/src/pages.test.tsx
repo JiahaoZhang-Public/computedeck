@@ -1,4 +1,5 @@
 import { setLocale, t } from './i18n';
+import { capacityText } from './pages/summary';
 import { ClustersPage } from './pages/Clusters';
 import { PlanPage } from './pages/Plan';
 import { UsagePage } from './pages/Usage';
@@ -218,7 +219,7 @@ function clusterData(states: string[], state: Source['cluster_state'] = 'availab
       gpu_type: 'example',
       cpu_count: 32,
       cpu_allocated: 0,
-      partitions: [],
+      partitions: ['gpu'],
       observed_at: now,
     })),
   });
@@ -262,11 +263,11 @@ describe('the last SSH check of a machine', () => {
       />,
     );
 
-  it('shows when it was checked and how many GPUs had processes', () => {
+  it('shows when it was checked and how many GPUs were in use', () => {
     const html = drawer(machine);
     expect(html).toContain('Reachable');
     expect(html).toContain('checked 2 min ago');
-    expect(html).toMatch(/GPUs with processes<\/dt><dd>1</);
+    expect(html).toMatch(/GPUs in use<\/dt><dd>1</);
     const page = renderToStaticMarkup(
       <CloudPage ctx={ctx(dash({ sources: [], instances: [machine] }))} />,
     );
@@ -279,13 +280,13 @@ describe('the last SSH check of a machine', () => {
       gpu_allocated: null,
       probe_warnings: [{ code: 'gpu_processes_unavailable', detail: 'rocm-smi' }],
     });
-    expect(html).toMatch(/GPUs with processes<\/dt><dd>—/);
+    expect(html).toMatch(/GPUs in use<\/dt><dd>—/);
     expect(html).toContain('GPU processes unavailable: rocm-smi');
   });
 
   it('leaves the busy count out for a provider instance, which holds what it rents', () => {
     const html = drawer({ ...machine, manual: false, metrics_scope: undefined });
-    expect(html).not.toContain('GPUs with processes');
+    expect(html).not.toContain('GPUs in use');
   });
 });
 
@@ -312,13 +313,9 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
     const html = renderToStaticMarkup(<OverviewPage ctx={context} />);
     const headings = [...html.matchAll(/<h2>([^<]*)/g)].map((match) => match[1]);
     expect(headings).toEqual(
-      [
-        t('overview.attention'),
-        t('overview.jobs'),
-        t('activity.title'),
-        t('overview.sources'),
-        t('chart.heading'),
-      ].map((heading) => heading.replaceAll('&', '&amp;')),
+      [t('overview.attention'), t('overview.jobs'), t('activity.title'), t('overview.sources')].map(
+        (heading) => heading.replaceAll('&', '&amp;'),
+      ),
     );
     expect(html.startsWith('<div class="stats">')).toBe(true);
     expect(html).toMatch(/class="[^"]*\bjobs-table\b[^"]*"/);
@@ -327,18 +324,93 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
     const groups = overviewGroupsTable(html);
     expect(groups).toContain('<strong>Cluster A</strong>');
     expect(html.indexOf('class="table jobs-table"')).toBeLessThan(html.indexOf(groups));
+    expect(html).toContain(`href="#/usage">${t('usage.view')}`);
+    expect(html).not.toContain('class="trend-chart"');
     expect(html).toContain(`href="#/jobs">${t('overview.allJobs')}`);
     if (demo) {
       expect(html).not.toContain('data-testid="overview-aside"');
     } else {
       expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(
-        html.indexOf(t('chart.heading')),
+        html.indexOf(t('usage.view')),
       );
     }
   });
 });
 
 describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (locale) => {
+  it('shows a healthy resting cluster without an outage or double-counted GPUs', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['IDLE+CLOUD+POWERED_DOWN', 'IDLE+POWERING_UP']));
+    const capacity = capacityText(context.data.summary.nodes, 'available');
+    expect(capacity.outage).toBe(false);
+    expect(capacity.tone).toBe('');
+    expect(capacity.detail).toBe(
+      `${t('summary.onDemand', { count: 16 })} · ${t('summary.capacityTotal', { total: 16 })}`,
+    );
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.onDemand', { count: 16 }));
+      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 16, total: 16 }));
+      expect(html).not.toContain(t('plan.verdict.unavailable'));
+    }
+  });
+
+  it('labels on-demand GPUs separately from free capacity', () => {
+    setLocale(locale);
+    const context = ctx(clusterData(['mixed', 'IDLE+CLOUD+POWERED_DOWN', 'FUTURE', 'ERROR']));
+    for (const html of [
+      renderToStaticMarkup(<OverviewPage ctx={context} />),
+      renderToStaticMarkup(<ClustersPage ctx={context} />),
+      renderToStaticMarkup(<PlanPage ctx={context} />),
+    ]) {
+      expect(html).toContain(t('summary.onDemand', { count: 8 }));
+      expect(html).not.toContain(t('summary.unknownNodes', { count: 2 }));
+    }
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(clusters).toContain(t('clusters.onDemand'));
+    expect(clusters).toContain('IDLE+\u200bCLOUD+\u200bPOWERED_DOWN');
+    expect(clusters).toContain(t('summary.allocation', { allocated: 2, usable: 8 }));
+  });
+
+  it.each(['ALLOCATED+CLOUD+POWERING_UP', 'MIXED+POWER_DOWN'])(
+    'keeps the working node %s labelled with its scheduler state',
+    (state) => {
+      setLocale(locale);
+      const data = clusterData([state, 'mixed']);
+      data.nodes[0].gpu_allocated = state.startsWith('ALLOCATED') ? 8 : 3;
+      const context = ctx(data);
+      const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
+      expect(html).not.toContain(t('clusters.onDemand'));
+      expect(html).toContain(state.replaceAll('+', '+\u200b'));
+      expect(html).toContain(
+        t('summary.allocation', {
+          allocated: data.nodes[0].gpu_allocated + 2,
+          usable: 16,
+        }),
+      );
+    },
+  );
+
+  it('labels FUTURE nodes neutrally while retaining their raw scheduler state', () => {
+    setLocale(locale);
+    const data = clusterData(['FUTURE']);
+    const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
+    expect(html).toContain(`<span class="tag gray">${t('clusters.future')}</span>`);
+    expect(html).toContain('<small class="sub muted">FUTURE</small>');
+  });
+
+  it('explains why an idle Slurm node without a partition is unavailable', () => {
+    setLocale(locale);
+    const data = clusterData(['IDLE']);
+    data.nodes[0].partitions = [];
+    const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
+    expect(html).toContain(t('clusters.noPartition'));
+    expect(html).toContain('<small class="sub muted">IDLE</small>');
+  });
+
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
     setLocale(locale);
     const data = serverDemo();
@@ -348,7 +420,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       (item) => item.subject.kind === 'instance',
     );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
-    expect(overview).toContain('≥ 25');
+    expect(overview).toContain('≥ 27');
     expect(overview).toContain('build-box');
     expect(overview).toContain(t('msg.summary_not_probed_yet'));
     expect(overview).toContain(t('summary.unmonitored.one'));
@@ -423,7 +495,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     },
   );
 
-  it.each(['FUTURE', 'ERROR'])('keeps the usable subtotal when a node is %s', (state) => {
+  it.each(['new_scheduler_state'])('keeps the usable subtotal when a node is %s', (state) => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', state], 'unknown'));
     const text = t('summary.allocation', { allocated: '—', usable: '≥ 8' });
@@ -587,7 +659,7 @@ it.each(['en', 'zh-CN'] as const)(
     ]) {
       expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
     }
-    const unknown = ctx(clusterData(['mixed', 'FUTURE'], 'unknown'));
+    const unknown = ctx(clusterData(['mixed', 'new_scheduler_state'], 'unknown'));
     for (const html of [
       renderToStaticMarkup(<OverviewPage ctx={unknown} />),
       renderToStaticMarkup(<ClustersPage ctx={unknown} />),

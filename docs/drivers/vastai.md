@@ -21,6 +21,7 @@ The driver class is `computedeck.drivers.vastai.VastAIDriver` (driver name `vast
 | `gpu_count`, `gpu_type` | `num_gpus`, `gpu_name` |
 | `gpu_utilization` | `gpu_util`, only for running instances and only when between 0 and 100 |
 | `hourly_cost` (USD) | `dph_total`, the CLI's `$/hr` column |
+| `started_at` | `null`; `start_date` is not used because reset-on-restart semantics are unconfirmed |
 | `host`, `port` | `public_ipaddr` and the host port mapped to `22/tcp` when present; otherwise the Vast SSH proxy `ssh_host` and `ssh_port` |
 | `username` | `root`, the login Vast.ai documents |
 
@@ -52,3 +53,26 @@ The driver has no options.
 - The SSH endpoint follows the official CLI's `ssh-url` logic, including its rule that the proxy port is one higher for Jupyter launch modes. Neither is documented in the API reference. The proxy hosts are shared, so accept the host key with a normal `ssh` login first.
 - `dph_total` is the instance's listed total price per hour. Whether it changes to the storage-only charge while an instance is stopped is not documented.
 - Pages are fetched one second apart, so a large account takes several seconds per collection.
+
+## Running cost
+
+Without a documented start of the current run, cost-so-far uses the store's
+`seen_running_since` observation window, labelled as such. It multiplies the
+observed duration by the current whole-instance price; it does not reconstruct
+past prices or billing. Gaps and lifecycle changes reset that window, and stale
+estimates stop at the last successful collection. See
+[running cost estimates](../metrics.md#running-cost-estimates).
+
+## Sustained low GPU use
+
+Each actual `gpu_util` reading contributes to the low-use observation window. At least
+three readings must cover the configured window without gaps longer than twice the
+source interval, and every reading must stay below the threshold. The UI labels these
+as **provider readings** because the API does not document their sampling window or
+multi-GPU aggregation. It does not claim that every individual GPU was idle. Missing
+readings or lifecycle changes break coverage. Known `dph_total` prices can produce a
+labelled estimate over the covered span at the current price, not a bill.
+
+The drawer links to the [Vast.ai Instances console](https://cloud.vast.ai/instances),
+as described in the [provider's instance guide](https://github.com/vast-ai/docs/blob/main/guides/instances/manage-instances.mdx).
+No stop operation is performed by ComputeDeck.

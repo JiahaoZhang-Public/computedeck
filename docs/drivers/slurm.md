@@ -1,6 +1,8 @@
 # Slurm permissions and availability
 
 Collection reads the current user's jobs, visible nodes, QoS limits and recent failures.
+Only when your jobs wait on Priority or Resources, it also reads their partitions'
+pending queue (priorities and reasons; counts kept, no other users' ids retained).
 All commands are read-only. Example outputs in the tests use fictional users and clusters.
 
 QoS definitions and partition `AllowQos` values do not prove that a user may use that QoS.
@@ -34,10 +36,52 @@ rank by whether the request fits one node, room after your queue, free GPUs and 
 access. The best-estimate card uses the first row only when it is likely or possible.
 These are estimates, not a queue position or a guarantee that Slurm will start the job.
 
+A pending personal-limit wait (for example `QOSMaxGRESPerUser` or
+`AssocMaxJobsLimit`) whose known GPU request fits the collected headroom caps a
+"Likely" estimate at "Possible". The explanation names the job and reason: the
+scheduler may count differently or enforce limits that were not collected. A larger
+limit-held job does not trigger this cap, and stale or unknown relevant data is not
+treated as proof of a contradiction.
+GPU-limit waits only use a known matching job model when any finite per-model cap
+exists, because only the requested model's room was checked. Job-count and submit-count
+waits (`QOSMaxJobsPerUserLimit`, `QOSMaxSubmitJobPerUserLimit`, `AssocMaxJobsLimit`,
+`AssocMaxSubmitJobLimit`) still cap the estimate when QoS count limits are missing or
+unlimited. Association limits are separate from QoS `MaxJobsPU` / `MaxSubmitJobsPU`
+and are not collected; a wait can also reflect an uncollected partition QoS limit.
+Any collected jobs or submit rule already at its limit prevents contradiction evidence.
+Zero-GPU GRES waits and CPU-limit waits are not used because their resource headroom
+is not evaluated.
+CPU-only running jobs do not make model-specific GPU use unknown. Queue reasons
+use short translated class labels, with the raw code on hover. Unrecognised reasons remain visible as reported.
+Duplicate sources for the same cluster and username merge per QoS, preferring current
+QoS-limit data, then current job data, then the latest successful collection.
+Jobs from either current source are deduplicated by their newest
+observation, even when the retained QoS source's job list is not current. An empty
+QoS list does not add a separate row if a twin lists QoS options.
+Different usernames retain separate options.
+
 The cluster state describes the visible inventory: all nodes unavailable means `unavailable`;
 fewer than 20% available means `degraded`. An empty or uncertain inventory remains `unknown`.
-Power-saving flags alone do not make a node unavailable. An unavailable cluster is shown as
-an outage even if no GPUs are allocated, rather than looking idle.
+Usable/free GPU counts exclude nodes with no partition and FUTURE/ERROR state tokens.
+DYNAMIC_FUTURE is a separate flag and does not make an idle node unavailable.
+A partitioned power-saving node with an idle, free or empty base state and no fault
+is shown as "Available on demand", with or without CLOUD. Nodes with assigned work
+(allocated, mixed, completing or job-busy) remain usable even with power flags,
+so their allocations still count while booting or awaiting power-down. On-demand GPUs
+are counted separately from usable and unavailable capacity. On-demand nodes count as healthy in the cluster's availability ratio; a
+cluster entirely at rest stays available with zero free GPUs. DOWN, reserved or
+otherwise faulty nodes keep their unavailable classification, even with power flags.
+The node table retains the scheduler's raw state alongside the on-demand label or
+"Not in any partition" reason. Where to run counts on-demand GPUs for the requested
+model only, with no count shown when the matching count or model is unknown.
+Partition `AllowQos` matching is not part of this capacity check; QoS and access checks
+still apply separately in Where to run.
+
+Node rows retain IP-valued `NodeAddr` as `host_addresses` for matching SSH machines
+to scheduler nodes, and `NodeHostName` as `host_names` to corroborate an IP match
+with the probed hostname. `NodeName` and `NodeHostName` alone are not identity evidence;
+DNS-only addresses remain unmatched without a lookup. Matching does not change
+scheduler allocations or add a cluster query. See [machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
 
 References: [scontrol](https://slurm.schedmd.com/scontrol.html),
 [sacctmgr](https://slurm.schedmd.com/sacctmgr.html),
@@ -91,3 +135,95 @@ history collection, up to 24 hours during an outage; see [job lifecycle](../metr
 PBS and LSF use the offset from their existing remote clock for terminal timestamps;
 that current offset may differ across a daylight-saving transition. Their legacy
 failure-row `end` strings also remain unchanged, with `ended_at` carrying the offset. No extra SSH connection is added.
+
+### Copy-only submit flags
+
+Where to run can copy flags or `#SBATCH` header lines using the requested GPU count and
+optional run time. A safe QoS name always comes from the selected option. GPU model
+spelling comes from current scheduler node records in that cluster, regardless of health,
+and must have one unambiguous safe spelling matching the request case-insensitively.
+Account and partition come from your own current jobs or recent failures in that QoS,
+including current jobs from twin logins with the same cluster and username. A partition
+also needs a currently observed usable matching node. Unknown or unsafe flags are
+combined into one visible note; model, multi-node and zero-time notes remain separate.
+Neither copied format includes notes. Uniform known node capacity permits an exact
+multi-node split; other layouts remain manual. This is not a submission or an access check.
+See [request copying](../metrics.md#copying-requests-and-reusing-job-shapes)
+for the evidence, rounding and preset rules.
+
+## Queue estimates and fair-share
+
+Only when your own jobs are PENDING for `Priority` or `Resources`, normal collection
+also reads the pending queue in their partitions:
+
+```text
+squeue -h --array --local -P -t PD -p <partitions> --sort=-p,i -o '%Q|%P|%i|%r'
+```
+
+As documented by [squeue](https://slurm.schedmd.com/squeue.html), `-P` lists a job
+separately for each partition; the sort uses scheduler order, including partition
+priority. A single pass counts earlier rows waiting on Priority or Resources.
+Held jobs, dependencies and limit waits are excluded. Earlier equal-priority rows
+become `ties`, separate from `ahead`; the drawer shows `ahead` to `ahead + ties`.
+Reservations, preemption and backfill can change the order. Resources waits say they
+are next in line and waiting for nodes to free up only when both `ahead` and `ties`
+are zero for that partition; otherwise they show the same count or range as Priority
+waits. Neither message predicts a start time or changes Where-to-run rankings.
+
+Other users' job ids exist only in the transient query/parser input: they are never
+stored, logged, returned in the dashboard or included in warnings. Only counts per
+partition are kept on your jobs. The existing own-job query fields are unchanged.
+If a job is missing from any requested partition after a successful query (including
+an empty listing), its queue stays null with `queue_unknown=failed`, without a batch
+warning: jobs can start or change reasons between queries. Unrecognized output or a
+failed step also leaves the queue null, with a generic `queue_unavailable` warning
+only when attempted work fails, without remote error text. The warning creates no
+capability gap or attention item.
+
+`scontrol show config` has a 15-second timeout and its successful settings are cached
+in process for one hour per source and SSH identity. Missing `PriorityType` or
+`PrivateData` prevents a queue estimate. `PriorityWeightFairShare` is optional: a
+missing weight leaves fair-share unknown without preventing queue counts, including
+on `priority/basic` clusters, which do not print priority weights.
+`PrivateData=jobs` suppresses the partition query entirely
+and explains that the cluster hides other users' jobs. The queue query also has a
+15-second timeout. Neither extra query runs when there are no eligible waits.
+
+Fair-share uses the last value on `SharesRaw/Norm/Level/Factor=` in the association
+output already collected for this login, keyed by Account. Conflicting account
+factors remain unknown. A value is shown only for `PriorityType=priority/multifactor`
+and a positive `PriorityWeightFairShare`. Missing factors are null, never invented
+zeroes; a measured zero remains valid. The drawer gives the 0–1 scale and explains
+that recent use lowers the factor. Its sample age is the job's collection time.
+PBS, LSF and Kubernetes queue estimates are deferred.
+
+## Typical waits from accounting
+
+Normal collection already reads the login's own finished allocations with `sacct
+--allocations --user=<username>` and offset-bearing Submit, Start and End fields.
+ComputeDeck now retains usable submit-to-start observations for 30 days, grouped by
+cluster, username, QoS, partition and GPU-count bucket. Where to run and pending-job
+drawers show a 25th–75th percentile range only with at least eight samples, always as
+“typical wait for your jobs, not a prediction”. Slurm and PBS explicitly support
+this through the optional driver class attribute `supports_wait_history = True`.
+LSF, Kubernetes and plugins without that opt-in show an unsupported-history
+explanation. Smaller samples and unreadable accounting are explained separately.
+This does not use other users' queue rows or change ranking.
+
+There is no extra SSH call or expanded lookback: samples accumulate from the existing
+terminal query after upgrading, with its existing outage and retention limitations.
+Jobs lacking an actual start or valid ordered aware timestamps are excluded. A
+nonempty AllocTRES without GPUs gives zero only when the collected nodes' CfgTRES
+confirms GPU tracking, as for live jobs. Without that evidence, missing GPU counts
+stay null and contribute to the login's `unknown_gpu_samples`, not a GPU bucket.
+Empty AllocTRES stays null; unallocated cancellations whose Start equals End remain
+excluded. Missing accounting counts are explained when a bucket has insufficient
+history, rather than always showing zero jobs. Repeated observations of the same
+job/start count once. See
+[wait-history semantics](../metrics.md#typical-wait-from-your-job-history) for buckets,
+percentile interpolation and coverage limitations.
+
+Slurm 记账与实时作业采用相同证据：只有节点 CfgTRES 确认追踪 GPU 时，非空但没有
+GPU 条目的 AllocTRES 才表示零 GPU。否则数量保持未知，计入此登录的
+`unknown_gpu_samples`，不进入 GPU 分组。空 AllocTRES 保持未知，未分配资源且
+Start 等于 End 的取消记录仍排除。匹配分组历史不足时说明记账数量缺失，不再永久显示零作业。

@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
 
+from ..host_identity import host_address
 from ..ssh_config import validate_alias
 from . import ssh
 from .base import (
@@ -573,6 +574,17 @@ def parse_nodes(
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": name,
+            "host_addresses": [
+                address
+                for entry in _list(status.get("addresses"))
+                if entry.get("type") in ("InternalIP", "ExternalIP")
+                and (address := host_address(entry.get("address")))
+            ],
+            "host_names": [
+                entry["address"]
+                for entry in _list(status.get("addresses"))
+                if entry.get("type") == "Hostname" and entry.get("address")
+            ],
             "state": node_state(node, capacity, allocated),
             "gpu_count": capacity,
             "gpu_allocated": allocated,

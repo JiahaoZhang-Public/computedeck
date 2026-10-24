@@ -448,3 +448,21 @@ async def test_invalid_options_never_start_the_cli(monkeypatch: pytest.MonkeyPat
     with pytest.raises(SourceError, match="invalid_option"):
         await aws_ec2.AWSEC2Driver().collect({**SOURCE, "options": {"region": "-x"}})
     assert cli.calls == []
+
+
+@pytest.mark.parametrize(
+    ("state", "value", "expected"),
+    [
+        ("running", "2026-01-01T12:00:00Z", "2026-01-01T12:00:00+00:00"),
+        ("running", "invalid", None),
+        ("running", "2026-01-01T12:00:00", None),
+        ("running", None, None),
+        ("stopped", "2026-01-01T12:00:00Z", None),
+        ("pending", "2026-01-01T12:00:00Z", None),
+    ],
+)
+def test_launch_time_only_describes_current_run(state, value, expected) -> None:
+    row = ec2(State={"Name": state}, LaunchTime=value)
+    instance = aws_ec2.parse_instances(reservations(row), types(), SOURCE)[0]
+    assert instance["started_at"] == expected
+    assert instance["hourly_cost"] is None

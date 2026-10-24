@@ -18,7 +18,9 @@ A provider only says where its API is and turns its own rows into CloudInstance:
 
 import asyncio
 import re
+from string import Formatter
 from typing import Any, ClassVar, Literal
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -81,7 +83,10 @@ class CloudInstance(BaseModel):
     state: State = "unknown"
     gpu_count: int | None = None
     gpu_type: str | None = None
+    # Price of the whole instance per hour, not per GPU.
     hourly_cost: float | None = None
+    # Provider-documented start of the current run, with a timezone.
+    started_at: str | None = None
     currency: str = "USD"
     ssh_host: str | None = None
     ssh_port: int | None = None
@@ -139,6 +144,7 @@ class Api:
 class CloudDriver:
     """Subclass and set the class attributes; implement ``instances`` (and ``account``)."""
 
+    console_url: ClassVar[str | None] = None
     kind: ClassVar[Literal["cluster", "cloud"]] = "cloud"
     name: ClassVar[str]
     label: ClassVar[Text]
@@ -245,7 +251,6 @@ class CloudDriver:
         for row in rows:
             try:
                 record = instance_record(source, row, observed)
-                validate_row(record, complete=True)
             except ValueError:
                 # An id unsafe as an SSH alias, or a value the dashboard cannot use (a
                 # negative price), leaves out that instance, not the whole listing.
@@ -262,7 +267,8 @@ class CloudDriver:
 
 def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -> dict[str, Any]:
     """The instance shape the app stores and shows. Raises ValueError for an unsafe id;
-    an unsafe SSH endpoint is dropped and the instance kept."""
+    an unsafe SSH endpoint is dropped and the instance kept. Ambiguous start times
+    become unknown, and other invalid measurements raise ValueError."""
     instance_id = validate_alias(row.id[:120])
     endpoint: dict[str, Any] = {"host": None, "port": None, "username": None}
     if row.ssh_host and row.ssh_port:
@@ -272,7 +278,7 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
             endpoint = candidate
         except ValueError:
             pass
-    return {
+    record = {
         "id": f"{source['cluster_id']}:{instance_id}",
         "source_id": source["id"],
         "platform": source["name"],
@@ -288,8 +294,31 @@ def instance_record(source: dict[str, Any], row: CloudInstance, observed: str) -
         "ssh_alias": f"computedeck-{source['cluster_id']}-{instance_id}",
         "identity_file": None,
         "hourly_cost": row.hourly_cost,
+        "started_at": row.started_at,
         "currency": row.currency,
         "region": row.region,
         "observed_at": observed,
         "ssh_status": "unverified",
     }
+
+    validate_row(record, complete=True, instance=True)
+    return record
+
+
+def provider_console_url(template: object, instance_id: str, region: str | None) -> str | None:
+    """Expand only encoded id/region placeholders in an HTTPS console link."""
+    if not isinstance(template, str) or not template:
+        return None
+    try:
+        if any(
+            field not in {None, "id", "region"} or spec or conversion
+            for _, field, spec, conversion in Formatter().parse(template)
+        ):
+            return None
+        url = template.format(id=quote(instance_id, safe=""), region=quote(region or "", safe=""))
+        parts = urlsplit(url)
+        if parts.scheme == "https" and parts.hostname and not parts.username and not parts.password:
+            return url
+    except ValueError:
+        pass
+    return None

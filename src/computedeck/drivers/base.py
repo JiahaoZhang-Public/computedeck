@@ -90,10 +90,12 @@ TEXT_FIELDS = (
     "external_id",
     "metrics_scope",
     "observed_at",
+    "gpus_observed_at",
     "array_id",
     "array_index",
     "submitted_at",
     "started_at",
+    "seen_running_since",
     "last_probe_attempt",
 )
 
@@ -118,7 +120,7 @@ def _check_message(value: Any, what: str) -> None:
             raise ValueError(f"Invalid collection message: {what}")
 
 
-def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
+def validate_row(row: dict[str, Any], *, complete: bool = False, instance: bool = False) -> None:
     """Check fields consumed by the dashboard and arithmetic, before storing a row.
 
     Numbers in text fields are stored as text; other kinds of value reject the row.
@@ -134,6 +136,32 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
         if not isinstance(row["partitions"], list):
             raise ValueError("Invalid collection text: partitions")
         row["partitions"] = [_text(item, "partitions") for item in row["partitions"]]
+    # Only rows opting into Slurm queue estimates use these field shapes.
+    if "queue_unknown" in row:
+        if row.get("queue_unknown") not in (None, "private_data", "failed"):
+            raise ValueError("Invalid collection queue_unknown")
+        queue = row.get("queue")
+        if queue is not None:
+            if not isinstance(queue, list):
+                raise ValueError("Invalid collection queue")
+            for position in queue:
+                if (
+                    not isinstance(position, dict)
+                    or not isinstance(position.get("partition"), str)
+                    or not position["partition"]
+                    or any(
+                        isinstance(position.get(key), bool)
+                        or not isinstance(position.get(key), int)
+                        or position[key] < 0
+                        for key in ("ahead", "ties")
+                    )
+                ):
+                    raise ValueError("Invalid collection queue position")
+        factor = row.get("fairshare")
+        if factor is not None and (
+            isinstance(factor, bool) or not isinstance(factor, int | float) or not 0 <= factor <= 1
+        ):
+            raise ValueError("Invalid collection fairshare")
     port = row.get("port")
     if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
         raise ValueError("Invalid collection port")
@@ -148,6 +176,7 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
         "cpu_count",
         "cpu_allocated",
         "gpu_utilization",
+        "gpu_utilization_max",
         "cpu_utilization",
         "memory_utilization",
         "hourly_cost",
@@ -157,39 +186,85 @@ def validate_row(row: dict[str, Any], *, complete: bool = False) -> None:
             number(value) is None or not isinstance(value, int | float) or value < 0
         ):
             raise ValueError(f"Invalid collection measurement: {key}")
-    if row.get("observed_at") is not None:
-        timestamp = datetime.fromisoformat(row["observed_at"])
-        if timestamp.tzinfo is None:
-            raise ValueError("Collection timestamp needs a timezone")
+    for key in ("observed_at", "gpus_observed_at", "started_at", "seen_running_since"):
+        if key == "started_at" and not instance:
+            continue
+        if row.get(key) is not None:
+            try:
+                timestamp = datetime.fromisoformat(row[key])
+                if timestamp.tzinfo is None:
+                    raise ValueError("Collection timestamp needs a timezone")
+            except ValueError:
+                if key != "started_at":
+                    raise
+                # API-1 plugins may supply arbitrary start text. Keep the instance,
+                # but never use an ambiguous time to calculate its running cost.
+                row[key] = None
 
 
-def node_health(state: str) -> Literal["usable", "unavailable", "unknown"]:
-    """Power saving alone is normal; reservations and nonresponsive nodes cannot take work."""
-    state = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
-    if re.search(
-        r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|reserved|unknown|\*",
-        state,
-        re.I,
+def node_health(
+    state: str, *, partitions: list[str] | None = None
+) -> Literal["usable", "unavailable", "on_demand", "unknown"]:
+    """Current capacity. Pass partitions for Slurm; other schedulers need no partition."""
+    # Inspect faults before power flags: DOWN+CLOUD+POWERED_DOWN is still a fault.
+    power = re.search(r"power(?:ed|ing)?_(?:down|up)", state, re.I)
+    base = re.sub(r"power(?:ed|ing)?_(?:down|up)", "", state, flags=re.I)
+    if (
+        partitions == []
+        or re.search(
+            r"down|drain|not_resp|not_ready|offline|unavail|unreach|fail|maint|cordon|inval|"
+            r"reserved|unknown|\*",
+            base,
+            re.I,
+        )
+        or {"future", "error"}.intersection(state.lower().split("+"))
     ):
         return "unavailable"
+    # Work already assigned to a node keeps its allocation, including while booting.
+    if re.search(r"mixed|alloc|completing|busy|job", state, re.I):
+        return "usable"
+    if (power and base.lower().split("+", 1)[0] in {"idle", "free", ""}) or re.search(
+        r"provisioning|sleep", state, re.I
+    ):
+        return "on_demand"
     if re.search(r"idle|mixed|alloc|busy|free|ready|ok|job", state, re.I):
         return "usable"
     return "unknown"
 
 
+def requires_partition(source: dict[str, Any]) -> bool:
+    return source.get("driver") == "slurm"
+
+
+def node_health_fields(node: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """Dashboard classification and its actionable reason, shared with example data."""
+    partitions = node.get("partitions", []) if requires_partition(source) else None
+    return {
+        "health": node_health(node.get("state", ""), partitions=partitions),
+        "health_reason": "no_partition" if partitions == [] else None,
+    }
+
+
 def cluster_state(
-    nodes: list[dict[str, Any]] | None,
+    nodes: list[dict[str, Any]] | None, *, require_partition: bool = False
 ) -> Literal["available", "degraded", "unavailable", "unknown"]:
-    """Availability of the visible inventory, using the same rule as usable capacity."""
+    """Health of the visible inventory; on-demand nodes are healthy but not free now."""
     nodes = [n for n in (nodes or []) if n.get("gpu_count") is None or n["gpu_count"] > 0]
     if not nodes:
         return "unknown"
-    health = [node_health(node.get("state", "")) for node in nodes]
+    health = [
+        node_health(
+            node.get("state", ""),
+            partitions=node.get("partitions", []) if require_partition else None,
+        )
+        for node in nodes
+    ]
     if all(value == "unavailable" for value in health):
         return "unavailable"
     if "unknown" in health:
         return "unknown"
-    return "degraded" if health.count("usable") / len(health) < 0.2 else "available"
+    healthy = health.count("usable") + health.count("on_demand")
+    return "degraded" if healthy / len(health) < 0.2 else "available"
 
 
 class Batch(BaseModel):
@@ -223,7 +298,7 @@ class Batch(BaseModel):
         json.dumps(self.model_dump(), allow_nan=False, ensure_ascii=False).encode("utf-8")
         for rows in (self.jobs, self.nodes, self.instances, self.failures, self.finished):
             for row in rows or []:
-                validate_row(row, complete=True)
+                validate_row(row, complete=True, instance=rows is self.instances)
         for entry in self.qos or []:
             if not isinstance(entry.get("name"), str) or not entry["name"]:
                 raise ValueError("QoS entry needs a nonempty name")

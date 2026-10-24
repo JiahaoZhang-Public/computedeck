@@ -4,9 +4,12 @@ import asyncio
 import math
 import re
 import shlex
+import time
+from collections import Counter
 from datetime import datetime
 from typing import Any, ClassVar, Literal
 
+from ..host_identity import host_address
 from ..ssh_config import validate_alias, validate_username
 from . import ssh
 from .base import (
@@ -20,6 +23,7 @@ from .base import (
     job_time,
     message,
     now,
+    number,
     ssh_alias_field,
     username_field,
 )
@@ -216,6 +220,8 @@ def parse_nodes(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": name,
+            "host_addresses": [address] if (address := host_address(row.get("NodeAddr"))) else [],
+            "host_names": [row["NodeHostName"]] if row.get("NodeHostName") else [],
             "state": row.get("State", "unknown").lower(),
             "gpu_count": capacity,
             "gpu_allocated": allocated,
@@ -319,6 +325,155 @@ def association_qos(output: str, username: str) -> set[str] | None:
     return None
 
 
+def association_fairshare(output: str, username: str) -> dict[str, float | None]:
+    """The login's account factors from the already collected association output."""
+    result: dict[str, float | None] = {}
+    for block in re.split(r"(?m)(?=^[ \t]*ClusterName=)", output):
+        fields = _key_values(block)
+        if fields.get("UserName", "").split("(", 1)[0] != username:
+            continue
+        account = fields.get("Account")
+        if not account:
+            continue
+        match = re.search(r"SharesRaw/Norm/Level/Factor=\S+/\S+/\S+/(\S+)", block)
+        factor = number(match[1]) if match else None
+        if factor is not None and not 0 <= factor <= 1:
+            factor = None
+        # Partition-specific associations must agree before showing one account value.
+        result[account] = factor if account not in result or result[account] == factor else None
+    return result
+
+
+def queue_positions(
+    output: str, jobs: list[dict[str, Any]]
+) -> dict[str, list[dict[str, Any]] | None]:
+    """Read scheduler order once; retain counts and our job ids only.
+
+    Ahead excludes equal-priority rows earlier in the listing; those form the
+    uncertainty range (ties). Held/dependency/limit waits are not in either count.
+    """
+    partitions = {
+        job["id"]: [p.strip() for p in (job.get("partition") or "").split(",") if p.strip()]
+        for job in jobs
+    }
+    own: dict[str, dict[str, dict[str, Any]]] = {job["id"]: {} for job in jobs}
+    totals: Counter[str] = Counter()
+    priorities: Counter[tuple[str, int]] = Counter()
+    cluster = jobs[0]["cluster_id"]
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        fields = [value.strip() for value in line.split("|")]
+        if len(fields) != 4:
+            raise SourceError("unexpected_output", command="squeue")
+        raw_priority, partition, job_id, reason = fields
+        priority = integer(raw_priority)
+        if (
+            priority is None
+            or not partition
+            or "," in partition
+            or not re.fullmatch(r"\d+(?:_\d+)?(?:\+\d+)?", job_id)
+        ):
+            raise SourceError("unexpected_output", command="squeue")
+        if reason not in {"Priority", "Resources"}:
+            continue
+        key = f"{cluster}:{job_id}"
+        if key in own and partition in partitions[key]:
+            ties = priorities[partition, priority]
+            own[key][partition] = {
+                "partition": partition,
+                "ahead": totals[partition] - ties,
+                "ties": ties,
+            }
+        totals[partition] += 1
+        priorities[partition, priority] += 1
+    return {
+        key: [own[key][p] for p in parts] if parts and all(p in own[key] for p in parts) else None
+        for key, parts in partitions.items()
+    }
+
+
+# Successful settings only; changing a source's SSH target or login bypasses its cache.
+_QUEUE_CONFIG: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
+
+
+async def collect_queue(
+    batch: Batch, source_id: str, alias: str, username: str, associations: str
+) -> None:
+    jobs = [
+        job
+        for job in batch.jobs or []
+        if job["state"] == "PENDING" and job["reason"] in {"Priority", "Resources"}
+    ]
+    if not jobs:
+        return
+    for job in jobs:
+        job.update(queue=None, fairshare=None, queue_unknown="failed")
+    options = ["-l", username]
+    key = (source_id, alias, username)
+    cached = _QUEUE_CONFIG.get(key)
+    try:
+        if cached and time.monotonic() - cached[0] < 3600:
+            config = cached[1]
+        else:
+            async with asyncio.timeout(15):
+                output = await ssh.run(alias, "scontrol show config", options)
+            config = dict(
+                re.findall(
+                    r"(?m)^[ \t]*(PriorityType|PriorityWeightFairShare|PrivateData)"
+                    r"[ \t]*=[ \t]*(\S+)[ \t]*$",
+                    output,
+                )
+            )
+            if not {"PriorityType", "PrivateData"} <= config.keys():
+                raise SourceError("unexpected_output", command="scontrol show config")
+            _QUEUE_CONFIG[key] = (time.monotonic(), config)
+        weight = number(config.get("PriorityWeightFairShare"))
+        if config["PriorityType"] == "priority/multifactor" and weight is not None and weight > 0:
+            factors = association_fairshare(associations, username)
+            for job in jobs:
+                job["fairshare"] = factors.get(job["account"])
+        private = config["PrivateData"].lower().split(",")
+        if "jobs" in private or "all" in private:
+            for job in jobs:
+                job["queue_unknown"] = "private_data"
+            return
+        partitions = sorted(
+            {
+                p.strip()
+                for job in jobs
+                for p in (job.get("partition") or "").split(",")
+                if p.strip()
+            }
+        )
+        if not partitions:
+            return
+        command = shlex.join(
+            [
+                "squeue",
+                "-h",
+                "--array",
+                "--local",
+                "-P",
+                "-t",
+                "PD",
+                "-p",
+                ",".join(partitions),
+                "--sort=-p,i",
+                "-o",
+                "%Q|%P|%i|%r",
+            ]
+        )
+        async with asyncio.timeout(15):
+            positions = queue_positions(await ssh.run(alias, command, options), jobs)
+        for job in jobs:
+            job["queue"] = positions[job["id"]]
+            job["queue_unknown"] = None if job["queue"] is not None else "failed"
+    except (RuntimeError, TimeoutError, SourceError):
+        # Remote errors may echo other users' job ids. Never persist their text.
+        batch.warnings.append(message("queue_unavailable"))
+
+
 def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
     """Effective grants from sacctmgr's documented parsable association columns."""
     result: set[str] = set()
@@ -343,7 +498,7 @@ def database_qos(output: str, username: str, cluster: str) -> set[str] | None:
 
 
 def parse_failures(
-    output: str, source: dict[str, Any], *, terminal: bool = False
+    output: str, source: dict[str, Any], *, terminal: bool = False, tracked: bool = False
 ) -> list[dict[str, Any]]:
     """sacct allocations in a failure state. Only terminal accounting records count."""
     fields = _FINISHED_FIELDS if terminal else _HISTORY_FIELDS
@@ -381,7 +536,9 @@ def parse_failures(
             "partition": row["Partition"],
             "qos": row["QOS"],
             "state": state,
-            "gpu_count": gpu_count(row["AllocTRES"]) if "gpu" in row["AllocTRES"] else None,
+            "gpu_count": gpu_count(row["AllocTRES"])
+            if tracked or "gpu" in row["AllocTRES"]
+            else None,
             "gpu_type": gpu_type(row["AllocTRES"]),
             "cpu_count": integer(row["NCPUS"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
@@ -414,6 +571,7 @@ def _unavailable(code: str, error: BaseException) -> dict[str, Any]:
 
 
 class SlurmDriver:
+    supports_wait_history: ClassVar[bool] = True
     name: ClassVar[str] = "slurm"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cluster"
     info: ClassVar[DriverInfo] = DriverInfo(
@@ -559,6 +717,7 @@ class SlurmDriver:
             grants = association_qos(associations, username)
         except (RuntimeError, TimeoutError):
             pass
+        await collect_queue(batch, source["id"], alias, username, associations)
         if grants is None:
             # A database can cover multiple clusters. The controller's cluster name,
             # not the display name or SSH alias, scopes the optional database query.
@@ -654,11 +813,12 @@ class SlurmDriver:
             failures, marker, finished = output.partition(HISTORY_MARKER)
             if not marker:
                 raise SourceError("unexpected_output", command="sacct")
-            batch.failures = parse_failures(failures, source)
-            batch.finished = parse_failures(finished, source, terminal=True)
+            tracked = gpus_tracked(node_output)
+            batch.failures = parse_failures(failures, source, tracked=tracked)
+            batch.finished = parse_failures(finished, source, terminal=True, tracked=tracked)
             batch.capabilities.append("history")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("history_unavailable", error))
         batch.qos = list(qos.values())
-        batch.cluster_state = cluster_state(batch.nodes)
+        batch.cluster_state = cluster_state(batch.nodes, require_partition=True)
         return batch

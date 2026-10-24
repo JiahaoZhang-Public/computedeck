@@ -119,6 +119,8 @@ def parse_instances(rows: list[Any], source: dict[str, Any]) -> list[dict[str, A
             # Unique per source, so two accounts that see one instance do not collide.
             "ssh_alias": f"computedeck-{source['cluster_id']}-{instance_id}",
             "identity_file": None,
+            # start_date is not confirmed to reset on restart.
+            "started_at": None,
             # Total price per hour, the CLI's $/hr column.
             "hourly_cost": number(row.get("dph_total")),
             "currency": "USD",
@@ -157,6 +159,7 @@ async def _page(client: httpx.AsyncClient, token: str, params: dict[str, str]) -
 
 
 class VastAIDriver:
+    console_url: ClassVar[str | None] = "https://cloud.vast.ai/instances"
     name: ClassVar[str] = "vastai"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cloud"
     info: ClassVar[DriverInfo] = DriverInfo(

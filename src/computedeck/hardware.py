@@ -2,7 +2,7 @@
 
 The snapshot runs the SSH machine driver's read-only probe and reads it the same way, so a
 machine added by hand and an SSH machine source agree on what "GPUs in use" means: GPUs with
-compute processes.
+visible compute processes or significant GPU memory use.
 """
 
 import asyncio
@@ -12,15 +12,19 @@ from typing import Any
 from .drivers import ssh, ssh_host
 from .drivers.base import now
 from .errors import SourceError
+from .host_identity import ssh_endpoint
 from .ssh_config import validate_alias, validate_endpoint
 
 
 def parse_probe(output: str) -> dict[str, Any]:
-    readings, _, warnings = ssh_host.measure(ssh_host.read_output(output))
+    snapshot = ssh_host.read_output(output)
+    readings, _, warnings = ssh_host.measure(snapshot)
     # Per-GPU processes and their users stay on the machine; the row keeps the counts.
     readings.pop("gpus")
     return {
         **readings,
+        "ssh_endpoint": ssh_endpoint(snapshot.get("ssh_connection")),
+        "host_name": snapshot.get("hostname"),
         "metrics_scope": "host_visible",
         "observed_at": now(),
         "ssh_status": "reachable",

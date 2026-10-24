@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { ArrowDownToLine, ArrowRight } from 'lucide-react';
-import { locales, t } from '../i18n';
-import { isLocale } from '../i18n';
+import { api } from '../api';
+import { errorText, isLocale, locales, t } from '../i18n';
 import { relativeTime } from '../domain';
 import { routeHash } from '../routes';
 import { Panel, Status } from '../ui';
@@ -28,6 +29,10 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
           const Settings = plugin.settings!;
           return <Settings key={plugin.id} {...ctx.plugin} />;
         })}
+        <LowUseSettings
+          key={`${data.low_use_settings?.threshold}:${data.low_use_settings?.window_minutes}`}
+          ctx={ctx}
+        />
         <Panel title={t('settings.language')}>
           <div className="setting-row">
             <p>{t('settings.languageHint')}</p>
@@ -126,5 +131,75 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
         )}
       </Panel>
     </div>
+  );
+}
+
+function LowUseSettings({ ctx }: { ctx: Ctx }) {
+  const [threshold, setThreshold] = useState(ctx.data.low_use_settings?.threshold ?? 10);
+  const [windowMinutes, setWindowMinutes] = useState(
+    ctx.data.low_use_settings?.window_minutes ?? 60,
+  );
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  return (
+    <Panel title={t('lowUse.title')}>
+      <form
+        className="low-use-settings"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setSaving(true);
+          setMessage('');
+          try {
+            await api(
+              '/settings',
+              { low_use_threshold: threshold, low_use_window_minutes: windowMinutes },
+              'PUT',
+            );
+            ctx.notify(t('lowUse.saved'));
+            await ctx.reload();
+          } catch (error) {
+            setMessage(errorText(error, 'lowUse.saveError'));
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <p className="panel-note">{t('lowUse.settingsHint')}</p>
+        <div className="setting-row">
+          <label>
+            {t('lowUse.threshold')}
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={50}
+              step={1}
+              required
+              disabled={ctx.demo || saving}
+              value={threshold}
+              onChange={(event) => setThreshold(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            {t('lowUse.window')}
+            <input
+              className="input"
+              type="number"
+              min={30}
+              max={360}
+              step={1}
+              required
+              disabled={ctx.demo || saving}
+              value={windowMinutes}
+              onChange={(event) => setWindowMinutes(Number(event.target.value))}
+            />
+          </label>
+          <button className="button" disabled={ctx.demo || ctx.busy || saving}>
+            {t('common.save')}
+          </button>
+        </div>
+        {message && <p role="alert">{message}</p>}
+      </form>
+    </Panel>
   );
 }

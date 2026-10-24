@@ -29,9 +29,9 @@ def test_dashboard_does_not_validate_collector_lifecycle_rows(
     validated = []
     validate = store_module.validate_row
 
-    def track(row: dict[str, Any]) -> None:
+    def track(row: dict[str, Any], **kwargs: Any) -> None:
         validated.append(row)
-        validate(row)
+        validate(row, **kwargs)
 
     monkeypatch.setattr(store_module, "validate_row", track)
     assert store.dashboard()["jobs"] == []
@@ -44,7 +44,12 @@ def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None
     path = tmp_path / "data" / "computedeck.sqlite"
     store = Store(path)
     assert store.sources() == []
-    assert store.settings() == {"language": "en", "server_name": None}
+    assert store.settings() == {
+        "language": "en",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     data = store.dashboard()
     assert data["mode"] == "live"
     assert data["sources"] == data["jobs"] == data["nodes"] == data["instances"] == []
@@ -60,13 +65,23 @@ def test_fresh_store_has_no_sources_and_default_settings(tmp_path: Path) -> None
 
 def test_settings_persist_and_reject_unknown_keys(tmp_path: Path) -> None:
     store = Store(tmp_path / "computedeck.sqlite")
-    assert store.save_settings({"language": "zh-CN"}) == {"language": "zh-CN", "server_name": None}
+    assert store.save_settings({"language": "zh-CN"}) == {
+        "language": "zh-CN",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     store.save_settings({"server_name": "Lab server"})
     with pytest.raises(ValueError, match="Unknown setting"):
         store.save_settings({"theme": "dark"})
     store.db.close()
     reopened = Store(tmp_path / "computedeck.sqlite")
-    assert reopened.settings() == {"language": "zh-CN", "server_name": "Lab server"}
+    assert reopened.settings() == {
+        "language": "zh-CN",
+        "server_name": "Lab server",
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
     reopened.db.close()
 
 
@@ -508,10 +523,23 @@ def test_reopening_bad_snapshot_preserves_good_rows(tmp_path: Path) -> None:
         )
     store.db.close()
     reopened = Store(path)
-    assert reopened.dashboard()["instances"] == [good]
+    assert reopened.dashboard()["instances"] == [
+        {
+            **good,
+            "console_url": None,
+            "low_use": {
+                "state": "unknown",
+                "since": None,
+                "covered_minutes": 0,
+                "samples": 0,
+                "origin": None,
+                "reason": "no_reading",
+            },
+        }
+    ]
     reopened.record_history()
     reopened.save_snapshot("source", {"instances": [good]})
-    assert reopened.snapshot("source") == {"instances": [good]}
+    assert reopened.snapshot("source") == {"instances": [{**good, "seen_running_since": None}]}
     reopened.db.close()
 
 
@@ -584,7 +612,12 @@ def test_an_unreadable_row_is_skipped_logged_and_counted(
         assert [source["id"] for source in dashboard["sources"]] == [good["id"]]
         assert [row["id"] for row in dashboard["instances"]] == ["manual:lab-box"]
         assert [node["id"] for node in store.nodes()] == ["gateway"]
-        assert store.settings() == {"language": "en", "server_name": None}
+        assert store.settings() == {
+            "language": "en",
+            "server_name": None,
+            "low_use_threshold": 10,
+            "low_use_window_minutes": 60,
+        }
         assert store.plugin_settings("chat") == {}
         assert [event["key"] for event in store.recent_events()] == ["ok"]
         store.history(24)
@@ -720,3 +753,84 @@ def test_unreadable_attention_state_is_skipped(store: Store) -> None:
     )
     assert store.attention_state() == {}
     assert store.unreadable_rows()["attention_state"] == 2
+
+
+def test_probe_preserves_per_gpu_rows_and_sample_time(store: Store) -> None:
+    from computedeck.hardware import parse_probe
+
+    sampled = "2026-01-01T00:00:00+00:00"
+    endpoint = {"host": "gpu-box", "port": None, "username": "alice"}
+    gpu = {"index": 0, "in_use": False, "processes": []}
+    store.save_snapshot(
+        "gpu-box",
+        {
+            "instances": [
+                {
+                    "id": "gpu-box:a",
+                    "source_id": "gpu-box",
+                    **endpoint,
+                    "gpus": [gpu],
+                    "gpus_observed_at": sampled,
+                    "observed_at": sampled,
+                }
+            ]
+        },
+    )
+    readings = parse_probe('{"cpu_utilization": 20}')
+    assert "gpus" not in readings and "gpus_observed_at" not in readings
+    store.update_cloud_metrics("gpu-box:a", endpoint, readings)
+    row = next(row for row in store.dashboard()["instances"] if row["id"] == "gpu-box:a")
+    assert row["gpus"] == [gpu]
+    assert row["gpus_observed_at"] == sampled
+    assert row["observed_at"] != sampled
+
+
+def test_seen_running_since_tracks_contiguous_held_observations(store, add_source) -> None:
+    source = add_source(driver="runpod", interval_minutes=10)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def save(minute, state="reported_running", **extra):
+        at = (base + timedelta(minutes=minute)).isoformat()
+        row = {"id": "pod", "source_id": source["id"], "state": state, "observed_at": at, **extra}
+        store.save_snapshot(source["id"], {"instances": [row]})
+        return store.snapshot(source["id"])["instances"][0]["seen_running_since"]
+
+    start = save(0)
+    assert start == base.isoformat()
+    assert save(10) == start
+    assert save(30, "running") == start  # Exactly two intervals still carries.
+    after_gap = save(51)
+    assert after_gap == (base + timedelta(minutes=51)).isoformat()
+    assert save(55, "stopped") is None
+    assert save(60) == (base + timedelta(minutes=60)).isoformat()
+    assert save(61, "desired_running") is None
+    assert save(62) == (base + timedelta(minutes=62)).isoformat()
+    store.save_snapshot(source["id"], {"nodes": []})
+    assert save(63) == (base + timedelta(minutes=62)).isoformat()
+    store.save_snapshot(source["id"], {"instances": []})
+    assert store.snapshot(source["id"])["instances"][0]["seen_running_since"] is None
+    assert save(64) == (base + timedelta(minutes=64)).isoformat()
+    # A provider-reported restart is evidence even within the polling interval.
+    assert (
+        save(65, started_at=(base + timedelta(minutes=64)).isoformat())
+        == (base + timedelta(minutes=65)).isoformat()
+    )
+    # Missing observation times never invent a start.
+    assert save(66, observed_at=None) is None
+
+
+@pytest.mark.parametrize("started", ["2026-10-22T10:00:00", "2026-10-22 10:00 UTC"])
+def test_snapshot_preserves_legacy_start_text_by_inventory(store, add_source, started) -> None:
+    source = add_source()
+    row = {
+        "id": "legacy",
+        "source_id": source["id"],
+        "state": "running",
+        "platform": "batch",
+        "started_at": started,
+    }
+    store.save_snapshot(source["id"], {"jobs": [dict(row)], "instances": [dict(row)]})
+    snapshot = store.snapshot(source["id"])
+    assert snapshot["jobs"][0]["started_at"] == started
+    assert snapshot["instances"][0]["started_at"] is None
+    assert not store.unreadable

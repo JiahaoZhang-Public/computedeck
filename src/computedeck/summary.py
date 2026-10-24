@@ -3,8 +3,9 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .drivers.base import node_health
+from .drivers.base import node_health, requires_partition
 from .drivers.cloud import instance_lifecycle
+from .host_identity import host_address, short_hostname
 
 RUNNING = {"RUNNING", "R", "CONFIGURING", "CF", "COMPLETING", "CG"}
 PENDING = {"PENDING", "PD", "Q", "PEND", "QUEUED"}
@@ -12,8 +13,10 @@ PROBE_INTERVAL = timedelta(minutes=10)
 
 
 def gpu_allocation(row: dict[str, Any]) -> int | None:
-    """SSH hosts count GPUs with compute processes; cloud instances count allocations.
+    """SSH hosts count GPUs with visible processes or significant memory use.
 
+    Unreadable processes, or missing memory without visible processes, leave use unknown.
+    Cloud instances count allocations.
     A machine added by hand counts only what an SSH check measured, never the GPUs typed in.
     """
     return (
@@ -111,7 +114,9 @@ def _source_reason(source: dict[str, Any]) -> str:
     return "summary_capability_missing"
 
 
-def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_nodes(
+    nodes: list[dict[str, Any]], *, partition_sources: set[str] | None = None
+) -> dict[str, Any]:
     """Current enabled observations only; callers filter before deduplicating."""
     unique: dict[tuple[str, str], dict[str, Any]] = {}
     for node in nodes:
@@ -120,9 +125,20 @@ def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             unique[key].get("observed_at") or ""
         ):
             unique[key] = node
-    rows = list(unique.values())
-    usable = [n for n in rows if node_health(n.get("state", "")) == "usable"]
-    unavailable = [n for n in rows if node_health(n.get("state", "")) == "unavailable"]
+    rows = [
+        {
+            **n,
+            "health": node_health(
+                n.get("state", ""),
+                partitions=n.get("partitions", [])
+                if partition_sources and n.get("source_id") in partition_sources
+                else None,
+            ),
+        }
+        for n in unique.values()
+    ]
+    usable = [n for n in rows if n["health"] == "usable"]
+    unavailable = [n for n in rows if n["health"] == "unavailable"]
     capacity = _sum([n.get("gpu_count") for n in rows]) if rows else None
     usable_gpus = _sum([n.get("gpu_count") for n in usable]) if rows else None
     known_usable = (
@@ -143,21 +159,22 @@ def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         if rows
         else None
     )
-    if any(node_health(n.get("state", "")) == "unknown" for n in rows):
+    if any(n["health"] == "unknown" for n in rows):
         usable_gpus = allocated = free = None
     return {
         "nodes": len(rows),
         "capacity": capacity,
         "usable": usable_gpus,
         "known_usable": known_usable,
+        "on_demand": _sum([n.get("gpu_count") for n in rows if n["health"] == "on_demand"])
+        if rows
+        else None,
         "unavailable": _sum([n.get("gpu_count") for n in unavailable]) if rows else None,
         "allocated": allocated,
         "unallocated": free,
-        "abnormal": len(unavailable),
+        "abnormal": sum(n["health"] == "unavailable" for n in rows),
         "unknown": sum(
-            node_health(n.get("state", "")) == "unknown"
-            or n.get("gpu_count") is None
-            or n.get("gpu_allocated") is None
+            n["health"] == "unknown" or n.get("gpu_count") is None or n.get("gpu_allocated") is None
             for n in rows
         ),
         "observed_at": min((n["observed_at"] for n in rows if n.get("observed_at")), default=None),
@@ -182,13 +199,64 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     all_instances = _unique(
         [i for i in data["instances"] if i.get("manual") or i["source_id"] not in disabled]
     )
+    rates: dict[str, float] = {}
+    priced = 0
+    spend_sources = [s for s in sources if s["kind"] == "cloud" and s.get("driver") != "ssh"]
+    unpriced = [
+        _missing(s, "source", _source_reason(s)) for s in spend_sources if not fresh(s, "instances")
+    ]
+    # Choose among current observations before deduplicating twin cloud logins.
+    spend_instances = _unique(
+        [
+            i
+            for i in data["instances"]
+            if (i.get("manual") and i.get("hourly_cost") is not None)
+            or (
+                not i.get("manual")
+                and by_id.get(i["source_id"], {}).get("driver") != "ssh"
+                and i["source_id"] not in disabled
+                and (i["source_id"] not in by_id or fresh(by_id[i["source_id"]], "instances"))
+            )
+        ]
+    )
+    for item in spend_instances:
+        source = by_id.get(item["source_id"])
+        state = manual_state(item) if item.get("manual") else item.get("state")
+        lifecycle = instance_lifecycle(state)
+        if lifecycle == "not_held":
+            continue
+        if not item.get("manual") and source is None:
+            reason = "summary_not_collected"
+        elif lifecycle == "unknown":
+            reason = "summary_lifecycle_unknown"
+        elif item.get("hourly_cost") is None or not item.get("currency"):
+            reason = "summary_price_missing"
+        else:
+            currency = item["currency"]
+            rates[currency] = rates.get(currency, 0) + item["hourly_cost"]
+            priced += 1
+            continue
+        unpriced.append(_missing(item, "instance", reason))
     shortcuts = [i for i in all_instances if i.get("manual") and not i.get("monitoring")]
-    instances = [i for i in all_instances if not i.get("manual") or i.get("monitoring")]
+    instances = [
+        i
+        for i in all_instances
+        if not i.get("same_node") and (not i.get("manual") or i.get("monitoring"))
+    ]
+    linked_sources = {
+        s["id"]
+        for s in sources
+        if s.get("driver") == "ssh"
+        and (rows := [i for i in all_instances if i["source_id"] == s["id"]])
+        and all(i.get("same_node") for i in rows)
+    }
     fresh_ids = {
         s["id"] for s in sources if fresh(s, "jobs" if s["kind"] == "cluster" else "instances")
     }
     unmeasured = [
-        _missing(s, "source", _source_reason(s)) for s in sources if s["id"] not in fresh_ids
+        _missing(s, "source", _source_reason(s))
+        for s in sources
+        if s["id"] not in fresh_ids and s["id"] not in linked_sources
     ]
     queued_missing = [_missing(s, "source", _source_reason(s)) for s in missing_jobs]
     for rows, missing in ((running, unmeasured), (pending, queued_missing)):
@@ -229,7 +297,11 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
             else:
                 reason = "summary_not_collected"
         unmeasured.append(_missing(item, "instance", reason))
-    known_allocated = sum(counted) if fresh_ids or counted else None
+    known_allocated = (
+        sum(counted)
+        if fresh_ids or counted or any(i.get("same_node") for i in all_instances)
+        else None
+    )
     jobs_known = any(s["kind"] == "cluster" and fresh(s, "jobs") for s in sources)
     jobs_complete = jobs_known and not missing_jobs
     requested = _sum([j.get("gpu_count") for j in pending]) if jobs_complete else None
@@ -258,6 +330,12 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     # Preserve history's source count for provider rows; manual machines have no source.
     instance_sources = {i["id"]: i["id"] if i.get("manual") else i["source_id"] for i in instances}
     return {
+        "spend": {
+            "applies": bool(spend_sources or spend_instances),
+            "rates": rates,
+            "priced": priced,
+            "unpriced": unpriced,
+        },
         "allocated": None if unmeasured else known_allocated,
         "known_allocated": known_allocated,
         "unknown_allocation_sources": len(
@@ -292,7 +370,8 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
                 n
                 for n in data["nodes"]
                 if n["source_id"] in by_id and fresh(by_id[n["source_id"]], "nodes")
-            ]
+            ],
+            partition_sources={s["id"] for s in sources if requires_partition(s)},
         ),
         "jobs": {
             **(
@@ -316,8 +395,71 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     }
 
 
+def link_machine_nodes(data: dict[str, Any]) -> None:
+    """Annotate machines before scoping, so all summaries use the same exclusion.
+
+    Retained nodes still establish identity during an outage; the scheduler's existing
+    freshness rules then keep its allocation unknown rather than substituting host use.
+    """
+    sources = {s["id"]: s for s in data["sources"]}
+    nodes: dict[str, dict[str, Any]] = {}
+    for node in data["nodes"]:
+        source = sources.get(node["source_id"], {})
+        if (
+            source.get("kind") != "cluster"
+            or not source.get("enabled")
+            or not source.get("last_success")
+        ):
+            continue
+        previous = nodes.get(node["id"])
+        if previous is None or (node.get("observed_at") or "") > (
+            previous.get("observed_at") or ""
+        ):
+            nodes[node["id"]] = node
+    addresses: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for node in nodes.values():
+        source = sources[node["source_id"]]
+        values = node.get("host_addresses")
+        for value in values if isinstance(values, list) else []:
+            address = host_address(value)
+            if address:
+                addresses.setdefault((source.get("node") or "", address), {})[node["id"]] = node
+    for item in data["instances"]:
+        item.pop("same_node", None)
+        source = sources.get(item["source_id"], {})
+        if not item.get("manual") and (
+            source.get("driver") != "ssh" or not source.get("last_success")
+        ):
+            continue
+        endpoint = item.get("ssh_endpoint")
+        if not isinstance(endpoint, dict) or endpoint.get("port") != 22:
+            continue
+        address = host_address(endpoint.get("host"))
+        if not address:
+            continue
+        matches = addresses.get((source.get("node") or "", address), {})
+        if len(matches) != 1:
+            continue
+        node = next(iter(matches.values()))
+        # Separate networks can reuse an IP even on the same collection computer.
+        # Require an independently observed hostname as well, never a name alone.
+        hostname = short_hostname(item.get("host_name"))
+        values = node.get("host_names")
+        names = [node.get("name"), *(values if isinstance(values, list) else [])]
+        if not hostname or not any(hostname == short_hostname(name) for name in names):
+            continue
+        cluster = sources[node["source_id"]]
+        item["same_node"] = {
+            "id": node["id"],
+            "name": node.get("name") or node["id"],
+            "cluster_id": cluster["cluster_id"],
+            "cluster_name": cluster["name"],
+        }
+
+
 def summarize(data: dict[str, Any]) -> dict[str, Any]:
     """One set of figures for the fleet, each group and each configured login."""
+    link_machine_nodes(data)
     source_groups = {s["id"]: s["cluster_id"] for s in data["sources"]}
 
     def instance_group(item: dict[str, Any]) -> str:

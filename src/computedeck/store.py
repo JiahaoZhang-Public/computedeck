@@ -12,16 +12,25 @@ from pathlib import Path
 from typing import Any
 
 from . import drivers, nodes
-from .drivers.base import job_time, node_health, validate_row
-from .drivers.cloud import instance_lifecycle
+from .drivers.base import job_time, node_health_fields, validate_row
+from .drivers.cloud import instance_lifecycle, provider_console_url
 from .errors import SourceError, checked
+from .history import HOLD_SECONDS, group_history, rollup_history
+from .low_use import low_use
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
 from .summary import gpu_allocation as gpu_allocation
 from .summary import manual_state as manual_state
+from .wait_history import summarize_waits, supports_wait_history, wait_sample
 
 SCHEMA_VERSION = 2
-DEFAULT_SETTINGS: dict[str, Any] = {"language": "en", "server_name": None}
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "language": "en",
+    "server_name": None,
+    "low_use_threshold": 10,
+    "low_use_window_minutes": 60,
+}
+LOW_USE_SETTINGS = {"low_use_threshold": (1, 50), "low_use_window_minutes": (30, 360)}
 # What an SSH check of a provider-listed instance leaves for the next listing to keep.
 PROBE_RESULT = ("ssh_status", "ssh_error", "last_probe_attempt")
 logger = logging.getLogger("computedeck")
@@ -111,7 +120,7 @@ def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, A
             try:
                 if not isinstance(row, dict):
                     raise ValueError("Invalid collection row")
-                validate_row(row)
+                validate_row(row, instance=key == "instances")
             except (ValueError, TypeError, UnicodeError):
                 invalid = True
                 logging.getLogger("computedeck").warning("Skipped malformed stored %s row", key)
@@ -147,6 +156,16 @@ class Store:
             CREATE TABLE IF NOT EXISTS snapshots (source_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS history (at TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS job_wait_samples (
+                source_id TEXT NOT NULL, job_id TEXT NOT NULL, started_at TEXT NOT NULL,
+                ended_at TEXT NOT NULL, data TEXT NOT NULL,
+                PRIMARY KEY (source_id, job_id, started_at)
+            );
+            CREATE TABLE IF NOT EXISTS instance_samples (
+                instance_id TEXT NOT NULL, at TEXT NOT NULL,
+                gpu_util REAL NOT NULL, gpu_util_max REAL, origin TEXT NOT NULL,
+                PRIMARY KEY (instance_id, at)
+            );
             CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -262,6 +281,11 @@ class Store:
                 if setting is not None:
                     self._skip("meta", key, "unsupported value")
                 continue
+            if name in LOW_USE_SETTINGS:
+                minimum, maximum = LOW_USE_SETTINGS[name]
+                if type(setting) is not int or not minimum <= setting <= maximum:
+                    self._skip("meta", key, "unsupported value")
+                    continue
             result[name] = setting
         return result
 
@@ -270,6 +294,10 @@ class Store:
             for key, value in changes.items():
                 if key not in DEFAULT_SETTINGS:
                     raise ValueError(f"Unknown setting: {key}")
+                if key in LOW_USE_SETTINGS:
+                    minimum, maximum = LOW_USE_SETTINGS[key]
+                    if type(value) is not int or not minimum <= value <= maximum:
+                        raise ValueError(f"Invalid setting: {key}")
                 self.db.execute(
                     "INSERT OR REPLACE INTO meta VALUES (?, ?)",
                     (f"setting:{key}", json.dumps(value)),
@@ -737,7 +765,13 @@ class Store:
 
     def save_source(self, source: dict[str, Any]) -> None:
         stored = {key: value for key, value in source.items() if key not in {"kind", "stale"}}
+        previous = self.source(source["id"])
         with self.db:
+            if previous and any(
+                (previous.get(key) or None) != (source.get(key) or None)
+                for key in ("driver", "cluster_id", "username", "ssh_alias", "options", "node")
+            ):
+                self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source["id"],))
             self.db.execute(
                 "INSERT INTO sources VALUES (?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -749,41 +783,143 @@ class Store:
         with self.db:
             deleted = self.db.execute("DELETE FROM sources WHERE id=?", (source_id,)).rowcount
             self.db.execute("DELETE FROM snapshots WHERE source_id=?", (source_id,))
+            self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source_id,))
         self._repaired("sources", source_id)
         self._repaired("snapshots", source_id)
         return deleted == 1
 
+    def record_job_waits(self, source: dict[str, Any], jobs: list[dict[str, Any]]) -> None:
+        """Retain only usable own-accounting times from normal finished-job collection."""
+        if not supports_wait_history(source):
+            return
+        current = datetime.now(UTC)
+        cutoff = (current - timedelta(days=30)).isoformat()
+        with self.db:
+            for job in jobs:
+                sample = wait_sample(job, source)
+                if sample is None or not cutoff <= sample["ended_at"] <= current.isoformat():
+                    continue
+                self.db.execute(
+                    "INSERT OR REPLACE INTO job_wait_samples VALUES (?, ?, ?, ?, ?)",
+                    (
+                        source["id"],
+                        sample["id"],
+                        sample["started_at"],
+                        sample["ended_at"],
+                        json.dumps(sample),
+                    ),
+                )
+            self.db.execute("DELETE FROM job_wait_samples WHERE ended_at < ?", (cutoff,))
+
     def save_snapshot(self, source_id: str, snapshot: dict[str, Any]) -> None:
-        for rows in snapshot.values():
+        for key, rows in snapshot.items():
             if not isinstance(rows, list):
                 raise ValueError("Snapshot inventory must be a list")
             for row in rows:
                 if not isinstance(row, dict):
                     raise ValueError("Invalid collection row")
-                validate_row(row)
+                validate_row(row, instance=key == "instances")
         old = self.db.execute(
             "SELECT data FROM snapshots WHERE source_id = ?", (source_id,)
         ).fetchone()
         merged = _read_snapshot(old[0])[0] if old else {}
-        if "instances" in snapshot and merged.get("instances"):
-            previous = {row["id"]: row for row in merged["instances"]}
+        if "instances" in snapshot:
+            previous = {row["id"]: row for row in merged.get("instances", [])}
             listed = [_keep_probe(row, previous.get(row["id"])) for row in snapshot["instances"]]
+            source = self.source(source_id)
+            interval = timedelta(minutes=2 * source["interval_minutes"]) if source else None
+            listed = [dict(row) for row in listed]
+            for row in listed:
+                row["seen_running_since"] = None
+                if instance_lifecycle(row.get("state")) != "held":
+                    continue
+                at = timestamp(row.get("observed_at"))
+                row["seen_running_since"] = at
+                old_row = previous.get(row["id"], {})
+                old_at = timestamp(old_row.get("observed_at"))
+                if (
+                    at
+                    and old_at
+                    and interval is not None
+                    and instance_lifecycle(old_row.get("state")) == "held"
+                    and timedelta(0)
+                    <= datetime.fromisoformat(at) - datetime.fromisoformat(old_at)
+                    <= interval
+                    and row.get("started_at") == old_row.get("started_at")
+                ):
+                    row["seen_running_since"] = timestamp(old_row.get("seen_running_since")) or at
             # Keep an unexplained disappearance for one successful listing. A second
             # complete listing confirms absence; partial failures never reach here.
             seen = {row["id"] for row in listed}
             missing = [
-                {**row, "state": "missing"}
-                for row in merged["instances"]
+                {**row, "state": "missing", "seen_running_since": None}
+                for row in merged.get("instances", [])
                 if row["id"] not in seen
                 and row.get("state") not in {"missing", "terminated", "deleted"}
             ]
             snapshot = {**snapshot, "instances": [*listed, *missing]}
         merged.update(snapshot)
         with self.db:
+            if "instances" in snapshot:
+                for row in snapshot["instances"]:
+                    before = previous.get(row["id"], {})
+                    if any(
+                        row.get(key) != before.get(key)
+                        for key in ("state", "started_at", "host", "port", "username")
+                    ):
+                        self.db.execute(
+                            "DELETE FROM instance_samples WHERE instance_id=?", (row["id"],)
+                        )
+                    if source and source["driver"] in {"vastai", "ssh"} and row["id"] in seen:
+                        self._record_instance_sample(
+                            row,
+                            row,
+                            "source" if source["driver"] == "ssh" else "provider",
+                            row.get("observed_at"),
+                        )
             self.db.execute(
                 "INSERT OR REPLACE INTO snapshots VALUES (?, ?)", (source_id, json.dumps(merged))
             )
         self._repaired("snapshots", source_id)
+
+    def _record_instance_sample(
+        self, instance: dict[str, Any], reading: dict[str, Any], origin: str, at: str | None
+    ) -> None:
+        utilization = reading.get("gpu_utilization")
+        maximum = reading.get("gpu_utilization_max")
+        eligible = (
+            instance_lifecycle(instance.get("state")) == "held" and instance.get("gpu_count") != 0
+        )
+        complete = origin == "provider" or (
+            maximum is not None
+            and reading.get("gpu_count") is not None
+            and reading.get("gpu_observed_count") == reading["gpu_count"]
+            and (instance.get("gpu_count") is None or reading["gpu_count"] >= instance["gpu_count"])
+        )
+        valid_util = (
+            isinstance(utilization, int | float)
+            and not isinstance(utilization, bool)
+            and 0 <= utilization <= 100
+        )
+        valid_max = maximum is None or (
+            isinstance(maximum, int | float)
+            and not isinstance(maximum, bool)
+            and 0 <= maximum <= 100
+        )
+        if not eligible or not complete or not valid_util or not valid_max or not timestamp(at):
+            # An actual check without complete readings breaks the observation window.
+            self.db.execute("DELETE FROM instance_samples WHERE instance_id=?", (instance["id"],))
+            return
+        self.db.execute(
+            "INSERT OR REPLACE INTO instance_samples VALUES (?, ?, ?, ?, ?)",
+            (instance["id"], at, utilization, maximum, origin),
+        )
+
+    def record_instance_sample(
+        self, instance: dict[str, Any], reading: dict[str, Any], at: str
+    ) -> None:
+        with self.db:
+            self._record_instance_sample(instance, reading, "probe", at)
 
     def manual_instances(self) -> list[dict[str, Any]]:
         result = []
@@ -811,7 +947,7 @@ class Store:
                     ):
                         updated = {**row, **updates}
                         try:
-                            validate_row(updated)
+                            validate_row(updated, instance=True)
                         except (ValueError, TypeError, UnicodeError) as error:
                             # Dropped for this instance: the source's listing stays readable.
                             logger.warning("Probe result for %s not saved: %s", instance_id, error)
@@ -825,7 +961,22 @@ class Store:
                     )
 
     def save_instance(self, instance: dict[str, Any]) -> None:
+        old = next((row for row in self.manual_instances() if row["id"] == instance["id"]), {})
         with self.db:
+            if any(
+                old.get(key) != instance.get(key)
+                for key in (
+                    "host",
+                    "port",
+                    "username",
+                    "identity_file",
+                    "existing_alias",
+                    "monitoring",
+                )
+            ):
+                self.db.execute(
+                    "DELETE FROM instance_samples WHERE instance_id=?", (instance["id"],)
+                )
             self.db.execute(
                 "INSERT OR REPLACE INTO instances VALUES (?, ?)",
                 (instance["id"], json.dumps(instance)),
@@ -906,11 +1057,58 @@ class Store:
         ]
         instances.update({item["id"]: item for item in manual})
         observations["instances"].extend(manual)
+        settings = self.settings()
+        current = datetime.now(UTC)
+        samples: dict[str, list[dict[str, Any]]] = {}
+        for iid, at, util, maximum, origin in self.db.execute(
+            "SELECT instance_id, at, gpu_util, gpu_util_max, origin FROM instance_samples "
+            "WHERE at >= ? ORDER BY at",
+            ((current - timedelta(days=7)).isoformat(),),
+        ):
+            samples.setdefault(iid, []).append(
+                {"at": at, "gpu_util": util, "gpu_util_max": maximum, "origin": origin}
+            )
+        for item in instances.values():
+            source = source_by_id.get(item.get("source_id"), {})
+            item["console_url"] = None
+            if source:
+                try:
+                    template = getattr(drivers.get(source["driver"]), "console_url", None)
+                except SourceError:
+                    template = None
+                item["console_url"] = provider_console_url(
+                    template,
+                    item["id"].removeprefix(source["cluster_id"] + ":"),
+                    item.get("region"),
+                )
+            readings = samples.get(item["id"], [])
+            if (source and not source["enabled"]) or (
+                item.get("manual") and not item.get("monitoring")
+            ):
+                readings = []
+            origin = readings[-1]["origin"] if readings else None
+            interval = (
+                PROBE_INTERVAL.total_seconds() / 60
+                if origin == "probe" and source.get("driver") != "ssh"
+                else source.get("interval_minutes", 10)
+            )
+            item["low_use"] = low_use(
+                item,
+                readings,
+                now=current,
+                interval_minutes=interval,
+                threshold=settings["low_use_threshold"],
+                window_minutes=settings["low_use_window_minutes"],
+            )
         history = self.history(24)
         for node in nodes.values():
-            node["health"] = node_health(node.get("state", ""))
+            node.update(node_health_fields(node, source_by_id.get(node["source_id"], {})))
         data = {
             "mode": "live",
+            "low_use_settings": {
+                "threshold": settings["low_use_threshold"],
+                "window_minutes": settings["low_use_window_minutes"],
+            },
             **freshness(sources),
             "collecting": [],
             "sources": sources,
@@ -934,6 +1132,14 @@ class Store:
         }
 
         data["summary"] = summarize({**data, **observations})
+        wait_samples = [
+            json.loads(row[0])
+            for row in self.db.execute(
+                "SELECT data FROM job_wait_samples WHERE ended_at >= ?",
+                ((current - timedelta(days=30)).isoformat(),),
+            )
+        ]
+        data["wait_history"] = summarize_waits(sources, wait_samples, now=current)
         return data
 
     def history(self, hours: int, max_points: int = 600) -> list[dict[str, Any]]:
@@ -951,7 +1157,7 @@ class Store:
             if row is not None and timestamp(row["at"]) is None:
                 self._skip("history", at, "no valid at")
             elif row is not None:
-                rows.append(row)
+                rows.append({key: value for key, value in row.items() if key != "by_group"})
         if len(rows) <= max_points:
             return rows
         bucket = hours * 3600 / max_points
@@ -961,6 +1167,19 @@ class Store:
             kept[index] = row
         # A sliding window can overlap an extra absolute bucket; keep the newest ones.
         return [kept[index] for index in sorted(kept)[-max_points:]]
+
+    def history_rollups(self, hours: int) -> dict[str, Any]:
+        end = datetime.now(UTC)
+        since = end - timedelta(hours=hours, seconds=HOLD_SECONDS)
+        points = []
+        for at, data in self.db.execute(
+            "SELECT at, data FROM history WHERE at >= ? AND at <= ? ORDER BY at",
+            (since.isoformat(), end.isoformat()),
+        ):
+            row = self._read("history", at, data, {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.append(row)
+        return rollup_history(points, hours, end=end)
 
     def record_history(self) -> None:
         dashboard = self.dashboard()
@@ -972,11 +1191,17 @@ class Store:
             "unknown_allocation_sources": summary["unknown_allocation_sources"],
             "gpu_utilization": summary["utilization"],
             "coverage_count": summary["covered"],
+            "by_group": group_history(dashboard),
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))
-            cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             self.db.execute("DELETE FROM history WHERE at < ?", (cutoff,))
+            self.db.execute("DELETE FROM job_wait_samples WHERE ended_at < ?", (cutoff,))
+            self.db.execute(
+                "DELETE FROM instance_samples WHERE at < ?",
+                ((datetime.now(UTC) - timedelta(days=7)).isoformat(),),
+            )
 
     def backup(self, directory: Path, keep: int = 10) -> Path:
         """Write a consistent copy; then remove all but the newest ``keep`` copies."""

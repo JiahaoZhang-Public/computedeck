@@ -5,8 +5,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { groupsOf } from './groups';
+import { dateTime } from './domain';
 import { setLocale, t } from './i18n';
-import { planOptions } from './plan';
+import { comparePlans, planOptions } from './plan';
+import { planFactors } from './planExplanation';
 import { PlanPage } from './pages/Plan';
 import type { Ctx } from './pages/shared';
 import type { Dashboard, Job, QosLimit, Source } from './types';
@@ -68,11 +70,45 @@ function renderPlan(login: Source, jobs: Job[] = []) {
 afterEach(() => setLocale('en'));
 
 describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) => {
+  it('shows a complete on-demand sentence after the reason, only for the selected model', async () => {
+    setLocale(locale);
+    const context = planContext(source);
+    context.data.nodes[0].state = 'IDLE+CLOUD+POWERED_DOWN';
+    context.data = serverDashboard(context.data);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const previous = window.location.href;
+    try {
+      window.history.replaceState(null, '', '#/plan?model=A100');
+      await act(async () => root.render(<PlanPage ctx={context} />));
+      const sentence = t('plan.why.onDemand', { count: 4 });
+      const row = container.querySelector('.plan-table tbody tr')!;
+      expect(row.textContent).toContain(
+        `${t('plan.why.busy', { free: 0 })}${locale === 'zh-CN' ? '' : ' '}${sentence}`,
+      );
+      expect(sentence).toMatch(/[.。]$/);
+      await act(async () => {
+        window.history.replaceState(null, '', '#/plan?model=H100');
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(container.textContent).not.toContain(sentence);
+      expect(container.textContent).not.toContain(t('summary.onDemand', { count: 4 }));
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      window.history.replaceState(null, '', previous);
+    }
+  });
+
   it('explains degradation without saying a known QoS limit is unknown', () => {
     setLocale(locale);
     const html = renderPlan({ ...source, cluster_state: 'degraded' });
     expect(html).toContain(t('plan.verdict.possible'));
     expect(html).toContain(t('plan.why.degraded'));
+    const free = page(html).querySelector('.plan-factors dd')!;
+    expect(free.textContent).toContain(t('plan.why.degraded'));
+    expect(free.textContent).toContain(t('plan.effect.lowers'));
     expect(html).not.toContain(t('plan.why.possibleLimit', { free: 4 }));
   });
 
@@ -122,6 +158,65 @@ function page(html: string) {
 }
 
 describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (locale) => {
+  it.each(['QOSMaxGRESPerUser', 'QOSMaxJobsPerUserLimit', 'AssocMaxJobsLimit'])(
+    'explains %s and translates the queue class with the raw code on hover',
+    (reason) => {
+      setLocale(locale);
+      const root = page(renderPlan(source, [pending({ gpu_count: 1, reason })]));
+      const row = root.querySelector('.plan-table tbody tr')!;
+      expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
+        t('plan.verdict.possible'),
+      );
+      expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
+      const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
+      expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
+      expect(queue.textContent).toContain(t('plan.queueReason.personalLimit'));
+      expect(queue.textContent).not.toContain(reason);
+      expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
+    },
+  );
+
+  it.each([
+    ['MaxJobsPU', 'QOSMaxJobsPerUserLimit', 'jobs'],
+    ['MaxSubmitJobsPU', 'QOSMaxSubmitJobPerUserLimit', 'submit'],
+  ] as const)('does not claim room when %s is reached', (key, reason, kind) => {
+    setLocale(locale);
+    const login = {
+      ...source,
+      qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', [key]: '1' } }],
+    };
+    const root = page(
+      renderPlan(login, [
+        pending({ id: 'running', state: 'RUNNING', gpu_count: 1 }),
+        pending({ gpu_count: 1, reason }),
+      ]),
+    );
+    const row = root.querySelector('.plan-table tbody tr')!;
+    expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(t('plan.verdict.limit'));
+    expect(row.textContent).toContain(
+      t(`plan.why.${kind}`, { limit: 1, used: kind === 'jobs' ? 1 : 2 }),
+    );
+    expect(row.textContent).not.toContain(t('plan.why.contradiction', { job: 'train', reason }));
+  });
+
+  it.each([
+    ['slurm', 'SiteSpecificCode', null],
+    ['pbs', 'Not Running: Insufficient amount of resource: ngpus', null],
+    ['slurm', 'Priority', 'plan.queueReason.priority'],
+  ] as const)(
+    'preserves reported %s reasons unless a class is recognised: %s',
+    (driver, reason, key) => {
+      setLocale(locale);
+      const root = page(renderPlan({ ...source, driver }, [pending({ gpu_count: 1, reason })]));
+      const queue = root.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
+      const label = queue.querySelector('[title]')!;
+      expect(label.getAttribute('title')).toBe(reason);
+      expect(label.textContent).toBe(key ? t(key) : reason);
+      expect(queue.textContent).not.toContain(t('job.explain.unknown'));
+      if (key && t(key) !== reason) expect(queue.textContent).not.toContain(reason);
+    },
+  );
+
   it('shows unknown access inline, with one note per source and a tagged best estimate', () => {
     setLocale(locale);
     const root = page(
@@ -134,8 +229,10 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
         })),
       }),
     );
-    expect(root.querySelector('details')).toBeNull();
-    expect(root.querySelectorAll('.plan-table tbody tr')).toHaveLength(2);
+    expect(root.querySelector('details.panel')).toBeNull();
+    expect(root.querySelectorAll('.plan-table tbody tr:not(.plan-explanation-row)')).toHaveLength(
+      2,
+    );
     const note = t('plan.accessNote', { source: 'Cluster A · alice' });
     expect(
       [...root.querySelectorAll('.panel-note')].filter((el) => el.textContent === note),
@@ -259,8 +356,8 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
         qos: [{ ...source.qos[0], name: 'denied', access: 'not_associated' }, source.qos[0]],
       }),
     );
-    expect(root.querySelector('details')!.textContent).toContain('denied');
-    expect(root.querySelector('details')!.hasAttribute('open')).toBe(false);
+    expect(root.querySelector('details.panel')!.textContent).toContain('denied');
+    expect(root.querySelector('details.panel')!.hasAttribute('open')).toBe(false);
     expect(root.querySelector('.plan-best')!.textContent).toContain('normal');
     expect(root.querySelector('.plan-best')!.textContent).not.toContain('denied');
   });
@@ -270,13 +367,18 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     const data = serverDemo();
     const options = planOptions(data, { gpus: 1, gpuType: '', hours: null });
     expect(options.some((option) => option.verdict === 'behind')).toBe(true);
-    const held = data.jobs.find((job) => job.reason === 'QOSMaxGRESPerUser')!;
+    const held = data.jobs.find(
+      (job) => job.reason === 'QOSMaxGRESPerUser' && job.gpu_count === 16,
+    )!;
+    const contradictory = options.find((option) => option.contradiction);
+    expect(contradictory).toMatchObject({ queuedForRoom: 1, verdict: 'possible' });
     expect(
       options.find((option) => option.source.id === held.source_id && option.qos === held.qos),
     ).toMatchObject({ queuedForRoom: 0, verdict: 'likely' });
     const root = page(
       renderToStaticMarkup(<PlanPage ctx={{ data, groups: groupsOf(data), demo: true } as Ctx} />),
     );
+    expect(root.textContent).toContain(t('plan.why.contradiction', contradictory!.contradiction!));
     const best = root.querySelector('.plan-best')!;
     expect(best.querySelector('strong')!.textContent).toBe(
       `${options[0].source.name} · ${options[0].source.username} · ${options[0].qos}`,
@@ -294,7 +396,12 @@ it.each(['en', 'zh-CN'] as const)(
       ...context.data,
       nodes: [
         context.data.nodes[0],
-        { ...context.data.nodes[0], id: 'cluster-a:unknown', name: 'unknown', state: 'FUTURE' },
+        {
+          ...context.data.nodes[0],
+          id: 'cluster-a:unknown',
+          name: 'unknown',
+          state: 'new_scheduler_state',
+        },
       ],
     });
     const root = page(renderToStaticMarkup(<PlanPage ctx={context} />));
@@ -305,3 +412,366 @@ it.each(['en', 'zh-CN'] as const)(
     expect(best.textContent).toContain(t('plan.best.free', { count: '≥ 3' }));
   },
 );
+
+describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale) => {
+  it('offers all seven factors on every option, including denied options, with source and age', () => {
+    setLocale(locale);
+    const login = {
+      ...source,
+      qos: [
+        ...source.qos,
+        { ...source.qos[0], name: 'restricted', access: 'not_associated' as const },
+      ],
+    };
+    const ctx = planContext(login);
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const options = planOptions(ctx.data, { gpus: 1, gpuType: '', hours: null });
+    const details = root.querySelectorAll<HTMLDetailsElement>('details.plan-explanation');
+    expect(details).toHaveLength(options.length);
+    for (const panel of details) {
+      expect(panel.open).toBe(false);
+      expect(panel.querySelector('summary')!.textContent).toBe(t('plan.explanation'));
+      expect(panel.querySelectorAll('dt')).toHaveLength(7);
+      for (const field of panel.querySelectorAll('dd')) {
+        expect(field.textContent).toContain('Cluster A · alice');
+        expect(field.querySelector('time')!.getAttribute('datetime')).toBe(source.last_success);
+        expect(field.querySelector('time')!.textContent).toBe(dateTime(source.last_success));
+        expect(field.querySelector('time')!.textContent).not.toBe(source.last_success);
+      }
+    }
+    expect(details[0].textContent).toContain(t('plan.factor.wallUnchecked'));
+    expect(details[1].textContent).toContain(t('plan.factor.access.not_associated'));
+  });
+
+  it('distinguishes an empty run time from an unknown maximum', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [option] = planOptions(planContext(source).data, request);
+    for (const max of [24, null]) {
+      for (const hours of [null, 0, 2]) {
+        const factor = planFactors({ ...option, maxWallHours: max }, { ...request, hours }).find(
+          (factor) => factor.key === 'wall',
+        )!;
+        const unchecked = hours == null || max == null;
+        expect(factor.value).toBe(
+          t('plan.factor.wallValue', {
+            max: max == null ? t('status.unknown') : t('plan.hours', { count: max }),
+            requested:
+              hours == null ? t('plan.factor.notEntered') : t('plan.hours', { count: hours }),
+          }) + (unchecked ? ` ${t('plan.factor.wallUnchecked')}` : ''),
+        );
+        expect(factor.effect).toBe(unchecked ? 'neutral' : 'supports');
+      }
+    }
+  });
+
+  it.each([
+    ['100', 1.7],
+    ['00:20:00', 0.3],
+  ])('rounds a %s wall limit and requested hours like the table', (max, rounded) => {
+    setLocale(locale);
+    const ctx = planContext({
+      ...source,
+      qos: [{ ...source.qos[0], limits: { ...source.qos[0].limits, MaxWallPJ: max } }],
+    });
+    const request = { gpus: 1, gpuType: '', hours: 1 / 3 };
+    const [option] = planOptions(ctx.data, request);
+    const factor = planFactors(option, request).find((factor) => factor.key === 'wall')!;
+    expect(factor.value).toBe(
+      locale === 'en'
+        ? `Maximum run time: ${rounded} h; requested: 0.3 h.`
+        : `最长运行时间：${rounded} 小时；请求时间：0.3 小时。`,
+    );
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const wall = root.querySelector(`[data-label="${t('plan.col.wall')}"]`)!;
+    expect(wall.textContent).toBe(t('plan.hours', { count: rounded }));
+    expect(root.querySelector('.plan-factors')!.textContent).toContain(wall.textContent);
+  });
+
+  it('labels unknown and unlimited queue counts without attaching GPU units to their values', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [option] = planOptions(planContext(source).data, request);
+    for (const room of [null, Infinity]) {
+      const factor = planFactors(
+        { ...option, queuedForRoom: null, headroomAfterQueue: room },
+        request,
+      ).find((factor) => factor.key === 'queue')!;
+      const value = room == null ? t('status.unknown') : t('plan.noLimit');
+      expect(factor.value).toContain(
+        locale === 'en' ? `room after queue (GPUs): ${value}` : `队列之后剩余（GPU）：${value}`,
+      );
+      expect(factor.value).not.toMatch(/(?:未知|不限) 张 GPU/);
+    }
+  });
+
+  it.each([false, true])(
+    'explains unavailable clusters only with current nodes (stale: %s)',
+    (stale) => {
+      setLocale(locale);
+      const ctx = planContext({ ...source, cluster_state: 'unavailable', stale });
+      ctx.data.nodes = [];
+      const request = { gpus: 1, gpuType: '', hours: null };
+      const [option] = planOptions(ctx.data, request);
+      expect(option.freeGpus).toBeNull();
+      if (!stale) expect(option.verdict).toBe('unavailable');
+      const free = planFactors(option, request).find((factor) => factor.key === 'free')!;
+      expect(free.effect).toBe(stale ? 'unknown' : 'lowers');
+      expect(free.value.includes(t('plan.why.unavailable'))).toBe(!stale);
+      const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+      expect(root.querySelector('.plan-factors dd')!.textContent).toContain(
+        t(stale ? 'plan.effect.unknown' : 'plan.effect.lowers'),
+      );
+    },
+  );
+
+  it('explains unknowns, partial capacity, limits, runtime and the contradiction cap without changing verdicts', () => {
+    setLocale(locale);
+    const request = { gpus: 1, gpuType: '', hours: 25 };
+    const ctx = planContext({
+      ...source,
+      qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', MaxWallPJ: '1440' } }],
+    });
+    const [option] = planOptions(ctx.data, request);
+    const factors = planFactors(option, request);
+    expect(option.verdict).toBe('wall');
+    expect(factors.find((factor) => factor.key === 'wall')!.effect).toBe('lowers');
+    expect(factors.find((factor) => factor.key === 'oneNode')!.effect).toBe('ranking');
+    const [contradiction] = planOptions(
+      planContext(source, [pending({ gpu_count: 1, reason: 'AssocMaxJobsLimit' })]).data,
+      { ...request, hours: null },
+    );
+    expect(contradiction.verdict).toBe('possible');
+    expect(
+      planFactors(contradiction, request).find((factor) => factor.key === 'queue'),
+    ).toMatchObject({ effect: 'lowers' });
+    expect(
+      planFactors(contradiction, request).find((factor) => factor.key === 'queue')!.value,
+    ).toContain('AssocMaxJobsLimit');
+    const [unknown] = planOptions(planContext({ ...source, stale: true }).data, request);
+    for (const key of ['free', 'limit', 'queue', 'wall']) {
+      expect(planFactors(unknown, request).find((factor) => factor.key === key)!.value).toContain(
+        t('status.unknown'),
+      );
+    }
+    expect(planFactors({ ...option, freeGpusPartial: true }, request)[0].value).toContain('≥ 4');
+    const [limited] = planOptions(
+      planContext({
+        ...source,
+        qos: [{ ...source.qos[0], limits: { MaxTRESPU: 'gres/gpu=8', MaxJobsPU: '0' } }],
+      }).data,
+      request,
+    );
+    expect(planFactors(limited, request).find((factor) => factor.key === 'limit')).toMatchObject({
+      effect: 'lowers',
+    });
+  });
+
+  it('compares the actual first two visible options and explains equal ranking honestly', () => {
+    setLocale(locale);
+    const ctx = planContext({
+      ...source,
+      qos: [...source.qos, { ...source.qos[0], name: 'other' }],
+    });
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const [best, next] = planOptions(ctx.data, request);
+    expect(comparePlans(best, next, request).factor).toBe('tie');
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    expect(root.querySelector('.plan-comparison')!.textContent).toBe(
+      t('plan.compare.tie', { other: 'Cluster A · alice · other' }),
+    );
+    const single = page(renderPlan(source));
+    expect(single.querySelector('.plan-comparison')).toBeNull();
+  });
+
+  it.each([
+    'verdict',
+    'none',
+    'noGpus',
+    'oneNode',
+    'unknownFit',
+    'queue',
+    'unlimited',
+    'unknownRoom',
+    'free',
+    'access',
+  ] as const)('renders both values and the first differing factor for %s', async (scenario) => {
+    setLocale(locale);
+    const ctx = planContext({ ...source, cluster_state: 'degraded' });
+    const first = ctx.data.sources[0];
+    const second: Source = {
+      ...first,
+      id: 'cluster-b-bob',
+      name: 'Cluster B',
+      cluster_id: 'cluster-b',
+      username: 'bob',
+      qos: [{ ...first.qos[0] }],
+    };
+    const firstNode = { ...ctx.data.nodes[0], gpu_count: 8 };
+    const secondNode = {
+      ...firstNode,
+      id: 'cluster-b:gpu-1',
+      source_id: second.id,
+      cluster_id: second.cluster_id,
+    };
+    ctx.data.sources = [first, second];
+    ctx.data.nodes = [firstNode, secondNode];
+    let factor: 'verdict' | 'oneNode' | 'queue' | 'free' | 'access' = 'verdict';
+    let best = t('plan.verdict.possible');
+    let next = t('plan.verdict.busy');
+    switch (scenario) {
+      case 'verdict':
+        secondNode.gpu_allocated = 8;
+        break;
+      case 'none':
+      case 'noGpus':
+        if (scenario === 'none') firstNode.gpu_type = 'H100';
+        else secondNode.gpu_count = 0;
+        next =
+          scenario === 'none'
+            ? t('plan.verdict.none', { model: 'H100' })
+            : t('plan.verdict.noGpus');
+        break;
+      case 'oneNode':
+      case 'unknownFit':
+        factor = 'oneNode';
+        best = t('plan.compare.fits');
+        if (scenario === 'oneNode') {
+          secondNode.gpu_count = 2;
+          ctx.data.nodes.push({ ...secondNode, id: 'cluster-b:gpu-2', name: 'gpu-2' });
+          next = t('plan.compare.notFit');
+        } else {
+          secondNode.state = 'new_scheduler_state';
+          next = t('status.unknown');
+        }
+        break;
+      case 'queue':
+      case 'unlimited':
+      case 'unknownRoom':
+        factor = 'queue';
+        first.qos = [
+          {
+            ...first.qos[0],
+            limits: { MaxTRESPU: scenario === 'unlimited' ? 'gres/gpu=N' : 'gres/gpu=16' },
+          },
+        ];
+        best = scenario === 'unlimited' ? t('plan.noLimit') : '16';
+        next = '8';
+        if (scenario === 'unknownRoom') {
+          second.qos = [{ ...second.qos[0], limits: {} }];
+          next = t('status.unknown');
+        }
+        break;
+      case 'free':
+        factor = 'free';
+        ctx.data.nodes.push(
+          { ...firstNode, id: 'cluster-a:gpu-2', name: 'gpu-2', gpu_count: 4 },
+          { ...firstNode, id: 'cluster-a:unknown', name: 'unknown', state: 'new_scheduler_state' },
+        );
+        best = '≥ 12';
+        next = '8';
+        break;
+      case 'access':
+        factor = 'access';
+        second.qos = [{ ...second.qos[0], access: 'unknown' }];
+        best = t('plan.compare.verified');
+        next = t('plan.compare.accessUnknown');
+        break;
+    }
+    ctx.data = serverDashboard(ctx.data);
+    ctx.groups = groupsOf(ctx.data);
+    const previous = window.location.href;
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      window.history.replaceState(
+        null,
+        '',
+        `#/plan?gpus=4${scenario === 'none' ? '&model=H100' : ''}`,
+      );
+      await act(async () => root.render(<PlanPage ctx={ctx} />));
+      expect(container.querySelector('.plan-comparison')!.textContent).toBe(
+        t('plan.compare.reason', {
+          other: 'Cluster B · bob · normal',
+          factor: t(`plan.compare.${factor}`),
+          best,
+          next,
+        }),
+      );
+    } finally {
+      await act(async () => root.unmount());
+      window.history.replaceState(null, '', previous);
+    }
+  });
+
+  it('labels limits and jobs separately when their observation times differ', () => {
+    setLocale(locale);
+    const observed = '2026-01-01T00:00:00Z';
+    const ctx = planContext(source, [pending({ observed_at: observed, gpu_count: 1 })]);
+    const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    const factor = [...root.querySelectorAll('.plan-factors > div')].find(
+      (row) => row.querySelector('dt')!.textContent === t('plan.factor.limit'),
+    )!;
+    for (const [capability, at] of [
+      ['qos_limits', source.last_success!],
+      ['jobs', observed],
+    ] as const) {
+      const line = [...factor.querySelectorAll('dd > span')].find(
+        (span) =>
+          span.querySelector('time') &&
+          span.textContent?.includes(t(`plan.factor.capability.${capability}`)),
+      )!;
+      expect(line.textContent).toContain('Cluster A · alice');
+      expect(line.querySelector('time')!.getAttribute('datetime')).toBe(at);
+    }
+  });
+
+  it('demonstrates different data ages and an unknown runtime in example mode', () => {
+    setLocale(locale);
+    const data = serverDemo();
+    const request = { gpus: 1, gpuType: '', hours: null };
+    const options = planOptions(data, request);
+    const bob = options.find(
+      (option) => option.source.id === 'example:cluster-a-bob' && option.qos === 'debug',
+    )!;
+    expect(bob.maxWallHours).toBeNull();
+    expect(bob.evidence.nodes[0].at).not.toBe(bob.evidence.limits[0].at);
+    expect(planFactors(bob, request).find((factor) => factor.key === 'wall')!.value).toContain(
+      t('status.unknown'),
+    );
+  });
+});
+
+describe.each(['en', 'zh-CN'] as const)('plan disclosure interaction in %s', (locale) => {
+  it('opens and closes natively, retaining an open panel while polled evidence changes', async () => {
+    setLocale(locale);
+    const ctx = planContext(source);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<PlanPage ctx={ctx} />));
+      const details = container.querySelector<HTMLDetailsElement>('.plan-explanation')!;
+      const summary = details.querySelector('summary')!;
+      summary.click();
+      expect(details.open).toBe(true);
+      expect(details.querySelector('dd')!.textContent).toContain(
+        t('plan.factor.freeValue', { count: '4' }),
+      );
+      const updated = {
+        ...ctx,
+        data: { ...ctx.data, nodes: ctx.data.nodes.map((node) => ({ ...node, gpu_allocated: 1 })) },
+      };
+      await act(async () => root.render(<PlanPage ctx={updated} />));
+      expect(details.open).toBe(true);
+      expect(details.querySelector('dd')!.textContent).toContain(
+        t('plan.factor.freeValue', { count: '3' }),
+      );
+      summary.click();
+      expect(details.open).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+});

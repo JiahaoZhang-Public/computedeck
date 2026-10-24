@@ -537,10 +537,10 @@ export default function App() {
   const addInstance = () => {
     if (!blockedInDemo()) setModal({ kind: 'instance' });
   };
-  const copy = async (text: string) => {
+  const copy = async (text: string, message?: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      notify(t('toast.copied'));
+      notify(message ?? t('toast.copied'));
     } catch {
       notify(t('toast.clipboard'), 'error');
     }

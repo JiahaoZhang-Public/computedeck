@@ -1,6 +1,7 @@
-import { serverNodeHealth, serverPendingStates } from './test-server';
+import { serverClusterState, serverNodeHealth, serverPendingStates } from './test-server';
 import { describe, expect, it } from 'vitest';
-import { gpuModels, idleInstances, planOptions, wallHours } from './plan';
+import { comparePlans, gpuModels, lowUseInstances, planOptions, wallHours } from './plan';
+import { planFactors } from './planExplanation';
 import type { ComputeNode, Instance, Job, QosLimit, Source } from './types';
 
 const source = (extra: Partial<Source> = {}): Source => ({
@@ -42,7 +43,7 @@ const node = (name: string, extra: Partial<ComputeNode> = {}): ComputeNode => ({
   cluster_id: 'cluster-a',
   name,
   state: 'mixed',
-  health: serverNodeHealth(extra.state ?? 'mixed'),
+  health: serverNodeHealth(extra.state ?? 'mixed', extra.partitions ?? ['gpu']),
   gpu_count: 8,
   gpu_allocated: 4,
   gpu_type: 'a100',
@@ -241,7 +242,14 @@ describe('where to run', () => {
     };
     const [option] = planOptions(open, { gpus: 4, gpuType: '', hours: null });
     expect(option.limit).toBe(Infinity);
-    expect(option.verdict).toBe('likely');
+    expect(option.verdict).toBe('possible');
+    expect(option.contradiction?.reason).toBe('QOSMaxGRESPerUser');
+    expect(
+      planOptions(
+        { ...open, jobs: [job('1'), job('2', { state: 'PENDING', reason: 'Priority' })] },
+        { gpus: 4, gpuType: '', hours: null },
+      )[0].verdict,
+    ).toBe('likely');
   });
 
   it('keeps unknown allocation unknown instead of counting it as free', () => {
@@ -260,22 +268,33 @@ describe('where to run', () => {
   });
 });
 
-describe('idle cloud GPUs', () => {
-  it('lists running instances with low measured utilization only', () => {
-    const base = { gpu_count: 1, gpu_utilization: 3, state: 'running' } as Instance;
-    const rows = idleInstances([
-      { ...base, id: 'a' },
-      { ...base, id: 'b', gpu_utilization: null },
-      { ...base, id: 'c', gpu_utilization: 60 },
-      { ...base, id: 'd', state: 'stopped' },
-      // A machine added by hand is not a cloud GPU being billed.
-      { ...base, id: 'e', manual: true },
-      { ...base, id: 'reported', state: 'reported_running' },
-      { ...base, id: 'starting', state: 'desired_running' },
-      { ...base, id: 'stopping', state: 'desired_stopped' },
-      { ...base, id: 'unknown', state: 'unknown' },
-    ]);
-    expect(rows.map((row) => row.id)).toEqual(['a', 'reported']);
+describe('paid resources with sustained low use', () => {
+  it('uses server low-use state and a positive price, including hand-added machines', () => {
+    const base = {
+      gpu_count: 1,
+      gpu_utilization: 3,
+      state: 'running',
+      hourly_cost: 1,
+      low_use: {
+        state: 'low',
+        since: null,
+        covered_minutes: 60,
+        samples: 7,
+        origin: 'probe',
+        reason: null,
+      },
+    } as Instance;
+    expect(
+      lowUseInstances([
+        { ...base, id: 'a' },
+        { ...base, id: 'manual', manual: true },
+        { ...base, id: 'unpriced', hourly_cost: null },
+        { ...base, id: 'free', hourly_cost: 0 },
+        { ...base, id: 'single', low_use: undefined },
+        { ...base, id: 'unknown', low_use: { ...base.low_use!, state: 'unknown' } },
+        { ...base, id: 'busy', low_use: { ...base.low_use!, state: 'busy' } },
+      ]).map((row) => row.id),
+    ).toEqual(['a', 'manual']);
   });
 });
 
@@ -400,7 +419,7 @@ describe('adversarial GPU planning', () => {
       verdict: 'unknown',
     });
   });
-  it('excludes reserved capacity but allows an idle powered-down cloud node', () => {
+  it('excludes reserved and powered-down cloud capacity', () => {
     const [option] = planOptions(
       {
         sources: [source()],
@@ -412,7 +431,7 @@ describe('adversarial GPU planning', () => {
       },
       { ...request, gpuType: '' },
     );
-    expect(option).toMatchObject({ freeGpus: 8, matchingNodes: 1 });
+    expect(option).toMatchObject({ freeGpus: 0, matchingNodes: 0 });
   });
   it('does not count the GPUs of a Slurm INVAL node as free', () => {
     const [option] = planOptions(
@@ -421,7 +440,7 @@ describe('adversarial GPU planning', () => {
         jobs: [],
         nodes: [
           node('bad', { state: 'inval', gpu_allocated: 0 }),
-          node('saving', { state: 'idle+power_down', gpu_allocated: 0 }),
+          node('ready', { state: 'idle', gpu_allocated: 0 }),
         ],
       },
       { ...request, gpuType: '' },
@@ -711,10 +730,10 @@ describe('own queue estimates', () => {
       headroomAfterQueue: 2,
       verdict: 'likely',
     });
-    // A reason alone does not override the arithmetic.
+    // A personal-limit wait that fits contradicts the collected arithmetic.
     expect(
       option([{ gpu_count: 1, reason: 'QOSMaxGRESPerUser' }], {}, { ...ask, gpus: 2 }).verdict,
-    ).toBe('likely');
+    ).toBe('possible');
   });
 
   it.each([
@@ -1083,3 +1102,667 @@ it.each([{ health: 'unknown' as const }, { gpu_count: null }, { gpu_allocated: n
     expect(option).toMatchObject({ freeGpus: 8, freeGpusPartial: true, verdict: 'likely' });
   },
 );
+
+it.each([
+  { state: 'idle', partitions: [] },
+  { state: 'IDLE+CLOUD+POWERED_DOWN', partitions: ['gpu'] },
+  { state: 'IDLE+CLOUD+POWERED_DOWN', partitions: [] },
+  { state: 'IDLE+CLOUD+POWERING_UP', partitions: ['gpu'] },
+  { state: 'FUTURE', partitions: ['gpu'] },
+  { state: 'ERROR', partitions: ['gpu'] },
+  { state: 'provisioning', partitions: ['gpu'] },
+  { state: 'sleep', partitions: ['gpu'] },
+  { state: 'wait-provisioning', partitions: ['gpu'] },
+])('uses the server classifier to exclude $state ($partitions) from free GPUs', (extra) => {
+  const nodes = [node('g1', { ...extra, gpu_type: 'h100', gpu_allocated: 0 })];
+  const sources = [source()];
+  const request = { gpus: 1, gpuType: 'h100', hours: null };
+  const options = planOptions({ sources, nodes, jobs: [] }, request);
+  for (const option of options) {
+    expect(option.freeGpus).toBe(0);
+    expect(option.matchingNodes).toBe(0);
+    expect(option.freeGpusPartial).toBe(false);
+    expect(option.verdict).not.toBe('likely');
+  }
+  const mixed = planOptions(
+    { sources, nodes: [...nodes, node('g2', { gpu_type: 'h100', gpu_allocated: 2 })], jobs: [] },
+    request,
+  );
+  expect(mixed[0].freeGpus).toBe(6);
+  expect(mixed[0].matchingNodes).toBe(1);
+  expect(mixed[0].freeGpusPartial).toBe(false);
+});
+
+it.each([
+  'IDLE+CLOUD+POWERED_DOWN',
+  'IDLE+POWERED_DOWN',
+  'IDLE+POWERING_DOWN',
+  'IDLE+POWER_DOWN',
+  'IDLE+POWERING_UP',
+  'IDLE+POWER_UP',
+  'IDLE+CLOUD+POWERING_UP',
+  'sleep',
+  'provisioning',
+  'wait-provisioning',
+  'free+sleep',
+])('does not mark a power-saving cluster (%s) as down or free', (state) => {
+  const nodes = [node('saving', { state, gpu_allocated: 0 })];
+  const cluster_state = serverClusterState(nodes);
+  expect(cluster_state).toBe('available');
+  const options = planOptions(
+    { sources: [source({ cluster_state })], nodes, jobs: [] },
+    { gpus: 1, gpuType: '', hours: null },
+  );
+  for (const option of options) {
+    expect(option.freeGpus).toBe(0);
+    expect(option.verdict).not.toBe('unavailable');
+    expect(option.verdict).not.toBe('likely');
+  }
+});
+
+it.each([
+  { gpu_type: 'A100', gpu_count: 8, gpuType: 'H100', expected: 0 },
+  { gpu_type: 'A100', gpu_count: 8, gpuType: 'a100', expected: 8 },
+  { gpu_type: null, gpu_count: 8, gpuType: 'h100', expected: null },
+  { gpu_type: 'h100', gpu_count: null, gpuType: 'h100', expected: null },
+  { gpu_type: 'a100,h100', gpu_count: 8, gpuType: 'h100', expected: null },
+  { gpu_type: null, gpu_count: 8, gpuType: '', expected: 8 },
+  { gpu_type: null, gpu_count: null, gpuType: '', expected: null },
+])(
+  'counts on-demand GPUs only for the requested model: %s',
+  ({ gpu_type, gpu_count, gpuType, expected }) => {
+    const options = planOptions(
+      {
+        sources: [source()],
+        nodes: [
+          node('resting', {
+            state: 'IDLE+CLOUD+POWERED_DOWN',
+            gpu_type,
+            gpu_count,
+            gpu_allocated: 0,
+          }),
+        ],
+        jobs: [],
+      },
+      { gpus: 1, gpuType, hours: null },
+    );
+    for (const option of options) expect(option.onDemandGpus).toBe(expected);
+  },
+);
+
+describe('honest ranking', () => {
+  const ask = { gpus: 2, gpuType: '', hours: null };
+  const estimate = (waiting: Partial<Job>, gpuType = '', extra: Partial<Source> = {}) =>
+    planOptions(
+      {
+        sources: [
+          source({
+            qos: [
+              {
+                ...source().qos[0],
+                limits: { MaxTRESPU: gpuType ? 'gres/gpu=12,gres/gpu:a100=8' : 'gres/gpu=8' },
+              },
+            ],
+            ...extra,
+          }),
+        ],
+        nodes: [node('g1', { gpu_allocated: 0 })],
+        jobs: [
+          job('running'),
+          job('waiting', {
+            state: 'PENDING',
+            gpu_count: 1,
+            reason: 'QOSMaxGRESPerUser',
+            ...waiting,
+          }),
+        ],
+      },
+      { ...ask, gpuType },
+    )[0];
+
+  it.each(['', 'a100'])('caps a contradictory personal-limit wait for %s', (model) => {
+    expect(estimate({}, model)).toMatchObject({
+      headroom: 4,
+      headroomAfterQueue: 3,
+      verdict: 'possible',
+      contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+    });
+    expect(estimate({ gpu_count: 12 }, model)).toMatchObject({
+      verdict: 'likely',
+      contradiction: null,
+      headroomAfterQueue: 4,
+    });
+    expect(estimate({ gpu_count: 4 }, model)).toMatchObject({ verdict: 'behind' });
+    expect(estimate({ gpu_count: null }, model).contradiction).toBeNull();
+    expect(estimate({ reason: 'JobHeldUser', gpu_count: 8 }, model)).toMatchObject({
+      verdict: 'likely',
+      contradiction: null,
+    });
+  });
+
+  it.each([
+    ['QOSMaxJobsPerUserLimit', 'MaxJobsPU', 1],
+    ['AssocMaxJobsLimit', 'MaxJobsPU', 1],
+    ['QOSMaxSubmitJobPerUserLimit', 'MaxSubmitJobsPU', 2],
+    ['AssocMaxSubmitJobLimit', 'MaxSubmitJobsPU', 2],
+  ] as const)('caps %s unless a collected count rule already binds', (reason, key, used) => {
+    const check = (cap: string | undefined, usage?: Record<string, string>) =>
+      estimate({ reason: `${reason} (details)` }, '', {
+        qos: [
+          {
+            ...source().qos[0],
+            limits: { MaxTRESPU: 'gres/gpu=8', ...(cap === undefined ? {} : { [key]: cap }) },
+            usage,
+          },
+        ],
+      });
+    expect(check(String(used + 1))).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason: `${reason} (details)` },
+    });
+    expect(check(String(used))).toMatchObject({ verdict: 'limit', contradiction: null });
+    for (const cap of [undefined, 'N'])
+      expect(check(cap)).toMatchObject({
+        verdict: 'possible',
+        contradiction: { reason: `${reason} (details)` },
+      });
+    // Scheduler counts take precedence, in both directions.
+    expect(check(String(used + 1), { [key]: String(used + 1) })).toMatchObject({
+      verdict: 'limit',
+      contradiction: null,
+    });
+    expect(check(String(used), { [key]: '0' })).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason: `${reason} (details)` },
+    });
+  });
+
+  it.each(['MaxJobsPU', 'MaxSubmitJobsPU'])('does not contradict a reached %s rule', (key) => {
+    for (const reason of [
+      'QOSMaxGRESPerUser',
+      'QOSMaxJobsPerUserLimit',
+      'QOSMaxSubmitJobPerUserLimit',
+      'AssocMaxJobsLimit',
+      'AssocMaxSubmitJobLimit',
+    ]) {
+      expect(
+        estimate({ reason }, '', {
+          qos: [
+            {
+              ...source().qos[0],
+              limits: {
+                MaxTRESPU: 'gres/gpu=8',
+                MaxJobsPU: '10',
+                MaxSubmitJobsPU: '10',
+                [key]: '1',
+              },
+            },
+          ],
+        }),
+      ).toMatchObject({ verdict: 'limit', contradiction: null });
+    }
+  });
+
+  it.each(['', 'a100'])('ignores zero-GPU GRES waits for %s', (model) => {
+    expect(estimate({ gpu_count: 0, gpu_type: null }, model)).toMatchObject({
+      headroom: 4,
+      queuedForRoom: 0,
+      verdict: 'likely',
+      contradiction: null,
+    });
+  });
+
+  it.each([
+    'QOSMaxJobsPerUserLimit',
+    'QOSMaxSubmitJobPerUserLimit',
+    'AssocMaxJobsLimit',
+    'AssocMaxSubmitJobLimit',
+  ])('retains a zero-GPU job as evidence for %s without a collected count cap', (reason) => {
+    expect(estimate({ reason, gpu_count: 0, gpu_type: null })).toMatchObject({
+      verdict: 'possible',
+      contradiction: { reason },
+    });
+  });
+
+  it.each(['QOSMaxCpuPerUserLimit', 'AssocMaxCpuPerUserLimit', 'AssocMaxGRESPerUser'])(
+    'does not infer room for unevaluated or undocumented reason %s',
+    (reason) => {
+      expect(estimate({ reason })).toMatchObject({ verdict: 'likely', contradiction: null });
+    },
+  );
+
+  it.each(['h100', null, 'a100,h100'])(
+    'does not test a %s wait against a different model headroom',
+    (gpu_type) => {
+      const [option] = planOptions(
+        {
+          sources: [
+            source({
+              qos: [
+                {
+                  ...source().qos[0],
+                  limits: {
+                    MaxTRESPU: 'gres/gpu=16,gres/gpu:h100=4',
+                  },
+                },
+              ],
+            }),
+          ],
+          nodes: [node('g1', { gpu_allocated: 0 })],
+          jobs: [
+            job('running', { gpu_type: 'h100', gpu_count: 4 }),
+            job('waiting', {
+              gpu_type,
+              state: 'PENDING',
+              gpu_count: 1,
+              reason: 'QOSMaxGRESPerUser',
+            }),
+          ],
+        },
+        { gpus: 2, gpuType: 'a100', hours: null },
+      );
+      expect(option).toMatchObject({ headroom: 12, verdict: 'likely', contradiction: null });
+    },
+  );
+
+  it('does not infer a contradiction from stale, unrelated or unknown evidence', () => {
+    for (const extra of [
+      { stale: true },
+      { capabilities: ['nodes', 'qos_limits', 'qos_access'] },
+      { capabilities: ['jobs', 'nodes', 'qos_access'] },
+      { driver: 'pbs' },
+    ])
+      expect(estimate({}, '', extra).contradiction).toBeNull();
+    expect(estimate({ qos: 'other' }).contradiction).toBeNull();
+    expect(estimate({ source_id: 'other-login' }).contradiction).toBeNull();
+    expect(estimate({ reason: 'Priority' }).verdict).toBe('likely');
+    for (const gpu_type of [null, 'h100', 'a100,h100'])
+      expect(estimate({ gpu_type }, 'a100').contradiction).toBeNull();
+    expect(
+      estimate({}, '', { qos: [{ ...source().qos[0], origin: 'kubernetes_resource_quota' }] }),
+    ).toMatchObject({
+      verdict: 'likely',
+      queuedForRoom: 0,
+      contradiction: null,
+    });
+  });
+
+  it('caps a contradiction with only a typed GPU limit', () => {
+    expect(
+      estimate({}, 'a100', {
+        qos: [{ ...source().qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }],
+      }),
+    ).toMatchObject({
+      used: 4,
+      headroom: 4,
+      headroomAfterQueue: 3,
+      verdict: 'possible',
+      contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+    });
+  });
+
+  it('does not turn stale twin jobs into current queue evidence', () => {
+    const current = source({ id: 'second-alice', last_success: '2026-01-01T01:00:00Z' });
+    const [option] = planOptions(
+      {
+        sources: [source({ stale: true }), current],
+        nodes: [node('g1', { source_id: current.id })],
+        jobs: [job('old-wait', { state: 'PENDING', gpu_count: 1, reason: 'QOSMaxGRESPerUser' })],
+      },
+      ask,
+    );
+    expect(option).toMatchObject({
+      source: { id: current.id },
+      used: 0,
+      queued: 0,
+      contradiction: null,
+      verdict: 'likely',
+    });
+  });
+
+  it.each([false, true])(
+    'uses current twin jobs when the kept QoS source lacks current jobs (%s)',
+    (reverse) => {
+      const limits = source({
+        capabilities: ['nodes', 'qos_limits', 'qos_access'],
+        qos: [source().qos[0]],
+      });
+      const jobs = source({
+        id: 'second-alice',
+        capabilities: ['jobs'],
+        qos: [source().qos[0]],
+      });
+      const sources = [limits, jobs];
+      const options = planOptions(
+        {
+          sources: reverse ? sources.reverse() : sources,
+          nodes: [node('g1')],
+          jobs: [
+            job('stale-running', { gpu_count: 8 }),
+            job('running', { source_id: jobs.id }),
+            job('waiting', {
+              source_id: jobs.id,
+              state: 'PENDING',
+              gpu_count: 1,
+              reason: 'AssocMaxJobsLimit',
+            }),
+          ],
+        },
+        ask,
+      );
+      expect(options).toHaveLength(1);
+      expect(options[0]).toMatchObject({
+        source: { id: limits.id },
+        used: 4,
+        headroom: 4,
+        queued: 1,
+        queuedGpus: 1,
+        headroomAfterQueue: 3,
+        contradiction: { job: 'train', reason: 'AssocMaxJobsLimit' },
+        verdict: 'possible',
+      });
+    },
+  );
+
+  it.each([0, 1, null])(
+    'keeps zero-GPU running jobs out of typed use, preserving unknowns (%s)',
+    (gpu_count) => {
+      const [option] = planOptions(
+        {
+          sources: [
+            source({ qos: [{ ...source().qos[0], limits: { MaxTRESPU: 'gres/gpu:a100=8' } }] }),
+          ],
+          nodes: [node('g1')],
+          jobs: [job('gpu'), job('cpu', { gpu_count, gpu_type: null })],
+        },
+        { ...ask, gpuType: 'a100' },
+      );
+      expect(option.headroom).toBe(gpu_count === 0 ? 4 : null);
+      expect(option.verdict).toBe(gpu_count === 0 ? 'likely' : 'possible');
+    },
+  );
+
+  it.each([false, true])('prefers a current twin over a newer failed twin (%s)', (reverse) => {
+    const current = source({ last_success: '2026-01-01T10:00:00Z', qos: [source().qos[0]] });
+    const failed = source({
+      id: 'second-alice',
+      last_success: '2026-01-01T10:02:00Z',
+      last_attempt: '2026-01-01T10:07:00Z',
+      status: 'error',
+      error: { code: 'ssh_failed' },
+      stale: false,
+      qos: [source().qos[0]],
+    });
+    const sources = [current, failed];
+    const options = planOptions(
+      {
+        sources: reverse ? sources.reverse() : sources,
+        nodes: [node('g1')],
+        jobs: [
+          job('running'),
+          job('waiting', { state: 'PENDING', gpu_count: 1, reason: 'Priority' }),
+        ],
+      },
+      ask,
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({
+      source: { id: current.id },
+      qos: 'normal',
+      limit: 8,
+      used: 4,
+      headroom: 4,
+      queued: 1,
+      queuedGpus: 1,
+      queuedForRoom: 1,
+      headroomAfterQueue: 3,
+      verdict: 'likely',
+    });
+  });
+
+  it.each([false, true])(
+    'omits an empty twin QoS row regardless of freshness (%s)',
+    (emptyFirst) => {
+      const populated = source({ last_success: '2026-01-01T01:00:00Z' });
+      const empty = source({
+        id: 'empty-twin',
+        qos: [],
+        last_success: emptyFirst ? '2026-01-01T02:00:00Z' : null,
+      });
+      const options = planOptions({ sources: [empty, populated], nodes: [], jobs: [] }, ask);
+      expect(options.map((option) => option.qos).sort()).toEqual(['long', 'normal']);
+      const otherUser = { ...empty, username: 'bob' };
+      const separate = planOptions({ sources: [otherUser, populated], nodes: [], jobs: [] }, ask);
+      expect(separate.filter((option) => option.qos == null)).toHaveLength(1);
+      expect(planOptions({ sources: [empty], nodes: [], jobs: [] }, ask)[0].qos).toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    'merges twins per QoS, attributing jobs regardless of source order (%s)',
+    (reverse) => {
+      const old = source({ last_success: '2026-01-01T00:00:00Z' });
+      const newer = source({
+        id: 'second-alice',
+        name: 'Second login',
+        last_success: '2026-01-01T01:00:00Z',
+        qos: [source().qos[0]],
+      });
+      const bob = source({ id: 'bob', username: 'bob' });
+      const disabled = source({
+        id: 'disabled',
+        enabled: false,
+        last_success: '2026-01-01T02:00:00Z',
+      });
+      const sources = [old, newer, bob, disabled];
+      const options = planOptions(
+        {
+          sources: reverse ? sources.reverse() : sources,
+          nodes: [node('g1', { gpu_allocated: 0 })],
+          jobs: [
+            job('running'),
+            job('waiting', { state: 'PENDING', gpu_count: 1, reason: 'QOSMaxGRESPerUser' }),
+          ],
+        },
+        ask,
+      );
+      expect(options).toHaveLength(4);
+      expect(
+        options.find((o) => o.source.username === 'alice' && o.qos === 'normal'),
+      ).toMatchObject({
+        source: { id: newer.id },
+        used: 4,
+        queued: 1,
+        verdict: 'possible',
+        contradiction: { job: 'train', reason: 'QOSMaxGRESPerUser' },
+      });
+      expect(
+        options.find((o) => o.source.username === 'alice' && o.qos === 'long')?.source.id,
+      ).toBe(old.id);
+      expect(options.find((o) => o.source.username === 'bob' && o.qos === 'normal')).toMatchObject({
+        used: 0,
+        queued: 0,
+        verdict: 'likely',
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'counts duplicated jobs once using their newest observation (%s)',
+    (reverse) => {
+      const newer = source({ id: 'second-alice', last_success: '2026-01-01T01:00:00Z' });
+      const jobs = [
+        job('same', {
+          source_id: newer.id,
+          state: 'PENDING',
+          gpu_count: 1,
+          reason: 'QOSMaxGRESPerUser',
+          observed_at: '2026-01-01T00:00:00Z',
+        }),
+        job('same', { observed_at: '2026-01-01T01:00:00Z' }),
+      ];
+      const [option] = planOptions(
+        { sources: [source(), newer], nodes: [node('g1')], jobs: reverse ? jobs.reverse() : jobs },
+        ask,
+      );
+      expect(option).toMatchObject({
+        source: { id: newer.id },
+        used: 4,
+        queued: 0,
+        contradiction: null,
+        verdict: 'likely',
+      });
+    },
+  );
+});
+
+describe('estimate evidence and ranking explanations', () => {
+  const request = { gpus: 2, gpuType: '', hours: null };
+
+  it('attributes deduplicated nodes and merged jobs to their actual logins and oldest observation', () => {
+    const limits = source({ capabilities: ['qos_limits', 'qos_access'] });
+    const twin = source({ id: 'twin', last_success: '2026-01-01T00:05:00Z', qos: [] });
+    const other = source({ id: 'bob', username: 'bob', qos: [] });
+    const [option] = planOptions(
+      {
+        sources: [limits, twin, other],
+        nodes: [
+          node('g1', { source_id: 'bob' }),
+          node('g1', { source_id: 'twin', observed_at: '2026-01-01T00:03:00Z' }),
+          node('g2', { source_id: 'bob', observed_at: '2026-01-01T00:01:00Z' }),
+        ],
+        jobs: [job('1', { source_id: 'twin', observed_at: '2026-01-01T00:02:00Z' })],
+      },
+      request,
+    ).filter((option) => option.source.username === 'alice' && option.qos === 'normal');
+    expect(option.evidence.nodes.map((item) => [item.source.id, item.at])).toEqual([
+      ['twin', '2026-01-01T00:03:00Z'],
+      ['bob', '2026-01-01T00:01:00Z'],
+    ]);
+    expect(option.evidence.limits[0].source.id).toBe(limits.id);
+    expect(option.evidence.jobs.map((item) => item.source.id)).toEqual(['twin']);
+    expect(option.evidence.jobs[0].at).toBe('2026-01-01T00:02:00Z');
+    expect(option.used).toBe(4);
+  });
+
+  it('preserves missing observation times and marks stale evidence as not current', () => {
+    const [option] = planOptions(
+      { sources: [source()], nodes: [node('g1', { observed_at: null })], jobs: [] },
+      request,
+    );
+    expect(option.evidence.nodes[0].at).toBeNull();
+    expect(option.evidence.jobs[0].at).toBe(source().last_success);
+    const [stale] = planOptions(
+      { sources: [source({ stale: true })], nodes: [node('g1')], jobs: [] },
+      request,
+    );
+    expect(stale.freeGpus).toBeNull();
+    expect(stale.evidence.nodes[0].current).toBe(false);
+    expect(stale.evidence.limits[0].current).toBe(false);
+  });
+
+  it('uses the first differing sort factor and does not invent an advantage on ties', () => {
+    const [base] = planOptions({ sources: [source()], nodes: [node('g1')], jobs: [] }, request);
+    const changes: [Partial<typeof base>, string][] = [
+      [{ verdict: 'possible', freeGpus: 100 }, 'verdict'],
+      [{ largestNodeFree: 1, headroomAfterQueue: 100 }, 'oneNode'],
+      [{ headroomAfterQueue: 1, freeGpus: 100 }, 'queue'],
+      [{ freeGpus: 1 }, 'free'],
+      [{ access: 'unknown' }, 'access'],
+    ];
+    for (const [change, factor] of changes) {
+      const next = { ...base, ...change };
+      expect(comparePlans(base, next, request)).toEqual({ factor, order: -1 });
+      expect(comparePlans(next, base, request)).toEqual({ factor, order: 1 });
+    }
+    expect(comparePlans(base, { ...base, key: `${base.key}z` }, request).factor).toBe('tie');
+    expect(
+      comparePlans(
+        { ...base, headroomAfterQueue: Infinity },
+        { ...base, headroomAfterQueue: Infinity },
+        request,
+      ),
+    ).toEqual({ factor: 'tie', order: 0 });
+  });
+});
+
+describe('plan factor effects', () => {
+  const request = { gpus: 4, gpuType: '', hours: null };
+  const factors = (login: Source, jobs: Job[] = []) => {
+    const options = planOptions({ sources: [login], nodes: [node('g1')], jobs }, request);
+    const option = options.find((option) => option.qos === 'normal') ?? options[0];
+    return {
+      option,
+      effects: Object.fromEntries(planFactors(option, request).map((f) => [f.key, f.effect])),
+    };
+  };
+
+  it.each([false, true])(
+    'attributes an exhausted limit to the limit, not the empty queue (%j)',
+    (unknownGroupUsage) => {
+      const { option, effects } = factors(
+        source({
+          qos: [
+            {
+              name: 'normal',
+              access: 'verified',
+              origin: 'test',
+              limits: {
+                MaxTRESPU: 'gres/gpu=4',
+                GrpTRES: unknownGroupUsage ? 'gres/gpu=16' : null,
+              },
+            },
+          ],
+        }),
+        [job('1')],
+      );
+      expect(option).toMatchObject({
+        verdict: 'limit',
+        headroom: 0,
+        headroomAfterQueue: 0,
+        queued: 0,
+      });
+      expect(effects).toMatchObject({ limit: 'lowers', queue: 'neutral' });
+      expect(option.rules.some((rule) => rule.effect === 'doubt')).toBe(unknownGroupUsage);
+      const unknownQueue = { ...option, headroomAfterQueue: null };
+      expect(planFactors(unknownQueue, request).find((f) => f.key === 'queue')!.effect).toBe(
+        'unknown',
+      );
+    },
+  );
+
+  it('lowers the queue factor when queued work actually takes the available room', () => {
+    const { option, effects } = factors(source(), [
+      job('1'),
+      job('2', { state: 'PENDING', reason: 'Priority' }),
+    ]);
+    expect(option).toMatchObject({ verdict: 'behind', headroom: 4, headroomAfterQueue: 0 });
+    expect(effects).toMatchObject({ limit: 'supports', queue: 'lowers' });
+  });
+
+  it.each(['pbs', 'lsf', 'kubernetes'])(
+    'keeps fresh %s data neutral even without access capability',
+    (driver) => {
+      const { effects } = factors(source({ driver, capabilities: ['jobs', 'nodes'], qos: [] }));
+      expect(effects).toMatchObject({ age: 'neutral', access: 'lowers' });
+    },
+  );
+
+  it.each([
+    { stale: true },
+    { error: 'collection_failed' },
+    { status: 'error' },
+    { last_success: null },
+  ])('lowers data age for an out-of-date source (%j)', (extra) => {
+    expect(factors(source(extra)).effects.age).toBe('lowers');
+  });
+
+  it('names degradation in the free-GPU factor only with current node data', () => {
+    const { option, effects } = factors(source({ cluster_state: 'degraded' }));
+    expect(option.verdict).toBe('possible');
+    expect(effects.free).toBe('lowers');
+    expect(factors(source({ cluster_state: 'degraded', stale: true })).effects.free).toBe(
+      'unknown',
+    );
+  });
+});

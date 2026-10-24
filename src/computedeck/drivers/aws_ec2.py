@@ -19,6 +19,7 @@ from .base import (
     DriverInfo,
     SourceError,
     integer,
+    job_time,
     now,
     number,
     options,
@@ -197,6 +198,7 @@ def parse_instances(
                 "platform": source["name"],
                 "name": _name(instance) or instance_id,
                 "state": state,
+                "started_at": job_time(instance.get("LaunchTime")) if state == "running" else None,
                 "gpu_count": gpu_count,
                 "gpu_type": gpu_type,
                 # EC2 reports configuration and lifecycle, not utilization.

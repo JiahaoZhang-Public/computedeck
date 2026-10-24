@@ -48,7 +48,7 @@ def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> No
     result = hardware.parse_probe(probe_output())
     assert result["gpu_count"] == 2
     assert result["gpu_type"] == "NVIDIA A100 80GB"
-    # The same convention as an SSH machine source: GPUs with compute processes.
+    # SSH sources and probes count visible processes or significant GPU memory use.
     assert result["gpu_allocated"] == 1
     assert result["gpu_utilization"] == 80
     assert result["gpu_observed_count"] == 1
@@ -65,7 +65,19 @@ def test_nvidia_reading_counts_gpus_with_processes_and_scope_is_explicit() -> No
 
 
 def test_idle_gpus_are_zero_in_use_but_unreadable_processes_stay_unknown() -> None:
-    assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 0
+    assert (
+        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("80, 40000", "0, 0")))[
+            "gpu_allocated"
+        ]
+        == 0
+    )
+    # Busy utilization also catches hidden work below the memory floor.
+    assert (
+        hardware.parse_probe(probe_output(apps="", gpu=GPUS.replace("40000", "0")))["gpu_allocated"]
+        == 1
+    )
+    # Significant memory use catches processes hidden by the host/container boundary.
+    assert hardware.parse_probe(probe_output(apps=""))["gpu_allocated"] == 1
     result = hardware.parse_probe(probe_output(apps=None, apps_error="Insufficient Permissions"))
     assert result["gpu_allocated"] is None
     assert result["gpu_count"] == 2
@@ -253,3 +265,11 @@ async def test_probe_classifies_connection_errors(monkeypatch, error, code) -> N
         await hardware.probe_instance({"host": "192.0.2.10", "port": 22, "username": "root"})
     assert caught.value.code == code
     assert caught.value.detail == (str(error) or None)
+
+
+def test_gpu_maximum_is_known_only_with_all_gpu_utilizations() -> None:
+    partial = hardware.parse_probe(probe_output())
+    assert partial["gpu_utilization_max"] is None
+    result = hardware.parse_probe(probe_output(gpu=GPUS.replace("[N/A]", "0")))
+    assert result["gpu_utilization"] == 40
+    assert result["gpu_utilization_max"] == 80

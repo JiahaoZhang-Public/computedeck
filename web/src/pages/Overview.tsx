@@ -20,7 +20,6 @@ import { connectedSource } from '../labels';
 import { routeHash } from '../routes';
 import { Empty, GroupMark, Meter, Panel, Stat, Status } from '../ui';
 import { ActivityTeaser } from './Activity';
-import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
 import { JobsMissingNote, JobsNotCollected, JobsTable } from './shared';
 import { recentlyReachable } from './util';
@@ -219,17 +218,19 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       >
         <GroupsTable ctx={ctx} />
       </Panel>
-      <div className={`grid ${asides.length ? 'wide-narrow' : ''}`}>
-        <HistoryPanel day={data.history} demo={demo} />
-        {asides.length > 0 && (
-          <div className="stack">
-            {asides.map((plugin) => {
-              const Aside = plugin.overview!;
-              return <Aside key={plugin.id} {...ctx.plugin} />;
-            })}
-          </div>
-        )}
-      </div>
+      <p className="panel-note">
+        <a className="link" href={routeHash('usage')}>
+          {t('usage.view')} <ArrowRight size={13} />
+        </a>
+      </p>
+      {asides.length > 0 && (
+        <div className="stack">
+          {asides.map((plugin) => {
+            const Aside = plugin.overview!;
+            return <Aside key={plugin.id} {...ctx.plugin} />;
+          })}
+        </div>
+      )}
     </>
   );
 }

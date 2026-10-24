@@ -75,6 +75,23 @@ def test_never_succeeded_failure_uses_attempt_not_an_invented_onset() -> None:
     assert item["observed_at"] == row["last_attempt"]
 
 
+def test_queue_warning_does_not_need_attention() -> None:
+    assert derive([source(warnings=[{"code": "queue_unavailable"}])]) == []
+
+
+def test_queue_warning_does_not_reopen_acknowledged_partial_data() -> None:
+    row = source(warnings=[{"code": "partial_one"}])
+    [item] = derive([row])
+    state = saved(item)
+    row["warnings"].append({"code": "queue_unavailable"})
+    [muted] = derive([row], state=state)
+    assert muted["details"] == [{"code": "partial_one"}]
+    assert muted["fingerprint"] == item["fingerprint"]
+    assert muted["muted"]["state"] == "acknowledged"
+    row["warnings"].append({"code": "partial_two"})
+    assert derive([row], state=state)[0]["muted"] is None
+
+
 def test_capability_gaps_regressions_and_all_other_warnings() -> None:
     warnings = [
         {"code": "history_unavailable"},
@@ -232,9 +249,15 @@ def test_demo_attention_shows_failed_check_without_unchecked_churn() -> None:
         "source_failed",
         "cluster_unavailable",
         "instance_ssh_failed",
+        "instance_low_use",
         "notification_failed",
     ]
-    assert data["attention"][-2]["subject"]["id"] == "example:runpod:demo-pod"
+    assert (
+        next(item for item in data["attention"] if item["kind"] == "instance_ssh_failed")[
+            "subject"
+        ]["id"]
+        == "example:runpod:demo-pod"
+    )
     pod = next(row for row in data["instances"] if row["id"] == "example:runpod:demo-pod")
     for metric in ("gpu_utilization", "cpu_utilization", "memory_utilization"):
         assert pod[metric] is None
@@ -324,7 +347,7 @@ def test_demo_contains_acknowledged_and_snoozed_items() -> None:
         "acknowledged",
         "snoozed",
     }
-    assert data["attention_count"] == 4
+    assert data["attention_count"] == 5
     assert all(item["mutable"] is True for item in data["attention"])
 
 
@@ -356,3 +379,26 @@ def test_notification_warning_reopens_for_error_code_but_not_channel_label() -> 
     assert renamed["muted"]["state"] == "acknowledged"
     [changed] = derive([], plugin_status=status(code="credential_unavailable"), state=state)
     assert changed["muted"] is None
+
+
+@pytest.mark.parametrize("previous_seconds", [None, 30])
+@pytest.mark.parametrize("seconds", [30, 60])
+def test_notification_display_params_do_not_reopen_acknowledgement(
+    previous_seconds: int | None, seconds: int
+) -> None:
+    failure = {
+        "channel": "team",
+        "channel_name": "Team",
+        "error_code": "send_timeout",
+        "at": NOW.isoformat(),
+    }
+    if previous_seconds is not None:
+        failure["error"] = {"code": "send_timeout", "seconds": previous_seconds}
+    status = {"notify": {"enabled": True, "delivery_failures": [failure]}}
+    [item] = derive([], plugin_status=status)
+    state = {item["key"]: {"fingerprint": item["fingerprint"], "acknowledged_at": NOW.isoformat()}}
+    failure["error"] = {"code": "send_timeout", "seconds": seconds}
+    [updated] = derive([], plugin_status=status, state=state)
+    assert updated["message"]["error"] == failure["error"]
+    assert updated["fingerprint"] == item["fingerprint"]
+    assert updated["muted"]["state"] == "acknowledged"

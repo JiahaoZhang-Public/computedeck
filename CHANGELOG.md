@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 (2026-10-24)
+
+- Fix final-review issues: size copied Slurm flags within the proven partition; allow example-mode copying; wrap copy notes and show explanation factors across the row. Improve preset tap targets, accessible control names and Cloud sampling labels.
+- Treat busy GPU utilization as evidence of use even when processes are invisible. Keep legacy plugin start-time text readable, treating ambiguous instance starts as unknown. Round partial spend down consistently and never guess a currency for low-use costs.
+- Collapse consecutive unrecorded days in usage history, clarify shared-host scope, and keep unknown-currency sources out of currency-specific bars. Preserve timeout duration in notification attention through retries.
+
+- Count only scheduler nodes that can take work now as usable or free. Show resting power-saving and PBS provisioning nodes as “Available on demand”, separately from unavailable capacity. Keep active allocations visible, and explain Slurm nodes without a partition.
+- Make Where to run more cautious when your scheduler reports personal limits despite apparent room. Merge duplicate logins for the same account, retain separate users, and keep CPU-only jobs from consuming model-specific GPU headroom.
+- Expand “Why this estimate” on every resource option to see seven factors, their effects, source logins and data ages. Explain the first ranking difference from the next option, or say when options tie; unknown evidence stays unknown.
+- Show per-GPU availability, memory, utilization and owners on SSH machines, with no PIDs in the interface. Offer current free GPUs in a separate Machines panel with copy-only NVIDIA setup. GPUs with significant memory use now count as in use even with an empty process list; unreadable evidence stays unknown, never free.
+- Reuse recent jobs as resource presets, find alternatives from pending or failed jobs, and copy Slurm submit flags or script headers. Use the selected QoS, current node model spelling and your own job evidence for partition and account flags; explain unconfirmed flags separately. Copying never submits a job.
+- Show running-since and cost-so-far estimates, distinguishing provider start times from ComputeDeck observation windows. Freeze stale estimates at the last successful collection. Keep currencies separate, name missing prices and show incomplete hourly totals as “≥”. GPUhub prices remain unknown for multi-GPU containers or unknown GPU counts because the price unit is ambiguous.
+- Make Usage & cost the home of trends, current GPU use and hourly spend by group. Add daily GPU-hours and spend, today and seven-day estimates, and 24-hour / seven-day / 30-day ranges. Mark partial-day spans, missing observations and unknown measurements; pre-upgrade history stays “Not recorded”. Costs are estimates, not bills.
+- Detect sustained low GPU use from at least three measured readings over a configurable window, checking per-GPU maxima where available and gaps between readings. Show acknowledgeable hints, Cloud filters and provider console links; include covered-duration cost only when priced. No instances are stopped and no automatic provider SSH checks are added.
+- Explain Slurm Priority and Resources waits with per-partition queue estimates and account fair-share when available. Hidden or unreadable queues stay unknown; only counts are retained, never other users' job ids.
+- Show typical waits from your own Slurm or PBS accounting jobs over the last 30 days, grouped by login, queue/QoS, partition and GPU count. Show a 25th–75th percentile range only with at least eight matching samples, labelled “not a prediction”. Explain missing GPU counts, insufficient history and unsupported or unavailable accounting. History builds from normal collections without a backfill or ranking changes.
+- Recognize SSH machines that are also scheduler nodes using a unique session IP match corroborated by the probed hostname. Label the shared host and count its GPUs with the cluster in summaries and new history; keep hardware checks and separate prices. Missing or ambiguous identity stays unmatched, with no extra connections or DNS lookups.
+- Keep plugin API, web API, database schema versions and route IDs unchanged. Add optional measurement, cost, queue, wait-history and host-identity fields, opt-in usage rollups, and low-use settings. Existing event subscriptions are unchanged.
+
 ## 0.6.0 (2026-10-22)
 
 - Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.

@@ -16,19 +16,32 @@ surface; other modules may change between releases.
 A plugin runs inside the service with the permissions of the user who runs it. Install
 only plugins you trust, and say plainly in your plugin what it does.
 
-## Compatibility with 0.6.0
+## Compatibility with 0.7.0
 
 `PLUGIN_API = 1`, `WEB_API = 1`, `SCHEMA_VERSION = 2` and existing route IDs stay
-unchanged. The additive `attention_state` table is created with `CREATE TABLE IF NOT
-EXISTS`; a 0.5 build can still open the database. Existing API keys keep their meaning.
-Event filters, grouping, change history and delivery status are opt-in; the default
-`GET /api/events` response remains a plain list.
+unchanged. The `instance_samples` and `job_wait_samples` tables join the existing
+`attention_state` table through `CREATE TABLE IF NOT EXISTS`; no schema-version
+migration is required. Event filters, grouping, change history and delivery status
+remain opt-in; the default `GET /api/events` response remains a plain list.
 
-Plugins tested across 0.3–0.6 can declare `requires=">=0.3,<0.7"`; widen matching pip
-dependencies and marketplace entries too. Features introduced in 0.4 require at least
-0.4, and plugins relying on 0.6 fields should require `>=0.6,<0.7` or handle their absence
-on older cores. A plugin's existing `<0.6` bound still excludes 0.6 even though its API
-version is unchanged.
+Plugins tested across 0.3–0.7 can declare `requires=">=0.3,<0.8"`; widen matching pip
+dependencies and marketplace entries too, after testing against 0.7. Features
+introduced in 0.4 still require at least 0.4. Plugins relying on 0.7 fields should
+require `>=0.7,<0.8` or handle their absence on older cores; the same rule applies
+to 0.6 fields with a minimum of 0.6. An existing `<0.7` bound excludes 0.7 even
+though its API version is unchanged.
+
+The 0.7 additions are optional per-GPU readings, run-start and spend fields,
+[usage rollups](#observed-usage-rollups-07),
+[low-use hints and settings](#low-gpu-use-additions-07), Slurm queue estimates,
+[own-job wait history](#own-job-wait-history-07) and
+[machine/node identity](#machinenode-identity-07-additive). Consumers should accept
+missing fields on older snapshots and the new `on_demand` node-health value.
+Existing counts follow the corrected measurement rules: resting on-demand nodes
+are not free, SSH GPU use includes significant memory use, and matched machines
+are counted with their scheduler node. See [Dashboard summaries](#dashboard-summaries)
+and [Reading the numbers](metrics.md). No new event type or subscription rule is
+introduced by 0.7; `instance_low_use` is an attention condition, not a plugin event.
 
 New event types reach only handlers that name them. A handler that does not subscribe
 to `job.finished` continues to receive one legacy `job.failed` or `job.ended` per ending;
@@ -81,7 +94,7 @@ plugin = Plugin(
     permissions=({"en": "posts failed jobs to the lab chat"},),
     settings=(SettingField(key="room", label={"en": "Chat room"}, required=True),),
     default_enabled=False,  # start off until the owner turns it on
-    requires=">=0.3,<0.7",  # ComputeDeck versions it supports
+    requires=">=0.3,<0.8",  # ComputeDeck versions it supports
     api=1,  # the plugin API it was written for
     page="lab-alerts",  # the page its web bundle adds, if any
     web=Path(__file__).parent / "web",  # the built web bundle, if any
@@ -396,6 +409,19 @@ Rules that keep the numbers honest:
   and must not be interpreted in the viewer's timezone. Missing fields on older rows
   mean unknown. A pending Slurm `StartTime` is an estimate, not an actual start, and is
   not stored as `started_at`.
+- Slurm pending jobs with Priority or Resources reasons may add `queue` (a list of
+  `{partition, ahead, ties}`, or `None`), `fairshare` (a number from 0 to 1, or `None`),
+  and `queue_unknown` (`private_data`, `failed`, or `None`). `ahead` and `ties` are
+  nonnegative integers: eligible earlier rows with unequal and equal priority,
+  respectively, in that partition's scheduler order. The drawer shows the range
+  `ahead` to `ahead + ties`. Other users' ids are never persisted. Missing fields on
+  older snapshots stay unknown. These are optional JSON additions with no new
+  capability, event, schema version or plugin API version.
+  Including `queue_unknown` opts a row into validation of all three queue-estimate
+  fields. Rows without that key retain their existing plugin-defined `queue` and
+  `fairshare` values (for example, `queue: "batch"` or `fairshare: 45.0`). The web
+  drawer displays these estimates only for Slurm jobs. Use `partition` for scheduler
+  queue names shown in the web app, and `qos` for queues carrying limits, as PBS and LSF do.
 - Accounting rows may add `exit_status` and `exit_signal` (nonnegative integers or
   `None`). Keep `exit_code` raw: missing normalized fields do not enable exit-code
   heuristics. Slurm splits `status:signal`; PBS values above 256 supply a signal,
@@ -459,12 +485,23 @@ class ExampleCloud(CloudDriver):
         ]
 ```
 
+`CloudInstance.hourly_cost` is the price of the **whole instance per hour**, not per GPU.
+Its optional `started_at` is a timezone-aware ISO 8601 timestamp for the provider-documented
+start of the current run, or `None`. Never substitute creation time or an undocumented
+field. Unparseable or timezone-free instance `started_at` values become `None`,
+including legacy API-1 plugin rows and stored snapshots; the instance is kept.
+Core-computed `seen_running_since` remains strict. Job `started_at` text keeps its
+existing contract even when the job has a `platform` field. The store supplies `seen_running_since` for contiguous held
+observations within two source intervals, resetting across gaps, state changes and known
+restarts. Consumers must label this as an observation window, not a guaranteed run start.
+Both fields are optional on older rows. No schema or API version changes are required.
+
 Override `account(api, source)` to return `Account(balance=...)` when the provider has a
 balance call; it is shown next to the source. `drivers/runpod.py` and `drivers/gpuhub.py`
 are complete examples.
 
 Drivers emitting `reported_running` or other SDK values introduced in 0.4 must declare
-`requires=">=0.4,<0.7"`, or use `desired_running` on 0.3.
+`requires=">=0.4,<0.8"`, or use `desired_running` on 0.3.
 
 `CloudInstance.state` also accepts `reported_running`: the provider's normal running
 report without an observation of readiness, as with RunPod REST. It can still be starting
@@ -531,7 +568,7 @@ register({
   id: 'lab-alerts',
   requires: 'lab-alerts',            // hidden while this server plugin is off
   pages: [{ id: 'lab-alerts', label: { en: 'Lab alerts' }, icon: Icon, render: (props) => <Page {...props} /> }],
-  overview: OverviewCard,             // optional: beside the 24-hour chart at the bottom of the Overview
+  overview: OverviewCard,             // optional: below the usage link at the bottom of the Overview
   settings: SettingsPanel,            // optional: on the Settings page
   banner: Banner,                     // optional: above every page
 });
@@ -567,8 +604,9 @@ listing's `observed_at`. The last `ssh_status`, `ssh_error` and check time survi
 listing with the same host, port and user, until the provider reports the instance
 released. Provider allocation fields are not overwritten by an SSH check.
 
-Hand-added rows carry `gpu_allocated` (GPUs with compute processes, or null) and
-`probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
+Hand-added rows carry `gpu_allocated` (GPUs with visible compute processes or significant
+GPU memory use, or null when processes are unreadable or memory is missing without visible
+processes) and `probe_warnings`, such as `{"code": "gpu_processes_unavailable", "detail": "rocm-smi"}`.
 Their dashboard `state` is `running` while a successful check is less than twenty
 minutes old, otherwise `unknown`. Use `summary` for totals: typed-in GPU inventory
 is not evidence of use, and hand-added machines with monitoring off are excluded.
@@ -596,7 +634,22 @@ hand-added machines) and `sources[source_id]`:
   preserves the subtotal on known usable nodes, displayed as a lower bound.
   `observed_at` is the oldest contributing observation.
   Only enabled, current inventories contribute.
-  Each dashboard node also gains `health: "usable" | "unavailable" | "unknown"`.
+  Each dashboard node has `health: "usable" | "unavailable" | "on_demand" | "unknown"`.
+  `on_demand` is an additive state for non-faulty resting Slurm power-saving nodes (with or
+  without CLOUD) and PBS provisioning/sleep/wait-provisioning nodes. `nodes.on_demand`
+  counts their GPUs (null when their count is unknown), separately from `usable`
+  and `unavailable`; they contribute no `unallocated` GPUs. These three capacity
+  categories, plus GPUs on unknown-state nodes, partition the total inventory.
+  On-demand nodes count as healthy for cluster status and never as `abnormal` nodes.
+  Slurm nodes with empty or missing `partitions` are unavailable; other drivers do
+  not require a Slurm partition. Faults, including FUTURE/ERROR, always take
+  precedence over power-saving flags. FUTURE/ERROR match whole state tokens;
+  DYNAMIC_FUTURE alone is not a fault. Nodes with assigned work keep `health: "usable"`
+  and their allocation even with power flags. Dashboard nodes also carry the additive
+  `health_reason: "no_partition" | null`, explaining missing Slurm membership without
+  requiring consumers to infer the scheduler rule.
+  The server supplies this shared classification; web consumers should use `health`
+  rather than interpreting the raw scheduler state.
 - `jobs` supplies `known`, `total` and `missing_source_ids` at every scope. Only the
   fleet-level `summary.jobs` includes `current_ids`, `listed_ids`, `running_ids` and
   `pending_ids`; these lists are not repeated under groups or sources. The running
@@ -605,7 +658,21 @@ hand-added machines) and `sources[source_id]`:
 
 `unknown_allocation_sources` retains the history coverage count: provider instances
 share their login's missing count; unmeasured hand-added machines count individually.
-The summary does not add cost accounting or failure-history coverage.
+`spend` is additive at all three scopes: `{applies: boolean, rates: {currency: hourly_total}, priced: n,
+unpriced: [{subject, reason}]}`. `applies` is true when the scope has an enabled cloud API
+source or eligible instance rows (including hand-added machines with a typed price).
+Consumers use this flag to show the spend note, even for an empty cloud listing;
+disabled-only, SSH-only and unpriced-manual-only scopes have `applies: false`. Rates include
+only held instances from fresh enabled cloud API sources, including third-party `CloudDriver` plugins. A hand-added machine takes
+part only when `hourly_cost` is not `None` (zero is a typed price): `manual_state()` running
+counts it; any other state produces `summary_lifecycle_unknown`. Hand-added machines without
+a typed price are neither counted nor listed. The built-in `ssh` driver's rows and sources
+are outside spend, even when stale or failed. Disabled sources are excluded. Cloud API
+rows retain the missing-price and coverage rules below.
+Unpriced entries name missing prices/currencies (`summary_price_missing`), unknown
+lifecycles (`summary_lifecycle_unknown`) and unavailable source listings (the existing
+source reason codes). Consumers must keep currencies separate and mark partial totals.
+This is an hourly estimate, not billing or failure-history coverage.
 
 ## Dashboard freshness
 
@@ -708,13 +775,15 @@ on the next collection. Current and seen capabilities are preserved.
 ## Notification delivery status
 
 Notify health adds `delivery_failures`, a list of `{channel, channel_name, error_code,
-at}` for configured channels whose latest recorded attempt in the last 24 hours failed.
+error, at}` for configured channels whose latest recorded attempt in the last 24 hours failed.
 It reads the retained 500 delivery-log rows and pending retries. Retry records now keep
-`last_attempt_at` and a code-only `last_error` in the existing queue JSON, so a restart
+`last_attempt_at` and a safe `last_error` message in the existing queue JSON, so a restart
 keeps their warning. Older pending records without these fields remain unknown until
 another attempt. A later successful attempt (including Send test), removal of the channel,
 or expiry of the 24-hour window clears the warning. Switching Notify off hides it.
-No channel configuration, recipient address or error detail is copied into this list.
+The additive `error` message retains its code and safe formatting parameters (currently
+`seconds` for `send_timeout`), including through retries. No channel configuration,
+recipient address or raw error detail is copied into this list.
 
 The dashboard lifts these failures as `notification_failed` warning items, labelled as
 Notifications and linking to its page (`action: "notify"`). Their keys are
@@ -758,7 +827,7 @@ an https address, or in a folder. The format follows Claude Code's `marketplace.
       "source": { "type": "pypi", "package": "computedeck-lab-alerts", "version": "1.0.0",
                   "sha256": ["<sha256 of the wheel>"] },
       "permissions": [{ "en": "posts failed jobs to the lab chat" }],
-      "requires": ">=0.3,<0.7",
+      "requires": ">=0.3,<0.8",
       "license": "MIT",
       "homepage": "https://example.com/lab-alerts"
     }
@@ -896,3 +965,180 @@ collection-machine status keep their ten-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
 polls every fifteen seconds and when the dashboard token changes. Relative ages
 continue to advance even when the dashboard is unchanged.
+
+### Per-GPU readings (0.7)
+
+SSH-source instances may include optional `gpus_observed_at` and `gpus` rows with
+`index`, `name`, `utilization`, `memory_used_mb`, `memory_total_mb`, `processes`,
+`in_use: true | false | null`, and `processes_omitted`. Process rows retain their existing
+`pid`, `user`, and `memory_mb` fields, with at most 16 rows per GPU. Missing fields in
+older snapshots mean unknown. When present and non-null, `gpus_observed_at` must be a
+timezone-aware ISO 8601 timestamp; rows with a timestamp without a timezone are rejected.
+See [the SSH driver](drivers/ssh.md#per-gpu-availability) for the memory-floor rule and
+timestamp semantics. No API or schema version changes.
+
+### Observed usage rollups (0.7)
+
+`GET /api/history?hours=24&rollup=1` adds `rollups` alongside the unchanged `hours`
+and `points` response. `hours` now accepts 1–720. Without `rollup=1`, the response
+shape stays unchanged. Dashboard history and its content token omit per-group data.
+No schema, plugin API or web API version changes are required.
+
+New stored history points add `by_group`, keyed exactly as `summary.groups`:
+`{allocated, known_allocated, unknown_allocation_sources, spend: {currency: rate},
+spend_unknown}`. `spend_unknown` is the count of unpriced subjects in that group.
+Groups without an enabled source are omitted from new samples, even if cloud instances
+are retained; hand-added platform groups remain included.
+Raw history retention is 30 days; older rows without this field are not backfilled.
+
+`rollups` contains `start`, `end` and hourly `buckets`. Each bucket has `at`, `end`,
+`observed_seconds` (time with a post-upgrade breakdown) and `groups`. Each group has
+`gpu_hours` (nullable), `spend` (a currency-to-amount map), `observed_seconds`,
+`gpu_observed_seconds` (time with a known allocation or known lower bound, including zero),
+`gpu_partial`, `spend_partial` and `spend_known`. The last flag distinguishes an
+observed zero rate from entirely unknown prices. Empty group maps and zero observed
+time mean not recorded, not zero usage. Partial flags cover both uncertain values
+and gaps within the bucket; clients must also account for missing buckets across
+larger ranges. Group `observed_seconds` retains its meaning as time present in the
+breakdown, even when values are unknown; GPU-row coverage uses `gpu_observed_seconds`.
+Currency keys are never converted or combined.
+
+Integrals use raw, unthinned rows and include a preceding observation when it still
+covers the range boundary. Samples are held until the next point, the response time,
+or 1800 seconds, whichever comes first, independent of the requested range. The
+preceding-observation lookback uses the same 1800-second cap. Hourly
+buckets are UTC; daily displays use local dates and prorate boundary buckets.
+These are estimates over observed time, not billing records.
+
+### Low GPU use additions (0.7)
+
+API and schema versions stay unchanged. `instance_samples` is created with
+`CREATE TABLE IF NOT EXISTS` and retains seven days of actual utilization readings:
+`instance_id`, `at`, `gpu_util`, nullable `gpu_util_max`, and `origin`
+(`provider`, `source`, or `probe`). Polls and fleet history never create samples.
+
+Dashboard instances gain optional `gpu_utilization_max` and a derived `low_use` object:
+
+```json
+{"state":"low","since":"2026-01-01T00:00:00+00:00","covered_minutes":60,"samples":7,"origin":"probe","reason":null}
+```
+
+`state` is `low`, `busy` (latest reading at/above threshold), or `unknown`.
+`since` and `origin` may be null. Unknown `reason` is `no_reading`, `not_running`,
+`stale`, or `coverage`. Low requires at least three complete, consecutive readings
+covering the configured window, below the threshold at both mean and available maximum.
+`source` and `probe` share one SSH measurement family for continuity and acknowledgement;
+`low_use.origin` still reports the latest reading's actual origin. SSH-source instances use
+the source interval for all their readings. Switching between the SSH and `provider`
+families starts a new window (including a probe of a Vast.ai instance). Lifecycle, endpoint
+or known provider-run changes also restart it. Failed probes preserve samples and rely on
+gap/stale rules; incomplete actual readings still break coverage. The dashboard also returns
+`low_use_settings: {threshold, window_minutes}`. Settings adds
+`low_use_threshold` (integer 1–50, default 10) and `low_use_window_minutes`
+(integer 30–360, default 60). Incomplete readings remain unknown.
+
+`instance_low_use` is a warn-level, acknowledgeable attention kind with an instance
+subject and action. Its message code is `attention_instance_low_use`; parameters include
+threshold, window, sample count, covered minutes, origin and optional estimated cost/currency.
+It is a current condition, not a new event or plugin notification. Growing duration and
+cost preserve acknowledgement of the same streak. A new streak or changed detection
+settings reopens it.
+
+Cloud drivers can optionally declare `console_url: ClassVar[str | None] = None`.
+Only HTTPS templates with `{id}` and `{region}` placeholders are supported; both values
+are URL-encoded and the id is the provider id without the source's cluster prefix.
+The dashboard exposes the expanded `instances[].console_url`, or null. Existing drivers
+need no change. The drawer only opens a link; it sends no provider mutation.
+
+### Own-job wait history (0.7)
+
+`GET /api/dashboard` adds optional `wait_history`, keyed by cluster source id:
+
+```typescript
+{
+  status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
+  observed_at: string | null; // latest accounting-capable login collection, ISO time
+  unknown_gpu_samples?: number; // own attempts with valid times but missing GPU counts
+  buckets: {
+    qos: string | null;
+    partition: string | null;
+    gpu_min: number;
+    gpu_max: number;
+    samples: number;
+    p25_seconds: number | null;
+    p75_seconds: number | null;
+  }[];
+}
+```
+
+Cluster drivers opt in with `supports_wait_history: ClassVar[bool] = True`. The
+optional class attribute is not required by the driver protocol; absent or non-true
+values mean unsupported. Opt in only when `Batch.finished` provides the login’s own
+terminal accounting with timezone-aware submit, start and end times (including
+successful jobs). Slurm and PBS opt in; LSF and Kubernetes do not yet. Plugins are
+unsupported by default, so incomplete or failure-only history never masquerades as
+an empty sample. Unsupported sources return `status: "unsupported"`, no buckets and
+a null observation time, with their own UI explanation.
+
+For opted-in drivers, the service computes aggregates from `Batch.finished` only
+when the batch has `history`. Each sample must match the source's `cluster_id` and
+`username` and carry
+`submitted_at`, `started_at`, `ended_at` with timezone offsets, in that order, plus a
+known nonnegative integer `gpu_count` to enter a bucket. Null GPU counts are retained
+and counted in additive `unknown_gpu_samples` per cluster/login over the same window,
+never filled with zero. Twin logins deduplicate these attempts; a known count from
+either twin resolves the missing count. Unknown-count jobs with start equal to end
+are excluded because they can represent unallocated cancellations. Unsupported
+drivers return zero for this count. Older services may omit the count.
+No new job field or query is required. Individual missing or invalid times are
+still excluded on supported drivers. An unreadable accounting capability remains
+`unavailable`, distinct from unsupported drivers and insufficient sample counts.
+Older dashboards may omit `wait_history`.
+
+`unknown_gpu_samples` 是新增的可选字段：按集群/登录统计同一 30 天窗口内时间有效但
+GPU 数量未知的作业尝试，不填成零 GPU，也不进入百分位分组。同账号重复登录共享去重
+计数；任一登录提供已知数量即可消除该尝试的不确定性。GPU 数量未知且开始等于结束的
+记录可能是未分配资源的取消，不计入。不支持的驱动返回零，旧服务可以省略此字段。
+
+The window is 30 days by completion time. Buckets are 0, 1, 2, 3–4, 5–8, 9–16, etc.,
+separate per cluster/user/QoS/partition. Same-account twins share deduplicated job/start
+observations. Percentiles use inclusive linear interpolation and are null below eight
+samples. `observed_at` remains the collection time even when stale. A currently
+unavailable history capability suppresses the displayed range, although unexpired
+samples are retained for recovery. No job identifiers or individual job times appear
+in these aggregates.
+
+The new `job_wait_samples` table is created with `CREATE TABLE IF NOT EXISTS`, with
+30-day retention. It stores only own-job identifiers, grouping fields and timestamps;
+no names, paths or other users' jobs. Source deletion or connection-identity edits
+clear that source's samples. Schema, plugin and web API versions are unchanged; no
+new event type, capability, attention kind, setting or route is introduced.
+
+### Machine/node identity (0.7, additive)
+
+Node rows may carry `host_addresses: string[]`, explicit IP addresses reported by
+the scheduler, and `host_names: string[]`, scheduler-reported hostnames in addition
+to the optional node `name`. SSH-source and hand-added probe rows may carry
+`ssh_endpoint: {host: string, port: int} | null`, the server endpoint read from the
+existing SSH session, and `host_name: string | null`, its probed hostname.
+Matching requires both a unique IP and a case-insensitive short-hostname match;
+IP-valued names are not corroboration. Missing evidence means no match.
+Only hand-added machines and sources with driver `ssh` participate in matching.
+SSH sources must retain `last_success`; connection edits invalidate the old link.
+Nodes without a display name use their id in the resulting `same_node.name`.
+
+节点可附带 `host_addresses: string[]` 和 `host_names: string[]`（调度器报告的 IP 与
+主机名）；SSH 机器可附带 `ssh_endpoint` 和 `host_name: string | null`（探测主机名）。
+匹配必须同时满足唯一 IP 与忽略大小写的短主机名一致，IP 形式的名称不算佐证。
+缺少证据时不匹配；SSH 数据源必须保留 `last_success`，修改连接会使旧匹配失效。
+节点没有显示名称时，`same_node.name` 使用节点 id。
+
+Dashboard instance rows may gain
+`same_node: {id, name, cluster_id, cluster_name}` when exactly one collected node
+matches. It is derived on dashboard reads, not stored as a durable link; absent
+means unmatched. All GPU/utilization summary scopes and new history exclude the
+machine's duplicate measurement. Scheduler job allocations keep their existing
+meaning; hourly spend is unchanged. Hardware checks still work. API versions,
+route ids and SCHEMA_VERSION are unchanged; no table or remote query is added.
+See [machine/node accounting](metrics.md#machines-that-are-also-scheduler-nodes)
+for matching limits and outage behaviour.

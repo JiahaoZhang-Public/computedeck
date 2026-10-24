@@ -80,7 +80,7 @@ async def test_balance_and_containers_are_collected(monkeypatch: pytest.MonkeyPa
     assert first["id"] == "gpuhub:53a677bb3e281b8-f94411a60c-63c24009"
     assert first["name"] == "llm-serve · 63c24009"
     assert (first["state"], first["gpu_count"], first["gpu_type"]) == ("running", 2, "RTX 5090")
-    assert first["hourly_cost"] == 1.6 and first["region"] == "Singapore-A"
+    assert first["hourly_cost"] is None and first["region"] == "Singapore-A"
     assert (first["host"], first["port"], first["username"]) == (
         "sg-a.example-gpu.com",
         22345,
@@ -192,3 +192,16 @@ def test_the_form_comes_from_the_class() -> None:
     assert info.label == {"en": "GPUhub", "zh-CN": "GPUhub"}
     assert info.fields[0].key == "credential" and info.fields[0].default == "env:GPUHUB_API_KEY"
     assert info.beta is True
+
+
+@pytest.mark.parametrize(("count", "expected"), [(1, 1.6), (2, None), (8, None), (None, None)])
+def test_price_is_withheld_when_gpu_unit_is_ambiguous(count, expected) -> None:
+    instance = container_instance({}, {**CONTAINER, "gpu_num": count})
+    assert instance.hourly_cost == expected
+    assert instance.currency == "USD"
+    assert instance.started_at is None
+
+
+def test_single_gpu_missing_price_stays_unknown() -> None:
+    instance = container_instance({}, {**CONTAINER, "gpu_num": 1, "price": None})
+    assert instance.hourly_cost is None

@@ -144,7 +144,16 @@ export function attentionText(item: Attention, tools: Pick<Tool, 'id' | 'name'>[
     }
   }
   const message = { ...item.message, name, error_code: item.message.error_code };
-  if (item.kind === 'notification_failed' && typeof message.error_code === 'string')
-    message.error_code = formatMessage({ code: message.error_code });
+  if (item.kind === 'notification_failed' && typeof message.error_code === 'string') {
+    const error = item.message.error;
+    const notice =
+      error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+        ? { ...error, code: error.code }
+        : { code: message.error_code };
+    message.error_code =
+      notice.code === 'send_timeout' && !('seconds' in notice)
+        ? t('msg.send_timeout_unknown')
+        : formatMessage(notice);
+  }
   return formatMessage(message);
 }

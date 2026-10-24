@@ -6,16 +6,27 @@ read those figures. `—` means unknown or no measurement; `≥ n` is a known su
 with named missing evidence. Neither means zero.
 
 - **Freshness** in the topbar uses the oldest enabled source’s last successful collection. If any enabled source has never succeeded, it says "Not collected yet". Disabled sources and manual SSH checks do not make the fleet age newer. "Collecting N" keeps that age visible, and Refresh can queue the other sources. Open the health pill on any page for source ages, next attempts, backoff and service faults. The age can look older than in earlier releases because it no longer follows the newest source.
-- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts GPUs with compute processes; unavailable process visibility (for example on AMD GPUs) remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
-- **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and idle-instance suggestions.
+- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts all users’ GPUs with visible compute processes or an empty process list with known memory and either memory use at least max(1024 MiB, 5% of total GPU memory) or utilization at least 5%. Unavailable process visibility (for example on AMD GPUs), or missing memory without visible processes, remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
+- **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and low-use suggestions.
 - **SSH checks** of a cloud instance are kept across provider listings while its host, port and user stay the same, so a failed connection stays failed until it is checked again. A listing that reports the instance no longer holds GPUs clears the old check, even if it retains an endpoint. The check shows its own age next to the listing's; counting a provider's allocation never makes an old utilization reading fresh.
-- **Usable capacity** includes only healthy nodes from enabled, current sources. Down, drained, reserved, UNKNOWN and nonresponsive (`*`) nodes are unavailable; power-saving flags alone are normal. An outage reads "0 usable · N unavailable", alongside the total inventory. **Unallocated** GPUs are usable capacity minus the allocations on those usable nodes. QoS limits and your access still constrain where you can run.
+- **Usable capacity** includes only healthy nodes from enabled, current sources. Down, drained, reserved, UNKNOWN, FUTURE, ERROR and nonresponsive (`*`) nodes are unavailable. Slurm nodes must belong to a partition. Power-saving nodes with idle, free or empty base states, and PBS provisioning, sleep and wait-provisioning nodes, cannot contribute current usable or free GPUs. Nodes with assigned work remain usable and retain their allocations even with power flags. DYNAMIC_FUTURE is not the FUTURE state and does not exclude an idle node. Non-faulty resting Slurm power-saving nodes (with or without CLOUD) and PBS sleep/provisioning nodes are labelled **available on demand**, never free now. They remain healthy for cluster status and do not count as unhealthy nodes. Usable, unavailable and on-demand GPU counts are separate parts of the total inventory; GPUs on unknown-state nodes remain unknown. An outage reads "0 usable · N unavailable", alongside the total inventory. **Unallocated** GPUs are usable capacity minus the allocations on those usable nodes. QoS limits and your access still constrain where you can run.
 - **QoS limits** are what the scheduler shows for your login. Limits alone do not prove access. The planner shows verified and unknown-access options together, with one access note per login. Only options without an association are collapsed. Limits of different QoS do not add up.
 - **Where to run** estimates account for this login's eligible queued jobs in the same QoS. Held, dependency, begin-time and array-task-limit jobs are excluded. Eligible jobs are considered in listed order, subtracting each only if it fits the room left after previously counted jobs. A larger job is skipped because it cannot start first. If the remaining queued GPUs starting first would leave insufficient headroom for the request, the option reads "Likely to wait for your queue". This is an estimate, not FIFO or a promise of scheduling order. Unknown queued GPU counts that could consume remaining room, or a job list that is no longer current, prevent a "Likely" estimate. An unlimited room is unaffected by queued demand, even when its GPU count is unknown. Model-specific limits count the matching queued GPUs; generic limits count all models. "Room used by queue" shows the reduction in available headroom across these limits, rather than the total GPUs requested by all queued jobs. Kubernetes resource-quota usage already includes admitted pending pods, so those queues are not subtracted again. The best-estimate card is the first table row, and appears only for likely or possible options. Within a verdict, options sort by fitting on one node, room after the queue, free GPUs, then verified access.
+  If an eligible pending job waits on a personal-limit reason even though its known GPU request fits the collected headroom, a "Likely" estimate becomes "Possible". The explanation names the job and scheduler code: the scheduler may count differently or enforce limits that were not collected. This does not assert that the new request will wait. Larger limit-held jobs do not trigger this cap; stale jobs, unknown relevant counts or models, and Kubernetes resource quotas do not supply contradiction evidence. If any finite per-model GPU cap exists, GPU-limit evidence must name exactly the requested model. Job-count and submit-count waits (`QOSMaxJobsPerUserLimit`, `QOSMaxSubmitJobPerUserLimit`, `AssocMaxJobsLimit`, `AssocMaxSubmitJobLimit`) still cap the estimate when QoS count limits are missing or unlimited. Association limits are separate from QoS limits and are not collected; a wait can also reflect an uncollected partition QoS limit. Any collected jobs or submit rule already at its limit prevents contradiction evidence. Zero-GPU GRES waits and CPU-limit waits are not used because their resource headroom is not evaluated. CPU-only running jobs consume no model-specific GPU headroom. The queue column uses short translated reason-class labels and keeps the raw code on hover; unrecognised reasons remain visible as reported.
+  Sources with the same cluster and username share one option per QoS, preferring current QoS-limit data, then current job data, then the latest successful collection. Jobs attributed to either current twin are counted once, using their newest observation, even when the retained QoS source's job list is not current; an empty twin QoS list adds no extra row; different usernames remain separate options.
+
+  若同一登录、同一 QoS 的可调度等待作业因个人配额受限，而已知 GPU 请求仍能放入采集到的余量，“很可能”会降为“可能”。说明列出作业和调度器原因码，提示调度器计数可能不同，也可能存在未采集到的限制，不保证新作业一定等待。超过余量的作业不触发此规则；过期作业、相关数量或型号未知的数据以及 Kubernetes 资源配额不作为矛盾证据。存在有限的型号 GPU 配额时，GPU 限制作业必须具有与请求一致的单一已知型号。作业数和提交数等待（`QOSMaxJobsPerUserLimit`、`QOSMaxSubmitJobPerUserLimit`、`AssocMaxJobsLimit`、`AssocMaxSubmitJobLimit`）在 QoS 计数上限缺失或无限制时仍会降低估计。关联限制独立于 QoS 限制且未被采集，等待也可能来自未采集的分区 QoS 限制。若已采集的任一作业数或提交数规则已达上限，则不提供矛盾证据。零 GPU 作业的 GRES 等待和 CPU 限制等待不触发矛盾提示，因为对应资源的余量未计算。纯 CPU 运行作业不占用特定型号 GPU 配额。排队列对已识别的原因显示简短分类标签，悬停可见原始代码；未识别的原因直接显示调度器原文。同一集群和用户名的重复连接按 QoS 合并，优先保留 QoS 配额数据当前有效的来源，其次比较作业数据是否当前有效，最后比较最近成功采集时间；两条连接的当前作业按最新观测去重，即使保留的 QoS 来源没有当前作业列表也会使用另一条连接的当前作业，空 QoS 列表的重复连接不再增加额外行，不同用户名保持独立。
+
+- **Why this estimate** expands on every Where-to-run option, including options without access. Seven factors show free usable GPUs, the most measured free GPUs on one node versus the request, your GPU limit and use (plus binding or unchecked scheduler rules), your eligible queue, maximum run time, access verification and data age. Each factor names its source login, capability (nodes, limits, jobs or access) and observation age, with the absolute timestamp formatted in the viewer's locale and local time, visible on phones too. Node evidence follows the deduplicated node rows, even when another login collected them; job evidence follows the merged login snapshots. Missing timestamps stay unknown. Limits and access use the source's last successful collection time, the timestamp available in the current contract. Stale or unavailable capabilities are labelled and their retained values do not become current estimates.
+  Factors state whether they support or lower the estimate, remain unknown, or leave the verdict unchanged. An exhausted GPU limit lowers the limit factor even when another rule is unknown; the queue lowers the estimate only when it takes the available room or contradicts the collected limits. Data age reflects source freshness, not capabilities the driver does not offer. Current degraded or unavailable cluster states are explained in the free-GPU factor and lower the estimate. Single-node fit only affects ranking. Maximum and requested run times use the same duration formatting as the table, rounding hours to one decimal place. A missing requested or maximum run time is explicitly unchecked and does not cap the verdict, preserving the existing calculation. The best-estimate card compares its first differing sorting factor with the next visible option: verdict, single-node fit, room after your queue, free GPUs, then verified access. Equal factors are described as a tie broken by display order; no advantage is invented. There is no comparison when only one visible option exists. These explanations add no collection calls or scheduling actions.
+
+  **为什么这样估计**可在每个“在哪里运行”选项中展开，包括无权限选项。七项因素展示可用节点上的空闲 GPU、单节点已测得的最多空闲 GPU 与请求的比较、个人 GPU 上限和用量（以及生效或未能核对的调度规则）、个人可调度队列、最长运行时间、权限验证与数据时间。每项列出实际来源登录及观测时间，绝对时间使用查看者的语言格式和本地时区，手机上也直接显示。节点来源跟随去重后的节点记录，作业来源跟随合并后的登录快照；缺失的时间保持未知。上限和权限使用当前接口提供的最近成功采集时间。过期或缺少能力的数据会标明状态，保留的旧值不会变成当前估计。
+  每条来源说明标明节点、上限、作业或访问权限，区分同一登录的不同观测时间。因素会说明支持、降低估计、未知或不改变判断。GPU 余量不足时，即使其他规则未知，上限因素仍会降低估计；只有队列占去可用余量或与已采集的限制矛盾时，队列因素才会降低估计。数据时间只反映来源是否当前有效，不把驱动未提供的能力当成数据过期。节点数据当前有效但集群降级或不可用时，空闲 GPU 因素会说明原因并降低估计。单节点容纳能力只影响排序。最长与请求运行时间使用和表格一致的时长格式，小时数四舍五入到一位小数；请求或最长运行时间未知时明确表示未核对，不会降低判断。最佳估计卡与下一个可见选项比较首个不同的排序因素：判断、单节点容纳能力、队列后余量、空闲 GPU、已验证权限。所有因素相同时明确表示并列，仅按显示顺序排列；只有一个可见选项时不作比较。这些说明不增加采集调用，也不执行调度操作。
+
 - **Utilization** is a percentage, separate from allocation. GPU utilization is weighted by the number of GPUs observed, and the coverage figure reports how many GPUs contributed. CPU and memory utilization are simple means of available samples, not weighted by cores or RAM. Samples come from current running jobs and reachable SSH readings less than twelve minutes old; missing samples are left out, not treated as idle. Machines with monitoring off do not contribute. An instance reading covers the visible host, which can include more than the container. The twenty-minute rule for a hand-added machine's allocation does not extend the twelve-minute utilization window.
 - **History** uses the same server allocation and utilization figures as Overview and Usage. Periods without data stay empty. Older points stay unchanged; excluding unmonitored machines can create a step at upgrade.
 - **Jobs counts** include only current jobs from enabled logins. If an enabled login lacks a current list, the count is partial. Last-known jobs remain visible as stale rows but do not increase the current count. The navigation badge and unfiltered Jobs count use the same server selection.
-- **Prices** are estimates from known hourly prices, not bills. Held instances show their hourly price; not-held instances do not. Unknown and transitional states retain the existing price display until fuller cost accounting is added; a price alone does not establish allocation. Currencies are never added together.
+- **Prices** are for the whole instance per hour, not per GPU. Only held instances (`running` or `reported_running`) contribute to the current hourly estimate. Other states show the known price as “while running”; their running cost is unknown, never zero. Currencies are never added together.
 
 ## Scope and freshness
 
@@ -78,6 +89,29 @@ saved as a failed check while its retry is pending.
 认证失败、主机密钥验证失败、网络不可达及连接被拒绝都有具体指引，不会自动重试。
 未知错误保留通用说明。在重试期间，不会将第一次瞬时故障保存为检查失败。
 远程命令失败（SSH 退出码不是 255）保留原始详情并使用通用错误说明，不提供连接指引或重试。
+
+## Upgrading to 0.7
+
+New samples use the corrected node-usability and SSH GPU-use rules, and omit
+machines matched to scheduler nodes. Existing history is not rewritten, so a step
+at upgrade can reflect a counting change rather than a workload change. Resting
+on-demand GPUs are shown separately from capacity that is free now.
+
+[Usage & cost](#usage--cost-now-and-over-range) builds group breakdowns from new
+observations; older days remain not recorded. [Running cost](#running-cost-estimates)
+uses a documented provider start or a labelled observation window.
+[Low-use hints](#sustained-low-gpu-use) need enough actual readings, and
+[typical waits](#typical-wait-from-your-job-history) need at least eight matching
+own-job samples collected after upgrading. [Slurm queue estimates](#slurm-queue-estimates)
+appear after a normal collection with an eligible pending job. None of these
+estimates is a scheduling guarantee or a bill.
+
+中文：升级后的新采样采用修正的节点可用性和 SSH GPU 使用规则，已匹配到集群节点的
+机器不再重复计数；旧历史不重算，因此升级时的跳变不一定表示工作负载变化。按需可用 GPU
+与当前空闲容量分开显示。分组用量从新观测开始积累，旧日期保持“未记录”；运行费用使用
+平台记录的启动时间或明确标注的观测窗口。低利用率提示需要足够的实际读数，通常等待区间
+需要升级后采集的至少 8 个匹配的自身作业样本。Slurm 队列估计在存在符合条件的等待作业时
+随正常采集出现。这些估计都不是调度保证或账单。
 
 ## Upgrading from 0.3
 
@@ -450,3 +484,538 @@ outcomes and a failing Team alerts channel, without reading live deliveries.
 其余事件仅显示“已合并”，避免误以为每个事件都单独发送了消息；限流事件仍显示“已抑制”。状态来自保留的最近 500 条日志，未显示状态表示未知。
 动态加载记录时读取这些状态；任务提醒页面的发送日志会自动刷新。示例模式使用虚构状态和发送失败的
 Team alerts 渠道，不读取真实发送记录。
+
+### Per-GPU SSH availability / SSH 单卡可用状态
+
+Machine drawers show Free, Busy, Busy (processes not visible), or Unknown for each GPU,
+with memory, utilization, and up to two owners with process counts and memory. Unknown
+memory is shown as `—`, just like unknown utilization. Owners sort by memory (unknown last),
+then process count. Owner totals cover only the shown processes when the 16-process
+cap is reached; PIDs are not displayed. The section uses its own `gpus_observed_at`,
+which probes never refresh. Older samples without a timestamp say “Sample time unknown”.
+
+Where to run has a separate Machines panel for running SSH-source instances with GPU samples
+no older than twice the collection interval. Missing instances are excluded. Only `in_use: false`
+counts as free. Unknown states or models keep free counts as lower bounds, with the missing count stated. Rows sort by
+known free GPUs and are muted when fewer than requested are known free. Model filtering
+includes machine models; machines with no matching GPU are hidden with a count note, while
+unknown models remain visible. Copy-only SSH and NVIDIA CUDA settings select known-free indexes
+in ascending index order, up to the requested count; fewer free GPUs means fewer selected,
+with both counts stated on the copy button.
+A separate count note identifies machines hidden because their GPU sample is missing or too old.
+The copied setup is one command: `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2; exec "${SHELL:-sh}" -l'`.
+Pasting it opens an SSH shell with the selected GPU settings; run your command in that shell.
+Copying runs nothing and reserves no GPU. SSH hosts
+do not appear in the paid-cloud idle list. Hand-added machines do not yet retain per-GPU data.
+
+机器抽屉逐卡显示空闲、使用中、使用中但进程不可见或未知，以及显存、利用率和最多两位
+用户的进程数与显存。未知显存与未知利用率统一显示为 `—`。用户按显存用量（未知排最后）、
+进程数降序排列。可见进程或空进程列表下达到 max(1024 MiB, 总显存的 5%) 的用量
+表示使用中；只有空进程列表且已知显存低于阈值才是空闲。进程不可读，或没有可见进程且
+显存未知时，状态保持未知。任一卡未知都会使机器的总使用量未知。每卡最多保留 16 个进程，
+超出时说明用户合计仅覆盖已显示的进程；不显示 PID。单卡列表使用独立采样时间，探测不会刷新它。
+旧采样缺少时间戳时显示“采样时间未知”。
+
+“在哪里运行”的机器面板仅采用运行中 SSH 来源实例最近两个采集周期内的有效单卡采样，
+不再报告的实例不参与比较。未知卡不计为空闲，空闲数标为下界并说明未知数量。按已知空闲卡数排序，不足请求数量时淡化显示。
+型号筛选包含机器型号；没有匹配 GPU 的机器隐藏并汇总数量，型号未知的机器仍然显示。
+SSH 和 NVIDIA CUDA 设置仅供复制，按编号升序选取已知空闲卡，
+最多选取请求数量；不足时选取所有已知空闲卡，并在复制按钮上说明选取数量和请求数量。
+GPU 采样缺失或过旧而隐藏的机器会单独汇总数量。
+复制内容是一条 SSH 命令，会在远端设置 `CUDA_DEVICE_ORDER=PCI_BUS_ID` 和 `CUDA_VISIBLE_DEVICES`，
+然后打开 shell；粘贴后在该 shell 中运行你的命令。
+复制操作不会执行命令或预留 GPU。SSH 主机不再出现在付费云实例的低利用率列表中；手动添加机器尚不保留单卡数据。
+
+The partial-total reason `summary_gpu_processes_unavailable` means GPU use could not be
+read on every GPU, whether because processes were unreadable or memory was missing without
+visible processes. The reason code is unchanged; it does not imply the process query failed.
+
+部分总量的原因码 `summary_gpu_processes_unavailable` 表示部分 GPU 的使用情况无法读取：
+可能是进程不可读，也可能是没有可见进程且显存缺失。原因码保持不变，并不表示进程查询一定失败。
+
+### Copying requests and reusing job shapes
+
+Where to run offers **Copy submit flags** on Slurm options estimated likely, possible,
+behind your queue or busy, unless a per-job rule decides the verdict. It copies only;
+the toast confirms that nothing was submitted. Example mode disables this copy action.
+The format switch chooses flags alone (no command or comments) or `#SBATCH` header lines
+and remembers the choice in this browser when storage is available.
+
+QoS always comes from the selected option when its name can be used safely in a flag.
+Model spelling comes from current scheduler node records for this cluster, regardless of
+node health: a case-insensitive match must yield exactly one safe spelling. Account and
+partition still require an unambiguous value from your own current jobs or recent
+failures in that QoS. Current jobs from any twin login with the same cluster and
+username can provide evidence. A partition also needs a currently observed usable
+matching node. Missing or unsafe flags are combined into one visible note. Model
+omissions, multi-node layout and zero-time notes stay separate; neither copied format
+contains these notes. A model containing spaces, or without one unambiguous current
+spelling, is omitted with a note to add the model before submitting. Generic GPU counts
+and entered run time come from the request. Positive hours round to the nearest minute
+(at least one minute); zero is omitted because Slurm would interpret it as unlimited.
+Node count is added only when every matching usable node has the same known GPU capacity
+and the request exceeds that capacity and is an exact multiple of it; the GPU flag then
+uses the per-node count. Otherwise a known need for multiple nodes is explained without
+inventing a layout. Review these partial flags before using them. PBS, LSF and
+Kubernetes do not offer submission copying.
+
+Up to four preset chips reuse distinct positive GPU-count/model shapes from your current
+jobs and recent failures, newest first by submission time for current jobs and end time
+for failures, falling back to observation time when those times are unknown.
+Labels and deduplication use the count and model actually
+filled; unlisted or multiple models become a model-less request. They clear the optional
+run time and perform no action on a source. Pending and failed job drawers link to the
+same form with `#/plan?from=<job id>` plus the GPU count and, if listed, a single model.
+From-only links resolve the job while it is available; explicit form parameters win and
+survive the job leaving the list. Unknown or zero job GPU counts require you to enter
+the intended request. The banner names the source job and its own GPU count, or just its
+name when that count is unknown or zero. Its waiting login/QoS is marked, including a
+merged twin login. Neither queue counts nor ranking are adjusted. Clearing the job
+context keeps the form values. Clearing the GPU count retains its current value and does
+not restore the source job's model over your selection.
+
+Prefilling run time in presets and drawer links remains deferred in this slice. Jobs already have an optional
+`time_limit` (including Slurm/PBS failure records and example data); a later change could
+fill hours from it when known and parseable.
+
+中文：“在哪里运行”在 Slurm 的较可能启动、可能、较可能等待你的排队作业及空闲不足选项上提供“复制提交参数”，
+由每作业规则决定的选项除外。操作只复制，提示明确说明未提交任何作业；示例模式禁用此复制按钮。
+可选择不含命令或注释的单行参数，或 `#SBATCH` 脚本头部，格式偏好在浏览器允许时保存。
+QoS 始终来自所选选项，只要名称可安全用于参数。型号写法来自该集群当前的调度器节点记录，
+不受节点健康状态影响：忽略大小写匹配后必须只有一种可安全用于参数的写法。账户和分区仍需
+同一集群、用户名和 QoS 的当前作业或近期失败记录提供唯一值；任一相同账户的重复连接都可
+提供当前作业证据。分区还必须出现在当前观测的、符合型号且可用的节点上。
+未知或不安全的参数合并为一行提示，型号、多节点布局和零运行时间的提示保持独立；两种复制
+格式均不包含提示文字。包含空格或无法确认唯一当前写法的型号会省略，提示提交前补充。
+GPU 数和运行时间来自表单；正数小时四舍五入到分钟（至少一分钟），零因在 Slurm
+表示不限时而省略。仅在所有匹配可用节点的 GPU 容量一致且已知、请求超过单节点容量并可整除时
+添加节点数，同时把 GPU 参数改为每节点数量；其他已知多节点需求只提示，不推测布局。
+使用前请检查这些可能不完整的参数。PBS、LSF 和 Kubernetes 不提供提交参数复制。
+
+最多四个预设按钮复用当前作业和近期失败记录的资源需求，按实际填入的 GPU 数量和型号生成
+标签并去重；按当前作业的提交时间或失败作业的结束时间从新到旧排列，时间未知时使用观测时间。
+未列出的型号或多型号请求按不指定型号处理。预设会清空可选运行时间，
+不操作任何来源。等待和失败作业详情可通过 `#/plan?from=<作业 ID>` 及资源参数进入表单；
+型号只有在列表中存在且为单一型号时才填入。仅含 from 的链接在作业仍存在时解析，显式资源参数
+优先，并在作业离开列表后保留。GPU 数未知或为零时提示填写需求。横幅显示作业自身的 GPU 数，未知或为零时仅显示名称。
+页面标明关联作业及其等待的登录/QoS，合并的重复登录也可识别；队列数量和排序均不改变。清除作业关联保留资源输入。
+清空 GPU 数量时保留当前数值，不会用来源作业的型号覆盖已选型号。
+
+本项的预设和详情链接暂不自动填入运行时间。作业已有可选的 `time_limit` 字段（包括 Slurm/PBS 失败记录和示例数据）；
+后续可在该值已知且可解析时用于填入小时数。
+
+## Running cost estimates
+
+Cloud and machines shows **Running now** from `summary.spend` for the selected group,
+before text-search filtering. The server computes the same figures for the fleet, each
+group and each login. Only held instances from current, enabled cloud API listings count,
+including third-party cloud drivers. A hand-added machine participates only when an hourly
+price was typed (including zero): `manual_state()` running counts its price; otherwise it
+is listed with `summary_lifecycle_unknown`. Hand-added machines without a typed price are
+neither counted nor listed. The built-in `ssh` driver's rows and sources are outside spend,
+including failed or stale SSH sources. Disabled sources are excluded.
+
+For cloud API sources, missing prices or currencies, uncertain lifecycles and unavailable
+listings are still named with links and reasons. Known totals read **≥** when that coverage
+is incomplete; unknown totals show **—**. If nothing priced is running and no cost is
+unknown, the note says **No priced instance running**. The note is hidden in scopes with
+neither an enabled cloud API source nor a hand-added machine with a typed price.
+The server supplies this visibility decision as `summary.spend.applies`. Each currency has
+its own hourly total. A supplied zero price remains a known zero.
+
+Rows have one compact platform/state line: **up 3 d 4 h** for a provider start or
+**seen running 2 h** for an observation window, followed by **≈ cost** only when known.
+Unknown parts are omitted. The panel note and drawer label estimates as **not a bill**;
+the drawer keeps the start's origin and any **As of** cutoff. Durations show days and hours,
+or whole minutes below an hour, rounded down. The drawer also states the whole-instance
+price and, for a known positive GPU count, the approximate price per GPU-hour. Cost is
+current price × elapsed hours; it does not reconstruct past price changes or include
+storage and other charges. This note appears in the drawer only
+when a cost estimate is shown.
+
+`started_at` is used only as a provider-documented start of the current run: RunPod's
+[`lastStartedAt`](https://docs.runpod.io/api-reference/pods/GET/pods) for RUNNING pods, and
+EC2's [`LaunchTime`](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_Instance.html)
+for running instances. Invalid or timezone-free values are unknown. EC2 has no collected
+price, so it shows the start without a cost. Vast.ai's `start_date` is not used because its
+reset-on-restart semantics have not been confirmed. Lambda, GPUhub and SSH sources do not
+supply a provider start in this slice. GPUhub prices are used only for single-GPU
+containers: its API reference does not specify whether the hourly base price is per
+GPU or per container. Multi-GPU containers and those with unknown GPU counts stay
+unpriced pending confirmation (see [GPUhub](drivers/gpuhub.md)).
+
+When no provider start is known, `seen_running_since` gives the contiguous observation
+window. It carries only between held observations at most two source intervals apart;
+a stop, uncertain state, disappearance, backwards time, observed provider restart or
+longer gap resets it. The drawer says **3 d 4 h since ComputeDeck first saw it running
+in this observation window**, never a lower-bound claim about this run: polling can miss
+a stop and restart. An unobserved start remains unknown. Hand-added machines do not receive a stored observation window.
+When the source is stale, disabled, failed or lacks current instance data, estimates stop
+at its last successful collection and say **As of** with the local time. A missing
+observation time leaves cost unknown. Observed daily estimates are described under
+Usage & cost below.
+
+## 运行费用估算
+
+「云与机器」的当前费用来自所选分组的 `summary.spend`，不受文字搜索筛选影响。
+服务端统一计算全局、分组及各登录的结果。仅计入已启用且采集有效、状态为
+`running` 或 `reported_running` 的云 API 实例，包括第三方云驱动。手动添加的机器仅在
+填写了小时单价（包括零）后参与费用统计：`manual_state()` 为运行时计入单价，否则
+以 `summary_lifecycle_unknown` 列出。未填写单价的手动机器不计入，也不列为费用未知。
+内置 `ssh` 驱动的机器和数据源均不参与费用统计，包括采集过期或失败的 SSH 数据源。
+已停用的数据源不计入。
+
+云 API 实例缺少单价或币种、运行状态未知或采集不可用时，仍列出名称、原因和链接；
+已知金额显示 **≥**，全部费用未知时显示 **—**。没有已知单价的实例运行且没有未知费用时，
+显示「当前无已知单价的实例运行」。所选范围内既无已启用的云 API 数据源，也无填写单价的手动
+机器时，隐藏整条费用说明；该显示条件由服务端 `summary.spend.applies` 统一提供。各币种分别汇总，绝不相加；明确填写的零单价按已知零处理。
+
+行中仅保留一条平台与状态信息，追加「已运行 3 天 4 小时」或「已观测运行 2 小时」，
+费用已知时再追加「≈ 金额」；未知部分不显示占位符。面板说明及详情注明「估算，非账单」，
+详情保留起始时间的来源和「截至」时间。时长向下取整，显示天和小时，不足一小时显示分钟。
+小时单价属于整个实例；GPU 数量已知且大于零时另列每 GPU 小时的近似价格。估算使用当前单价乘以时长，不还原历史
+价格变动，也不包含存储及其他费用；详情中仅在显示费用估算时附上此说明。
+RunPod 和 EC2 使用平台记录的本次启动时间；EC2 没有采集单价，因此只显示起始时间。其他平台在本阶段仅使用连续观测窗口。
+GPUhub API 文档未说明小时基础价格是每 GPU 还是每容器，因此仅使用单 GPU 容器的价格；
+多 GPU 或 GPU 数未知的容器单价保持未知，等待确认（见 [GPUhub](drivers/gpuhub.md)）。
+
+缺少平台启动时间时，详情显示「距 ComputeDeck 在本次观测窗口首次看到运行已过 3 天 4 小时」。
+手动添加的机器不记录观测起始时间。连续两次观测必须均为运行状态，间隔不超过两倍采集周期；停止、状态未知、消失、时间倒退、平台
+报告重启或更长的间隔会重置窗口。轮询可能漏掉中间的停止和重启，因此这不是本次运行
+费用的下界。采集过期、失败、停用或缺少当前实例数据时，估算停在最后成功采集时间并
+显示「截至」；时间未知则费用未知。按观测历史汇总的每日费用见下方「用量与费用」。
+
+## Usage & cost: now and over range
+
+Usage & cost (`#/usage`) is the home of the allocation/utilization chart; Overview
+links to it. **Now** uses `summary.groups` for your GPUs in use and `summary.spend`
+for hourly rates by group, with currencies kept separate. The top eight groups are
+shown separately; Other retains any unknown members as a lower bound. Unknown values
+use an empty hatched track. Missing prices, uncertain lifecycle states and unavailable
+cloud connections remain named below the current figures. The daily-rate line is a
+projection, not a bill. Priced running instances open their drawers by keyboard or
+pointer and show the same per-run estimates as Cloud; no run detail is shown when
+the start is unknown. Disabled connections are excluded.
+
+**Over range** keeps `24h`, `7d` or `30d` in the URL; legacy `24` maps to 24h,
+while `72`, `3d` and `168` map to 7d so an offered chip is always selected. New history
+points retain the already-computed group figures, including known allocation,
+missing-source counts, currency rates and cost uncertainty. Raw points
+are kept for 30 days. Opt-in server rollups integrate these raw observations, never
+the chart's thinned points, using sample-and-hold until the next observation, capped
+at 30 minutes in every range. This uses the chart rule's floor at raw resolution,
+without its scaling for thinned points. The same observed hour therefore has the
+same GPU-hours, spend and coverage in every range. Nothing is extrapolated past
+the response time. Daily bars use the viewer's local calendar days;
+boundary hourly buckets are prorated, including timezone offsets and DST boundaries.
+Days cut off by the range show the local start or end time they cover.
+
+Partial days show observation coverage; uncertain quantities show lower bounds or
+unknown. Before-upgrade days and days without collection read **Not recorded**, not
+zero. GPU-hours rows use the time that the group's allocation or lower bound was known;
+a collected but entirely unknown group reads **Not measured**. Groups without an enabled
+source are omitted from new samples even when cloud instances are retained, so paused
+groups leave missing time. Hand-added platform groups remain included.
+Spend coverage still means collection time, not proof that every price was known.
+Values following ≥ are rounded down to the displayed precision. Historical groups
+no longer configured carry a “removed” label.
+Daily spend and the Today / Last 7 days totals are **estimated from hourly prices
+observed while ComputeDeck was collecting, not a bill**. The two headline totals use
+the last seven days, independent of the selected range. They exclude collection
+gaps and do not reconstruct provider billing, storage charges or prices before
+observation. They are separate from each instance's start-time-based estimate.
+The example includes two currencies, a collection gap and pre-upgrade history. Its per-group GPU counts sum to each chart point’s known allocation, and groups become unknown when their collection failed. Source gaps start at the last successful collection; an unprobed machine starts contributing unknown usage only after it was added, and an unknown GPU reading only from its observation time. Groups containing only machines not yet added are absent from earlier points.
+
+## 用量与费用：当前与所选时间范围
+
+「用量与费用」（`#/usage`）集中展示用量趋势图，概览通过链接进入。「当前」直接读取
+服务端分组汇总，展示你使用中的 GPU 及每小时费用，不混合币种。前八组单独显示，
+「其他」包含未知项时仍标为下界；未知数值使用空的斜线条，并列出未测量或费用未知的
+对象。按当前费率推算的每日费用始终标注为预测、非账单。可通过键盘打开有价格的运行中
+实例详情；起始时间未知时不追加运行详情。停用的连接不参与统计。当前数据不受时间范围影响。
+
+「所选时间范围」将 `24h`、`7d`、`30d` 保存在 URL 中；旧链接 `24` 对应 24h，
+`72`、`3d`、`168` 对应 7d，始终选中一个范围按钮。原始历史保留
+30 天；服务端直接积分原始采样，不使用趋势图抽稀后的数据。每个采样保持到下一次采样，
+所有范围的上限均为 30 分钟，采用趋势图规则在原始分辨率下的下限，不使用抽稀后的
+范围缩放。因此同一小时在各范围的 GPU 小时、费用与覆盖率保持一致，且不超过响应时间。
+每日柱形图使用查看者的本地日期，边界小时按比例分摊，兼顾时区与夏令时边界。
+被时间范围截断的日期会标明实际覆盖的本地起止时间。
+
+部分采集的日期显示观测覆盖率；缺失价格或用量显示下界或未知。升级前及未采集的日期
+显示「未记录」，不会填零。GPU 小时行的覆盖率只计入该组用量或下界已知的时长；
+已采集但用量完全未知的组显示「未测量」。没有启用来源的组不写入新采样，即使保留了云实例，
+暂停期间也保持缺失。手动添加的平台分组仍会记录。
+费用覆盖率仍只表示采集时长，不保证所有价格均已知。
+≥ 后的数值按显示精度向下取整。已移除的历史分组标注「已移除」。
+今日与最近七天的估算固定使用最近七天的数据，不随范围切换改变；这些数值仅来自采集期间观察到
+的小时价格，并非账单，不补算采集间断、存储费或采集前价格，与实例本次运行估算分开。
+示例包含两种币种、采集中断及升级前历史。每个点的分组 GPU 数量之和与曲线的已知用量一致，分组在采集失败时才变为未知。来源空档从最后一次成功采集开始；未探测机器仅在添加后计入未知用量，未知 GPU 读数仅从其观测时间开始计入。仅包含尚未添加机器的组不会出现在更早的采样中。
+
+## Sustained low GPU use
+
+Low GPU use is an observation hint, not a claim that a machine is idle or safe to stop.
+The default threshold is strictly below 10% over at least 60 minutes. At least three
+actual readings must cover that window, every mean and available per-GPU maximum must
+stay below the threshold, and no gap may exceed twice the expected collection interval.
+SSH-source instances use the source's collection interval even when checks add readings
+in between. Other probe readings use the existing ten-minute probe interval. The reported
+duration ends at the last reading; it never extends through unobserved time. SSH collections
+and probes share one measurement family and preserve the window and its acknowledgement.
+Provider readings are a separate family: probing a Vast.ai instance restarts its window,
+as does returning to provider readings. A failed probe records nothing and preserves prior
+samples; gaps and stale readings end coverage when measurements stop. A high reading clears
+the hint; old or insufficient readings mean unknown. Lifecycle changes, known provider
+restarts, changed endpoints and incomplete checks break the window. SSH readings must cover every listed GPU; a low mean with one
+busy GPU cannot qualify. CPU-only machines do not qualify.
+
+Coverage comes from Vast.ai's provider utilization, normal SSH-source collections and
+hardware probes. Vast.ai values say **provider reading**: the provider does not document
+its sampling window or how it combines GPUs. SSH sources have no listed price, so their
+hints contain duration only. Hand-added machines with monitoring enabled are probed on
+the existing schedule and can include a typed price. RunPod, Lambda, EC2 and GPUhub do
+not provide utilization here; their on-demand checks contribute individual readings,
+never an assumed continuous duration. No periodic provider SSH checks are added.
+
+Cloud and machines shows low-use duration, filters low-use and insufficient-reading
+rows through `?use=low|unknown`, and explains missing coverage in the drawer. Where to run
+links to this list when a low-use instance has a positive known price. Needs attention
+uses the same server result and supports acknowledgement and snoozing. More readings
+in the same low-use period do not reopen an acknowledgement; a new period or changed
+threshold/window does. When priced, the hint multiplies the covered span by the current
+whole-instance hourly price and labels it an estimate, not a bill. It is not historical
+billing and makes no claim about savings. Provider console links open the provider's
+site; ComputeDeck never stops an instance.
+
+## 持续低 GPU 利用率
+
+低利用率是一项观测提示，不表示机器闲置或可以安全停止。默认要求至少 3 次实际读数覆盖
+60 分钟，每次平均利用率及可读取的单卡最大利用率均严格低于 10%，相邻读数间隔不超过
+采集周期的两倍。SSH 来源的实例始终使用该来源的采集周期，期间的硬件检查只会缩短读数间隔；
+其他硬件检查使用现有的 10 分钟周期。持续时间截至最后一次读数，不延伸到未观测时段。
+SSH 常规采集与硬件检查属于同一测量类别，交替进行不会中断窗口或清除确认状态。
+供应商读数属于独立类别：对 Vast.ai 实例进行硬件检查，或随后恢复供应商读数，都会重启窗口。
+检查失败不记录读数，也不删除已有样本；测量停止后，由间隔和过期规则结束覆盖。
+读数升高会清除提示，读数过旧或不足则为未知。
+生命周期变化、已知的供应商重启、端点变化及不完整检查会中断窗口。SSH 读数必须覆盖全部
+已知 GPU，不能用平均值掩盖某张繁忙 GPU。纯 CPU 机器不会产生提示。
+
+覆盖范围包括 Vast.ai 的供应商读数、SSH 来源的常规采集和硬件检查。Vast.ai 未说明采样窗口
+或多卡聚合方式，因此明确标为“供应商读数”。SSH 来源没有标价，只显示持续时间。手动添加且
+启用监控的机器沿用现有检查周期，填写价格后也可显示估算费用。RunPod、Lambda、EC2 和
+GPUhub 在此不提供利用率，只能通过按需硬件检查获取单次读数；不会新增供应商实例的自动 SSH 检查。
+
+“云与机器”通过 `?use=low|unknown` 筛选低利用率或读数不足的实例，抽屉说明覆盖不足的原因。
+“在哪里运行”在存在标价大于零的低利用率实例时提供列表链接。“待处理”使用同一个服务端结果，
+支持确认和暂缓。同一低利用率时段积累更多读数不会重新提醒；新的时段或阈值、窗口变化会重新提醒。
+费用按观测覆盖时长乘以当前整实例每小时标价，明确标为估算值，非账单，也不声称是历史计费或可节省费用。
+供应商控制台链接仅打开供应商网站，ComputeDeck 不会停止实例。
+
+## Slurm queue estimates
+
+For your PENDING jobs waiting on Priority or Resources, the job drawer uses the
+partition queue from normal collection. “About N jobs ahead” is an estimate, not a
+start-time prediction: reservations, preemption and backfill can change the order.
+Only earlier Priority/Resources rows count; held, dependency and limit waits do not.
+Earlier equal-priority rows form an uncertainty range, shown as N to N+T, and each
+partition is shown separately. Resources waits say they are next in line, waiting
+for nodes to free up, only when that partition has zero jobs ahead and zero ties.
+Otherwise they show the same count or range as Priority waits. These facts do not
+affect resource ranking.
+
+The fair-share line is your account's factor from 0 to 1; recent use lowers it. It is
+shown only when Slurm reports a factor and uses multifactor priority with a positive
+`PriorityWeightFairShare`. An absent weight leaves fair-share unknown but does not
+prevent queue estimates. Both values refer to the drawer's displayed sample time, including
+retained older observations. Hidden queues, unreadable output and jobs missing from
+the listing show “—” with a reason, never an invented zero. Older snapshots without
+queue fields say “Not collected yet”. Fair-share that is missing
+or not used by the policy also shows “—”. Only aggregate queue counts are retained;
+other users' job ids are never stored or logged. See the
+[Slurm driver](drivers/slurm.md#queue-estimates-and-fair-share) for the queries and limits.
+
+## Slurm 队列估计
+
+对于因 Priority 或 Resources 等待的 PENDING 作业，作业详情展示正常采集所得的分区队列。
+“前方约有 N 个作业”是估计，不是启动时间预测；资源预留、抢占和回填调度都可能改变顺序。
+只计算前方因 Priority 或 Resources 等待的作业，不计挂起、依赖或配额限制中的作业。
+前方优先级相同的作业单独形成 N 至 N+T 的范围，多分区分别展示。
+Resources 作业仅在该分区的前方作业数和同优先级作业数均为零时，说明已排在队首、等待节点释放资源；
+否则和 Priority 作业一样显示数量或范围。这些信息不改变资源推荐排名。
+
+公平共享因子属于你的账户，范围 0 至 1，近期使用量越多则越低。仅当 Slurm 报告该因子、
+使用 multifactor 优先级且 `PriorityWeightFairShare` 大于零时展示。权重缺失时因子保持未知，
+但仍可计算队列估计。队列和因子都对应详情中显示的采样时间，
+保留的旧观测也不会被当作新数据。集群隐藏队列、读取失败或列表中找不到作业时，展示“—”并解释原因，
+不会填成零。没有队列字段的旧快照显示“尚未采集”。因子缺失或调度策略未使用它时也展示“—”。
+只保留队列汇总数量，不保存或记录其他用户的作业 ID。
+
+## Typical wait from your job history
+
+Where to run and a waiting job's drawer show “Typical wait for your jobs”, explicitly
+labelled “Not a prediction”. The range is the 25th–75th percentile of submit-to-start
+seconds from this login's own finished accounting records ending in the last 30 days
+(a rolling 30 × 24 hours, selected by job end time).
+This includes time held for dependencies, scheduled begin times, user holds or array
+throttling; PBS uses queue-entry time (`qtime`) rather than creation time (`ctime`).
+At least eight samples are required in the matching group. With fewer, the value is
+“— · Not enough history (n jobs)”. Missing accounting and history not yet collected
+have their own explanations, as does a driver that cannot supply usable accounting times.
+The drawer shows the accounting collection time in local time;
+stale history does not advance to the present or change planner verdicts or ranking.
+
+Groups are separate for each cluster, username, queue/QoS, partition and GPU-count
+bucket: 0, 1, 2, 3–4, 5–8, 9–16, and so on, doubling the upper bound. GPU models are
+pooled and the UI says so. Same-account twin logins share samples, deduplicated by
+job id and actual start time. Repeated polls do not increase the count; a new attempt
+with a different start can count again. Quartiles use linear interpolation at
+`(n - 1) × 0.25` and `(n - 1) × 0.75`. A zero wait is valid. A job cancelled before
+starting, missing or timezone-free timestamps, or times out of order cannot supply a
+sample. Failed jobs that did start can supply one. Jobs with valid times but unknown
+GPU counts are retained separately and counted per login, outside the GPU buckets.
+When a matching bucket has fewer than eight samples and such jobs exist, the UI
+explains the login's missing accounting GPU counts instead of claiming an empty or
+complete sample count. A range still requires eight jobs with known counts.
+On Slurm, a nonempty CPU-only AllocTRES means zero GPUs only when the collected nodes
+confirm GPU TRES tracking; otherwise the count stays unknown. Empty AllocTRES stays
+unknown, and unallocated cancellations with Start equal to End remain excluded.
+
+Where to run has no partition selector, so it shows each observed partition separately
+for the selected QoS and count bucket, with partition labels only when several rows
+need distinguishing. Each option uses one compact wait line. The non-prediction note
+and oldest relevant accounting age appear once per panel, with the absolute time on
+hover. The best card puts waits after the ranking comparison; the drawer puts them
+after the scheduler reason and queue position. Durations use whole hours/minutes,
+rounded to the nearest minute, or seconds for sub-minute waits. The drawer matches
+the job's partition(s), showing insufficient history for any without samples. It never
+borrows another login's, QoS's, partition's or GPU-count bucket's range.
+An unknown queue/QoS gets its own explanation instead of a zero-sample count.
+
+History accumulates after upgrading from the existing normal terminal-history query;
+there is no additional accounting query or 30-day backfill. Collection gaps and the
+scheduler's own retention can leave jobs unobserved. Slurm already provides aware
+Submit/Start/End fields. PBS terminal records apply the remote clock offset to all
+three times and are supported too. LSF and Kubernetes are not yet supported: LSF
+keeps naive submit/start text, and Kubernetes lacks complete terminal times and
+reliable login ownership. Plugin drivers must explicitly opt in. Unsupported drivers
+get an explanation rather than a permanent zero-sample message. A supported driver
+whose accounting is not readable reports unavailable instead. Only own-job identifiers,
+grouping fields and timestamps are retained locally, for 30 days; the dashboard
+sends aggregates.
+Deleting or repointing a login clears its retained samples; pausing it preserves them.
+
+## 根据你的作业历史展示通常等待时间
+
+“在哪里运行”和等待中的作业详情展示“你的作业通常等待多久”，并明确标注“不是预测”。
+范围取自此登录自己的已结束作业记账记录，计算提交至实际开始的时长，按作业结束时间筛选
+最近滚动的 30 × 24 小时。此时长包含依赖、预定开始时间、用户挂起或数组并发限制带来的
+等待；PBS 使用进入队列的时间（`qtime`），而不是创建时间（`ctime`）。
+匹配分组至少有 8 个样本才显示第 25–75 百分位及作业数；
+不足时显示“— · 历史不足（n 个作业）”。驱动不支持等待历史、记账不可用和尚未采集分别说明。最近一次记账
+采集时间以本地时间展示；旧历史不会随当前时间延长，也不影响规划结论或排序。
+
+按集群、用户名、队列/QoS、分区及 GPU 数量分组：0、1、2、3–4、5–8、9–16，
+之后上界依次翻倍。分组包含所有 GPU 型号，界面明确说明。同集群同用户名的重复登录共享
+样本，以作业 ID 和实际开始时间去重；重复采集不增加数量，重新运行且开始时间不同的尝试
+可以另计。百分位在排序后的 `(n - 1) × 0.25` 和 `(n - 1) × 0.75` 处线性插值。
+零等待有效。未开始就取消、时间缺失或没有时区、时间顺序错误的作业不计入；
+实际开始后失败的作业可以计入。时间有效但 GPU 数量未知的作业单独保留，按登录计数，
+不进入 GPU 分组。匹配分组不足 8 个样本且存在此类作业时，界面说明此登录的记账记录缺少
+GPU 数量，不再声称样本为零或完整。区间仍要求至少 8 个 GPU 数量已知的作业。
+Slurm 仅在采集到的节点确认追踪 GPU TRES 时，将非空且只含 CPU 等资源的 AllocTRES
+解释为零 GPU，否则保持未知。空 AllocTRES 仍为未知；未分配资源且 Start 等于 End 的
+取消记录仍排除。
+
+“在哪里运行”没有分区选择器，因此按分区分别展示当前 QoS 和 GPU 数量分组的历史，
+仅在有多个分区需要区分时显示分区名。每个选项使用紧凑的一行；“不是预测”及最早的相关
+记账采集时间每个面板只显示一次，悬停可查看绝对时间。最佳估计卡片先展示排序比较，
+再展示等待历史；作业详情先展示调度器原因和队列位置，再展示历史。时长四舍五入到整分钟，
+以小时和分钟表示；不足一分钟时显示秒。
+作业详情匹配该作业的各个分区，没有样本的分区单独说明历史不足。不会借用其他登录、QoS、
+分区或 GPU 数量分组的数据。
+队列/QoS 未知时给出专门说明，不显示零样本。
+
+升级后利用原有的正常终态历史采集逐步积累，不新增记账查询，也不回查完整 30 天。
+采集中断和调度器自身的保留期可能造成缺失。Slurm 已提供带时区的提交、开始、结束时间；
+PBS 的终态记录也为三个时间应用远程时钟偏移，因此支持此估计。LSF 和 Kubernetes
+暂不支持：LSF 的提交/开始时间没有时区，Kubernetes 缺少完整的终态时间及可靠的登录归属。
+插件驱动须显式选择支持。不支持的驱动会给出专门说明，不再永久显示零样本。支持此功能但
+当前记账不可读的来源则说明不可用。本地只保留自己的作业标识、分组字段和时间戳 30 天，
+仪表盘仅返回汇总。删除登录或修改其连接身份会清除相应样本；暂停登录保留样本。
+
+## Machines that are also scheduler nodes
+
+A hand-added or SSH-source machine can be another view of a collected scheduler
+node. During the existing hardware check, ComputeDeck reads the server IP and port
+from `SSH_CONNECTION`. It matches that address against explicit node addresses
+already collected from Slurm (`NodeAddr`), PBS (`Mom`) or Kubernetes (InternalIP /
+ExternalIP). No extra connection or DNS request is made. Names, SSH aliases, GPU
+models and manually typed endpoints alone never establish identity.
+
+An IP match also requires the hostname read by `os.uname().nodename` in that same
+probe to agree with the node name, Slurm `NodeHostName` or Kubernetes Hostname
+address. Comparison uses the short hostname (before the first dot), ignoring
+case; an IP written as a hostname is not a second signal. This applies to all
+addresses, including private IPv4, IPv6 ULA and shared CGNAT ranges, because
+different networks reached by one computer can reuse an address. Missing or
+different hostnames leave machines separate.
+
+A unique match within the same collection-node context is labelled on the machine
+row and drawer. Its measurements stay available and hardware checks still work,
+but its GPUs and utilization are excluded from fleet, group and login aggregates
+and newly recorded history. The cluster remains authoritative: “My GPUs in use”
+still counts your scheduler jobs, while node capacity/allocation covers all users.
+The machine is also excluded from Where to run's unscheduled machine options and
+paid low-use suggestions. A typed hourly price remains a separate expense.
+
+Retained node identity still applies during a cluster outage, so scheduler
+allocation stays unknown instead of being replaced with a host process count.
+An SSH-source row can link only while its source has a successful collection.
+Editing its connection clears that success and removes the retained row's link
+until collection succeeds again; failed collection keeps the total incomplete.
+A later failure on an unchanged connection keeps the previous identity.
+Pausing/removing the cluster or removing/changing the node address removes the
+match. Ambiguous addresses, missing identity in older snapshots, DNS-only node
+addresses, nonstandard SSH ports and loopback/link-local addresses stay unmatched.
+LSF currently supplies no explicit address. Matching uses port 22; other ports can
+represent forwarded services or containers. Refresh the machine and cluster after
+upgrading to collect identity evidence. Existing history is not rewritten.
+
+Slurm's `NodeAddr` often defaults to a hostname, and PBS `Mom` is usually a hostname;
+when the scheduler supplies only names, no match is made and the machine's GPU
+readings still count separately. To avoid counting twice, turn off monitoring for
+a hand-added machine (on-demand hardware checks remain available); an SSH source
+has no separate monitoring toggle, so pause the source, which also stops its
+scheduled readings.
+
+## 同时属于集群节点的机器
+
+手动添加的机器或 SSH 数据源可能是已采集集群节点的另一种视图。现有硬件检查会从
+`SSH_CONNECTION` 读取服务端 IP 和端口，与 Slurm 的 `NodeAddr`、PBS 的 `Mom` 或
+Kubernetes 的 InternalIP / ExternalIP 匹配，不增加连接或 DNS 请求。显示名称、SSH
+别名、GPU 型号及手动填写的连接地址本身都不能证明主机相同。
+
+IP 相同还必须由同次探测中 `os.uname().nodename` 读取的主机名佐证，匹配节点名称、
+Slurm 的 `NodeHostName` 或 Kubernetes 的 Hostname 地址。比较时取第一个点之前的
+短主机名并忽略大小写；把 IP 写成主机名不算第二项证据。此要求适用于所有地址，包括
+私有 IPv4、IPv6 ULA 和共享 CGNAT 地址，因为同一电脑访问的不同网络可能重复使用地址。
+主机名缺失或不一致时，机器保持独立计数。
+
+同一采集节点范围内的唯一匹配会显示在机器行和详情中。硬件读数和检查功能仍然保留，
+但不会重复计入总览、分组、登录级别的 GPU 与利用率统计，也不会重复计入新记录的历史。
+“我的 GPU 使用量”仍采用自己的调度任务分配量，节点容量和分配量则涵盖所有用户。
+匹配的机器不会作为无调度器的空闲机器或付费低使用率建议出现在“在哪里运行”中。
+手动填写的小时价格仍作为独立费用计算。
+
+集群采集中断时，保留的节点身份仍有效，调度分配量保持未知，不会改用主机进程数。
+SSH 数据源只有保留成功采集记录时才能匹配。修改连接会清除该成功记录并解除旧行的匹配，
+直到新连接成功采集；采集失败时总量保持不完整。连接未改变时，后续失败仍保留原身份。
+暂停或删除集群、删除节点或更改节点地址后，匹配会消失。地址有歧义、旧快照缺少身份、
+节点仅提供 DNS 名称、非标准 SSH 端口、回环或链路本地地址均不匹配。LSF 目前没有
+提供明确地址。仅匹配端口 22，其他端口可能指向转发服务或容器。升级后刷新机器与集群
+即可采集身份信息；不会改写已有历史。
+
+Slurm 的 `NodeAddr` 通常默认为主机名，PBS 的 `Mom` 也通常是主机名；如果调度器只提供
+名称，就不会匹配，机器的 GPU 读数仍会单独计入。为避免重复计数，手动添加的机器可以
+关闭监控（仍可按需检查硬件）；SSH 数据源没有独立的监控开关，需要暂停数据源，这也会
+停止其定期读数采集。

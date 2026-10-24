@@ -1,27 +1,33 @@
 import { useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
-import type { DeckEvent, Instance, Job, SSHConfig } from '../types';
+import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
+  dateTime,
+  percentage,
   arrayField,
   groupArrays,
   instanceAllocation,
   jobGpuResources,
   listedJobs,
+  lowUseText,
   money,
   PENDING_STATES,
   relativeTime,
   runningPrice,
+  runningSince,
 } from '../domain';
 import { directSSHCommand } from '../connections';
+import { jobPlanLink } from '../submit';
 import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
-import { JobsTable } from './shared';
+import { InstanceRunCost, JobsTable, MachineNodeNote } from './shared';
+import { WaitHistory } from '../WaitHistory';
 
 export function SSHConfigView({
   config,
@@ -181,10 +187,8 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
 
 export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: DeckEvent }) {
   const gpu = jobGpuResources(job);
-  const driver =
-    event?.data.driver ??
-    ctx.data.sources.find((source) => source.id === job.source_id)?.driver ??
-    '';
+  const source = ctx.data.sources.find((source) => source.id === job.source_id);
+  const driver = event?.data.driver ?? source?.driver ?? '';
   const terms = jobTerms(driver);
   const failure = failureExplanation(job, driver);
   const historical = !!event || !!job.end || !!failure;
@@ -205,6 +209,13 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       : job.observed_at;
   return (
     <div className="drawer-body">
+      {(pending || failure) && (
+        <div className="drawer-actions">
+          <a className="button" href={jobPlanLink(job, ctx.data.nodes)}>
+            {t('plan.findAnother')}
+          </a>
+        </div>
+      )}
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">
@@ -244,12 +255,74 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       {explanation && (
         <div className="callout">
           <strong>{t('job.reason')}</strong>
-          <p>{explanation.summary}</p>
+          <p>
+            {driver === 'slurm' && explanation.kind === 'priority' && job.queue?.length
+              ? t('job.queue.priorityReported')
+              : explanation.summary}
+          </p>
           {job.reason && <code>{job.reason}</code>}
+          {driver === 'slurm' && ['priority', 'resources'].includes(explanation.kind) && (
+            <>
+              {job.queue?.length ? (
+                job.queue.map(({ partition, ahead, ties }) => (
+                  <p key={partition}>
+                    {t(
+                      ahead === 0 && ties === 0
+                        ? explanation.kind === 'resources'
+                          ? 'job.queue.resources'
+                          : 'job.queue.front'
+                        : ties
+                          ? ahead === 0
+                            ? 'job.queue.upTo'
+                            : 'job.queue.range'
+                          : 'job.queue.ahead',
+                      { partition, count: ahead, max: ahead + ties },
+                    )}
+                  </p>
+                ))
+              ) : (
+                <p>
+                  {t(
+                    job.queue_unknown === undefined
+                      ? 'job.queue.notCollected'
+                      : job.queue_unknown === 'private_data'
+                        ? 'job.queue.private'
+                        : 'job.queue.failed',
+                  )}
+                </p>
+              )}
+              <p>
+                {job.fairshare != null
+                  ? t('job.queue.fairshare', {
+                      account: job.account,
+                      factor: job.fairshare.toFixed(2),
+                    })
+                  : t(
+                      job.fairshare === undefined
+                        ? 'job.queue.fairshareNotCollected'
+                        : job.queue_unknown === 'failed'
+                          ? 'job.queue.fairshareFailed'
+                          : 'job.queue.fairshareUnknown',
+                    )}
+              </p>
+            </>
+          )}
           <strong>{t('job.nextStep')}</strong>
           <p>{explanation.next}</p>
         </div>
       )}
+      {pending &&
+        (ctx.data.wait_history?.[job.source_id]?.status === 'unsupported' ||
+        (source?.username === job.user && source.cluster_id === job.cluster_id) ? (
+          <WaitHistory
+            history={ctx.data.wait_history?.[job.source_id]}
+            qos={job.qos}
+            partition={job.partition}
+            gpus={job.gpu_count}
+          />
+        ) : (
+          <p className="wait-history">{t('wait.ownOnly')}</p>
+        ))}
       <dl className="kv">
         {(job.ended_at || job.end) && (
           <div>
@@ -400,8 +473,10 @@ export function InstanceDetail({
 }) {
   const { demo, remote, busy } = ctx;
   const direct = remote || !!item.existing_alias;
-  // GPUs with compute processes, as the last SSH check counted them.
+  // Busy GPUs, as the last SSH check counted them.
   const inUse = instanceAllocation(item);
+  const since = runningSince(item);
+  const source = ctx.data.sources.find((entry) => entry.id === item.source_id);
   async function copyCommand() {
     if (direct) {
       const command = directSSHCommand(item);
@@ -463,6 +538,7 @@ export function InstanceDetail({
           <span className="mono">{formatMessage(item.ssh_error)}</span>
         </div>
       )}
+      <MachineNodeNote item={item} />
       <dl className="kv">
         <div>
           <dt>{t('usage.col.platform')}</dt>
@@ -475,13 +551,36 @@ export function InstanceDetail({
           </dd>
         </div>
         <div>
-          <dt>{t('cloud.col.price')}</dt>
+          <dt>{t('cost.price')}</dt>
           <dd>
             {item.hourly_cost == null
               ? '—'
               : runningPrice(item) == null
                 ? t('cloud.priceWhenRunning', { price: money(item.hourly_cost, item.currency) })
-                : `${money(item.hourly_cost, item.currency)}/h`}
+                : t('cost.perInstance', { price: money(item.hourly_cost, item.currency) })}
+            {item.hourly_cost != null && (item.gpu_count ?? 0) > 0 && (
+              <span className="sub">
+                {t('cost.perGpu', {
+                  price: money(item.hourly_cost / item.gpu_count!, item.currency),
+                })}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{t('cost.since')}</dt>
+          <dd>
+            {since
+              ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) })
+              : item.manual
+                ? t('cost.manualStartUnknown')
+                : '—'}
+          </dd>
+        </div>
+        <div>
+          <dt>{t('cost.thisRun')}</dt>
+          <dd>
+            <InstanceRunCost item={item} source={source} />
           </dd>
         </div>
         <div>
@@ -536,6 +635,43 @@ export function InstanceDetail({
           <dd>{relativeTime(item.observed_at)}</dd>
         </div>
       </dl>
+      {item.gpu_count !== 0 && (
+        <section>
+          <h3>{t('lowUse.title')}</h3>
+          {item.low_use?.state === 'low' ? (
+            <p>{lowUseText(item, ctx.data.low_use_settings)}</p>
+          ) : item.low_use?.state === 'busy' ? (
+            <p className="panel-note">
+              {t('lowUse.busy', { threshold: ctx.data.low_use_settings?.threshold ?? 10 })}
+            </p>
+          ) : (
+            <p className="panel-note">
+              {t('lowUse.unknown')}
+              {' · '}
+              {t(`lowUse.${item.low_use?.reason ?? 'no_reading'}`, {
+                minutes: ctx.data.low_use_settings?.window_minutes ?? 60,
+              })}{' '}
+              {item.manual
+                ? !item.monitoring && t('lowUse.monitor')
+                : ['runpod', 'lambda', 'aws-ec2', 'gpuhub'].includes(source?.driver ?? '') &&
+                    ['no_reading', 'coverage', 'stale'].includes(
+                      item.low_use?.reason ?? 'no_reading',
+                    )
+                  ? t('lowUse.providerMissing')
+                  : ''}
+            </p>
+          )}
+          {item.low_use?.origin === 'provider' && item.low_use.state !== 'low' && (
+            <p className="panel-note">{t('lowUse.provider')}</p>
+          )}
+        </section>
+      )}
+      {item.console_url?.startsWith('https://') && (
+        <a className="link" href={item.console_url} target="_blank" rel="noreferrer">
+          {t('lowUse.console')}
+        </a>
+      )}
+      <GpuDetails item={item} />
       <Metrics
         values={[
           { label: 'GPU', value: item.gpu_utilization },
@@ -548,5 +684,80 @@ export function InstanceDetail({
         {t('instance.note.scope')}
       </p>
     </div>
+  );
+}
+
+function gpuMemory(value: number | null) {
+  return value == null ? '—' : `${Math.round((value / 1024) * 10) / 10} GiB`;
+}
+
+function gpuOwners(gpu: GpuRow) {
+  const owners = new Map<string | null, { count: number; memory: number | null }>();
+  for (const process of gpu.processes ?? []) {
+    const owner = owners.get(process.user) ?? { count: 0, memory: 0 };
+    owner.count += 1;
+    owner.memory =
+      owner.memory == null || process.memory_mb == null ? null : owner.memory + process.memory_mb;
+    owners.set(process.user, owner);
+  }
+  const labels = [...owners]
+    .sort(([, a], [, b]) => (b.memory ?? -1) - (a.memory ?? -1) || b.count - a.count)
+    .slice(0, 2)
+    .map(([user, owner]) =>
+      t('gpu.owner', {
+        user: user ?? t('gpu.unknownUser'),
+        count: owner.count,
+        memory: gpuMemory(owner.memory),
+      }),
+    );
+  if (owners.size > 2) labels.push(t('gpu.moreOwners', { count: owners.size - 2 }));
+  if (gpu.processes_omitted) labels.push(t('gpu.omitted', { count: gpu.processes_omitted }));
+  return labels.join(' · ');
+}
+
+function GpuDetails({ item }: { item: Instance }) {
+  if (!item.gpus?.length) return null;
+  return (
+    <section className="gpu-details">
+      <h3>{t('gpu.title')}</h3>
+      <p className="panel-note" title={dateTime(item.gpus_observed_at)}>
+        {item.gpus_observed_at
+          ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
+          : t('gpu.sampleUnknown')}
+      </p>
+      <ul className="rows">
+        {item.gpus.map((gpu, index) => {
+          const owners = gpuOwners(gpu);
+          return (
+            <li key={index}>
+              <div className="grow">
+                <strong>
+                  {gpu.index ?? '—'} · {gpu.name ?? t('status.unknown')}
+                </strong>
+                <span className="sub">
+                  {t('gpu.memory', {
+                    used: gpuMemory(gpu.memory_used_mb),
+                    total: gpuMemory(gpu.memory_total_mb),
+                  })}{' '}
+                  · {t('gpu.utilization', { value: percentage(gpu.utilization) })}
+                </span>
+                {owners && <span className="sub">{owners}</span>}
+                <span className="tag">
+                  {t(
+                    gpu.in_use == null
+                      ? 'status.unknown'
+                      : !gpu.in_use
+                        ? 'gpu.free'
+                        : gpu.processes?.length
+                          ? 'gpu.busy'
+                          : 'gpu.busyHidden',
+                  )}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

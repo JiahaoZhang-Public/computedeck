@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   groupArrays,
   runningPrice,
+  runningSince,
+  runningHours,
+  costThisRun,
   instanceLifecycle,
   partialCount,
   elapsedSeconds,
@@ -324,7 +327,7 @@ describe('allocation accounting', () => {
   it('counts a running machine added by hand only by the GPUs a check found busy', () => {
     const data = dashboard([job({})]);
     data.sources.push(source({ id: 'cloud', kind: 'cloud', driver: 'runpod', enabled: false }));
-    // Without a process count the GPUs typed in are not GPUs in use.
+    // Without measured GPU use the GPUs typed in are not GPUs in use.
     data.instances = [instance({ state: 'running', manual: true, source_id: 'manual' })];
     const result = summarize(data);
     expect(result.known_allocated).toBe(4);
@@ -422,7 +425,7 @@ describe('visible cluster capacity', () => {
       ratio: 37.5,
     });
   });
-  it('counts INVAL nodes as abnormal and power-saving transitions as normal', () => {
+  it('keeps power saving out of the unhealthy count and free capacity', () => {
     const nodes = [
       node({ name: 'bad', state: 'inval' }),
       node({ name: 'p1', state: 'idle+cloud+powering_down' }),
@@ -430,7 +433,13 @@ describe('visible cluster capacity', () => {
       node({ name: 'p3', state: 'idle+powering_up' }),
       node({ name: 'p4', state: 'idle+cloud+powered_down' }),
     ];
-    expect(summarizeNodes(nodes).abnormal).toBe(1);
+    expect(summarizeNodes(nodes)).toMatchObject({
+      abnormal: 1,
+      on_demand: 32,
+      usable: 0,
+      unallocated: 0,
+      unavailable: 8,
+    });
   });
   it('leaves capacity and ratios unknown when nodes have missing allocation data', () => {
     expect(summarizeNodes([node({ gpu_allocated: null })])).toMatchObject({
@@ -590,8 +599,8 @@ describe('running price', () => {
   it('is not shown as the rate of a stopped or terminated instance', () => {
     expect(runningPrice(instance({ state: 'running', hourly_cost: 0.59 }))).toBe(0.59);
     expect(runningPrice(instance({ state: 'reported_running', hourly_cost: 0.59 }))).toBe(0.59);
-    expect(runningPrice(instance({ state: 'desired_running', hourly_cost: 0.59 }))).toBe(0.59);
-    expect(runningPrice(instance({ state: 'unknown', hourly_cost: 0.59 }))).toBe(0.59);
+    expect(runningPrice(instance({ state: 'desired_running', hourly_cost: 0.59 }))).toBeNull();
+    expect(runningPrice(instance({ state: 'unknown', hourly_cost: 0.59 }))).toBeNull();
     expect(runningPrice(instance({ state: 'desired_stopped', hourly_cost: 0.59 }))).toBeNull();
     expect(runningPrice(instance({ state: 'stopped', hourly_cost: 0.59 }))).toBeNull();
     expect(runningPrice(instance({ state: 'terminated', hourly_cost: 1 }))).toBeNull();
@@ -600,7 +609,7 @@ describe('running price', () => {
   });
 });
 
-describe('SSH process-based GPU use', () => {
+describe('SSH measured GPU use', () => {
   it.each([0, 1, null])(
     'reports %s occupied GPUs without replacing unknown with capacity',
     (gpu_allocated) => {
@@ -747,5 +756,57 @@ describe('job arrays', () => {
     expect(data.summary.known_running).toBe(2);
     expect(data.summary.known_pending).toBe(1);
     expect(JSON.stringify(data)).toBe(before);
+  });
+});
+
+describe('cost this run', () => {
+  const start = '2026-01-01T00:00:00Z';
+  const observed = '2026-01-01T02:00:00Z';
+  const end = Date.parse('2026-01-01T04:00:00Z');
+  const item = instance({
+    state: 'reported_running',
+    started_at: start,
+    seen_running_since: observed,
+    hourly_cost: 2,
+    currency: 'USD',
+  });
+  const cloud = source({ capabilities: ['instances'], last_success: observed });
+
+  it('prefers the provider start and multiplies the whole-instance rate, including zero', () => {
+    expect(runningSince(item)).toEqual({ at: start, origin: 'provider' });
+    expect(costThisRun(item, cloud, end)).toBe(8);
+    expect(costThisRun({ ...item, hourly_cost: 0 }, cloud, end)).toBe(0);
+    expect(costThisRun({ ...item, gpu_count: 8 }, cloud, end)).toBe(8);
+    const observedItem = { ...item, started_at: null };
+    expect(runningSince(observedItem)).toEqual({ at: observed, origin: 'observed' });
+    expect(costThisRun(observedItem, cloud, end)).toBe(4);
+  });
+
+  it.each([{ stale: true }, { enabled: false }, { status: 'error' }, { capabilities: [] }])(
+    'freezes non-current sources at last success: %j',
+    (change) => {
+      const old = { ...cloud, ...change };
+      expect(costThisRun(item, old, end)).toBe(4);
+      expect(runningHours(item, old, end)?.asOf).toBe(observed);
+      expect(costThisRun(item, old, end + 3600000)).toBe(4);
+    },
+  );
+
+  it('keeps missing time, price, currency, lifecycle and observation unknown', () => {
+    for (const state of ['stopped', 'missing', 'unknown', 'desired_running', 'desired_stopped']) {
+      expect(costThisRun({ ...item, state }, cloud, end)).toBeNull();
+      expect(runningSince({ ...item, state })).toBeNull();
+    }
+    expect(costThisRun({ ...item, hourly_cost: null }, cloud, end)).toBeNull();
+    expect(costThisRun({ ...item, currency: '' }, cloud, end)).toBeNull();
+    expect(
+      costThisRun({ ...item, started_at: null, seen_running_since: null }, cloud, end),
+    ).toBeNull();
+    expect(
+      costThisRun({ ...item, started_at: 'invalid', seen_running_since: null }, cloud, end),
+    ).toBeNull();
+    expect(costThisRun({ ...item, started_at: '2026-01-02T00:00:00Z' }, cloud, end)).toBeNull();
+    expect(costThisRun(item, { ...cloud, last_success: null }, end)).toBeNull();
+    expect(costThisRun(item, undefined, end)).toBeNull();
   });
 });

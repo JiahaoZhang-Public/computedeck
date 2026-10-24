@@ -18,7 +18,7 @@ from .store import PROBE_INTERVAL, Store, manual_state, now
 logger = logging.getLogger("computedeck")
 # Settings whose change means an in-flight result belongs to an old connection.
 CONNECTION_KEYS = ("ssh_alias", "enabled", "credential", "username", "options", "node")
-PERCENTAGES = ("gpu_utilization", "cpu_utilization", "memory_utilization")
+PERCENTAGES = ("gpu_utilization", "gpu_utilization_max", "cpu_utilization", "memory_utilization")
 # What a check may change on an instance a source lists. The source stays the authority for
 # its inventory, its GPUs in use and when it was listed.
 LISTED_PROBE_FIELDS = ("ssh_status", "ssh_error", "gpu_observed_count", *PERCENTAGES)
@@ -167,6 +167,13 @@ class Collector:
             )
             # Write only a successful collection. Failures preserve last good snapshots.
             self.store.save_snapshot(source_id, batch.snapshot())
+            if batch.finished is not None and "history" in batch.capabilities:
+                try:
+                    self.store.record_job_waits(source, batch.finished)
+                except Exception as error:
+                    # Ancillary history must not discard collected job events. Do not
+                    # log the exception text: a storage error can contain row data.
+                    logger.warning("Could not record wait history (%s)", type(error).__name__)
             source.update(
                 status="ready",
                 last_success=now(),
@@ -307,6 +314,7 @@ class Collector:
                         ):
                             raise ProbeConflict("endpoint_changed") from None
             current = persist({**result, "ssh_error": None})
+            self.store.record_instance_sample(current, result, result.get("observed_at") or attempt)
             self.store.record_history()
         except ProbeConflict:
             raise

@@ -3,7 +3,7 @@
 All sample outputs are hand-written from the documented formats and use fictional data.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -415,6 +415,36 @@ def fake_cluster(
         raise AssertionError(f"Unexpected command: {command}")
 
     return run
+
+
+@pytest.mark.parametrize("tracked", [True, False])
+async def test_collect_passes_gpu_tracking_to_accounting(
+    monkeypatch: pytest.MonkeyPatch, tracked: bool
+) -> None:
+    calls: list[tuple[str, str, list[str] | None]] = []
+    fake = fake_cluster(calls)
+    tres = "billing=4,cpu=4,mem=16G,node=1"
+
+    async def run(destination: str, command: str, options: list[str] | None = None) -> str:
+        if command == "scontrol -d show nodes -o" and not tracked:
+            return "NodeName=node-01 CfgTRES=cpu=64 State=IDLE Partitions=gpu Gres=gpu:4\n"
+        if " sacct " in command:
+            return (
+                sacct_line(AllocTRES=tres)
+                + "\n"
+                + slurm.HISTORY_MARKER
+                + "\n"
+                + terminal_line(AllocTRES=tres)
+            )
+        return await fake(destination, command, options)
+
+    monkeypatch.setattr(ssh, "run", run)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert "history" in batch.capabilities
+    assert batch.finished and batch.failures
+    assert (
+        batch.finished[0]["gpu_count"] == batch.failures[0]["gpu_count"] == (0 if tracked else None)
+    )
 
 
 async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -914,3 +944,320 @@ def test_history_time_limit_is_known_or_null(limit, terminal) -> None:
     assert row["time_limit"] == (limit if limit in {"02:00:00", "2-00:00:00"} else None)
     with pytest.raises(SourceError, match="unexpected_output"):
         slurm.parse_failures(line(Timelimit=limit).rsplit("|", 1)[0], SOURCE, terminal=terminal)
+
+
+QUEUE_CONFIG = """Configuration data as of 2026-01-05T10:00:00
+PriorityType            = priority/multifactor
+PriorityWeightAge       = 1000
+PriorityWeightFairShare = 10000
+PriorityFlags           =
+PrivateData             = none
+SlurmctldPort           = 6817
+"""
+FAIRSHARE = """Association Records
+ClusterName=cluster-a Account=lab-a UserName=alice(1001) Partition= ID=1 QOS=normal
+    SharesRaw/Norm/Level/Factor=1/0.50/2/0.12
+ClusterName=cluster-a Account=lab-b UserName=alice(1001) Partition= ID=2 QOS=normal
+    SharesRaw/Norm/Level/Factor=1/0.50/2/0.76
+ClusterName=cluster-a Account=lab-a UserName=bob(1002) Partition= ID=3 QOS=normal
+    SharesRaw/Norm/Level/Factor=1/0.50/2/0.99
+"""
+
+
+def test_association_fairshare_uses_only_the_login_and_matching_account() -> None:
+    assert slurm.association_fairshare(FAIRSHARE, "alice") == {"lab-a": 0.12, "lab-b": 0.76}
+    assert slurm.association_fairshare("not available", "alice") == {}
+    for factor in ("nan", "inf", "-1", "1.1", "N/A"):
+        assert (
+            slurm.association_fairshare(FAIRSHARE.replace("0.12", factor), "alice")["lab-a"] is None
+        )
+    assert slurm.association_fairshare(FAIRSHARE.replace("0.12", "0.00"), "alice")["lab-a"] == 0
+    missing = FAIRSHARE.replace("    SharesRaw/Norm/Level/Factor=1/0.50/2/0.12\n", "")
+    assert slurm.association_fairshare(missing, "alice")["lab-a"] is None
+    conflicting = FAIRSHARE + FAIRSHARE.replace("0.12", "0.32")
+    assert slurm.association_fairshare(conflicting, "alice")["lab-a"] is None
+
+
+def test_queue_positions_follow_each_partition_and_separate_earlier_ties() -> None:
+    jobs = slurm.parse_jobs(
+        job_line(State="PENDING", Reason="Priority", Partition="gpu,debug"), SOURCE
+    )
+    output = """900|gpu|900001|Resources
+800|gpu|900002|Dependency
+800|gpu|900003|QOSMaxGRESPerUser
+700|gpu|900004|JobHeldUser
+600|gpu|900005|Priority
+600|gpu|42|Priority
+600|gpu|900006|Priority
+100|debug|42|Priority
+"""
+    assert slurm.queue_positions(output, jobs) == {
+        "cluster-a:42": [
+            {"partition": "gpu", "ahead": 1, "ties": 1},
+            {"partition": "debug", "ahead": 0, "ties": 0},
+        ]
+    }
+    # An omitted partition is unknown, not a partial or zero position.
+    assert slurm.queue_positions(output.replace("100|debug|42|Priority", ""), jobs) == {
+        "cluster-a:42": None
+    }
+    assert slurm.queue_positions("", jobs) == {"cluster-a:42": None}
+    # Preserve the scheduler's row order, even if priorities alone suggest another order.
+    assert (
+        slurm.queue_positions(output.replace("900|gpu", "100|gpu"), jobs)["cluster-a:42"][0][
+            "ahead"
+        ]
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "unrecognized output",
+        "oops|gpu|42|Priority",
+        "100|gpu,debug|42|Priority",
+        "100||42|Priority",
+        "100|gpu|not-a-job|Priority",
+    ],
+)
+def test_queue_positions_reject_unrecognized_output(output: str) -> None:
+    jobs = slurm.parse_jobs(job_line(State="PENDING", Reason="Priority"), SOURCE)
+    with pytest.raises(SourceError, match="unexpected_output"):
+        slurm.queue_positions(output, jobs)
+
+
+@pytest.fixture
+def queue_cluster(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
+    """Optional queue steps on top of the existing normal collection fixture."""
+    slurm._QUEUE_CONFIG.clear()
+    state: dict[str, Any] = {
+        "jobs": job_line(State="PENDING", Reason="Priority"),
+        "config": QUEUE_CONFIG,
+        "queue": "900|gpu|900001|Resources\n600|gpu|42|Priority\n",
+        "associations": FAIRSHARE,
+        "commands": [],
+    }
+    healthy = fake_cluster([])
+
+    async def run(destination: str, command: str, options: list[str] | None = None) -> str:
+        state["commands"].append(command)
+        if " squeue " in command:
+            return state["jobs"]
+        if command == "scontrol show config":
+            value = state["config"]
+        elif command.startswith("squeue -h"):
+            value = state["queue"]
+        elif command.startswith("scontrol show assoc_mgr users="):
+            value = state["associations"]
+        else:
+            return await healthy(destination, command, options)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(ssh, "run", run)
+    yield state
+    slurm._QUEUE_CONFIG.clear()
+
+
+async def test_queue_collection_keeps_only_counts_and_own_ids(
+    queue_cluster, tmp_path, caplog
+) -> None:
+    import json
+    import shlex
+
+    source = {**SOURCE, "enabled": True, "interval_minutes": 10}
+    batch = await slurm.SlurmDriver().collect(source)
+    batch.validate_rows()
+    assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
+    assert batch.jobs[0]["fairshare"] == 0.12
+    assert batch.jobs[0]["queue_unknown"] is None
+    assert not batch.warnings
+    assert "queue_position" not in batch.capabilities
+    assert not any(check.warning == "queue_unavailable" for check in slurm.SlurmDriver.info.checks)
+    command = next(c for c in queue_cluster["commands"] if c.startswith("squeue -h"))
+    assert shlex.split(command) == [
+        "squeue",
+        "-h",
+        "--array",
+        "--local",
+        "-P",
+        "-t",
+        "PD",
+        "-p",
+        "gpu",
+        "--sort=-p,i",
+        "-o",
+        "%Q|%P|%i|%r",
+    ]
+    store = Store(tmp_path / "queue.sqlite3")
+    store.save_snapshot(source["id"], {"jobs": batch.jobs})
+    assert "900001" not in json.dumps(batch.model_dump())
+    assert store.snapshot(source["id"])["jobs"] == batch.jobs
+    assert "900001" not in json.dumps(store.snapshot(source["id"]))
+    assert "900001" not in caplog.text
+
+
+@pytest.mark.parametrize("private", ["jobs", "accounts,jobs", "ALL"])
+async def test_private_queue_is_unknown_without_a_query_or_warning(queue_cluster, private) -> None:
+    queue_cluster["config"] = QUEUE_CONFIG.replace("none", private)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["queue"] is None
+    assert batch.jobs[0]["queue_unknown"] == "private_data"
+    assert batch.jobs[0]["fairshare"] == 0.12
+    assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+    assert not batch.warnings
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "Configuration data as of 2026-01-05T10:00:00\n"
+        "PriorityType            = priority/basic\n"
+        "PrivateData             = none\n"
+        "SlurmctldPort           = 6817\n",
+        QUEUE_CONFIG.replace("PriorityWeightFairShare = 10000\n", ""),
+        QUEUE_CONFIG.replace("10000", "0"),
+        QUEUE_CONFIG.replace("10000", "unknown"),
+    ],
+)
+async def test_fairshare_requires_a_known_active_weight(queue_cluster, config) -> None:
+    queue_cluster["config"] = config
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["fairshare"] is None
+    assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
+    assert batch.jobs[0]["queue_unknown"] is None
+    assert not batch.warnings
+
+
+@pytest.mark.parametrize(
+    "step,value",
+    [
+        ("queue", ssh.SSHError("900001: private remote diagnostic")),
+        ("queue", TimeoutError()),
+        ("queue", "malformed 900001 output"),
+        ("config", ssh.SSHError("private diagnostic")),
+        ("config", TimeoutError()),
+        ("config", "not recognized"),
+        ("config", QUEUE_CONFIG.replace("PrivateData             = none\n", "")),
+        ("config", QUEUE_CONFIG.replace("PriorityType            = priority/multifactor\n", "")),
+    ],
+)
+async def test_optional_queue_failures_are_generic_and_do_not_fail_collection(
+    queue_cluster, step, value, caplog
+) -> None:
+    import json
+
+    queue_cluster[step] = value
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["queue"] is None
+    assert batch.jobs[0]["queue_unknown"] == "failed"
+    assert batch.warnings == [{"code": "queue_unavailable"}]
+    assert "jobs" in batch.capabilities
+    assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
+    if step == "config":
+        assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+
+
+@pytest.mark.parametrize("output", ["900|gpu|900001|Priority", "", "100|gpu|42|QOSMaxGRESPerUser"])
+async def test_successful_queue_query_without_own_wait_is_unknown_without_warning(
+    queue_cluster, output, caplog
+) -> None:
+    import json
+
+    queue_cluster["queue"] = output
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["queue"] is None
+    assert batch.jobs[0]["queue_unknown"] == "failed"
+    assert batch.jobs[0]["fairshare"] == 0.12
+    assert not batch.warnings
+    assert "jobs" in batch.capabilities
+    assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
+
+
+@pytest.mark.parametrize(
+    "state,reason",
+    [
+        ("RUNNING", "None"),
+        ("PENDING", "Dependency"),
+        ("PENDING", "QOSMaxGRESPerUser"),
+    ],
+)
+async def test_queue_steps_are_skipped_without_eligible_waits(queue_cluster, state, reason) -> None:
+    queue_cluster["jobs"] = job_line(State=state, Reason=reason)
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert "queue" not in batch.jobs[0]
+    assert "scontrol show config" not in queue_cluster["commands"]
+    assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+    assert not batch.warnings
+
+
+async def test_resources_and_array_elements_get_queue_facts(queue_cluster) -> None:
+    queue_cluster["jobs"] = job_line(JobID="42_7", State="PENDING", Reason="Resources")
+    queue_cluster["queue"] = "100|gpu|42_7|Resources"
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 0, "ties": 0}]
+    assert batch.jobs[0]["fairshare"] == 0.12
+
+
+async def test_queue_config_cache_expires_and_is_scoped_to_source_and_connection(
+    queue_cluster, monkeypatch
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(slurm.time, "monotonic", lambda: clock[0])
+    await slurm.SlurmDriver().collect(SOURCE)
+    clock[0] += 3599
+    await slurm.SlurmDriver().collect(SOURCE)
+    assert queue_cluster["commands"].count("scontrol show config") == 1
+    clock[0] += 1
+    await slurm.SlurmDriver().collect(SOURCE)
+    await slurm.SlurmDriver().collect({**SOURCE, "id": "another-source"})
+    await slurm.SlurmDriver().collect({**SOURCE, "ssh_alias": "another-target"})
+    assert queue_cluster["commands"].count("scontrol show config") == 4
+    assert sum(c.startswith("squeue -h") for c in queue_cluster["commands"]) == 5
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"queue": "not a list"},
+        {"queue": [None]},
+        {"queue": [{"partition": "gpu", "ahead": -1, "ties": 0}]},
+        {"queue": [{"partition": "gpu", "ahead": 0, "ties": True}]},
+        {"queue": [{"partition": None, "ahead": 0, "ties": 0}]},
+        {"queue_unknown": "guessed"},
+        {"fairshare": "0.12"},
+        {"fairshare": True},
+        {"fairshare": 1.2},
+        {"fairshare": -0.1},
+    ],
+)
+def test_queue_fields_are_validated_before_storage(fields) -> None:
+    from computedeck.drivers.base import validate_row
+
+    with pytest.raises(ValueError):
+        validate_row({"id": "cluster-a:42", "queue_unknown": None, **fields})
+
+
+@pytest.mark.parametrize("kind", ["jobs", "nodes", "instances", "failures", "finished"])
+def test_plugin_queue_fields_without_slurm_opt_in_remain_compatible(kind, tmp_path) -> None:
+    from computedeck.drivers.base import Batch
+
+    row = {
+        "id": "cluster-a:42",
+        "source_id": "cluster-a-alice",
+        "state": "PENDING",
+        "queue": "batch",
+        "fairshare": 45.0,
+    }
+    batch = Batch(**{kind: [row]})
+    batch.validate_rows()
+    assert getattr(batch, kind) == [row]
+    # Finished rows are transient; all other row kinds also survive stored snapshots.
+    if kind != "finished":
+        store = Store(tmp_path / "plugin.sqlite3")
+        store.save_snapshot("cluster-a-alice", {kind: getattr(batch, kind)})
+        saved = store.snapshot("cluster-a-alice")[kind]
+        assert len(saved) == 1
+        assert {key: saved[0][key] for key in row} == row

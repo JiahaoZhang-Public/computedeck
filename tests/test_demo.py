@@ -11,7 +11,7 @@ import pytest
 from computedeck.demo import dashboard, demo_history, events, nodes
 from computedeck.drivers.cloud import instance_lifecycle
 from computedeck.store import gpu_allocation, manual_state
-from computedeck.summary import RUNNING, fresh
+from computedeck.summary import RUNNING, fresh, summarize
 
 
 def test_demo_mutes_only_the_named_cluster_and_machine() -> None:
@@ -34,13 +34,13 @@ def test_demo_has_verified_planner_choices() -> None:
 
 def test_demo_machine_added_by_hand_is_checked_and_counted() -> None:
     [machine] = [row for row in dashboard()["instances"] if row["name"] == "dev-box"]
-    # The state the service would derive from its last check, and GPUs with processes.
+    # The state and GPU use measured by the last check (visible processes or significant memory).
     assert machine["state"] == manual_state(machine) == "running"
     assert gpu_allocation(machine) == machine["gpu_allocated"] == 1
 
 
 def test_demo_pod_is_reported_running_and_holds_its_listed_gpus() -> None:
-    [pod] = [row for row in dashboard()["instances"] if row["platform"] == "RunPod"]
+    [pod] = [row for row in dashboard()["instances"] if row["name"] == "sd-inference"]
     assert pod["state"] == "reported_running"
     assert instance_lifecycle(pod["state"]) == "held"
     assert gpu_allocation(pod) == 2
@@ -50,9 +50,10 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     data = dashboard()
     assert data["summary"]["unmonitored"] == 1
     assert data["summary"]["allocated"] is None
-    assert data["summary"]["known_allocated"] == 25
+    assert data["summary"]["known_allocated"] == 27
     assert {row["subject"]["name"] for row in data["summary"]["unmeasured"]} == {
         "build-box",
+        "lab-server",
         "Cluster A · carol",
         "Cluster C · alice",
         "RunPod secondary",
@@ -75,7 +76,7 @@ def test_demo_shows_named_missing_machine_and_unavailable_capacity() -> None:
     for key, gpus in running_gpus.items():
         assert gpus <= nodes[key]["gpu_count"]
     unavailable = [node for node in data["nodes"] if node["health"] == "unavailable"]
-    assert {node["state"] for node in unavailable} == {"down*", "drained"}
+    assert {node["state"] for node in unavailable} == {"down*", "drained", "IDLE", "FUTURE"}
     assert all(node["gpu_allocated"] == 0 for node in unavailable)
 
 
@@ -303,15 +304,19 @@ def test_demo_failure_coverage_uses_only_fresh_history_sources() -> None:
     assert data["failure_history_observed_at"] == min(source["last_success"] for source in covered)
 
 
-def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
+def test_demo_queue_waits_show_both_contradictory_and_larger_limit_held_jobs() -> None:
     data = dashboard()
     queued = [job for job in data["jobs"] if job["state"] == "PENDING"]
     assert queued
-    limit_held = [job for job in queued if job["reason"] == "QOSMaxGRESPerUser"]
-    assert limit_held
+    limit_held = [
+        job for job in queued if job["reason"] in {"QOSMaxGRESPerUser", "AssocMaxJobsLimit"}
+    ]
+    assert len(limit_held) == 2
     for job in limit_held:
         source = next(source for source in data["sources"] if source["id"] == job["source_id"])
         qos = next(qos for qos in source["qos"] if qos["name"] == job["qos"])
+        if job["reason"] == "AssocMaxJobsLimit":
+            assert "MaxJobsPU" not in qos["limits"]
         limit = int(qos["limits"]["MaxTRESPU"].removeprefix("gres/gpu="))
         used = sum(
             running["gpu_count"]
@@ -320,9 +325,14 @@ def test_demo_queue_waits_do_not_claim_a_contradictory_per_user_limit() -> None:
             and running["qos"] == job["qos"]
             and running["state"] in RUNNING
         )
-        assert job["gpu_count"] > max(0, limit - used)
-    # A separate queue still demonstrates demand that can start before a new request.
-    assert any(job["reason"] == "Priority" and job["gpu_count"] == 4 for job in queued)
+        room = max(0, limit - used)
+        if job["cluster_id"] == "example:cluster-a":
+            assert job["gpu_count"] == 1
+            assert room == 4
+        else:
+            assert job["gpu_count"] > room
+    # Ordinary resource and priority waits remain visible alongside limit waits.
+    assert {"Priority", "Resources"} <= {job["reason"] for job in queued}
 
 
 def test_example_all_down_cluster_has_consistent_state_and_capacity() -> None:
@@ -360,8 +370,36 @@ def test_example_history_agrees_with_summary_and_observation_gaps(hours: int) ->
             point["at"] >= s["last_success"] for s in data["sources"] if s["stale"] or s["error"]
         )
         gaps += sum(point["at"] >= i["added_at"] for i in unprobed)
+        gaps += sum(
+            point["at"] >= i["gpus_observed_at"]
+            for i in data["instances"]
+            if i.get("gpus") and i.get("gpu_allocated") is None
+        )
         assert point["unknown_allocation_sources"] == gaps
         assert point["allocated_gpus"] == (None if gaps else point["known_allocated_gpus"])
+    for point in history:
+        groups = point["by_group"]
+        assert (
+            sum(g["known_allocated"] or 0 for g in groups.values()) == point["known_allocated_gpus"]
+        )
+        assert point["unknown_allocation_sources"] == sum(
+            g["unknown_allocation_sources"] for g in groups.values()
+        )
+        assert all(
+            g["known_allocated"] is None or isinstance(g["known_allocated"], int)
+            for g in groups.values()
+        )
+        failed = next(
+            source for source in data["sources"] if source["cluster_id"] == "example:cluster-c"
+        )
+        group = groups[failed["cluster_id"]]
+        if point["at"] < failed["last_success"]:
+            assert group["allocated"] == group["known_allocated"] == 0
+            assert group["unknown_allocation_sources"] == 0
+        else:
+            assert group["allocated"] is group["known_allocated"] is None
+            assert group["unknown_allocation_sources"] == 1
+    assert len({p["by_group"]["example:cluster-b"]["known_allocated"] for p in history}) > 1
 
 
 def test_demo_shows_completed_and_unavailable_outcomes() -> None:
@@ -489,3 +527,134 @@ def test_array_failure_history_matches_activity_and_coverage() -> None:
         assert job["source_id"] in data["failure_history_sources"]
         assert job["state"] == event["data"]["state"] == "FAILED"
         assert job["end"] == event["data"]["ended_at"]
+
+
+def test_demo_shows_on_demand_and_partitionless_nodes():
+    data = dashboard()
+    on_demand = [n for n in data["nodes"] if n["health"] == "on_demand"]
+    assert len(on_demand) == 1
+    assert on_demand[0]["partitions"] == ["gpu"]
+    spare = next(n for n in data["nodes"] if n["name"] == "a-spare-01")
+    assert spare["state"] == "IDLE" and spare["partitions"] == []
+    assert spare["health_reason"] == "no_partition"
+    assert next(n for n in data["nodes"] if n["name"] == "a-future-01")["state"] == "FUTURE"
+    summary = data["summary"]["groups"]["example:cluster-a"]["nodes"]
+    assert summary["on_demand"] == 4
+    assert summary["unavailable"] == 8
+    assert summary["usable"] == 32
+
+
+def test_demo_planner_includes_an_unknown_runtime_limit() -> None:
+    source = next(row for row in dashboard()["sources"] if row["id"] == "example:cluster-a-bob")
+    debug = next(qos for qos in source["qos"] if qos["name"] == "debug")
+    assert "MaxWallPJ" not in debug["limits"]
+    assert debug["access"] == "verified"
+
+
+def test_demo_ssh_machine_shows_all_gpu_states() -> None:
+    data = dashboard()
+    source = next(source for source in data["sources"] if source["driver"] == "ssh")
+    machine = next(row for row in data["instances"] if row["source_id"] == source["id"])
+    assert [gpu["in_use"] for gpu in machine["gpus"]] == [False, True, True, None]
+    assert machine["gpus"][1]["processes"][0]["user"] == "alice"
+    assert machine["gpus"][2]["processes"] == []
+    assert machine["gpu_allocated"] is None
+    assert machine["gpus_observed_at"] == machine["observed_at"]
+
+
+def test_submit_examples_include_unproven_flags_and_unsafe_model() -> None:
+    data = dashboard()
+    source = next(source for source in data["sources"] if source["id"] == "example:cluster-a-bob")
+    assert any(qos["name"] == "long" for qos in source["qos"])
+    assert not any(
+        job["cluster_id"] == source["cluster_id"] and job["user"] == "bob" and job["qos"] == "long"
+        for job in [*data["jobs"], *data["recent_failures"]]
+    )
+    model = next(
+        node["gpu_type"] for node in data["nodes"] if node["cluster_id"] == source["cluster_id"]
+    )
+    assert model == "A100 80GB"
+    assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", model) is None
+
+
+def test_example_costs_have_provider_and_observed_starts_and_unpriced_instances() -> None:
+    data = dashboard()
+    pod = next(i for i in data["instances"] if i["name"] == "sd-inference")
+    assert pod["started_at"] < pod["observed_at"]
+    observed = next(i for i in data["instances"] if i["name"] == "batch-inference")
+    assert observed["state"] == "reported_running"
+    assert observed["started_at"] is None
+    assert observed["hourly_cost"] == 0.35
+    ec2 = next(i for i in data["instances"] if i["name"] == "gpu-eval")
+    assert ec2["state"] == "running"
+    assert ec2["started_at"] < ec2["observed_at"]
+    assert ec2["hourly_cost"] is None
+    for item in data["instances"]:
+        if item.get("manual"):
+            assert "seen_running_since" not in item
+        elif instance_lifecycle(item["state"]) == "held":
+            assert item["seen_running_since"] < item["observed_at"]
+    spend = data["summary"]["spend"]
+    assert spend["rates"] == {"USD": 1.04, "EUR": 0.4}
+    manual = next(i for i in data["instances"] if i["name"] == "dev-box")
+    assert manual["hourly_cost"] == 0.4 and manual["currency"] == "EUR"
+    assert next(i for i in data["instances"] if i["name"] == "build-box")["hourly_cost"] is None
+    assert spend["priced"] == 3
+    assert {i["subject"]["id"]: i["reason"]["code"] for i in spend["unpriced"]} == {
+        "example:runpod-secondary": "summary_source_failed",
+        ec2["id"]: "summary_price_missing",
+    }
+
+
+def test_example_history_omits_a_machine_only_group_before_it_was_added() -> None:
+    data = dashboard()
+    machine = next(
+        item
+        for item in data["instances"]
+        if item.get("manual") and item.get("monitoring") and not item.get("observed_at")
+    )
+    machine["platform"] = "New workstation"
+    data["summary"] = summarize(data)
+    key = "platform:new workstation"
+    history = demo_history(24, data)
+    for point in history:
+        groups = point["by_group"]
+        if point["at"] < machine["added_at"]:
+            assert key not in groups
+        else:
+            assert groups[key]["allocated"] is None
+            assert groups[key]["unknown_allocation_sources"] == 1
+        assert (
+            sum(g["known_allocated"] or 0 for g in groups.values()) == point["known_allocated_gpus"]
+        )
+        assert (
+            sum(g["unknown_allocation_sources"] for g in groups.values())
+            == point["unknown_allocation_sources"]
+        )
+
+
+def test_demo_shows_queue_estimates_and_explicit_unknowns() -> None:
+    from computedeck.drivers.base import validate_row
+
+    jobs = dashboard()["jobs"]
+    waiting = [job for job in jobs if job["reason"] in {"Priority", "Resources"}]
+    assert waiting
+    for job in waiting:
+        validate_row(job)
+    assert any(job["queue"] and job["queue"][0]["ties"] > 0 for job in waiting)
+    assert any(job["reason"] == "Resources" and job["queue"] for job in waiting)
+    assert any(job["fairshare"] == 0.12 for job in waiting)
+    assert {job["queue_unknown"] for job in waiting} == {None, "failed"}
+    assert all("queue" not in job for job in jobs if job not in waiting)
+
+
+def test_demo_pending_array_siblings_count_as_ties() -> None:
+    waiting = [
+        job
+        for job in dashboard()["jobs"]
+        if job.get("array_id") == "48300" and job["state"] == "PENDING"
+    ]
+    for job in waiting:
+        if job["queue"] is not None:
+            earlier = sum(int(other["array_index"]) < int(job["array_index"]) for other in waiting)
+            assert job["queue"] == [{"partition": "gpu", "ahead": 0, "ties": earlier}]

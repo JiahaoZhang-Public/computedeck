@@ -65,6 +65,7 @@ export function capacityText(nodes: NodeSummary, state: string) {
           usable: partialCount(nodes.usable, nodes.known_usable),
         }),
     detail:
+      (nodes.on_demand ? `${t('summary.onDemand', { count: nodes.on_demand })} · ` : '') +
       (nodes.unknown ? `${t('summary.unknownNodes', { count: nodes.unknown })} · ` : '') +
       ((nodes.unavailable ?? 0) > 0 || (nodes.usable == null && nodes.known_usable != null)
         ? t('summary.capacityDetail', {

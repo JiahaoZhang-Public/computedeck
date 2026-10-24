@@ -21,7 +21,16 @@ import { routeHash } from '../routes';
 import type { Locale } from '../i18n';
 import { t } from '../i18n';
 import type { PluginProps, WebPlugin } from '../plugins';
-import { arrayLabel, jobGpuResources, relativeTime } from '../domain';
+import {
+  arrayLabel,
+  costThisRun,
+  dateTime,
+  jobGpuResources,
+  money,
+  relativeTime,
+  runDuration,
+  runningHours,
+} from '../domain';
 import type { JobArray } from '../domain';
 import { failureEnd } from '../failures';
 import { jobReason, jobTime, jobWaiting } from '../jobFacts';
@@ -70,7 +79,7 @@ export type Ctx = {
   openEvent: (event: DeckEvent) => void;
   openArray: (array: JobArray) => void;
   openInstance: (item: Instance) => void;
-  copy: (text: string) => Promise<void>;
+  copy: (text: string, message?: string) => Promise<void>;
   notify: (text: string, tone?: 'ok' | 'error') => void;
   backup: () => Promise<void>;
   toggleDemo: () => void;
@@ -489,4 +498,34 @@ export function ChartLegend({ partial = false }: { partial?: boolean }) {
       )}
     </span>
   );
+}
+
+/** The full estimate and its qualifications in the instance drawer. */
+export function InstanceRunCost({ item, source }: { item: Instance; source?: Source }) {
+  const run = runningHours(item, source);
+  const cost = costThisRun(item, source);
+  if (!run) return <>—</>;
+  return (
+    <>
+      <span className="sub">
+        {t(run.origin === 'provider' ? 'cost.runningFor' : 'cost.observedFor', {
+          duration: runDuration(run.hours),
+        })}
+      </span>
+      <span className="sub">
+        {cost == null ? '—' : t('cost.estimate', { cost: money(cost, item.currency) })}
+      </span>
+      {run.asOf && <span className="sub">{t('cost.asOf', { time: dateTime(run.asOf) })}</span>}
+      {cost != null && <span className="sub">{t('cost.excludes')}</span>}
+    </>
+  );
+}
+
+/** Scheduler-managed hosts remain inspectable, but are counted with their cluster. */
+export function MachineNodeNote({ item }: { item: Instance }) {
+  return item.same_node ? (
+    <span className="sub">
+      {t('instance.sameNode', { node: item.same_node.name, cluster: item.same_node.cluster_name })}
+    </span>
+  ) : null;
 }

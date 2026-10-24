@@ -25,7 +25,7 @@ from .records import (
     source_record,
 )
 from .ssh_config import render_config
-from .store import Store, now
+from .store import DEFAULT_SETTINGS, Store, now
 
 _SOURCE_KEYS = (
     "username",
@@ -111,7 +111,7 @@ def load(text: str) -> dict[str, Any]:
         raise ConfigError(str(error)) from None
     except RecursionError:
         raise ConfigError("The file nests arrays or tables too deeply") from None
-    unknown = set(data) - {"language", "server_name", "cluster", "cloud", "instance", "node"}
+    unknown = set(data) - {*DEFAULT_SETTINGS, "cluster", "cloud", "instance", "node"}
     if unknown:
         raise ConfigError(f"Unknown top-level keys: {', '.join(sorted(unknown))}")
     for section in ("cluster", "cloud", "instance", "node"):
@@ -139,9 +139,7 @@ def load(text: str) -> dict[str, Any]:
         except (ValidationError, ValueError) as error:
             raise ConfigError(f"node {row.get('name', '')}: {error}") from None
     try:
-        settings = SettingsInput(
-            **{key: data[key] for key in ("language", "server_name") if key in data}
-        )
+        settings = SettingsInput(**{key: data[key] for key in DEFAULT_SETTINGS if key in data})
         instances = [
             InstanceInput(
                 platform=row.get("platform", ""),
@@ -267,7 +265,12 @@ def _value(value: Any) -> str:
 def export(store: Store) -> str:
     lines = ["# ComputeDeck configuration. Import with: computedeck import FILE", ""]
     settings = store.settings()
-    for key in ("language", "server_name"):
+    for key in DEFAULT_SETTINGS:
+        if (
+            key in {"low_use_threshold", "low_use_window_minutes"}
+            and settings[key] == DEFAULT_SETTINGS[key]
+        ):
+            continue
         if settings.get(key) is not None:
             lines.append(f"{key} = {_value(settings[key])}")
     for node in store.nodes():

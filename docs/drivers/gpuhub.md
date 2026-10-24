@@ -29,4 +29,14 @@ list includes is never read or stored.
   credentials.
 - `api.gpuhub.com` is not reachable from every network; the same API is then used through
   `www.gpuhub.com`.
-- Prices are the base price of each container (thousandths of a dollar in the API).
+- The [container-list reference](https://docs.gpuhub.com/api-reference/api-elastic-deployment#8-list-containers)
+  describes `price` on the container object as a base price in USD × 1000
+  (1600 means $1.60/hour), without specifying per GPU or per container.
+  ComputeDeck treats `price / 1000` as the container's hourly price only when
+  `gpu_num == 1`, where both interpretations agree. For multiple GPUs or an unknown
+  GPU count, `hourly_cost` stays unknown: no cost-so-far or per-GPU-hour estimate is
+  shown, and a running container appears in the summary's missing-price list.
+  **Follow-up:** confirm the multi-GPU unit against a container listing and its console
+  or billing price, or obtain an explicit statement from GPUhub, before using it.
+- This slice leaves provider `started_at` unset; running-cost estimates use the labelled
+  ComputeDeck observation window. No extra billing or lifecycle API calls are made.

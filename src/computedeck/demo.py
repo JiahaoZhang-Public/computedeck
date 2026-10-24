@@ -1,12 +1,19 @@
 """Fictional example data. Never persisted or passed to collectors."""
 
+import json
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import attention, drivers
-from .drivers.base import cluster_state, node_health
+from .drivers.aws_ec2 import parse_instances as parse_ec2_instances
+from .drivers.base import cluster_state, node_health_fields, requires_partition
+from .drivers.runpod import parse_pods
+from .drivers.ssh_host import parse_machine
+from .history import group_history
+from .low_use import low_use
 from .summary import fresh, freshness, summarize
+from .wait_history import summarize_waits, wait_sample
 
 _SOURCES = [
     # id, label, driver, cluster_id, username
@@ -26,7 +33,7 @@ _JOBS = [
     ("example:cluster-b-alice", "vit-pretrain / stage 2", "RUNNING", 8, 94, 78, "1-06:12:04"),
     ("example:cluster-a-bob", "speech-asr / eval", "RUNNING", 2, 73, 47, "03:28:51"),
     ("example:cluster-b-alice", "diffusion / fid eval", "RUNNING", 4, None, None, "08:14:32"),
-    ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 4, None, None, "00:00:00"),
+    ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 1, None, None, "00:00:00"),
     ("example:cluster-b-alice", "rl-agent / rollout", "PENDING", 16, None, None, "00:00:00"),
 ]
 
@@ -117,7 +124,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
 
 
 def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """A smooth fictional trace, one point per 30 minutes, up to 7 days."""
+    """A smooth fictional trace, one point per 30 minutes, up to 30 days."""
     current = datetime.now(UTC).replace(second=0, microsecond=0)
     data = dashboard() if data is None else data
     summary = data["summary"]
@@ -127,16 +134,22 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
         for i in data["instances"]
         if i.get("manual") and i.get("monitoring") and not i.get("observed_at")
     ]
-    steps = min(hours, 168) * 2
-    points = []
-    for i in range(steps + 1):
-        age = steps - i
+    unknown_machines = [
+        i for i in data["instances"] if i.get("gpus") and i.get("gpu_allocated") is None
+    ]
+    steps = min(hours, 720) * 2
+    points: list[dict[str, Any]] = []
+    for age in range(steps, -1, -1):
+        i = 1440 - age  # Keep periodic terms independent of the requested range.
         allocated = 14 + (4 if age % 48 < 32 else 0) + (4 if i % 96 > 60 else 0)
         at = current - timedelta(minutes=30 * age)
         # Unprobed machines create a gap only after being added. Source gaps start
         # at their last successful collection; the latest point uses the live summary.
         unknown = sum(at >= datetime.fromisoformat(i["added_at"]) for i in unprobed)
         unknown += sum(at >= datetime.fromisoformat(s["last_success"]) for s in gaps)
+        unknown += sum(
+            at >= datetime.fromisoformat(i["gpus_observed_at"]) for i in unknown_machines
+        )
         points.append(
             {
                 "at": at.isoformat(),
@@ -152,6 +165,62 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
         known_allocated_gpus=summary["known_allocated"],
         unknown_allocation_sources=len(summary["unmeasured"]),
     )
+    # A fictional upgrade ten days ago and a two-hour collection gap yesterday.
+    # Derive breakdowns from each point without changing the fleet trace: groups
+    # become unknown at the same gap onsets, and newly added machines appear then.
+    source_groups = {source["id"]: source["cluster_id"] for source in data["sources"]}
+    for point in points:
+        at = datetime.fromisoformat(point["at"])
+        age_hours = (current - at).total_seconds() / 3600
+        if age_hours <= 240:
+            groups = group_history(
+                {
+                    **data,
+                    "instances": [
+                        item
+                        for item in data["instances"]
+                        if not item.get("added_at")
+                        or at >= datetime.fromisoformat(item["added_at"])
+                    ],
+                }
+            )
+            for group in groups.values():
+                group["unknown_allocation_sources"] = 0
+            for source in gaps:
+                if at >= datetime.fromisoformat(source["last_success"]):
+                    groups[source["cluster_id"]]["unknown_allocation_sources"] += 1
+            for items, field in ((unprobed, "added_at"), (unknown_machines, "gpus_observed_at")):
+                for item in items:
+                    if at >= datetime.fromisoformat(item[field]):
+                        key = source_groups.get(
+                            item["source_id"], f"platform:{item['platform'].strip().lower()}"
+                        )
+                        groups[key]["unknown_allocation_sources"] += 1
+            # Keep single-GPU groups visible; larger groups absorb the variation.
+            # Cumulative rounding preserves integer counts and the fleet total.
+            fixed = sum(group["known_allocated"] == 1 for group in groups.values())
+            known_total = sum(group["known_allocated"] or 0 for group in groups.values()) - fixed
+            cumulative = previous = 0
+            for group in groups.values():
+                if not group["unknown_allocation_sources"] and group["known_allocated"] is None:
+                    group["known_allocated"] = 0
+                known = group["known_allocated"]
+                if known is not None and known > 1:
+                    cumulative += known
+                    scaled = round(
+                        cumulative * (point["known_allocated_gpus"] - fixed) / known_total
+                    )
+                    group["known_allocated"] = scaled - previous
+                    previous = scaled
+                group["allocated"] = (
+                    None if group["unknown_allocation_sources"] else group["known_allocated"]
+                )
+            point["by_group"] = groups
+    points = [
+        p
+        for p in points
+        if not 26 < (current - datetime.fromisoformat(p["at"])).total_seconds() / 3600 < 28
+    ]
     return points
 
 
@@ -171,6 +240,8 @@ def dashboard() -> dict[str, Any]:
     # A missing optional command has never worked here: a gap, not a regression.
     sources[1]["capabilities"].remove("history")
     sources[1]["warnings"] = [{"code": "history_unavailable", "detail": "sacct: command not found"}]
+    # The planner explains a missing run-time limit as unknown, not unlimited.
+    next(qos for qos in sources[1]["qos"] if qos["name"] == "debug")["limits"].pop("MaxWallPJ")
     sources[4].update(
         stale=True,
         last_success=(current - timedelta(minutes=47)).isoformat(),
@@ -203,9 +274,13 @@ def dashboard() -> dict[str, Any]:
         capabilities_seen=["instances", "ssh_discovery", "ssh_probe"],
     )
     jobs = [_job(index, spec, observed) for index, spec in enumerate(_JOBS)]
-    # Cluster B's long QoS has 8 GPUs left: this 16-GPU job cannot start first.
-    jobs[-1]["reason"] = "QOSMaxGRESPerUser"
     for job in jobs:
+        # Cluster A waits on an uncollected association cap despite its GPU room.
+        if job["name"] == "llm-sft / ablation":
+            job["reason"] = "AssocMaxJobsLimit"
+        # Cluster B's 16-GPU wait does not fit its GPU room.
+        if job["name"] == "rl-agent / rollout":
+            job["reason"] = "QOSMaxGRESPerUser"
         if job["source_id"] == sources[1]["id"]:
             job["observed_at"] = sources[1]["last_success"]
     jobs.append(
@@ -240,6 +315,22 @@ def dashboard() -> dict[str, Any]:
             qos="long",
             reason=("Resources" if index < 25 else "Priority") if state == "PENDING" else None,
         )
+        if state == "PENDING":
+            # Pending array siblings share priority; earlier elements count as ties.
+            element.update(
+                queue=[
+                    {
+                        "partition": "gpu",
+                        "ahead": 0,
+                        "ties": index - 5,
+                    }
+                ],
+                fairshare=0.12,
+                queue_unknown=None,
+            )
+            # One element disappeared between the own-job and partition queries.
+            if index == 29:
+                element.update(queue=None, queue_unknown="failed")
         jobs.append(element)
     local_current = current.astimezone().replace(tzinfo=None)
     failure = {
@@ -295,6 +386,8 @@ def dashboard() -> dict[str, Any]:
             "ssh_alias": "computedeck-runpod-demo-pod",
             "identity_file": None,
             "hourly_cost": 0.69,
+            "started_at": (current - timedelta(hours=76)).isoformat(),
+            "seen_running_since": (current - timedelta(hours=4)).isoformat(),
             "currency": "USD",
             "observed_at": observed,
             # A failed check survives provider listings without changing held GPUs.
@@ -311,7 +404,7 @@ def dashboard() -> dict[str, Any]:
             "platform": "Lab workstation",
             "external_id": "devbox",
             "name": "dev-box",
-            # Running while a recent SSH check reached it; GPUs in use have processes.
+            # Running while a recent SSH check reached it; GPU use was measured by that check.
             "state": "running",
             "gpu_count": 1,
             "gpu_allocated": 1,
@@ -367,6 +460,84 @@ def dashboard() -> dict[str, Any]:
             "ssh_alias": "cd-lab-workstation-shortcut",
         }
     )
+    machine_source = _source(
+        ("example:lab-server", "Lab server", "ssh", "example:lab-server", "alice"), observed
+    )
+    machine_source.update(ssh_alias="lab-server", credential="", capabilities=["instances"])
+    sources.append(machine_source)
+    machine = parse_machine(
+        json.dumps(
+            {
+                "gpu_tool": "nvidia-smi",
+                "gpu": "0, GPU-demo-0, NVIDIA L4, 0, 64, 24576\n"
+                "1, GPU-demo-1, NVIDIA L4, 80, 16000, 24576\n"
+                "2, GPU-demo-2, NVIDIA L4, 25, 8000, 24576\n"
+                "3, GPU-demo-3, NVIDIA L4, N/A, N/A, 24576\n",
+                "apps": "GPU-demo-1, 4242, 16000\n",
+                "owners": "4242 alice\n",
+                "user": "alice",
+                "cpu_utilization": 20,
+                "memory_utilization": 30,
+            }
+        ),
+        machine_source,
+        "lab-server",
+    )
+    machine_source["capabilities"] = machine.capabilities
+    assert machine.instances is not None
+    machine.instances[0].update(
+        observed_at=observed,
+        gpus_observed_at=observed,
+        last_probe_attempt=observed,
+        seen_running_since=(current - timedelta(hours=2)).isoformat(),
+    )
+    instances.extend(machine.instances)
+    runpod_source = next(s for s in sources if s["id"] == "example:runpod-runpod")
+    observed_pod = parse_pods(
+        [
+            {
+                "id": "observed-pod",
+                "name": "batch-inference",
+                "desiredStatus": "RUNNING",
+                "gpu": {"count": 1, "displayName": "RTX 4090"},
+                "costPerHr": 0.35,
+                # lastStartedAt is not reported: only the store's observation window is known.
+            }
+        ],
+        runpod_source,
+    )[0]
+    observed_pod.update(
+        observed_at=observed,
+        seen_running_since=(current - timedelta(hours=2)).isoformat(),
+        ssh_alias="computedeck-runpod-observed-pod",
+    )
+    instances.append(observed_pod)
+    ec2_source = _source(("example:ec2", "Example EC2", "aws-ec2", "example:ec2", ""), observed)
+    ec2_source.update(credential="", options={"region": "us-east-1"})
+    sources.append(ec2_source)
+    ec2_instance = parse_ec2_instances(
+        [
+            {
+                "Instances": [
+                    {
+                        "InstanceId": "i-00000000000000001",
+                        "InstanceType": "g5.xlarge",
+                        "State": {"Name": "running"},
+                        "LaunchTime": (current - timedelta(hours=6)).isoformat(),
+                        "Tags": [{"Key": "Name", "Value": "gpu-eval"}],
+                    }
+                ]
+            }
+        ],
+        {"g5.xlarge": (1, "A10G")},
+        ec2_source,
+    )[0]
+    ec2_instance.update(
+        observed_at=observed,
+        seen_running_since=(current - timedelta(hours=4)).isoformat(),
+        ssh_alias="computedeck-ec2-gpu-eval",
+    )
+    instances.append(ec2_instance)
     nodes: list[dict[str, Any]] = [
         {
             "id": f"{cluster_id}:{cluster_id[-1]}-gpu-{i:02}",
@@ -402,6 +573,42 @@ def dashboard() -> dict[str, Any]:
         }
         for i, state in enumerate(("down*", "drained"), 1)
     )
+    nodes.extend(
+        {
+            **nodes[0],
+            "id": f"example:cluster-a:{name}",
+            "name": name,
+            "state": state,
+            "partitions": partitions,
+            "gpu_allocated": 0,
+            "cpu_allocated": 0,
+        }
+        for name, state, partitions in [
+            ("a-cloud-01", "IDLE+CLOUD+POWERED_DOWN", ["gpu"]),
+            ("a-spare-01", "IDLE", []),
+            ("a-future-01", "FUTURE", ["gpu"]),
+        ]
+    )
+    # A separate SSH view of a scheduler node: hardware stays inspectable, GPUs count once.
+    nodes[0]["host_addresses"] = ["192.0.2.31"]
+    instances.append(
+        {
+            **instances[1],
+            "id": "example:manual:lab-workstation-node-console",
+            "external_id": "node-console",
+            "name": "node-console",
+            "host": "192.0.2.31",
+            "ssh_alias": "cd-lab-workstation-node-console",
+            "ssh_endpoint": {"host": "192.0.2.31", "port": 22},
+            "host_name": "a-gpu-01",
+            "gpu_count": 4,
+            "gpu_allocated": 2,
+            "gpu_type": nodes[0]["gpu_type"],
+            "gpu_observed_count": 4,
+            "gpu_utilization": 30,
+        }
+    )
+    source_by_id = {source["id"]: source for source in sources}
     for node in nodes:
         if node["cluster_id"] == "example:cluster-b":
             if node["name"] in {"b-gpu-07", "b-gpu-08"}:
@@ -412,11 +619,12 @@ def dashboard() -> dict[str, Any]:
                 )
             elif node["name"] == "b-gpu-02":
                 node["gpu_allocated"] = 8  # The 8-GPU running example job is on this node.
-        node["health"] = node_health(node["state"])
+        node.update(node_health_fields(node, source_by_id[node["source_id"]]))
     for source in sources:
         if source["kind"] == "cluster":
             source["cluster_state"] = cluster_state(
-                [n for n in nodes if n["cluster_id"] == source["cluster_id"]]
+                [n for n in nodes if n["cluster_id"] == source["cluster_id"]],
+                require_partition=requires_partition(source),
             )
     array_failures = []
     for index in range(60):
@@ -456,8 +664,64 @@ def dashboard() -> dict[str, Any]:
         ),
     }
 
+    # A typed rental price demonstrates a second currency without mixing totals.
+    next(i for i in instances if i["name"] == "dev-box").update(hourly_cost=0.4, currency="EUR")
+    data["low_use_settings"] = {"threshold": 10, "window_minutes": 60}
+    for item in instances:
+        # The monitored, priced workstation has seven real-shaped probe readings.
+        readings = (
+            [
+                {
+                    "at": (
+                        datetime.fromisoformat(observed) - timedelta(minutes=10 * n)
+                    ).isoformat(),
+                    "gpu_util": 4,
+                    "gpu_util_max": 4,
+                    "origin": "probe",
+                }
+                for n in range(6, -1, -1)
+            ]
+            if item["name"] == "dev-box"
+            else []
+        )
+        item["low_use"] = low_use(
+            item, readings, now=current, interval_minutes=10, threshold=10, window_minutes=60
+        )
+        item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
     data["summary"] = summarize(data)
-    data["history"] = demo_history(24, data)
+    # Own accounting demonstrates ranges, small samples and missing GPU counts.
+    wait_samples = []
+    for source, count, gpus in (
+        (sources[0], 12, 1),
+        (sources[2], 3, 16),
+        (sources[7], 8, 0),
+        (sources[7], 4, None),
+    ):
+        for index in range(count):
+            wait_ended = current - timedelta(days=index + 1)
+            wait_started = wait_ended - timedelta(hours=1)
+            sample = wait_sample(
+                {
+                    "id": f"{source['cluster_id']}:wait-{gpus}-{index}",
+                    "cluster_id": source["cluster_id"],
+                    "user": source["username"],
+                    "qos": "long" if gpus == 16 else "normal",
+                    "partition": "gpu",
+                    "gpu_count": gpus,
+                    "submitted_at": (
+                        wait_started - timedelta(minutes=10 * (index + 1))
+                    ).isoformat(),
+                    "started_at": wait_started.isoformat(),
+                    "ended_at": wait_ended.isoformat(),
+                },
+                source,
+            )
+            assert sample is not None
+            wait_samples.append(sample)
+    data["wait_history"] = summarize_waits(sources, wait_samples, now=current)
+    data["history"] = [
+        {k: v for k, v in p.items() if k != "by_group"} for p in demo_history(24, data)
+    ]
     data["attention"] = attention.derive(
         data,
         [drivers.describe(name) for name in drivers.names()],
@@ -470,6 +734,7 @@ def dashboard() -> dict[str, Any]:
                         "channel": "example:team",
                         "channel_name": "Team alerts",
                         "error_code": "send_timeout",
+                        "error": {"code": "send_timeout", "seconds": 30},
                         "at": (current - timedelta(minutes=3)).isoformat(),
                     }
                 ],
@@ -688,7 +953,7 @@ def nodes() -> list[dict[str, Any]]:
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
             "status": "ok",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,

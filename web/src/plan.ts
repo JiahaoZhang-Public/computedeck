@@ -1,14 +1,16 @@
 import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
+import { directSSHCommand } from './connections';
+import { reasonCode, reasonKind } from './jobFacts';
 import {
+  freeGpuIndexes,
+  gpuMatchesModel,
   holdsAllocation,
   PENDING_STATES,
-  instanceLifecycle,
   gpuTres,
   qosGpuLimit,
   qosGpuUsed,
   qosUsedTres,
   sourceHasData,
-  uniqueJobs,
   uniqueNodes,
 } from './domain';
 
@@ -24,7 +26,8 @@ export interface PlanRequest {
 /**
  * - likely: enough visible free GPUs, known QoS headroom, and no QoS rule left unchecked.
  * - possible: free GPUs, but the QoS limit is unknown (or the other way round), or a QoS
- *   rule could not be checked.
+ *   rule could not be checked. A personal-limit wait that fits the collected room
+ *   also caps likely at possible.
  * - behind: your eligible queued GPUs leave too little headroom (an estimate, not FIFO).
  * - busy: not enough visible free GPUs right now, or the QoS's shared GPUs are taken.
  * - limit: your QoS limit is used up, or the request breaks a QoS rule.
@@ -62,12 +65,16 @@ export interface QosRule {
 }
 
 export interface PlanOption {
+  /** The actual logins and observation times used by each part of the estimate. */
+  evidence: Record<'nodes' | 'limits' | 'jobs' | 'access', PlanObservation[]>;
   access: 'verified' | 'not_associated' | 'unknown';
   key: string;
   source: Source;
   qos: string | null;
   /** Unallocated GPUs of the requested model on healthy visible nodes. */
   freeGpus: number | null;
+  /** On-demand GPUs of the requested model; null when the count or model is unknown. */
+  onDemandGpus: number | null;
   /** Free GPUs are a lower bound because matching capacity is partly unmeasured. */
   freeGpusPartial: boolean;
   /** The most free GPUs of that model on one node; fewer than requested means multi-node. */
@@ -83,6 +90,8 @@ export interface PlanOption {
   queuedForRoom: number | null;
   headroomAfterQueue: number | null;
   reasons: string[] | null;
+  /** A personal-limit wait that disagrees with the collected GPU or job-count room. */
+  contradiction: { job: string; reason: string } | null;
   maxWallHours: number | null;
   nodesObservedAt: string | null;
   /** The collected nodes are complete enough to say none has a GPU of the requested model. */
@@ -92,6 +101,29 @@ export interface PlanOption {
   verdict: Verdict;
   /** The rule behind the verdict, when one is. */
   rule: QosRule | null;
+}
+
+export interface PlanObservation {
+  source: Source;
+  capability: 'nodes' | 'qos_limits' | 'jobs' | 'qos_access';
+  at: string | null;
+  current: boolean;
+}
+
+function observations(
+  sources: Source[],
+  capability: PlanObservation['capability'],
+  rows?: { source_id: string; observed_at: string | null }[],
+): PlanObservation[] {
+  return sources.map((source) => {
+    const times = rows?.filter((row) => row.source_id === source.id).map((row) => row.observed_at);
+    return {
+      source,
+      capability,
+      at: times?.length ? (times.some((at) => !at) ? null : times.sort()[0]) : source.last_success,
+      current: sourceHasData(source, capability),
+    };
+  });
 }
 
 const ORDER: Verdict[] = [
@@ -154,16 +186,30 @@ function capacity(nodes: ComputeNode[], gpuType: string, requestedGpus: number) 
         node.gpu_count != null &&
         (!gpuType || !!node.gpu_type),
     );
+  const onDemand = gpuNodes.filter((node) => node.health === 'on_demand');
+  const onDemandUnknown = onDemand.some(
+    (node) =>
+      (matchesModel(node, gpuType) && node.gpu_count == null) ||
+      (gpuType &&
+        (!node.gpu_type || (matchesModel(node, gpuType) && models(node.gpu_type).length > 1))),
+  );
   const knownFree = known.reduce((a, b) => a + b, 0);
   const partial =
     known.length < free.length ||
     matching.some(
       (node) =>
         node.health !== 'unavailable' &&
+        node.health !== 'on_demand' &&
         (node.health !== 'usable' || node.gpu_count == null || node.gpu_allocated == null),
     );
   return {
     matchingNodes: usable.length,
+    onDemandGpus:
+      !nodes.length || onDemandUnknown
+        ? null
+        : onDemand
+            .filter((node) => matchesModel(node, gpuType))
+            .reduce((sum, node) => sum + (node.gpu_count ?? 0), 0),
     freeGpus: partial
       ? knownFree >= requestedGpus
         ? knownFree
@@ -309,6 +355,7 @@ function verdict(
       option.queuedForRoom == null ||
       option.headroomAfterQueue == null ||
       option.source.cluster_state === 'degraded' ||
+      option.contradiction != null ||
       rule('doubt')
       ? { verdict: 'possible', rule: rule('doubt') }
       : { verdict: 'likely', rule: null };
@@ -327,21 +374,65 @@ export function planOptions(
       data.sources.some((source) => source.id === node.source_id && sourceHasData(source, 'nodes')),
     ),
   );
-  const jobs = uniqueJobs(data.jobs);
-  const options: PlanOption[] = [];
-  for (const source of data.sources) {
-    if (source.kind !== 'cluster' || !source.enabled) continue;
-    const cluster = capacity(
-      nodes.filter((node) => node.cluster_id === source.cluster_id),
-      request.gpuType,
-      request.gpus,
+  const sources = data.sources
+    .filter((source) => source.kind === 'cluster' && source.enabled)
+    .sort(
+      (a, b) =>
+        Number(sourceHasData(b, 'qos_limits')) - Number(sourceHasData(a, 'qos_limits')) ||
+        Number(sourceHasData(b, 'jobs')) - Number(sourceHasData(a, 'jobs')) ||
+        (Date.parse(b.last_success ?? '') || 0) - (Date.parse(a.last_success ?? '') || 0),
     );
-    const mine = jobs.filter((job) => job.source_id === source.id);
-    const currentJobs = sourceHasData(source, 'jobs');
+  const seen = new Set<string>();
+  const options: PlanOption[] = [];
+  for (const source of sources) {
+    // An uncollected twin must not add a "no QoS" row beside this login's QoS rows.
+    if (
+      !source.qos.length &&
+      sources.some(
+        (other) =>
+          other.cluster_id === source.cluster_id &&
+          other.username === source.username &&
+          other.qos.length > 0,
+      )
+    )
+      continue;
+    const clusterNodes = nodes.filter((node) => node.cluster_id === source.cluster_id);
+    const nodeObservations = observations(
+      clusterNodes.length
+        ? sources.filter((login) => clusterNodes.some((node) => node.source_id === login.id))
+        : [source],
+      'nodes',
+      clusterNodes,
+    );
+    const cluster = capacity(clusterNodes, request.gpuType, request.gpus);
+    const twins = new Set(
+      sources
+        .filter(
+          (other) =>
+            other.cluster_id === source.cluster_id &&
+            other.username === source.username &&
+            sourceHasData(other, 'jobs'),
+        )
+        .map((other) => other.id),
+    );
+    // Jobs may retain either twin's source_id after dashboard deduplication.
+    // Keep the newest observation of each job, preferring this source on a tie.
+    const mine = new Map<string, Job>();
+    for (const job of data.jobs) {
+      if (!twins.has(job.source_id) || job.cluster_id !== source.cluster_id) continue;
+      const previous = mine.get(job.id);
+      const age =
+        (Date.parse(job.observed_at ?? '') || 0) - (Date.parse(previous?.observed_at ?? '') || 0);
+      if (!previous || age > 0 || (age === 0 && job.source_id === source.id)) mine.set(job.id, job);
+    }
+    const currentJobs = twins.size > 0;
     const qosList: (QosLimit | null)[] = source.qos.length ? source.qos : [null];
     for (const qos of qosList) {
+      const key = JSON.stringify([source.cluster_id, source.username, qos?.name ?? null]);
+      if (seen.has(key)) continue;
+      seen.add(key);
       const currentQos = sourceHasData(source, 'qos_limits') ? qos : null;
-      const inQos = mine.filter((job) => !qos || job.qos === qos.name);
+      const inQos = [...mine.values()].filter((job) => !qos || job.qos === qos.name);
       const running = inQos.filter(holdsAllocation);
       const pending = inQos.filter((job) => PENDING_STATES.includes(job.state.toUpperCase()));
       const eligible = pending.filter((job) => !QUEUE_BLOCKED.has(job.reason ?? ''));
@@ -373,7 +464,9 @@ export function planOptions(
         const reportedUsage = gpuTres(qosUsedTres(currentQos));
         const rooms = constraints.map((entry) => {
           const relevant = running.filter(
-            (job) => !entry.model || !job.gpu_type || models(job.gpu_type).includes(entry.model),
+            (job) =>
+              job.gpu_count !== 0 &&
+              (!entry.model || !job.gpu_type || models(job.gpu_type).includes(entry.model)),
           );
           const measured = reportedUsage.find((value) => value.model === entry.model)?.value;
           const count =
@@ -433,13 +526,68 @@ export function planOptions(
         headroomAfterQueue = null;
         queuedForRoom = null;
       }
+      const rules = currentQos
+        ? qosRules(
+            currentQos,
+            request,
+            currentJobs ? { running, queued: pending } : null,
+            currentQos.usage ?? {},
+          )
+        : [];
+      const hasTypedCap =
+        currentQos &&
+        gpuTres(currentQos.limits?.MaxTRESPU).some(
+          (entry) => entry.model && Number.isFinite(entry.value),
+        );
+      const contradictory =
+        currentJobs &&
+        !includesPending &&
+        headroom != null &&
+        !rules.some((rule) => ['jobs', 'submit'].includes(rule.kind) && rule.effect === 'limit')
+          ? eligible.find((job) => {
+              const reason = reasonCode(job.reason);
+              if (
+                job.gpu_count == null ||
+                job.gpu_count > headroom! ||
+                reasonKind(reason, source.driver) !== 'personalLimit'
+              )
+                return false;
+              if (reason === 'QOSMaxGRESPerUser')
+                // Only the requested model's room was checked, including other typed caps.
+                return (
+                  job.gpu_count > 0 &&
+                  (!hasTypedCap ||
+                    (models(job.gpu_type).length === 1 &&
+                      models(job.gpu_type).includes(request.gpuType.toLowerCase())))
+                );
+              // Count waits can reflect uncollected association or partition QoS limits.
+              // CPU room is not evaluated.
+              return [
+                'QOSMaxJobsPerUserLimit',
+                'AssocMaxJobsLimit',
+                'QOSMaxSubmitJobPerUserLimit',
+                'AssocMaxSubmitJobLimit',
+              ].includes(reason);
+            })
+          : undefined;
       const option = {
         source,
+        evidence: {
+          nodes: nodeObservations,
+          limits: observations([source], 'qos_limits'),
+          jobs: observations(
+            currentJobs ? sources.filter((login) => twins.has(login.id)) : [source],
+            'jobs',
+            inQos,
+          ),
+          access: observations([source], 'qos_access'),
+        },
         access: sourceHasData(source, 'qos_access')
           ? (qos?.access ?? 'unknown')
           : ('unknown' as const),
         qos: qos?.name ?? null,
         freeGpus: cluster.freeGpus,
+        onDemandGpus: cluster.onDemandGpus,
         freeGpusPartial: cluster.freeGpusPartial,
         largestNodeFree: cluster.largestNodeFree,
         matchingNodes: cluster.matchingNodes,
@@ -454,16 +602,12 @@ export function planOptions(
           ? [...new Set(eligible.map((job) => job.reason).filter((r): r is string => !!r))]
           : null,
         maxWallHours: currentQos ? wallHours(currentQos.limits?.MaxWallPJ) : null,
+        contradiction: contradictory
+          ? { job: contradictory.name || contradictory.id, reason: contradictory.reason! }
+          : null,
         nodesObservedAt: cluster.observedAt,
         noMatchingGpus: cluster.noMatchingGpus,
-        rules: currentQos
-          ? qosRules(
-              currentQos,
-              request,
-              currentJobs ? { running, queued: pending } : null,
-              currentQos.usage ?? {},
-            )
-          : [],
+        rules,
       };
       options.push({
         ...option,
@@ -472,39 +616,105 @@ export function planOptions(
       });
     }
   }
-  return options.sort(
-    (a, b) =>
-      ORDER.indexOf(a.verdict) - ORDER.indexOf(b.verdict) ||
-      Number((b.largestNodeFree ?? 0) >= request.gpus) -
-        Number((a.largestNodeFree ?? 0) >= request.gpus) ||
-      (b.headroomAfterQueue ?? -Infinity) - (a.headroomAfterQueue ?? -Infinity) ||
-      (b.freeGpus ?? -1) - (a.freeGpus ?? -1) ||
-      Number(b.access === 'verified') - Number(a.access === 'verified') ||
-      a.key.localeCompare(b.key),
-  );
+  return options.sort((a, b) => comparePlans(a, b, request).order);
 }
 
-/** GPU models the visible nodes report, for the model filter. */
-export function gpuModels(nodes: ComputeNode[]) {
+/** Sorting and its explanation share the same first differing factor. */
+export function comparePlans(a: PlanOption, b: PlanOption, request: PlanRequest) {
+  const factors = [
+    ['verdict', -ORDER.indexOf(a.verdict), -ORDER.indexOf(b.verdict)],
+    [
+      'oneNode',
+      Number((a.largestNodeFree ?? 0) >= request.gpus),
+      Number((b.largestNodeFree ?? 0) >= request.gpus),
+    ],
+    ['queue', a.headroomAfterQueue ?? -Infinity, b.headroomAfterQueue ?? -Infinity],
+    ['free', a.freeGpus ?? -1, b.freeGpus ?? -1],
+    ['access', Number(a.access === 'verified'), Number(b.access === 'verified')],
+  ] as const;
+  for (const [factor, left, right] of factors)
+    if (left !== right) return { factor, order: left > right ? -1 : 1 };
+  return { factor: 'tie' as const, order: a.key.localeCompare(b.key) };
+}
+
+/** Models reported by scheduler nodes and per-GPU machine rows. */
+export function gpuModels(nodes: ComputeNode[], instances: Instance[] = []) {
   return [
     ...new Set(
-      nodes
-        .flatMap((node) =>
+      [
+        ...nodes.flatMap((node) =>
           node.gpu_type ? node.gpu_type.split(',').map((model) => model.trim()) : [],
-        )
-        .filter(Boolean),
+        ),
+        ...instances.flatMap((item) =>
+          (item.gpus ?? []).flatMap((gpu) => (gpu.name ? [gpu.name] : [])),
+        ),
+      ].filter(Boolean),
     ),
   ].sort();
 }
 
-/** Cloud instances you already pay for that are almost idle; not machines added by hand. */
-export function idleInstances(instances: Instance[], threshold = 10) {
+/** Paid resources with sustained low use, as measured by the server. */
+export function lowUseInstances(instances: Instance[]) {
   return instances.filter(
-    (item) =>
-      !item.manual &&
-      instanceLifecycle(item.state) === 'held' &&
-      item.gpu_utilization != null &&
-      item.gpu_utilization < threshold &&
-      (item.gpu_count ?? 0) > 0,
+    (item) => !item.same_node && item.low_use?.state === 'low' && (item.hourly_cost ?? 0) > 0,
   );
+}
+
+/** Separate current GPU samples from otherwise eligible machines missing a recent sample. */
+export function machineSamples(data: Pick<Dashboard, 'sources' | 'instances'>, now = Date.now()) {
+  let staleCount = 0;
+  const current = data.instances.flatMap((instance) => {
+    const source = data.sources.find((source) => source.id === instance.source_id);
+    if (
+      !source ||
+      source.driver !== 'ssh' ||
+      instance.same_node ||
+      instance.state !== 'running' ||
+      !sourceHasData(source, 'instances')
+    )
+      return [];
+    const age = Math.max(0, now - Date.parse(instance.gpus_observed_at ?? ''));
+    if (!Number.isFinite(age) || age > source.interval_minutes * 120000) {
+      staleCount += 1;
+      return [];
+    }
+    if (!instance.gpus?.length) return [];
+    return [{ instance, source }];
+  });
+  return { current, staleCount };
+}
+
+/** Current per-GPU SSH samples, separate from scheduler estimates. */
+export function machineOptions(
+  data: Pick<Dashboard, 'sources' | 'instances'>,
+  request: PlanRequest,
+  now = Date.now(),
+) {
+  return machineSamples(data, now)
+    .current.map(({ instance, source }) => {
+      const gpus = instance.gpus!;
+      const matching = gpus.filter((gpu) => gpuMatchesModel(gpu, request.gpuType));
+      const unknown =
+        matching.filter((gpu) => gpu.in_use == null).length +
+        (request.gpuType ? gpus.filter((gpu) => !gpu.name).length : 0);
+      const free = matching.filter((gpu) => gpu.in_use === false).length;
+      const indexes = freeGpuIndexes(instance, request.gpuType)
+        .sort((a, b) => a - b)
+        .slice(0, request.gpus);
+      const ssh = directSSHCommand(instance);
+      // Only the NVIDIA query provides gpu_processes; GPU names can also start with Tesla.
+      const nvidia = indexes.length > 0 && source.capabilities.includes('gpu_processes');
+      return {
+        instance,
+        source,
+        free,
+        total: matching.length,
+        unknown,
+        command:
+          ssh && nvidia
+            ? `${ssh.replace(/^ssh /, 'ssh -t ')} 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${indexes.join(',')}; exec "\${SHELL:-sh}" -l'`
+            : null,
+      };
+    })
+    .sort((a, b) => b.free - a.free || a.instance.name.localeCompare(b.instance.name));
 }

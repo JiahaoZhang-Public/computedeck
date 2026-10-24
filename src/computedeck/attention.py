@@ -2,10 +2,13 @@
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from .low_use import measurement_family
+
 IMMUTABLE_KINDS = {"service_loop_failed", "unreadable_rows"}
+INFORMATIONAL_WARNINGS = {"queue_unavailable"}
 
 
 def _source_name(source: dict[str, Any]) -> str:
@@ -51,6 +54,14 @@ def derive(
             if isinstance(detail, dict)
         )
         cause_params = {key: value for key, value in params.items() if key != "channel"}
+        if kind == "notification_failed":
+            # Error parameters are display context; error_code already identifies the cause.
+            cause_params.pop("error", None)
+        if kind == "instance_low_use":
+            # Growing/trimmed coverage is the same condition. The collector clears saved
+            # acknowledgements when a high reading, gap or lifecycle change resolves it.
+            cause_params = {key: params[key] for key in ("threshold", "window")}
+            cause_params["origin"] = measurement_family(params["origin"])
         fingerprint = hashlib.sha256(
             json.dumps([kind, severity, cause_params, causes], sort_keys=True).encode()
         ).hexdigest()
@@ -130,9 +141,10 @@ def derive(
         partial = []
         regressed: dict[str, list[Any]] = {}
         for warning in source.get("warnings", []):
-            capability = (
-                capabilities.get(warning.get("code")) if isinstance(warning, dict) else None
-            )
+            code = warning.get("code") if isinstance(warning, dict) else None
+            if code in INFORMATIONAL_WARNINGS:
+                continue
+            capability = capabilities.get(code)
             if capability is None:
                 partial.append(warning)
             elif capability in seen:
@@ -167,6 +179,32 @@ def derive(
             continue
         if source and not source["enabled"]:
             continue
+        usage = instance.get("low_use", {})
+        if usage.get("state") == "low":
+            settings = dashboard.get("low_use_settings", {"threshold": 10, "window_minutes": 60})
+            cost = instance.get("hourly_cost")
+            add(
+                "instance_low_use",
+                {"kind": "instance", "id": instance["id"], "name": instance["name"]},
+                "warn",
+                since=usage["since"],
+                observed_at=(
+                    datetime.fromisoformat(usage["since"])
+                    + timedelta(minutes=usage["covered_minutes"])
+                ).isoformat(),
+                action="instance",
+                threshold=settings["threshold"],
+                window=settings["window_minutes"],
+                samples=usage["samples"],
+                minutes=int(usage["covered_minutes"]),
+                origin=usage["origin"],
+                currency=instance.get("currency"),
+                cost=(
+                    cost * usage["covered_minutes"] / 60
+                    if cost is not None and instance.get("currency")
+                    else None
+                ),
+            )
         if instance.get("ssh_status") == "error":
             add(
                 "instance_ssh_failed",
@@ -223,6 +261,7 @@ def derive(
                 suffix=f":{failure['channel']}",
                 channel=failure["channel_name"],
                 error_code=failure["error_code"],
+                error=failure.get("error"),
                 observed_at=failure["at"],
                 action="notify",
             )

@@ -1,9 +1,23 @@
 import { afterEach, expect, it } from 'vitest';
-import { jobReason, jobTime, jobWaiting } from './jobFacts';
+import { jobReason, jobTime, jobWaiting, reasonCode, reasonKind } from './jobFacts';
 import { setLocale, t } from './i18n';
 import type { Job } from './types';
 
 afterEach(() => setLocale('en'));
+
+it.each([' (details)', ',details', ':details', ' details', ''])(
+  'uses the same reason classification with suffix %s',
+  (suffix) => {
+    const reason = `AssocMaxJobsLimit${suffix}`;
+    expect(reasonCode(reason)).toBe('AssocMaxJobsLimit');
+    expect(reasonKind(reasonCode(reason), 'slurm')).toBe('personalLimit');
+    expect(jobReason({ state: 'PENDING', reason }, 'slurm')?.kind).toBe(
+      reasonKind(reasonCode(reason), 'slurm'),
+    );
+    expect(reasonKind(reasonCode(reason), 'pbs')).toBe('unknown');
+    expect(reasonKind(reasonCode(null), 'slurm')).toBe('unknown');
+  },
+);
 
 it.each(['en', 'zh-CN'] as const)('explains scheduler limits and next steps in %s', (locale) => {
   setLocale(locale);
@@ -38,3 +52,25 @@ it('bounds waits by observation time and preserves unknown timestamps', () => {
   expect(jobWaiting({ ...job, submitted_at: '2026-01-05T10:00:00' })).toBe('—');
   expect(jobWaiting({ ...job, observed_at: '2025-01-01T00:00:00Z' })).toBe('—');
 });
+
+it.each([
+  'QOSMaxSubmitJobPerUserLimit',
+  'QOSMaxCpuPerUserLimit',
+  'AssocMaxJobsLimit',
+  'AssocMaxSubmitJobLimit',
+])('shares the personal-limit class for %s with the planner', (reason) => {
+  for (const locale of ['en', 'zh-CN'] as const) {
+    setLocale(locale);
+    expect(jobReason({ state: 'PENDING', reason: `${reason} (details)` }, 'slurm')).toMatchObject({
+      kind: 'personalLimit',
+      summary: t('job.explain.personalLimit'),
+    });
+  }
+});
+
+it.each(['AssocMaxGRESPerUser', 'AssocMaxCpuPerUserLimit'])(
+  'leaves undocumented reason %s unexplained',
+  (reason) => {
+    expect(jobReason({ state: 'PENDING', reason }, 'slurm')?.kind).toBe('unknown');
+  },
+);

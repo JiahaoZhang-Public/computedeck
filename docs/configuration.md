@@ -55,7 +55,7 @@ A cluster without identity tables can put `username` and `ssh_alias` directly in
 
 ## `[[cloud]]`
 
-One table per API account or machine. `driver` defaults to `"runpod"`; built in are also `vastai`, `lambda`, `aws-ec2` and `ssh` (one GPU machine collected over SSH).
+One table per API account or machine. `driver` defaults to `"runpod"`; built in are also `vastai`, `lambda`, `aws-ec2`, `gpuhub` (beta) and `ssh` (one GPU machine collected over SSH).
 
 | Key | Meaning |
 |---|---|
@@ -89,7 +89,7 @@ A machine you reach over SSH and add by hand.
 | `host`, `port`, `username`, `identity_file` | SSH endpoint. `identity_file` must be absolute or start with `~/`. |
 | `existing_alias` | `true` when `host` is an alias already in your SSH configuration; no Host block is generated. |
 | `gpu_count`, `gpu_type` | Shown until a hardware snapshot reports the real values. |
-| `hourly_cost`, `currency` | For cost estimates; `currency` is an ISO code such as `USD`. |
+| `hourly_cost`, `currency` | Whole-machine price per hour for cost estimates, not per GPU; `currency` is an ISO code such as `USD`. An omitted price stays unknown. |
 | `monitoring` | Read GPUs, their processes, CPU and memory over SSH every 10 minutes. The machine counts in GPUs in use while its last check is under 20 minutes old. |
 
 An edit or import keeps the last SSH check and measurements when `host`, `port`,
@@ -120,8 +120,12 @@ The URL preserves view choices without storing credentials:
 - Jobs: `#/jobs?state=pending&q=train`; add `group=<cluster-id>` to filter a cluster.
 - Activity: `#/activity?type=failed&range=7d&q=train`; `group` scopes a cluster or platform,
   and `job_filter` selects one job's history.
-- Planner: `#/plan?gpus=4&model=A100&hours=12`.
-- Cluster nodes: `#/resources?nodes=abnormal`; history uses `range=24`, `72` or `168`.
+- Planner: `#/plan?gpus=4&model=A100&hours=12`; `from=<job-id>` links a pending or failed job to alternatives. Recent-job presets fill resources, not run time.
+- Cloud and machines: `#/cloud?use=low` for sustained low use, or `use=unknown` for insufficient readings.
+- Cluster nodes: `#/resources?nodes=abnormal`.
+- Usage & cost: `#/usage?range=24h`, `7d` or `30d`; old numeric history ranges
+  (`24` → `24h`; `72`, `3d`, `168` → `7d`) map to offered chips. The range applies
+  to observed history, not current figures.
 - Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
 
 Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back
@@ -129,12 +133,16 @@ closes the detail while keeping the prior filters. Reloading a link restores the
 live details follow newly collected data. Arrays use `array=<cluster>:<array_id>`;
 recorded jobs use `event=<id>` and keep the immutable facts saved with that event.
 A link to an item no longer present, or to an expired event, says so.
+The submit-copy format (flags or script headers) is a per-browser preference, not a
+server setting or exported configuration. Copying does not submit anything.
 These are links within your own dashboard; they do not grant access to its service.
 
 中文：筛选、搜索、“去哪跑”输入和详情保存在地址栏中，刷新和浏览器返回会恢复对应状态。
 链接不会包含凭据，也不会授予他人访问服务的权限。调度器未提供时区的作业时间会明确标注；
 无法可靠计算的等待时长保持未知。动态页保存类型、时间范围及搜索条件，`job_filter` 用于
 单个作业的历史；`array` 打开当前数组，`event` 打开事件记录时的作业快照，后者不随采集变化。
+“在哪里运行”的 `from` 关联待运行或失败作业；预设不填入运行时间。云与机器的 `use=low` /
+`unknown` 分别筛选持续低利用率与读数不足。提交参数的复制格式仅保存在当前浏览器，不随配置导出；复制不会提交任务。
 
 ## Notify job outcomes
 
@@ -194,3 +202,35 @@ notification delivery. See [Needs attention](metrics.md#needs-attention).
 
 确认和暂缓保存在服务端，所有查看者共享。“直到明天”在服务主机时区的次日零点到期。
 总览的“标为已读”独立保存在当前浏览器，不会确认故障或影响通知发送。
+
+## Low GPU use hints
+
+Settings → Low GPU use controls two service-wide settings, shared by viewers:
+
+| Setting | Default | Allowed values |
+| --- | --- | --- |
+| `low_use_threshold` | 10 (%) | Integer 1–50 |
+| `low_use_window_minutes` | 60 (minutes) | Integer 30–360 |
+
+`GET /api/settings` returns them; `PUT /api/settings` accepts either independently.
+Configuration export includes these settings only when they differ from their defaults,
+so default exports remain importable by 0.6. Import leaves omitted settings unchanged;
+non-default values round-trip. For example, these top-level TOML settings select
+strictly below 15% over at least 90 minutes:
+
+```toml
+low_use_threshold = 15
+low_use_window_minutes = 90
+```
+
+Changes recompute hints from recorded readings. They do not enable any new collection
+or SSH checks. At least three consecutive measurements must cover the chosen window, with no gap exceeding twice the
+collection interval. A deliberately quiet inference server can be acknowledged or snoozed in Needs attention. Readings are retained for
+seven days. See [sustained low GPU use](metrics.md#sustained-low-gpu-use) for coverage.
+
+中文：“设置 → GPU 低利用率”提供服务端共享设置：利用率阈值 `low_use_threshold` 默认 10%，
+范围为整数 1–50；窗口 `low_use_window_minutes` 默认 60 分钟，范围为整数 30–360。
+配置导出仅包含非默认值，使默认配置仍可导入 0.6；导入时未指定的设置保持不变。
+更改后按已有读数重新计算，不会开启新的采集或 SSH 检查。至少需要 3 次连续测量覆盖窗口，
+相邻间隔不得超过采集周期的两倍。对于有意保持低负载的推理服务，可在“待处理”中确认或暂缓。
+读数保留 7 天。

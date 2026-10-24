@@ -852,3 +852,38 @@ def test_failure_time_limit_and_output_path_use_existing_document(known, termina
     [row] = pbs.parse_failures(history({"1001.pbs-server": job}), SOURCE, terminal=terminal)
     assert row["time_limit"] == ("24:00:00" if known else None)
     assert row["log_path"] == ("login01:/work/train/output.log" if known else None)
+
+
+def test_terminal_accounting_supplies_usable_wait_history() -> None:
+    from datetime import datetime
+
+    from computedeck.wait_history import summarize_waits, wait_sample
+
+    output = history(
+        {
+            "1101.pbs-server": finished(
+                Exit_status=0,
+                qtime="Mon Jan  5 08:00:00 2026",
+                stime="Mon Jan  5 08:20:00 2026",
+            )
+        },
+        clock="2026-01-05T12:00:00+0400",
+    )
+    [row] = pbs.parse_failures(output, SOURCE, terminal=True)
+    sample = wait_sample(row, SOURCE)
+    assert sample is not None
+    assert sample["started_at"] == "2026-01-05T04:20:00+00:00"
+    result = summarize_waits(
+        [
+            {
+                **SOURCE,
+                "kind": "cluster",
+                "capabilities": ["history"],
+                "last_success": "2026-01-05T12:00:00+04:00",
+            }
+        ],
+        [sample],
+        now=datetime.fromisoformat("2026-01-05T12:00:00+04:00"),
+    )[SOURCE["id"]]
+    assert result["status"] == "available"
+    assert result["buckets"][0]["samples"] == 1

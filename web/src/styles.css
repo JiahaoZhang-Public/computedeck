@@ -770,7 +770,8 @@ form > .form-error {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
 }
-.panel-header h2 {
+.panel-header h2,
+.usage-trend h3 {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -830,6 +831,7 @@ form > .form-error {
   min-width: 0;
 }
 .toolbar {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1882,6 +1884,37 @@ form > .form-error {
   padding: 14px 18px;
   overflow-wrap: anywhere;
 }
+.plan-comparison {
+  flex-basis: 100%;
+  margin: 0;
+}
+.plan-explanation {
+  margin-top: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.plan-explanation summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.plan-factors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.plan-factors > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.plan-factors dt {
+  font-weight: 600;
+}
+.plan-factors dd {
+  margin: 4px 0 0;
+}
 .plan-best strong {
   flex-basis: 100%;
 }
@@ -1889,6 +1922,9 @@ form > .form-error {
   color: var(--accent-text);
 }
 .plan-table .tag {
+  white-space: normal;
+}
+.plan-table .num .sub {
   white-space: normal;
 }
 .plan-form {
@@ -1923,6 +1959,13 @@ form > .form-error {
 .plan-table td {
   vertical-align: top;
 }
+.plan-table .plan-option-row > td {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.plan-table .plan-explanation-row > td {
+  padding-top: 0;
+}
 .plan-table td.plan-verdict {
   min-width: 180px;
 }
@@ -1945,6 +1988,13 @@ form > .form-error {
     gap: 8px 16px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
+  }
+  .plan-table .plan-option-row {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+  .plan-table .plan-explanation-row {
+    padding-top: 0;
   }
   .table.plan-table td {
     order: 2;
@@ -2743,6 +2793,10 @@ td.wrap {
     flex-direction: column;
     align-items: flex-start;
   }
+  .low-use-settings .setting-row label {
+    flex: none;
+    align-self: stretch;
+  }
   .chips {
     max-width: 100%;
     overflow-x: auto;
@@ -3017,5 +3071,228 @@ td.wrap {
   .attention-actions .button {
     min-height: 44px;
     white-space: normal;
+  }
+}
+
+/* GPU facts stay stacked in drawers and wrap with machine commands on narrow screens. */
+.gpu-details .grow,
+.machine-options .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gpu-details .tag {
+  white-space: normal;
+}
+.machine-options .grow {
+  flex: 1 1 16rem;
+}
+.machine-options li {
+  flex-wrap: wrap;
+}
+.machine-options .machine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.machine-options .machine-command {
+  white-space: pre;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.plan-from,
+.plan-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+.plan-from > span {
+  flex: 1 1 12rem;
+  overflow-wrap: anywhere;
+}
+.plan-presets .button {
+  height: auto;
+  min-height: 26px;
+  padding: 4px 9px;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.plan-copy-format {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.plan-copy-format .chips {
+  flex-wrap: wrap;
+}
+.plan-submit {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+  min-width: 0;
+}
+.plan-best .plan-submit {
+  flex-basis: 100%;
+}
+
+/* Usage comparisons keep the value readable even on a narrow phone. */
+.usage-heading {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.usage-block,
+.usage-history {
+  padding: 16px;
+  min-width: 0;
+}
+.usage-history .stat-value {
+  font-size: 1.2rem;
+}
+.usage-history .stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.usage-daily {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.usage-daily summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.usage-instances {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px;
+}
+.usage-instances li {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.usage-instances button {
+  text-align: start;
+  white-space: normal;
+}
+.ranked-bars {
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+.ranked-bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, 2fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+.ranked-bars .with-mark {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ranked-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ranked-track.partial {
+  background: repeating-linear-gradient(135deg, var(--border) 0 3px, transparent 3px 6px);
+}
+.ranked-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.ranked-value {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.ranked-note {
+  grid-column: 1 / -1;
+  color: var(--text-3);
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .ranked-bars li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ranked-track {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .ranked-value {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+.low-use-settings .setting-row {
+  flex-wrap: wrap;
+}
+.low-use-settings label {
+  display: grid;
+  gap: 0.4rem;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.low-use-settings input {
+  width: 100%;
+}
+
+.low-use-filters {
+  padding: 10px 16px;
+  min-width: 0;
+}
+
+.wait-history {
+  margin-top: 10px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.wait-history p {
+  margin: 4px 0;
+}
+.plan-best > .wait-history,
+.plan-best > .wait-history-note {
+  flex-basis: 100%;
+}
+
+.wait-history-note p {
+  margin: 4px 0;
+}
+.wait-history-compact {
+  margin-top: 4px;
+}
+
+.plan-submit .button {
+  white-space: nowrap;
+}
+.table.stack-on-phone .cloud-sampled {
+  white-space: nowrap;
+}
+@container (min-width: 901px) {
+  .table.stack-on-phone .cloud-sampled {
+    width: 1%;
+  }
+}
+.table.stack-on-phone .cloud-price {
+  min-width: 8rem;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.plan-explanation-row .plan-explanation {
+  margin-top: 0;
+}
+@media (max-width: 560px) {
+  .plan-presets .button {
+    min-height: 44px;
   }
 }

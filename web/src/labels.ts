@@ -55,6 +55,7 @@ export function nodeAbnormal(node: Pick<ComputeNode, 'health'>) {
   return node.health === 'unavailable';
 }
 export function nodeTone(node: Pick<ComputeNode, 'health' | 'state'>): Tone {
+  if (/^FUTURE$/i.test(node.state)) return 'gray';
   if (nodeAbnormal(node)) return 'red';
   if (node.health === 'usable' && /idle/i.test(node.state)) return 'green';
   return 'gray';

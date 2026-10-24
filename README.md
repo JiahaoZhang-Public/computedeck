@@ -10,7 +10,7 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 [![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
 
-*All screenshots use built-in example data from an earlier preview; the 0.6.0 layout and figures have changed. Click the overview for the 20-second demo.*
+*All screenshots use built-in example data from an earlier preview; the 0.7.0 layout and figures have changed. Click the overview for the 20-second demo.*
 
 ## Features
 
@@ -21,16 +21,17 @@ ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your ow
 
 The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
 
-In **0.4.0 — Numbers you can trust**, partial totals show `≥` and name the unmeasured
+**Numbers you can trust:** partial totals show `≥` and name the unmeasured
 machines or logins. Overview, Usage and history share the same figures. Running cloud
-instances count their provider's GPU allocation; SSH machines count GPUs with compute
-processes, and hand-added machines with monitoring off are excluded. SSH checks keep
-their own age across provider updates.
+instances count their provider's GPU allocation; SSH machines count GPUs with visible compute
+processes or significant GPU memory use. Unreadable processes, or missing memory without visible
+processes, leave use unknown. Hand-added machines with monitoring off are excluded. SSH checks
+keep their own age across provider updates.
 
 The **Data freshness and service health** indicator in the top bar shows the oldest
 enabled source's successful collection, or **Not collected yet** if any enabled source
 has never succeeded. Open it for errors and retry times.
-Overview puts Needs attention and current jobs before the chart. Hidden tabs pause
+Overview highlights Needs attention and current jobs; trends live on Usage & cost. Hidden tabs pause
 browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
 for upgrade details, including possible steps in the history chart.
 
@@ -38,13 +39,15 @@ for upgrade details, including possible steps in the history chart.
 
 **0.6.0 — Know what changed** adds searchable activity, recorded job outcomes and array summaries, notification digests and delivery status, visible observation gaps, and attention acknowledgement and snoozing. See the [changelog](CHANGELOG.md).
 
+**0.7.0 — Choose resources with confidence** explains resource estimates and their evidence, finds free SSH GPUs, and copies Slurm flags from collected facts. Usage & cost adds observed daily usage and cost estimates; low-use hints, Slurm queue positions and history-backed waits help you decide where to run. See the [changelog](CHANGELOG.md).
+
 ## Version preview
 
-Planned work; scope and priorities may change.
+Completed milestones and planned work; future scope and priorities may change.
 
 - [x] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
 - [x] **v0.6 — Know what changed:** a searchable activity page, one recorded outcome per job with failure explanations, grouped job and array notifications with delivery status, attention acknowledgement and snoozing, and visible observation gaps.
-- [ ] **v0.7 — Choose resources with confidence:** explainable resource comparisons, cost estimates and usage trends, sustained low-utilization hints, and wait estimates only where history supports them.
+- [x] **v0.7 — Choose resources with confidence:** explained resource comparisons, free SSH GPUs and copy-only Slurm flags, observed usage and cost estimates, sustained low-use hints, Slurm queue positions, history-backed waits, and shared-host GPU counting.
 - [ ] **v1.0 — A redesigned interface:** a rebuilt visual system, navigation organised around your questions, a command palette, a phone layout with bottom tabs, and one place to add and repair connections.
 
 ## Terms in the interface
@@ -56,7 +59,7 @@ Planned work; scope and priorities may change.
 | Instance / machine | One rented or owned machine. **Cloud and machines** includes cloud instances, SSH sources and hand-added machines. |
 | Collection machine | Another computer that collects sources for this service, shown as **via {name}**. It is not a compute node. |
 | Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
-| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with compute processes on SSH machines. This is not GPU utilization. |
+| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with visible compute processes or significant GPU memory use on SSH machines. Unreadable processes, or missing memory without visible processes, leave use unknown. This is not GPU utilization. |
 | “usable GPUs” in the capacity reading | Capacity on usable nodes across all users, not a promise that your login can allocate it. |
 | Needs attention | The single list of current faults and warnings; its badge, tile and panel count only items that are not acknowledged or snoozed. |
 
@@ -88,9 +91,9 @@ Enter the model, count and run time. The planner flags the two-hour debug QoS an
 
 | Clusters | Cloud GPUs | Other machines |
 |---|---|---|
-| Slurm, Kubernetes, PBS, LSF | RunPod, Lambda, AWS EC2, Vast.ai | NVIDIA and AMD GPU hosts over SSH; manual entries |
+| Slurm, Kubernetes, PBS, LSF | RunPod, Lambda, AWS EC2, Vast.ai, GPUhub | NVIDIA and AMD GPU hosts over SSH; manual entries |
 
-Kubernetes, PBS, LSF and Vast.ai are beta integrations. The interface supports English and Chinese.
+Kubernetes, PBS, LSF, Vast.ai and GPUhub are beta integrations. The interface supports English and Chinese.
 
 ## Run from source
 
@@ -146,6 +149,8 @@ For core changes, open a focused PR with the behavior changed and the checks you
 bash scripts/check.sh    # lint, formatting, types, tests and web build
 bash scripts/build.sh    # local wheel and sdist, including the web interface
 ```
+
+For demo layout checks with an external Playwright installation, run `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs` (optionally set `PLAYWRIGHT_EXECUTABLE_PATH` to the browser executable).
 
 The Python service is in `src/computedeck`, the React interface in `web`, and Python tests in `tests`.
 

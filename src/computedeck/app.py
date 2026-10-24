@@ -32,6 +32,7 @@ from .collector import Collector, ProbeConflict
 from .demo import delivery_status as demo_delivery_status
 from .errors import SourceError, message
 from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
+from .history import rollup_history
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -383,11 +384,19 @@ def create_app(
 
     @app.get("/api/history")
     async def history(
-        hours: int = Query(default=24, ge=1, le=168), demo: bool = False
+        hours: int = Query(default=24, ge=1, le=720), demo: bool = False, rollup: bool = False
     ) -> dict[str, Any]:
-        """Allocation and utilization points for the chart's time range (up to 7 days)."""
+        """Chart points, with optional raw-observation rollups (up to 30 days)."""
         points = demo_history(hours) if demo else store().history(hours)
-        return {"hours": hours, "points": points}
+        result = {
+            "hours": hours,
+            "points": [{k: v for k, v in point.items() if k != "by_group"} for point in points],
+        }
+        if rollup:
+            result["rollups"] = (
+                rollup_history(points, hours) if demo else store().history_rollups(hours)
+            )
+        return result
 
     @app.post("/api/refresh", status_code=202)
     async def refresh(body: RefreshInput) -> dict[str, str]:

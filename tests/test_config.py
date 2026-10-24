@@ -148,7 +148,12 @@ def test_import_creates_sources_instances_and_settings(store: Store) -> None:
     assert gpu1["monitoring"] is True
     assert gpu1["ssh_alias"] == "cd-lab-box-gpu1"
     assert instances["manual:lab-box-gpu2"]["ssh_alias"] == "gpu-two"
-    assert store.settings() == {"language": "zh-CN", "server_name": 'Lab "east" server \\ main'}
+    assert store.settings() == {
+        "language": "zh-CN",
+        "server_name": 'Lab "east" server \\ main',
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
 
 
 def test_export_round_trip(store: Store, tmp_path: Path) -> None:
@@ -371,7 +376,12 @@ def test_invalid_configuration_is_rejected_before_writing(
         config.apply(store, text)
     assert store.sources() == []
     assert store.manual_instances() == []
-    assert store.settings() == {"language": "en", "server_name": None}
+    assert store.settings() == {
+        "language": "en",
+        "server_name": None,
+        "low_use_threshold": 10,
+        "low_use_window_minutes": 60,
+    }
 
 
 def test_single_node_table_is_a_config_error(store: Store) -> None:
@@ -471,3 +481,24 @@ def test_import_enables_configured_source_before_first_collection(store: Store) 
     assert saved["status"] == "ready"
     assert saved["error"] is None
     assert saved["failures"] == 0
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{}, {"low_use_threshold": 5}, {"low_use_window_minutes": 90}],
+)
+def test_export_omits_default_low_use_settings(store: Store, settings: dict[str, int]) -> None:
+    store.save_settings(settings)
+    exported = tomllib.loads(config.export(store))
+    assert {key: exported[key] for key in exported if key.startswith("low_use_")} == settings
+
+
+def test_low_use_settings_round_trip(store: Store) -> None:
+    store.save_settings({"low_use_threshold": 5, "low_use_window_minutes": 90})
+    exported = config.export(store)
+    assert "low_use_threshold = 5" in exported
+    assert "low_use_window_minutes = 90" in exported
+    store.save_settings({"low_use_threshold": 10, "low_use_window_minutes": 60})
+    config.apply(store, exported)
+    assert store.settings()["low_use_threshold"] == 5
+    assert store.settings()["low_use_window_minutes"] == 90

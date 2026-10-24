@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeHealth } from './health';
+import { attentionText, computeHealth } from './health';
 import { groupsOf, sourceLabel } from './groups';
 import { groupSummary } from './pages/summary';
 import { serverDemo } from './test-server';
@@ -300,5 +300,19 @@ it.each(['en', 'zh-CN'] as const)(
       );
       expect(nextAttemptText(due, true)).toBe(t('health.nextAttempt', { time: dateTime(due) }));
     }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'retains timeout parameters in notification attention (%s)',
+  (locale) => {
+    setLocale(locale);
+    const item = serverDemo().attention!.find((entry) => entry.kind === 'notification_failed')!;
+    const text = attentionText(item, []);
+    expect(text).toContain(t('msg.send_timeout', { seconds: 30 }));
+    expect(text).not.toContain('{');
+    delete item.message.error;
+    expect(attentionText(item, [])).toContain(t('msg.send_timeout_unknown'));
+    expect(attentionText(item, [])).not.toContain('{');
   },
 );

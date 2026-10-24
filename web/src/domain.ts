@@ -1,8 +1,9 @@
-import { locale, t } from './i18n';
+import { formatMessage, locale, t } from './i18n';
 import type {
   ComputeNode,
   Dashboard,
   HistoryPoint,
+  GpuRow,
   Instance,
   Job,
   QosLimit,
@@ -111,7 +112,7 @@ export function historyPartial(point: HistoryPoint) {
   );
 }
 /**
- * GPUs an instance holds: those with compute processes on a machine read over SSH, the
+ * GPUs an instance holds: those with processes or significant memory use over SSH, the
  * allocation a provider lists otherwise. A machine added by hand counts only what an SSH
  * check measured, never the GPUs typed in.
  */
@@ -139,25 +140,72 @@ export function dateTime(value: string | null | undefined) {
     ? value
     : date.toLocaleString(locale(), { hour12: false, dateStyle: 'short', timeStyle: 'short' });
 }
+export function calendarDate(value: Date) {
+  return value.toLocaleDateString(locale(), { dateStyle: 'short' });
+}
+export function clockTime(value: number) {
+  return new Date(value).toLocaleTimeString(locale(), { hour12: false, timeStyle: 'short' });
+}
 /** The hourly price applies while an instance runs; a stopped or terminated one is not billed at it. */
 export function runningPrice(item: Instance): number | null {
-  const lifecycle = instanceLifecycle(item.state);
-  if (lifecycle === 'held') return item.hourly_cost;
-  if (lifecycle === 'not_held') return null;
-  // Keep the existing price display for unknown/transitional states until cost accounting
-  // defines them. A displayed price is not evidence that the instance holds GPUs.
-  return /stopped|terminated|deleted|exited/i.test(item.state) ? null : item.hourly_cost;
+  return instanceLifecycle(item.state) === 'held' ? item.hourly_cost : null;
 }
-export function money(value: number | null, currency: string) {
+export function runningSince(item: Instance) {
+  if (instanceLifecycle(item.state) !== 'held') return null;
+  for (const [origin, at] of [
+    ['provider', item.started_at],
+    ['observed', item.seen_running_since],
+  ] as const) {
+    if (at && Number.isFinite(Date.parse(at))) return { at, origin };
+  }
+  return null;
+}
+/** Freeze estimates at the last listing when collection is no longer current. */
+export function runningHours(item: Instance, source?: Source, now = Date.now()) {
+  const since = runningSince(item);
+  if (!since) return null;
+  const current = source ? sourceHasData(source, 'instances') : false;
+  const asOf = current ? null : (source?.last_success ?? null);
+  const end = current ? now : asOf ? Date.parse(asOf) : NaN;
+  const hours = (Math.min(end, now) - Date.parse(since.at)) / 3600000;
+  return Number.isFinite(hours) && hours >= 0 ? { ...since, hours, asOf } : null;
+}
+export function costThisRun(item: Instance, source?: Source, now = Date.now()) {
+  const run = runningHours(item, source, now);
+  const price = runningPrice(item);
+  return run && price != null && item.currency ? price * run.hours : null;
+}
+/** Compact elapsed time, rounded down: minutes below an hour, otherwise days and hours. */
+export function runDuration(hours: number) {
+  const minutes = Math.floor(hours * 60);
+  if (minutes < 60) return t('cost.duration.minutes', { count: minutes });
+  const days = Math.floor(minutes / 1440);
+  const remainingHours = Math.floor(minutes / 60) % 24;
+  return [
+    days ? t('cost.duration.days', { count: days }) : '',
+    remainingHours ? t('cost.duration.hours', { count: remainingHours }) : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+export function money(value: number | null, currency: string, lowerBound = false) {
   if (value === null) return t('money.unknown');
+  if (lowerBound) value += 1e-9 * Math.max(1, Math.abs(value));
   try {
     return new Intl.NumberFormat(locale(), {
       style: 'currency',
       currency,
       maximumFractionDigits: 2,
+      roundingMode: lowerBound ? 'floor' : 'halfExpand',
     }).format(value);
   } catch {
-    return `${currency} ${value.toFixed(2)}`;
+    const amount = new Intl.NumberFormat(locale(), {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+      useGrouping: false,
+      roundingMode: lowerBound ? 'floor' : 'halfExpand',
+    }).format(value);
+    return `${currency} ${amount}`;
   }
 }
 export function elapsedSeconds(value: string | null | undefined) {
@@ -296,4 +344,29 @@ export function qosUsedTres(qos: QosLimit): string | null {
 /** GPUs counted against the total limit, when reported by the scheduler. */
 export function qosGpuUsed(qos: QosLimit): number | null {
   return gpuTres(qosUsedTres(qos)).find((entry) => !entry.model)?.value ?? null;
+}
+
+export function gpuMatchesModel(gpu: GpuRow, model: string) {
+  return !model || gpu.name?.toLowerCase() === model.toLowerCase();
+}
+
+/** Only the driver's explicit free state is evidence; unknown never becomes free. */
+export function freeGpuIndexes(instance: Instance, model: string) {
+  return (instance.gpus ?? [])
+    .filter((gpu) => gpu.in_use === false && gpuMatchesModel(gpu, model))
+    .flatMap((gpu) => (gpu.index == null ? [] : [gpu.index]));
+}
+
+export function lowUseText(item: Instance, settings = { threshold: 10, window_minutes: 60 }) {
+  const usage = item.low_use;
+  if (!usage || usage.state !== 'low') return '';
+  return formatMessage({
+    code: 'instance_low_use',
+    threshold: settings.threshold,
+    minutes: usage.covered_minutes,
+    samples: usage.samples,
+    origin: usage.origin,
+    currency: item.currency,
+    cost: item.hourly_cost == null ? null : (item.hourly_cost * usage.covered_minutes) / 60,
+  });
 }

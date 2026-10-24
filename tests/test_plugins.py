@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 import logging
 import sys
 import time
@@ -605,3 +606,55 @@ def test_exit_fields_require_nonnegative_integers(field, value) -> None:
         validate_row({"id": "cluster-a:1001", field: value})
     for valid in (None, 0, 9, 127):
         validate_row({"id": "cluster-a:1001", field: valid})
+
+
+@pytest.mark.parametrize("field", ["observed_at", "gpus_observed_at"])
+def test_collection_timestamps_require_timezones(field: str) -> None:
+    from computedeck.drivers.base import validate_row
+
+    for value in (None, "2026-01-01T12:00:00Z", "2026-01-01T16:00:00+04:00"):
+        validate_row({"id": "lab-server", field: value})
+    with pytest.raises(ValueError, match="needs a timezone"):
+        validate_row({"id": "lab-server", field: "2026-01-01T12:00:00"})
+    with pytest.raises(ValueError):
+        validate_row({"id": "lab-server", field: "invalid"})
+
+
+@pytest.mark.parametrize("field", ["started_at", "seen_running_since"])
+def test_instance_cost_times_require_timezones(field: str) -> None:
+    from computedeck.drivers.base import validate_row
+
+    for value in (None, "2026-01-01T12:00:00Z", "2026-01-01T16:00:00+04:00"):
+        validate_row({"id": "pod", "platform": "Example Cloud", field: value}, instance=True)
+    for value in ("2026-01-01T12:00:00", "invalid"):
+        row = {"id": "pod", "platform": "Example Cloud", field: value}
+        if field == "started_at":
+            validate_row(row, instance=True)
+            assert row[field] is None
+        else:
+            with pytest.raises(ValueError):
+                validate_row(row, instance=True)
+    # Raw scheduler job times remain valid under the existing API-1 contract.
+    validate_row({"id": "cluster-a:1", "started_at": "Jan 5 09:00"})
+
+
+@pytest.mark.parametrize("started", ["2026-10-22T10:00:00", "2026-10-22 10:00 UTC"])
+def test_legacy_start_text_uses_inventory_kind_not_platform(started: str) -> None:
+    from computedeck.drivers.base import Batch
+    from computedeck.store import _read_snapshot
+
+    row = {
+        "id": "legacy",
+        "source_id": "plugin",
+        "state": "running",
+        "platform": "batch",
+        "started_at": started,
+    }
+    batch = Batch(jobs=[dict(row)], instances=[dict(row)])
+    batch.validate_rows()
+    assert batch.jobs[0]["started_at"] == started
+    assert batch.instances[0]["started_at"] is None
+    snapshot, invalid = _read_snapshot(json.dumps({"jobs": [row], "instances": [row]}))
+    assert not invalid
+    assert snapshot["jobs"][0]["started_at"] == started
+    assert snapshot["instances"][0]["started_at"] is None

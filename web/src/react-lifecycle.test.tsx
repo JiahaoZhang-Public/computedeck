@@ -20,6 +20,7 @@ import { dateTime, relativeTime } from './domain';
 import { driverInfo } from './drivers';
 import { groupsOf } from './groups';
 import { HistoryPanel } from './pages/HistoryPanel';
+import { UsagePage } from './pages/Usage';
 import { NotifyPage } from './pages/Notify';
 import { ActivityPanel } from './pages/Activity';
 import { SourcesPage } from './pages/Sources';
@@ -322,41 +323,65 @@ describe('dashboard lifecycle', () => {
 });
 
 describe('history lifecycle', () => {
+  function historyResult(points: HistoryPoint[]) {
+    return {
+      points,
+      rollups: {
+        start: new Date(now.getTime() - 168 * 3600000).toISOString(),
+        end: now.toISOString(),
+        buckets: [],
+      },
+    };
+  }
+  function usageContext(demo = false): Ctx {
+    const data = dashboard('Cluster A');
+    return { data, groups: groupsOf(data), demo, locale: 'en' } as Ctx;
+  }
   it('ignores a previous range response and resets errors when selecting another range', async () => {
-    const threeDays = deferred<{ points: HistoryPoint[] }>();
-    const week = deferred<{ points: HistoryPoint[] }>();
-    request.mockImplementation((path) =>
-      path.includes('hours=72') ? threeDays.promise : week.promise,
-    );
-    await render(<HistoryPanel day={[sample(1)]} demo={false} />);
+    const day = deferred<ReturnType<typeof historyResult>>();
+    const week = deferred<ReturnType<typeof historyResult>>();
+    request.mockImplementation((path) => (path.includes('hours=24') ? day.promise : week.promise));
+    await render(<UsagePage ctx={usageContext()} />);
     await click('[role="tab"]:nth-child(2)');
-    await click('[role="tab"]:nth-child(3)');
-    await act(async () => week.resolve({ points: [sample(2), sample(3)] }));
+    await act(async () => week.resolve(historyResult([sample(2), sample(3)])));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
-    await act(async () => threeDays.reject(new Error('Old request failed')));
+    await act(async () => day.reject(new Error('Old request failed')));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
-    await click('[role="tab"]:nth-child(2)');
-    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.failed'));
     await click('[role="tab"]:nth-child(1)');
-    expect(container.querySelector('.chart-empty')).toBeNull();
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    expect(container.textContent).toContain(t('chart.failed'));
+    await click('[role="tab"]:nth-child(2)');
+    expect(container.textContent).not.toContain(t('chart.failed'));
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
   });
 
   it('does not display history from the previous demo mode while the new range loads', async () => {
-    const demo = deferred<{ points: HistoryPoint[] }>();
+    const demo = deferred<ReturnType<typeof historyResult>>();
     request.mockImplementation(async (path) =>
-      path.includes('demo=true') ? demo.promise : { points: [sample(2)] },
+      path.includes('demo=true') ? demo.promise : historyResult([sample(2)]),
     );
-    await render(<HistoryPanel day={[]} demo={false} />);
-    await click('[role="tab"]:nth-child(2)');
+    await render(<UsagePage ctx={usageContext()} />);
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
     await click('[role="tab"]:nth-child(2)');
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
-    await render(<HistoryPanel day={[]} demo={true} />);
+    await click('[role="tab"]:nth-child(2)');
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    await render(<UsagePage ctx={usageContext(true)} />);
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(0);
-    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.loading'));
-    await act(async () => demo.resolve({ points: [sample(3), sample(4)] }));
+    expect(container.textContent).toContain(t('chart.loading'));
+    await act(async () => demo.resolve(historyResult([sample(3), sample(4)])));
     expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+  });
+
+  it('presents supplied points, empty text and note without fetching or range controls', async () => {
+    await render(
+      <HistoryPanel points={[]} hours={24} empty={t('chart.loading')} note={t('usage.demo')} />,
+    );
+    expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.loading'));
+    expect(container.textContent).toContain(t('usage.demo'));
+    expect(container.querySelector('[role="tab"]')).toBeNull();
+    expect(request).not.toHaveBeenCalled();
+    await render(<HistoryPanel points={[sample(2)]} hours={24} />);
+    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
   });
 
   it('advances the time window without new data and stops its timer on unmount', async () => {
@@ -1744,7 +1769,7 @@ it.each(['en', 'zh-CN'] as const)(
       );
       expect(tile?.querySelector('.stat-value')?.textContent).toBe(String(count));
     };
-    assertCounts(4);
+    assertCounts(5);
     expect(container.querySelector<HTMLDetailsElement>('.attention-muted')!.open).toBe(false);
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
       t('attention.acknowledged', { count: 2 }),
@@ -1763,7 +1788,7 @@ it.each(['en', 'zh-CN'] as const)(
       { action: 'acknowledge', until: undefined, fingerprint: data.attention![0].fingerprint },
       'PUT',
     );
-    assertCounts(3);
+    assertCounts(4);
     expect(document.activeElement?.id).toBe('attention');
     expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
       t('attention.acknowledgedToast'),
@@ -1773,7 +1798,7 @@ it.each(['en', 'zh-CN'] as const)(
     );
     await click('.attention-muted summary');
     await click('.attention-muted .attention-actions button');
-    assertCounts(4);
+    assertCounts(5);
     expect(document.activeElement?.id).toBe('attention');
     expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
       t('attention.unmutedToast'),
@@ -1792,7 +1817,7 @@ it.each(['en', 'zh-CN'] as const)(
       expect(request.mock.calls.filter(([path]) => path.startsWith('/attention/'))).toHaveLength(
         writes,
       );
-      assertCounts(until === '1h' ? 4 : 3);
+      assertCounts(until === '1h' ? 5 : 4);
       await click(selector);
       expect(document.activeElement?.id).toBe('attention');
       expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
@@ -1807,6 +1832,8 @@ it.each(['en', 'zh-CN'] as const)(
         ),
       ).toBe(true);
     }
+    assertCounts(3);
+    await click('#attention > ul .attention-actions button');
     assertCounts(2);
     await click('#attention > ul .attention-actions button');
     assertCounts(1);
@@ -1863,7 +1890,7 @@ it('keeps a failed acknowledgement visible and reports the error', async () => {
   });
   await render(<App />);
   await click('#attention > ul .attention-actions button');
-  expect(container.querySelector('#attention .count')?.textContent).toBe('4');
+  expect(container.querySelector('#attention .count')?.textContent).toBe('5');
   expect(container.textContent).toContain('Save failed');
   expect(
     container.querySelector<HTMLButtonElement>('#attention > ul .attention-actions button')
@@ -1909,7 +1936,7 @@ it.each(['en', 'zh-CN'] as const)(
       expect(container.textContent).toContain(
         action === 'clear' ? 'Save failed' : t('msg.attention_changed'),
       );
-      expect(container.querySelector('#attention .count')?.textContent).toBe('4');
+      expect(container.querySelector('#attention .count')?.textContent).toBe('5');
     }
   },
 );
@@ -1994,14 +2021,15 @@ it.each(['en', 'zh-CN'] as const)(
     });
     await render(<App />);
     const warning = [...container.querySelectorAll<HTMLButtonElement>('.attention-open')].find(
-      (item) => item.textContent?.includes(t('msg.send_timeout')),
+      (item) => item.textContent?.includes(t('msg.send_timeout', { seconds: 30 })),
     )!;
     expect(warning.textContent).toContain(
       t('msg.attention_notification_failed', {
         channel: 'Team alerts',
-        error_code: t('msg.send_timeout'),
+        error_code: t('msg.send_timeout', { seconds: 30 }),
       }),
     );
+    expect(warning.textContent).not.toContain('{');
     expect(warning.querySelector('.dot.amber')).not.toBeNull();
     await act(async () => warning.click());
     expect(window.location.hash).toBe('#/notify');

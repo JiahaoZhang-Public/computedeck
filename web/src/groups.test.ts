@@ -127,7 +127,7 @@ it('distinguishes power-saving nodes from unavailable or reserved nodes', () => 
       state: 'idle+cloud+powered_down',
       health: serverNodeHealth('idle+cloud+powered_down'),
     }),
-  ).toBe('green');
+  ).toBe('gray');
   expect(
     nodeTone({ state: 'down+powered_down', health: serverNodeHealth('down+powered_down') }),
   ).toBe('red');
@@ -136,9 +136,9 @@ it('distinguishes power-saving nodes from unavailable or reserved nodes', () => 
   );
 });
 it.each(['idle+power_down', 'idle+cloud+powering_down', 'idle+power_up', 'idle+powering_up'])(
-  'treats the Slurm power-saving transition %s as normal',
+  'keeps the Slurm power-saving transition %s gray',
   (state) => {
-    expect(nodeTone({ state: state, health: serverNodeHealth(state) })).toBe('green');
+    expect(nodeTone({ state: state, health: serverNodeHealth(state) })).toBe('gray');
   },
 );
 it('marks a Slurm INVAL node as abnormal', () => {

@@ -119,6 +119,12 @@ Only nodes with GPUs are shown: nodes whose capacity or allocatable resources li
 - `state` joins the Kubernetes words with the word the dashboard colours by: `ready`, `ready+idle` (no GPU allocated), `ready+cordoned+drain` (`spec.unschedulable`), `not_ready+down` (`Ready` is `False`) and `unknown` (`Ready` is `Unknown` or missing).
 - `partitions` holds the node pool label, if any.
 
+Node rows retain `status.addresses` entries of type InternalIP or ExternalIP as
+`host_addresses` and Hostname entries as `host_names`. An IP match also needs a
+matching probed short hostname to identify an SSH machine that is a scheduler node;
+Hostname labels alone never establish a match. No extra API call is made. See
+[machine/node accounting](../metrics.md#machines-that-are-also-scheduler-nodes).
+
 ### GPU quotas
 
 Each ResourceQuota of the namespace with a GPU entry becomes one limit, named after the quota:
@@ -150,6 +156,15 @@ A GPU pod of the namespace counts as a failure when it finished within the last 
 | `ended_at` | The same offset-bearing time as `end`. |
 | `time_limit` | `spec.activeDeadlineSeconds`, formatted as `[D-][H:]MM:SS`; null when absent. No log path is collected. |
 | `reason` | The pod reason (e.g. `Evicted`), the disruption reason, or the container reason (e.g. `Error`). Termination messages are never read. |
+
+### Wait estimates
+
+Typical wait history is not supported by this driver yet: completed pods do not
+supply the complete terminal times and reliable login ownership needed for own-job
+samples. Where to run and pending-pod drawers show an unsupported explanation,
+not an empty history. This does not change existing pod failure records.
+Queue-position and fair-share estimates are Slurm-only. See
+[wait-history semantics](../metrics.md#typical-wait-from-your-job-history).
 
 ## Errors
 

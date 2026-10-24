@@ -120,6 +120,9 @@ export interface Job {
   time_limit?: string | null;
   log_path?: string | null;
   reason: string | null;
+  queue?: { partition: string; ahead: number; ties: number }[] | null;
+  fairshare?: number | null;
+  queue_unknown?: 'private_data' | 'failed' | null;
   gpu_utilization: number | null;
   cpu_utilization: number | null;
   memory_utilization: number | null;
@@ -129,7 +132,35 @@ export interface FailedJob extends Job {
   end: string | null;
   exit_code: string | null;
 }
+export interface GpuRow {
+  index: number | null;
+  name: string | null;
+  utilization: number | null;
+  memory_used_mb: number | null;
+  memory_total_mb: number | null;
+  processes: { pid: number; user: string | null; memory_mb: number | null }[] | null;
+  in_use?: boolean | null;
+  processes_omitted?: number;
+}
+export interface LowUse {
+  state: 'low' | 'busy' | 'unknown';
+  since: string | null;
+  covered_minutes: number;
+  samples: number;
+  origin: 'provider' | 'probe' | 'source' | null;
+  reason: 'no_reading' | 'not_running' | 'stale' | 'coverage' | null;
+}
 export interface Instance {
+  same_node?: { id: string; name: string; cluster_id: string; cluster_name: string } | null;
+  ssh_endpoint?: { host: string; port: number } | null;
+  host_name?: string | null;
+  low_use?: LowUse;
+  console_url?: string | null;
+  gpu_utilization_max?: number | null;
+  started_at?: string | null;
+  seen_running_since?: string | null;
+  gpus?: GpuRow[] | null;
+  gpus_observed_at?: string | null;
   id: string;
   source_id: string;
   /** Display label of the cloud or machine type, e.g. the RunPod source name. */
@@ -164,7 +195,10 @@ export interface Instance {
   probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
-  health?: 'usable' | 'unavailable' | 'unknown';
+  host_addresses?: string[];
+  host_names?: string[];
+  health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
+  health_reason?: 'no_partition' | null;
   id: string;
   source_id: string;
   cluster_id: string;
@@ -196,6 +230,8 @@ export interface NodeSummary {
   capacity: number | null;
   usable: number | null;
   known_usable: number | null;
+  /** GPUs available on demand, separate from usable and unavailable capacity. */
+  on_demand?: number | null;
   unavailable: number | null;
   allocated: number | null;
   unallocated: number | null;
@@ -205,6 +241,12 @@ export interface NodeSummary {
   ratio: number | null;
 }
 export interface Summary {
+  spend?: {
+    applies?: boolean;
+    rates: Record<string, number>;
+    priced: number;
+    unpriced: Unmeasured[];
+  };
   allocated: number | null;
   known_allocated: number | null;
   unknown_allocation_sources: number;
@@ -254,6 +296,9 @@ export interface Attention {
   action: 'diagnose' | 'instance' | 'health' | 'toolbox' | 'notify';
 }
 export interface Dashboard {
+  /** Own finished-job wait aggregates; older services omit this field. */
+  wait_history?: Record<string, WaitHistory>;
+  low_use_settings?: { threshold: number; window_minutes: number };
   token?: string;
   attention?: Attention[];
   attention_count?: number;
@@ -272,6 +317,20 @@ export interface Dashboard {
   recent_failures?: FailedJob[];
   failure_history_sources?: string[];
   failure_history_observed_at?: string | null;
+}
+export interface WaitHistory {
+  status: 'available' | 'unavailable' | 'unsupported' | 'not_collected';
+  observed_at: string | null;
+  unknown_gpu_samples?: number;
+  buckets: {
+    qos: string | null;
+    partition: string | null;
+    gpu_min: number;
+    gpu_max: number;
+    samples: number;
+    p25_seconds: number | null;
+    p75_seconds: number | null;
+  }[];
 }
 export interface SSHConfig {
   config: string;
@@ -293,6 +352,8 @@ export interface Health {
   plugins?: Record<string, Record<string, unknown>>;
 }
 export interface Settings {
+  low_use_threshold: number;
+  low_use_window_minutes: number;
   language: string;
   server_name: string | null;
 }
@@ -430,4 +491,27 @@ export interface Marketplaces {
   }[];
   plugins: MarketPlugin[];
   policy_error: string | null;
+}
+
+/** Opt-in history rollups; absent from the dashboard poll. */
+export interface UsageRollups {
+  start: string;
+  end: string;
+  buckets: {
+    at: string;
+    end: string;
+    observed_seconds: number;
+    groups: Record<
+      string,
+      {
+        gpu_hours: number | null;
+        gpu_observed_seconds: number;
+        spend: Record<string, number>;
+        observed_seconds: number;
+        gpu_partial: boolean;
+        spend_partial: boolean;
+        spend_known: boolean;
+      }
+    >;
+  }[];
 }

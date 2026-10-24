@@ -20,6 +20,7 @@ import shlex
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Literal
 
+from ..host_identity import host_address
 from ..ssh_config import validate_alias, validate_username
 from . import ssh
 from .base import (
@@ -386,6 +387,7 @@ def parse_nodes(output: str, source: dict[str, Any]) -> list[dict[str, Any]]:
             "source_id": source["id"],
             "cluster_id": source["cluster_id"],
             "name": name,
+            "host_addresses": [address] if (address := host_address(node.get("Mom"))) else [],
             "state": _node_state(node.get("state"), busy),
             "gpu_count": capacity,
             "gpu_allocated": allocated,
@@ -558,6 +560,7 @@ def _unknown_gpus(rows: list[dict[str, Any]], *keys: str) -> bool:
 
 
 class PbsDriver:
+    supports_wait_history: ClassVar[bool] = True
     name: ClassVar[str] = "pbs"
     kind: ClassVar[Literal["cluster", "cloud"]] = "cluster"
     info: ClassVar[DriverInfo] = DriverInfo(
