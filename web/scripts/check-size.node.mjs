@@ -19,7 +19,7 @@ function bytes(length) {
 }
 
 const requiredEntries = [
-  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings', 'Clusters'].map(
+  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings'].map(
     (name) => `src/pages/${name}.tsx`,
   ),
   'src/forms.tsx',

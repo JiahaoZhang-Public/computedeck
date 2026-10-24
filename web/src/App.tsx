@@ -32,7 +32,6 @@ import {
   loadLocale,
   rememberServerLocale,
   setLocale,
-  startupLocale,
   storeLocale,
   storedLocale,
   t,
@@ -51,23 +50,16 @@ import { PageBoundary } from './PageBoundary';
 
 const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
 
-function initialLocale(): Locale {
-  const locale = startupLocale();
-  setLocale(locale);
-  return locale;
-}
-
 export default function App() {
-  return (
-    <LocaleGate>
-      <Application />
-    </LocaleGate>
-  );
+  return <LocaleGate>{(language) => <Application initialLocale={language} />}</LocaleGate>;
 }
 
-function Application() {
+function Application({ initialLocale }: { initialLocale: Locale }) {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
-  const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  const [locale, setLocaleState] = useState(() => {
+    setLocale(initialLocale);
+    return initialLocale;
+  });
   const hash = useHash();
   const group = readRoute(startPages, hash).group;
   const query = routeParams(hash).get('q') ?? '';

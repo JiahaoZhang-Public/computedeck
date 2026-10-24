@@ -9,6 +9,7 @@ import { ActivityPage } from '../pages/Activity';
 import { JobsPage } from '../pages/Jobs';
 import { CloudPage } from '../pages/Cloud';
 import { SourcesPage } from '../pages/Sources';
+import { ClustersPage } from '../pages/Clusters';
 
 const PlanPage = lazyView(async () => ({ default: (await import('../pages/Plan')).PlanPage }));
 const UsagePage = lazyView(async () => ({ default: (await import('../pages/Usage')).UsagePage }));
@@ -21,9 +22,6 @@ const NotifyPage = lazyView(async () => ({
 const ChatPage = lazyView(async () => ({ default: (await import('../pages/Chat')).ChatPage }));
 const SettingsPage = lazyView(async () => ({
   default: (await import('../pages/Settings')).SettingsPage,
-}));
-const ClustersPage = lazyView(async () => ({
-  default: (await import('../pages/Clusters')).ClustersPage,
 }));
 const Gallery = lazyView(async () => ({ default: (await import('../Gallery')).Gallery }));
 

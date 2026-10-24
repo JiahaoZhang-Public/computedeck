@@ -553,6 +553,9 @@ kbd,
   color: var(--text-3);
   padding: 40px 0;
 }
+.locale-gate {
+  padding-inline: 24px;
+}
 
 /* ---------- Buttons ---------- */
 
@@ -2746,6 +2749,9 @@ td.wrap {
   }
   .content {
     padding: 16px 16px 40px;
+  }
+  .locale-gate {
+    padding-inline: 16px;
   }
   .banner {
     padding: 8px 16px;

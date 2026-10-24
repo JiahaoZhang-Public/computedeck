@@ -170,26 +170,40 @@ outside the initial static import graph. Each non-initial chunk is checked (30,0
 palette 15,000), as is all CSS (16,000). `check.sh` runs this after the build.
 Runtime performance budgets, including LCP, remain Q2 work.
 
+F3 follow-up for F4, F5, F8 and U1: with Clusters eager, the reviewed build measures
+142,390 bytes for single-locale startup and 163,541 bytes for both locales. The existing
+two-locale gate therefore leaves only 6,459 bytes below 170,000, even though the proposal's
+budget describes one active locale. Keep this stricter check and its tests intact; plan
+shared primitives, tokens, charts and frame changes around that remaining space, and
+recheck both totals after each item. P6 owns the new lazy cluster detail page.
+
 中文：首屏 JS 的 gzip 上限为 170,000 字节，目标为 160,000 字节。检查会分别报告并约束
 单语言启动（设备选择或与服务器一致的记忆值，取两种语言中较大的总量）及双字典启动
 （首次访问或服务器默认语言变化），每种总量中的共享依赖只计算一次。F3 的延迟页面、
 表单、组件展示页及两份字典必须在构建清单中保留为动态入口，且不在首屏静态依赖图中。
 每个延迟加载块和全部 CSS 仍分别受原有预算约束；LCP 等运行时预算留待 Q2 验证。
+F4、F5、F8、U1 待办：集群列表立即加载后，本次构建单语言为 142,390 字节，双语言为
+163,541 字节；现有双语言检查比提案的单语言预算更严格，仅余 6,459 字节。保留检查及
+测试，在实现共享组件、令牌、图表和框架时规划空间，每项完成后复查两个总量。
+新集群详情页的延迟加载由 P6 完成。
 
 ## Lazy views and languages
 
 `App.tsx` owns data and actions; `app/Frame.tsx`, `app/Routes.tsx` and `app/Layers.tsx`
 render the existing frame, route table and layers. The F2 hash store, aliases and plugin
-routes are unchanged. Plan, Usage, Toolbox, Notify, Chat, Settings and Clusters load on
-first visit. Clusters includes the existing single-group view; P6 still owns the new
-detail design. The existing source/instance forms load on opening, and Gallery brings
+routes are unchanged. Plan, Usage, Toolbox, Notify, Chat and Settings load on first
+visit. Clusters stays eager, including its existing single-group view; P6 owns splitting
+the new cluster detail page. The existing source/instance forms load on opening, and Gallery brings
 its own CSS. The new focus-view wizard and palette remain later items (F6 and U2).
 
 The first dictionary request starts before React mounts. Startup uses the device choice,
 then a separately remembered server-language hint, then English. The current server default
 still applies when there is no device choice, so a first visit or changed default may load
 both dictionaries; blocked storage cannot preserve the hint for later visits. A small shared
-loading/error vocabulary reports a failed dictionary request and offers Retry.
+loading/error vocabulary reports a failed dictionary request and offers Retry. The gate
+passes the language it loaded into the application, so a cross-tab storage change during
+loading cannot select an unloaded dictionary. Startup loading is a polite status, and
+loading/error states have side gutters (16 px on phones, 24 px otherwise).
 Switching languages keeps the current page in its previous language until the new
 one arrives, while the select shows the requested value with `aria-busy=true`. A failed
 switch preserves both the active language and the stored device
@@ -197,16 +211,20 @@ choice and shows an error toast; a late server preference or older selection can
 overwrite the newest device choice. Unit-test setup loads both dictionaries before
 synchronous translation tests; the browser tests exercise actual cold imports.
 
-`loading.spec.ts` adds six interaction cases in all six Chromium combinations: deferred
+`loading.spec.ts` covers all six Chromium combinations: deferred
 assets and the unchanged host API, navigating away from a delayed route and back,
 recovery from a failed route import, a delayed language switch, and closing/reopening a
-cold form with focus return, plus a failed form's title-only accessible name. A failed view
+cold form with focus return, plus a failed form's title-only accessible name. It also
+checks startup storage changes, loading/error gutters, and focus and Tab wrapping when
+a cold form stays open. Add source opens a type chooser first; selecting Slurm focuses
+the cluster-name field. Add instance directly exercises autoFocus on chunk arrival. A failed view
 import offers Retry, which reloads the app
 at its current URL (React caches failed lazy imports). Route rendering errors still use
 the existing page boundary. Suspense loading states carry `aria-busy=true`; modal shells
 and their close controls remain mounted while their content loads.
 
 There is no intended settled-page visual change and no baseline regeneration for F3.
+The startup gutter correction is covered by browser geometry assertions.
 Run the full `bash scripts/check-ui.sh` outside the socket-restricted sandbox to compare
 all existing screenshots and exercise the new interactions. Example data is unchanged:
 loading and import failures are transport states, exercised with delayed/failed local
@@ -214,9 +232,13 @@ asset requests, rather than new server data states.
 
 中文：页面、表单及语言字典按需加载，组件展示页的 CSS 随页面加载。加载完成后的布局、
 插件 DOM 和样式约定不变。字典请求在 React 挂载前开始，优先使用设备选择，其次使用
-独立记住的服务器语言，否则使用英语；首次访问或服务器默认语言变化时可能加载两份
+独立记住的服务器语言，否则使用英语。应用直接使用加载门传入的语言，避免加载期间
+其他标签页更改存储导致选择尚未加载的字典。启动加载状态会被朗读，加载及错误状态
+保留侧边距（手机 16 px，其他宽度 24 px）。首次访问或服务器默认语言变化时可能加载两份
 字典，存储不可用时无法为后续访问保留提示。切换语言时下拉框显示所选值并标记为忙碌，
 当前页面文字保留，成功后再保存设备选择；失败时恢复下拉框、保留原语言并显示错误。
 延迟返回的服务器语言或旧选择不会覆盖新的设备选择。新增浏览器测试覆盖冷加载、
-失败重试、前进后退、表单焦点恢复及加载失败时仅含标题的对话框名称；F3 不更新截图
-基线或示例数据。
+失败重试、前进后退、启动期间存储变化、侧边距、表单焦点恢复及加载失败时仅含标题的
+对话框名称。冷表单保持打开时也检查焦点和 Tab 循环：添加来源先选类型，再聚焦集群名称；
+添加实例直接检查加载完成后的自动聚焦。集群列表保持立即加载，新详情页的拆分留待 P6。
+F3 不更新截图基线或示例数据。

@@ -30,7 +30,6 @@ test('Overview loads only its active locale and defers routes, forms and gallery
     'Notify',
     'Chat',
     'Settings',
-    'Clusters',
     'forms',
     'Gallery',
   ]) {
@@ -62,6 +61,61 @@ test('Overview loads only its active locale and defers routes, forms and gallery
   await expect(page.locator('[data-token]')).toHaveCount(21);
   expect(assets.some((url) => script('Gallery').test(url))).toBe(true);
   expect(assets.some((url) => /\/Gallery-[^/]+\.css$/.test(url))).toBe(true);
+});
+
+test('startup keeps the loaded language if storage changes during the request', async ({
+  page,
+  locale,
+}) => {
+  const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const arrived = deferred();
+  const release = deferred();
+  await page.route(script(language), async (route) => {
+    arrived.resolve();
+    await release.promise;
+    await route.continue();
+  });
+  try {
+    await page.goto('/?demo=true#/overview', { waitUntil: 'domcontentloaded' });
+    await arrived.promise;
+    const status = page.getByRole('status');
+    await expect(status).toHaveText(language === 'en' ? 'Loading…' : '正在载入…');
+    expect((await status.boundingBox())!.x).toBeGreaterThanOrEqual(16);
+    await page.evaluate(
+      (next) => localStorage.setItem('computedeck.locale', next),
+      language === 'en' ? 'zh-CN' : 'en',
+    );
+    release.resolve();
+    await ready(page);
+    await expect(page.locator('html')).toHaveAttribute('lang', language);
+    await expect(page.locator('.topbar h1')).toHaveText(language === 'en' ? 'Overview' : '总览');
+  } finally {
+    release.resolve();
+  }
+});
+
+test('a failed startup dictionary keeps its error and retry inside the viewport gutter', async ({
+  page,
+  locale,
+}) => {
+  await page.route(script(locale === 'zh-CN' ? 'zh-CN' : 'en'), (route) =>
+    route.fulfill({ status: 503, body: 'Unavailable' }),
+  );
+  await page.goto('/?demo=true#/overview');
+  const error = page.getByRole('alert');
+  await expect(error).toHaveText(
+    locale === 'zh-CN' ? '无法加载语言，请重试。' : 'Could not load the language. Try again.',
+  );
+  const retry = page.getByRole('button', {
+    name: locale === 'zh-CN' ? '重试' : 'Retry',
+    exact: true,
+  });
+  for (const element of [error, retry]) {
+    await expect(element).toBeVisible();
+    const box = (await element.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(16);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width - 16);
+  }
 });
 
 test('a delayed lazy route keeps the frame usable and cannot replace a newer route', async ({
@@ -232,3 +286,71 @@ test('a cold form keeps its focus shell and can close before the chunk arrives',
     release.resolve();
   }
 });
+
+for (const form of ['source', 'instance'] as const) {
+  test(`a cold ${form} form stays open and focuses its field with Tab contained`, async ({
+    page,
+    locale,
+  }) => {
+    const arrived = deferred();
+    const release = deferred();
+    await page.route(script('forms'), async (route) => {
+      arrived.resolve();
+      await release.promise;
+      await route.continue();
+    });
+    try {
+      await page.goto(form === 'source' ? '/#/sources' : '/#/cloud');
+      await ready(page);
+      const name =
+        form === 'source'
+          ? locale === 'zh-CN'
+            ? '添加来源'
+            : 'Add source'
+          : locale === 'zh-CN'
+            ? '添加实例'
+            : 'Add instance';
+      const add = page.locator('.topbar').getByRole('button', { name, exact: true });
+      await add.click();
+      await arrived.promise;
+      const dialog = page.getByRole('dialog');
+      const close = dialog.getByRole('button', {
+        name: locale === 'zh-CN' ? '关闭' : 'Close',
+        exact: true,
+      });
+      await expect(dialog.locator('[aria-busy="true"]')).toBeVisible();
+      await expect(close).toBeFocused();
+      release.resolve();
+      if (form === 'source') {
+        // Add source first asks for a type; the details step owns the autoFocus field.
+        await dialog.getByRole('button', { name: /Slurm/ }).click();
+      }
+      const field = dialog.getByLabel(
+        form === 'source'
+          ? locale === 'zh-CN'
+            ? '集群名称'
+            : 'Cluster name'
+          : locale === 'zh-CN'
+            ? '名称'
+            : 'Name',
+        { exact: true },
+      );
+      await expect(field).toBeFocused();
+      await page.keyboard.press('Tab');
+      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(
+        true,
+      );
+      // Exercise both wrap boundaries after the lazy content has replaced the placeholder.
+      await close.focus();
+      await page.keyboard.press('Shift+Tab');
+      await expect(dialog.locator('button[type="submit"], button.primary').last()).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(close).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(add).toBeFocused();
+    } finally {
+      release.resolve();
+    }
+  });
+}

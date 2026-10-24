@@ -19,7 +19,7 @@ const jsSize = (keys) => [...keys].reduce((sum, key) => sum + size(manifest[key]
 // These must remain separate lazy entries, even if no request for them appears on Overview.
 const localeEntries = ['src/locales/en.ts', 'src/locales/zh-CN.ts'];
 const lazyEntries = [
-  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings', 'Clusters'].map(
+  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings'].map(
     (name) => `src/pages/${name}.tsx`,
   ),
   'src/forms.tsx',

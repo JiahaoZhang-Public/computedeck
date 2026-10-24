@@ -76,13 +76,12 @@ it.each(['en', 'zh-CN'] as const)(
     const first = deferred<void>();
     const next = deferred<void>();
     const load = vi.spyOn(i18n, 'loadLocale').mockReturnValue(first.promise);
-    await render(
-      <LocaleGate>
-        <main>Ready</main>
-      </LocaleGate>,
-    );
+    await render(<LocaleGate>{() => <main>Ready</main>}</LocaleGate>);
     expect(container.querySelector('main')).toBeNull();
     expect(container.querySelector('[aria-busy="true"]')?.getAttribute('lang')).toBe(language);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      language === 'en' ? 'Loading…' : '正在载入…',
+    );
     expect(load).toHaveBeenCalledWith(language);
     await act(async () => first.reject(new Error('offline')));
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
@@ -95,6 +94,34 @@ it.each(['en', 'zh-CN'] as const)(
     expect(container.querySelector('main')?.textContent).toBe('Ready');
   },
 );
+
+it.each([
+  ['computedeck.locale', 'en'],
+  ['computedeck.locale', 'zh-CN'],
+  ['computedeck.serverLocale', 'en'],
+  ['computedeck.serverLocale', 'zh-CN'],
+] as const)('uses the loaded language when %s changes while %s loads', async (key, language) => {
+  mockDashboard(deferred<unknown>().promise);
+  window.localStorage.setItem(key, language);
+  vi.spyOn(i18n, 'localeLoaded').mockReturnValue(false);
+  const pending = deferred<void>();
+  const load = vi.spyOn(i18n, 'loadLocale').mockReturnValue(pending.promise);
+  const select = vi.spyOn(i18n, 'setLocale');
+  await render(<App />);
+  expect(container.querySelector('main')).toBeNull();
+  expect(load).toHaveBeenCalledWith(language);
+  const next = language === 'en' ? 'zh-CN' : 'en';
+  window.localStorage.setItem(key, next);
+  await act(async () => pending.resolve());
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  expect(document.documentElement.lang).toBe(language);
+  expect(container.querySelector('h1')?.textContent).toBe(language === 'en' ? 'Settings' : '设置');
+  expect(select).toHaveBeenCalledWith(language);
+  expect(select).not.toHaveBeenCalledWith(next);
+  expect(window.localStorage.getItem(key)).toBe(next);
+});
 
 it('keeps the active language and device preference when another dictionary fails', async () => {
   mockDashboard();
