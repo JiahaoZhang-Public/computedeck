@@ -6,6 +6,7 @@ uv run --frozen ruff check .
 uv run --frozen ruff format --check .
 uv run --frozen mypy src/computedeck scripts
 uv run --frozen pytest -q
+npm --prefix web run check:tokens
 npm --prefix web run lint
 npm --prefix web run format:check
 npm --prefix web run typecheck

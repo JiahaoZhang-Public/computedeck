@@ -2,6 +2,7 @@
 
 import importlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -81,3 +82,50 @@ def test_generated_test_runs_without_core_test_fixtures(tmp_path: Path) -> None:
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_web_example_covers_the_public_styling_contract(tmp_path: Path) -> None:
+    project = tmp_path / "hello-example"
+    scaffold.create(project, "hello-example", web=True, driver=False)
+    source = (project / "web/src/index.jsx").read_text()
+    for slot in ("overview: Overview", "settings: Settings", "banner: Banner"):
+        assert slot in source
+    for name in ("Panel", "Empty", "Status", "Switch", "Chips", "Stat", "Meter", "BrandMark"):
+        assert f"<{name}" in source
+    for name in (
+        "panel-note",
+        "button primary",
+        "button primary-button",
+        "button secondary-button",
+        "status green",
+        "status amber",
+        "status red",
+        "form-error",
+        "num",
+        "spin",
+        "table-wrap",
+        "table compact",
+        "sub",
+        "muted",
+        "red-text",
+        "red",
+        "amber",
+        "link",
+        "banner amber",
+    ):
+        assert f'className="{name}"' in source
+    assert "if (!visible) return null" in source
+    assert "if (demo) return" in source
+    assert "'zh-CN':" in source
+    assert "requires: 'hello-example'" in source
+
+    # The starter keeps links and controls in spaced groups, with explicit link hit areas.
+    assert "style={{ display: 'grid', gap: 16 }}" in source
+    assert source.count("style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}") == 2
+    assert source.count("style={{ display: 'grid', gap: 4 }}") == 2
+    links = re.findall(r"<a\b(.*?)>", source, re.DOTALL)
+    assert len(links) == 2
+    for link in links:
+        assert "display: 'inline-flex'" in link
+        assert "alignItems: 'center'" in link
+        assert "minHeight: 44" in link

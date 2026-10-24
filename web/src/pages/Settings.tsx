@@ -5,11 +5,14 @@ import { errorText, isLocale, locales, t } from '../i18n';
 import { relativeTime } from '../domain';
 import { routeHash } from '../routes';
 import { Panel, Status } from '../ui';
+import { readTheme, readDensity, saveTheme, saveDensity } from '../theme/preferences';
+import type { Theme, Density } from '../theme/preferences';
 import type { Ctx } from './shared';
 
 export function SettingsPage({ ctx }: { ctx: Ctx }) {
   const { data, remote, health, demo, busy } = ctx;
-  const panels = demo ? [] : ctx.webPlugins.filter((plugin) => plugin.settings);
+  const panels =
+    demo && !__TEST_PLUGIN_SLOTS__ ? [] : ctx.webPlugins.filter((plugin) => plugin.settings);
   return (
     <div className="grid wide-narrow settings">
       <div className="stack">
@@ -27,12 +30,17 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
         </Panel>
         {panels.map((plugin) => {
           const Settings = plugin.settings!;
-          return <Settings key={plugin.id} {...ctx.plugin} />;
+          return (
+            <div className="plugin-slot" data-plugin={plugin.id} key={plugin.id}>
+              <Settings {...ctx.plugin} />
+            </div>
+          );
         })}
         <LowUseSettings
           key={`${data.low_use_settings?.threshold}:${data.low_use_settings?.window_minutes}`}
           ctx={ctx}
         />
+        <AppearanceSettings />
         <Panel title={t('settings.language')}>
           <div className="setting-row">
             <p>{t('settings.languageHint')}</p>
@@ -201,6 +209,52 @@ function LowUseSettings({ ctx }: { ctx: Ctx }) {
         </div>
         {message && <p role="alert">{message}</p>}
       </form>
+    </Panel>
+  );
+}
+
+function AppearanceSettings() {
+  const [theme, setTheme] = useState(readTheme);
+  const [density, setDensity] = useState(readDensity);
+  return (
+    <Panel title={t('settings.appearance')}>
+      <div className="setting-row">
+        <label htmlFor="theme">{t('settings.theme')}</label>
+        <select
+          id="theme"
+          value={theme}
+          onChange={(event) => {
+            const value = event.target.value as Theme;
+            saveTheme(value);
+            setTheme(value);
+          }}
+        >
+          {(['system', 'light', 'dark'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.theme.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <label htmlFor="density">{t('settings.density')}</label>
+        <select
+          id="density"
+          value={density}
+          onChange={(event) => {
+            const value = event.target.value as Density;
+            saveDensity(value);
+            setDensity(value);
+          }}
+        >
+          {(['comfortable', 'compact'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.density.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="panel-note">{t('settings.appearanceHint')}</p>
     </Panel>
   );
 }

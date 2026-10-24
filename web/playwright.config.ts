@@ -50,7 +50,7 @@ export default defineConfig({
     ...(process.env.CI || hasWebKit
       ? combos.map(({ width, locale, colorScheme }) => ({
           name: `webkit-${width}-${locale}-${colorScheme}`,
-          testMatch: '**/*.overlays.spec.ts',
+          testMatch: ['**/*.overlays.spec.ts', '**/theme.spec.ts'],
           use: {
             browserName: 'webkit' as const,
             viewport: { width, height: 800 },

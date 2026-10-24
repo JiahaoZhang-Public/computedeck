@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, ready, fontGuard } from './fixtures';
 import { checkLayout, checkFocus } from './checks';
 import { domFingerprints } from './dom-findings';
-import { screenshotOptions, settledScreenshot } from './screenshots';
+import { withScreenshotViewport, settledScreenshot } from './screenshots';
 
 // Twelve 0.7 routes plus the existing Nodes and Marketplace page states. No new aliases.
 const pages = [
@@ -34,7 +34,9 @@ for (const [name, route] of pages) {
       await expect(page.locator('.activity > li').first()).toBeVisible();
     }
     const first = await settledScreenshot(page, testInfo, 'first-run');
-    await expect.soft(page).toHaveScreenshot(`${name}.png`, screenshotOptions(page));
+    await withScreenshotViewport(page, testInfo, (options) =>
+      expect.soft(page).toHaveScreenshot(`${name}.png`, options),
+    );
     const axe = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
       .analyze();

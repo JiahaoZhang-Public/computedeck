@@ -39,6 +39,17 @@ dd.mono`), whose value contains the throwaway service's random port. The shared 
 options mask exactly that value with `#808080` in both baseline assertions and raw captures
 for fresh-context comparison. No other element is masked; product code is unchanged.
 
+Touch projects scroll to the top and capture with a viewport grown to the re-measured document
+height: Chromium's `fullPage` capture temporarily switches to fine-pointer media, moving the
+layout away from the mask rectangles. Pointer/hover changes fail the capture, and settled
+Settings images must have grey pixels throughout the Address box. The original viewport is
+restored before axe, DOM and focus checks; non-touch projects keep their existing full-page path.
+
+中文：触屏项目先滚动到顶部，增高视口并重新测量文档高度后截取视口；Chromium 的
+`fullPage` 截图会临时切换为精细指针布局，导致遮罩与内容错位。截图期间若指针或
+悬停媒体发生变化就失败，设置页稳定截图还须验证整个地址区域内的灰色遮罩像素。
+axe、DOM 和焦点检查前恢复原视口；非触屏项目保持原有的整页截图方式。
+
 All Chromium projects use `--disable-gpu --disable-partial-raster`, locally and in CI.
 Partial raster (re-rasterising only invalidated tile areas) produced ±1–2 channel-level
 differences between otherwise identical renders, even with GPU rendering disabled. Both
@@ -242,3 +253,87 @@ asset requests, rather than new server data states.
 对话框名称。冷表单保持打开时也检查焦点和 Tab 循环：添加来源先选类型，再聚焦集群名称；
 添加实例直接检查加载完成后的自动聚焦。集群列表保持立即加载，新详情页的拆分留待 P6。
 F3 不更新截图基线或示例数据。
+
+## F4 tokens and plugin compatibility
+
+`npm --prefix web run gen:tokens` regenerates `theme/tokens.css` and
+`theme/tokens.fallback-only.css` from `theme/tokens.ts`. The generator uses Node's native
+TypeScript support (Node.js 22.18+ or 24); it has no package dependency and rejects sRGB
+clipping. Generated files have their own byte-for-byte check instead of Prettier; authored
+files still use Prettier. `check.sh` and `npm run build` run `check:tokens`: generation
+freshness, component colour lint, every fallback context (including both explicit themes
+and contrast-more), and a WCAG/APCA report. Vitest gates the WCAG matrix, gamut and identity
+separation, the 21 compatibility names, and device-preference persistence/blocked storage.
+APCA Lc is advisory; it is never used as a pass threshold. Fallback declarations reference
+the matching primitive, with no `light-dark()` call. The lint checks both that reference and
+the primitive's value; removing or changing any declaration in any of the eight fallback
+contexts must fail the mutation test.
+
+The light warning shape uses OKLCH `.60 .1299 70`: the proposed chroma `.13` produces
+linear-sRGB blue `-0.00002774`. The tiny chroma adjustment keeps the hue/lightness and passes
+the strict no-clipping test. All matrix backgrounds include hover and selected, plus raised,
+overlay, each status's own tint and the identity tints. Translucent chart marks are composed
+in sRGB before measuring WCAG contrast. The hatch edge is checked against both the base and
+the composited stripe. Contrast-more stripe alpha is .72 (light) / .60 (dark), keeping edge
+contrast at 3.18 / 3.22 instead of the original 2.51 / 2.18.
+
+The local launcher now makes three isolated builds: normal core, fallback-only core under
+`/__ui-fallback/`, and the scaffolded hello example plus test fixtures under `/__ui-plugins/`.
+These paths exist only in the throwaway test server. Both test build flags are unset before
+the normal build. `theme.spec.ts` requires zero axe violations on the compat gallery in
+normal and contrast-more mode, compares every semantic/compat colour with the fallback in
+all system/explicit theme combinations, and checks persistence and exact single/two-line
+row boxes (hairline included) for both densities, `.compact`, and coarse pointers. It also
+exercises a generic stacked table and the new `cell-overflow` DOM finding: visible `td`/`th`
+with non-table-cell display and `scrollHeight > clientHeight + 1`. Like the other DOM findings,
+its kind, identity and count are baselined; pixel measurements stay in the report.
+`fallback.spec.ts`
+renders Overview and the gallery under six theme/contrast contexts, with exact screenshots,
+normal/fallback image equality and axe records (named `gallery-…` or `overview-…`). Existing Overview findings remain visible
+in those records until P1/Q1. The gating fallback screenshot suite runs only in Chromium.
+WebKit keeps the screenshot-free theme suite (axe and computed-colour parity), as well as
+F6's future overlay suite. The weekly WebKit fallback-only render is advisory, outside the
+PR gate.
+
+`plugin-compat.spec.ts` exercises the actual `plugin new --web` template through
+`window.ComputeDeck`: page and all slots, all public classes/components, a null overview,
+a page-only plugin, and a banner toggled from null to shown and back. Switch interactions
+click the visible label and assert the input's checked state by role. The hello screenshot
+uses the same settled capture and options as the page gate. The fixture build uses
+`COMPUTEDECK_WEB_PLUGINS`, `COMPUTEDECK_HELLO_EXAMPLE` and `COMPUTEDECK_TEST_PLUGIN_SLOTS=1`;
+normal builds neither load these fixtures nor expose example-mode slots. No live plugins or
+external services are needed. The template itself is bilingual and skips its greeting API
+read in example mode, so `demo.py` needs no new server data state for F4.
+
+F4 intentionally changes every existing page's palette and shared typography/controls.
+Outside the socket-restricted sandbox, review/regenerate **all 96 existing page screenshots
+and their axe/DOM records**, plus the new fallback and hello screenshots, then run the full
+gate without `--update-snapshots`. Local macOS baselines remain ignored; Linux artifacts
+are reviewed and committed at PR time as before. No baseline is approved merely because a
+regeneration command succeeds. In particular, inspect 375 px layouts and the old Jobs
+reason-clip assertion. The full six-shape/raster and persisted identity assignment tests
+belong to F5; navigation/scroll chrome remains U1; private-plugin comparison and the advisory
+pinned network-plugin run remain release follow-ups.
+
+中文：F4 增加零依赖 token 生成器、兼容变量映射、颜色 lint、WCAG 对比度矩阵及
+仅供参考的 APCA 报告。生成器需要 Node.js 22.18+ 或 24，拒绝 sRGB 溢出；浅色警告形状
+的色度由 `.13` 微调到 `.1299`，避免蓝色通道略低于零。
+本地 UI 脚本构建正常版、禁用 `light-dark()` 的兼容版及真实脚手架示例插件版。
+测试覆盖系统/显式主题、增强对比度、设备设置持久化、空插槽、全部组件/类和横幅切换；
+兼容版截图门禁仅在 Chromium 运行；WebKit 保留不截图的主题测试（axe 和计算颜色
+一致性），以及 F6 后续的浮层测试。每周 WebKit 兼容版渲染属于非阻塞巡检，不纳入
+PR 门禁。界面状态只依赖设备设置和双语测试插件，
+无需修改 `demo.py`。F4 有意改变全站颜色和共享字体/控件，需在沙箱外检查并更新
+全部旧页面基线及新增兼容版/插件截图，再运行一次不更新基线的完整 UI gate。
+不得仅凭重新生成成功就接受基线；重点检查 375 像素布局和 Jobs 已知裁剪用例。
+F5 的完整状态形状/身份分配、U1 的导航与滚动边距、发布前的私有插件比较及固定版本
+network 插件巡检仍由后续项目完成。
+
+中文（F4 跟进）：兼容分支引用对应基础变量，lint 同时检查引用与基础变量值；八个上下文
+中的任意声明被删除或改动都必须触发失败。斜线填充测试同时检查底色和叠加后的条纹，
+增强对比度条纹透明度改为浅色 .72 / 深色 .60，使边缘对比度达到 3.18 / 3.22。
+行高测试精确检查包含分隔线的单行/双行尺寸、两种设备密度、`.compact` 和粗指针，
+并验证通用堆叠布局自然增高。新增 `cell-overflow` DOM 记录：可见的非 table-cell
+显示模式 td/th 的 scrollHeight 大于 clientHeight + 1；种类、身份和数量纳入基线，
+像素值仅供报告。hello 开关点击可见 label，按角色断言 checked 状态，截图使用统一
+稳定捕获流程；兼容版基线采用可读的 `gallery-…` / `overview-…` 名称。

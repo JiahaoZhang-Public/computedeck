@@ -200,29 +200,218 @@ export default defineConfig({{
 WEB_ENTRY = """import {{ useEffect, useState }} from 'react';
 
 const {{ components, register }} = window.ComputeDeck;
-const {{ Panel }} = components;
-
+const {{ Panel, Empty, Status, Switch, Chips, Stat, Meter, BrandMark }} =
+  components;
+const words = {{
+  en: {{
+    title: '{title}',
+    example: 'Example',
+    note: 'Plugin styling example',
+    error: 'Example error',
+    warning: 'Example warning',
+    input: 'Example input',
+    select: 'Example choice',
+    toggle: 'Show banner',
+    empty: 'Nothing to show',
+    overview: 'Example overview',
+    settings: 'Example settings',
+  }},
+  'zh-CN': {{
+    title: '{title}',
+    example: '示例',
+    note: '插件样式示例',
+    error: '示例错误',
+    warning: '示例警告',
+    input: '示例输入',
+    select: '示例选项',
+    toggle: '显示横幅',
+    empty: '暂无内容',
+    overview: '示例概览',
+    settings: '示例设置',
+  }},
+}};
 function Icon() {{
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
       <circle cx="12" cy="12" r="9" />
     </svg>
   );
 }}
-
-function Page({{ request }}) {{
-  const [greeting, setGreeting] = useState('…');
+// The banner is local example UI: it never changes the server or a cluster.
+let showBanner = false;
+const bannerListeners = new Set();
+function toggleBanner(value) {{
+  showBanner = value;
+  bannerListeners.forEach((listener) => listener(value));
+}}
+function Page({{ request, demo, locale }}) {{
+  const text = words[locale] ?? words.en;
+  const [greeting, setGreeting] = useState(text.example);
+  const [enabled, setEnabled] = useState(showBanner);
+  const [tab, setTab] = useState('a');
   useEffect(() => {{
-    request('/plugins/{id}/hello').then((data) => setGreeting(data.greeting));
-  }}, [request]);
+    if (demo) return;
+    let active = true;
+    request('/plugins/{id}/hello')
+      .then((data) => {{
+        if (active) setGreeting(data.greeting);
+      }})
+      .catch(() => {{
+        if (active) setGreeting(text.error);
+      }});
+    return () => {{
+      active = false;
+    }};
+  }}, [request, demo, text.error]);
   return (
-    <Panel title="{title}">
+    <Panel title={{text.title}}>
       <p className="panel-note">{{greeting}}</p>
+      <div className="panel-note" style={{{{ display: 'grid', gap: 16 }}}}>
+        <p>{{text.note}}</p>
+        <div style={{{{ display: 'flex', flexWrap: 'wrap', gap: 12 }}}}>
+          <button className="button primary" onClick={{() => setTab('a')}}>
+            {{text.example}}
+          </button>
+          <button className="button primary-button" onClick={{() => setTab('b')}}>
+            {{text.example}}
+          </button>
+          <button
+            className="button secondary-button"
+            onClick={{() => setTab('a')}}
+          >
+            {{text.example}}
+          </button>
+        </div>
+        <p>
+          <span className="status green">{{text.example}}</span>{{' '}}
+          <span className="status amber">{{text.warning}}</span>{{' '}}
+          <span className="status red">{{text.error}}</span>
+        </p>
+        <p className="form-error">{{text.error}}</p>
+        <p className="red-text">{{text.error}}</p>
+        <p className="red">{{text.error}}</p>
+        <p className="amber">{{text.warning}}</p>
+        <p className="muted">{{text.note}}</p>
+        <p className="sub">{{text.note}}</p>
+        <div style={{{{ display: 'flex', flexWrap: 'wrap', gap: 16 }}}}>
+          <label style={{{{ display: 'grid', gap: 4 }}}}>
+            {{text.input}}
+            <input defaultValue={{text.example}} />
+          </label>
+          <label style={{{{ display: 'grid', gap: 4 }}}}>
+            {{text.select}}
+            <select defaultValue="a">
+              <option value="a">{{text.example}}</option>
+            </select>
+          </label>
+        </div>
+        <div style={{{{ display: 'flex', flexWrap: 'wrap', gap: 16 }}}}>
+          <a
+            href="#/overview"
+            style={{{{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minHeight: 44,
+            }}}}
+          >
+            {{text.overview}}
+          </a>
+          <a
+            className="link"
+            href="#/settings"
+            style={{{{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minHeight: 44,
+            }}}}
+          >
+            {{text.settings}}
+          </a>
+        </div>
+        <Switch
+          checked={{enabled}}
+          label={{text.toggle}}
+          onChange={{(value) => {{
+            setEnabled(value);
+            toggleBanner(value);
+          }}}}
+        />
+        <Chips
+          value={{tab}}
+          label={{text.select}}
+          options={{[
+            {{ value: 'a', label: text.example }},
+            {{ value: 'b', label: text.note }},
+          ]}}
+          onChange={{setTab}}
+        />
+        <Status state="RUNNING" />
+        <Meter value={{50}} />
+        <Stat label={{text.example}} value={{42}} unit="GPU" />
+        <BrandMark />
+        <span className="spin" aria-hidden="true">
+          <BrandMark size={{16}} />
+        </span>
+        <Empty title={{text.empty}} />
+      </div>
+      <div className="table-wrap">
+        <table className="table compact">
+          <thead>
+            <tr>
+              <th>{{text.example}}</th>
+              <th className="num">GPU</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                {{text.example}}
+                <span className="sub">{{text.note}}</span>
+              </td>
+              <td className="num">42</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </Panel>
   );
 }}
-
+function Overview({{ locale }}) {{
+  const text = words[locale] ?? words.en;
+  return (
+    <Panel title={{text.overview}}>
+      <p className="panel-note">{{text.note}}</p>
+    </Panel>
+  );
+}}
+function Settings({{ locale }}) {{
+  const text = words[locale] ?? words.en;
+  return (
+    <Panel title={{text.settings}}>
+      <p className="panel-note">{{text.note}}</p>
+    </Panel>
+  );
+}}
+function Banner({{ locale }}) {{
+  const [visible, setVisible] = useState(showBanner);
+  useEffect(() => {{
+    bannerListeners.add(setVisible);
+    return () => {{
+      bannerListeners.delete(setVisible);
+    }};
+  }}, []);
+  if (!visible) return null;
+  return (
+    <div className="banner amber">{{(words[locale] ?? words.en).warning}}</div>
+  );
+}}
 register({{
   id: '{id}',
   // Hidden while the server plugin of the same id is switched off.
@@ -235,6 +424,9 @@ register({{
       render: (props) => <Page {{...props}} />,
     }},
   ],
+  overview: Overview,
+  settings: Settings,
+  banner: Banner,
 }});
 """
 

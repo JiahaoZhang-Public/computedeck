@@ -1,8 +1,14 @@
 export interface DomFinding {
-  kind: 'horizontal-overflow' | 'empty-plugin-slot' | 'duplicate-heading' | 'small-touch-target';
+  kind:
+    | 'horizontal-overflow'
+    | 'empty-plugin-slot'
+    | 'duplicate-heading'
+    | 'small-touch-target'
+    | 'cell-overflow';
   identity: string;
   width?: number;
   height?: number;
+  scrollHeight?: number;
   viewportWidth?: number;
 }
 

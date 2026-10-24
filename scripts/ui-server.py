@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from starlette.routing import Mount
+from starlette.staticfiles import StaticFiles
 
 from computedeck.app import create_app
 from computedeck.store import Store
@@ -25,6 +27,14 @@ def main() -> None:
     store.db.close()
     # No discovered plugins, collectors, cloud calls or notification loops.
     app = create_app(directory / "data", polling=False, plugins=[notify, chat])
+    for name in ("fallback", "plugins"):
+        app.router.routes.insert(
+            0,
+            Mount(
+                f"/__ui-{name}",
+                app=StaticFiles(directory=directory / name, html=True),
+            ),
+        )
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]

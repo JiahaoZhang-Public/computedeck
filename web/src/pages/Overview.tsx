@@ -42,7 +42,8 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   ).length;
   const hasClusters = clusterLogins > 0;
   const jobsKnown = summary.jobs.missing_source_ids.length < clusterLogins;
-  const asides = demo ? [] : ctx.webPlugins.filter((plugin) => plugin.overview);
+  const asides =
+    demo && !__TEST_PLUGIN_SLOTS__ ? [] : ctx.webPlugins.filter((plugin) => plugin.overview);
   // Before anything is connected the dashboard has nothing to say; show how to start.
   if (setupNeeded) return <SetupGuide ctx={ctx} />;
   const waiting =
@@ -223,14 +224,14 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
           {t('usage.view')} <ArrowRight size={13} />
         </a>
       </p>
-      {asides.length > 0 && (
-        <div className="stack">
-          {asides.map((plugin) => {
-            const Aside = plugin.overview!;
-            return <Aside key={plugin.id} {...ctx.plugin} />;
-          })}
-        </div>
-      )}
+      {asides.map((plugin) => {
+        const Aside = plugin.overview!;
+        return (
+          <div className="plugin-slot" data-plugin={plugin.id} key={plugin.id}>
+            <Aside {...ctx.plugin} />
+          </div>
+        );
+      })}
     </>
   );
 }

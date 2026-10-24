@@ -96,7 +96,7 @@ Kubernetes、PBS、LSF、Vast.ai 和 GPUhub 集成处于测试阶段。界面支
 
 ComputeDeck 目前提供源码预览，尚未发布 PyPI 包。
 
-需要 macOS 或 Linux、Python 3.12 或 3.13、[uv](https://docs.astral.sh/uv/)、Node.js 22 和 OpenSSH。Node 用于构建网页。
+需要 macOS 或 Linux、Python 3.12 或 3.13、[uv](https://docs.astral.sh/uv/)、Node.js 22.18+（或 24）和 OpenSSH。Node 用于构建网页。
 
 ```sh
 git clone https://github.com/JiahaoZhang-Public/computedeck.git

@@ -1155,3 +1155,90 @@ meaning; hourly spend is unchanged. Hardware checks still work. API versions,
 route ids and SCHEMA_VERSION are unchanged; no table or remote query is added.
 See [machine/node accounting](metrics.md#machines-that-are-also-scheduler-nodes)
 for matching limits and outage behaviour.
+
+## Styling contract, WEB_API 1
+
+The 0.8 theme keeps the public component DOM and every 0.7 route. `Chips` still uses
+`role="tab"`. Colour is now ink on neutral surfaces; warning and error text retain their
+severity colours. Links are ink and underlined. Primary buttons use ink with contrasting
+text in **both** themes; do not put literal white text on `--accent`.
+
+The supported aliases are in `web/src/theme/tokens-compat.css`; the machine-readable
+old-to-new map is `web/src/theme/compat-map.json` (also shipped at `/tokens-compat.json`):
+
+| Existing token | Semantic token / value |
+| --- | --- |
+| `--text` | `--fg-default` |
+| `--text-2`, `--text-muted` | `--fg-muted` |
+| `--text-3`, `--text-4` | `--fg-subtle` |
+| `--surface` | `--bg-surface` |
+| `--surface-2` | `--bg-sunken` |
+| `--border` | `--border-muted` |
+| `--accent` | `--ink` |
+| `--accent-soft` | `--bg-selected` |
+| `--accent-text` | `--fg-default` |
+| `--accent-hover` | `color-mix(in oklch, var(--ink) 88%, var(--bg-canvas))` |
+| `--gray-soft` | `--status-unknown-bg` |
+| `--green`, `--green-soft` | `--status-ok-fg`, `--status-ok-bg` |
+| `--amber`, `--amber-soft` | `--status-warn-fg`, `--status-warn-bg` |
+| `--red` | `--status-error-fg` |
+| `--radius`, `--radius-sm` | 8 px, 6 px (unchanged) |
+| `--mono` | System monospace stack, now with CJK fallbacks |
+
+All 19 original names remain supported, plus `--accent-hover` and the previously missing
+`--text-muted`. The core Vite dev server warns about legacy colour names in CSS/TSX/JSX
+modules outside `web/src`, such as build-time plugins loaded through
+`COMPUTEDECK_WEB_PLUGINS`. Core source is excluded. Runtime plugin bundles built with their
+own Vite config do not pass through this warning, and production builds do not warn.
+Prefer semantic tokens in new code. `--p-*` values
+are private primitives: components and plugins should not read them directly.
+
+`web/src/theme/compat.css` keeps these classes: `panel`, `panel-header`, `panel-note`,
+`button`, `primary-button`, `secondary-button`, `primary` (with `button`), `form-error`,
+`num`, `spin`, `status green|amber|red`, `table-wrap`, `table`, `compact`, `sub`, `muted`,
+`red-text`, `red`, `amber`, `link`, and `banner amber`. Dot-less status pills gain a CSS
+mask shape without an extra DOM node. A `panel` still owns its heading and padding.
+Each host slot is a bare `div.plugin-slot`; empty slots are hidden and have no host
+heading, border or padding. A plugin returning its own `Panel` gets exactly one heading.
+
+The root's optional `data-theme="light"` or `data-theme="dark"` forces the theme. Absence
+means follow the system; plugins should inherit it. The generated CSS includes an older
+WebKit fallback, contrast-more and forced-colours rules. No webfont is loaded. Chinese uses
+the same one-line heights as English, no synthesized weight or tracking, and a 1.7 prose
+line height (English 1.5). New controls are 32 px tall; Compact makes **table** controls
+28 px and rows 32 px, leaving forms alone. Row sizes include the hairline: single/two-line
+text rows are 40/60 px in Comfortable, 32/48 px in Compact, and 44/60 px with a coarse pointer.
+`table.compact` also selects 32/48 px rows in Comfortable; device Compact and coarse-pointer
+minimums still apply. Tables use separate borders with zero spacing. Padding sets the text-row
+size, so longer content and stacked cells grow instead of clipping. Touch controls are at
+least 44 px. The basic
+button reset still has no border/background/padding; the documented control classes
+supply these. Links now have an underline by default, including ordinary `<a>` elements.
+
+`computedeck plugin new hello-example --web` generates the bilingual styling example:
+page, overview `Panel`, settings `Panel`, and a banner toggled between null and `banner amber`.
+It exercises all eight exported components, the frozen classes, and ordinary links, inputs
+and selects. Its example-mode page makes no greeting request. The core UI gate builds this
+actual template with the server-plugin requirement removed **only in the test build**, plus
+an empty-overview fixture and a page-only fixture. The test-only build flag
+`COMPUTEDECK_TEST_PLUGIN_SLOTS=1` shows slots in example mode; regular builds still hide them.
+
+中文：0.8 保留 WEB_API 1 的组件 DOM、旧路由、上表中的 19 个变量和全部公共类，
+并补齐 `--accent-hover`、`--text-muted`。强调色改为墨色；主按钮使用 `--ink` 和
+`--fg-on-ink`，深色主题下不可硬编码白字。普通链接为墨色并带下划线。
+核心 Vite 开发服务器只对 `web/src` 之外的 CSS/TSX/JSX 模块提示旧颜色变量，
+例如通过 `COMPUTEDECK_WEB_PLUGINS` 加载的构建时插件；核心源码不提示。
+使用独立 Vite 配置构建的运行时插件包不会经过该检查，生产构建也不提示。
+新代码应采用语义变量；`--p-*` 是内部实现。
+插槽使用无标题、无边框、无内边距的 `div.plugin-slot`，空插槽隐藏，插件的 Panel
+自行提供标题。根元素的 `data-theme="light|dark"` 强制主题，缺省跟随系统。
+兼容 CSS 覆盖旧版 WebKit、增强对比度和强制颜色模式。中文与英文的单行高度相同，
+不合成字重、不增加字距，说明文字行高为 1.7；不下载字体。
+控件默认 32 像素；紧凑模式只把表格行和控件改为 32/28 像素，表单不受影响，
+行高包含分隔线：舒适模式单行/双行为 40/60 像素，紧凑为 32/48 像素，粗指针为
+44/60 像素。`table.compact` 在舒适模式下也使用 32/48 像素，设备紧凑模式和粗指针
+最小尺寸仍然生效。表格使用独立边框、零间距，以内边距确定文字行高；更长的内容和
+堆叠单元格会自然增高，不裁剪内容。触屏控件至少 44 像素。
+基础 button reset 不变，尺寸由控件类提供。
+`plugin new --web` 生成的双语示例覆盖所有组件、公共类和插槽，横幅可显示或隐藏。
+UI 测试构建会启用示例模式插槽并移除示例插件的服务端依赖；正式构建不启用该标志。

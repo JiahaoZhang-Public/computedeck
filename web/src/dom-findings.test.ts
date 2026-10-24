@@ -16,6 +16,7 @@ it('keeps a baseline stable across measurement and traversal-order changes', () 
     { kind: 'horizontal-overflow', identity: 'html', width: 400, viewportWidth: 375 },
     { kind: 'empty-plugin-slot', identity: '#empty-slot', width: 100, height: 10 },
     { kind: 'duplicate-heading', identity: 'h2: Example' },
+    { kind: 'cell-overflow', identity: 'td: Example', height: 60, scrollHeight: 90 },
   ];
   expect(domFingerprints(findings)).toEqual(
     domFingerprints(
@@ -34,4 +35,17 @@ it('distinguishes finding kinds and control identities', () => {
       { kind: 'duplicate-heading', identity: 'button: Example' },
     ]),
   ).toHaveLength(3);
+});
+
+it('records new cell overflows without depending on exact pixel measurements', () => {
+  const finding: DomFinding = {
+    kind: 'cell-overflow',
+    identity: 'td: Example',
+    height: 60,
+    scrollHeight: 90,
+  };
+  expect(domFingerprints([finding])).toEqual(
+    domFingerprints([{ ...finding, height: 61, scrollHeight: 95 }]),
+  );
+  expect(domFingerprints([finding])).not.toEqual(domFingerprints([]));
 });

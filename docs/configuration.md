@@ -303,3 +303,34 @@ See [Local UI checks](ui-testing.md) for the isolated service and screenshot wor
 中文：将 `COMPUTEDECK_DEMO_NOW` 设为带时区的 ISO 时间（如 `2026-01-15T14:00:00Z`），
 即可将示例数据固定在对应的 UTC 分钟，仅影响示例概览、历史、事件和采集节点，实时数据仍使用正常时钟。
 未设置时使用当前分钟；无效或不带时区的值会被拒绝。隔离服务和截图流程见[本地 UI 检查](ui-testing.md)。
+
+### Device appearance
+
+Settings → Appearance offers Follow system (default), Light and Dark, plus Comfortable
+(default) and Compact table density. These choices live only in this browser/device's
+`localStorage` (`computedeck.theme`, `computedeck.density`), not in server configuration.
+They apply before the first application render. Follow system leaves `data-theme` absent
+on `<html>` and responds immediately to OS theme changes; an explicit choice sets
+`data-theme="light|dark"`. Invalid saved values use the defaults. If storage is blocked,
+changes still work for the current page, but cannot survive a reload.
+
+Comfortable tables use 40 px rows (60 px for the shared two-line pattern) and 32 px controls;
+Compact uses 32/48 px rows and 28 px table controls. These text-row sizes include the
+hairline; longer content can grow. A plugin's `table.compact` also selects the denser rows
+in Comfortable. Coarse pointers use 44/60 px text rows, overriding both density choices.
+Forms and panels are unaffected.
+Coarse-pointer controls are at least 44 px in either density. Appearance settings work in
+example mode without writing example data to the server. High contrast, forced colours
+and reduced motion follow the browser/OS preference. Older WebKit, including iOS 16,
+uses the generated fallback palette with the same colours.
+
+中文：设置 → 外观提供「跟随系统」（默认）、「浅色」、「深色」以及表格的「舒适」
+（默认）和「紧凑」密度。选择仅保存到当前设备的浏览器 localStorage，不写入服务器。
+页面首次渲染前应用设置；跟随系统时根元素无 `data-theme`，系统主题变化会立即生效。
+无效的存储值使用默认设置；存储受限时仍可临时切换，刷新后恢复默认。
+舒适模式的单行/双行表格为 40/60 像素，控件为 32 像素；紧凑模式为 32/48 和
+28 像素，行高包含分隔线，较长内容可自然增高。插件的 `table.compact` 在舒适模式下
+也选择紧凑行高；粗指针覆盖两种密度，使用 44/60 像素文字行。仅影响表格，不影响
+表单与面板，触屏控件至少 44 像素。示例模式也能切换，
+不写入服务端示例数据。增强对比度、强制颜色和减少动态效果跟随系统，旧版 WebKit
+（包括 iOS 16）使用生成的同色兼容样式。

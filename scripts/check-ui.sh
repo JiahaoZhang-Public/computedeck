@@ -32,9 +32,24 @@ done
 export COMPUTEDECK_DEMO_NOW=2026-01-15T14:00:00Z
 export TZ=UTC
 # Build only core code, even when the developer normally loads private plugins.
-unset COMPUTEDECK_WEB_PLUGINS
+unset COMPUTEDECK_WEB_PLUGINS COMPUTEDECK_TEST_PLUGIN_SLOTS COMPUTEDECK_FALLBACK_TOKENS COMPUTEDECK_HELLO_EXAMPLE
 npm --prefix web run build -- --outDir "$work/web"
 node web/scripts/check-size.mjs "$work/web"
+# Separate builds exercise the older-engine fallback and the actual plugin-new template.
+COMPUTEDECK_FALLBACK_TOKENS=1 npm --prefix web run build -- --base /__ui-fallback/ --outDir "$work/fallback"
+"$root/.venv/bin/python" - "$work/hello.jsx" <<'PYTHON'
+import sys
+from pathlib import Path
+from computedeck.scaffold import WEB_ENTRY
+
+# No server plugin is needed: example mode keeps the hello page's reads local.
+source = WEB_ENTRY.format(id="hello-example", title="Hello example")
+source = source.replace("  requires: 'hello-example',\n", "")
+Path(sys.argv[1]).write_text(source)
+PYTHON
+COMPUTEDECK_WEB_PLUGINS="$root/web/e2e/plugins.tsx" \
+COMPUTEDECK_HELLO_EXAMPLE="$work/hello.jsx" COMPUTEDECK_TEST_PLUGIN_SLOTS=1 \
+  npm --prefix web run build -- --base /__ui-plugins/ --outDir "$work/plugins"
 mkdir -p "$work/data"
 "$root/.venv/bin/python" scripts/ui-server.py "$work" >"$work/service.log" 2>&1 &
 service_pid=$!

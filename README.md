@@ -99,7 +99,7 @@ Kubernetes, PBS, LSF, Vast.ai and GPUhub are beta integrations. The interface su
 
 ComputeDeck is available as a source preview. No PyPI package has been released yet.
 
-You need macOS or Linux, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Node.js 22 and OpenSSH. Node is needed to build the web interface.
+You need macOS or Linux, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Node.js 22.18+ (or 24) and OpenSSH. Node is needed to build the web interface.
 
 ```sh
 git clone https://github.com/JiahaoZhang-Public/computedeck.git

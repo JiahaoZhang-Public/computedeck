@@ -363,12 +363,16 @@ export function Frame({
             </button>
           </div>
         )}
-        {!demo &&
+        {(!demo || __TEST_PLUGIN_SLOTS__) &&
           plugins
             .filter((item) => item.banner)
             .map((item) => {
               const Banner = item.banner!;
-              return <Banner key={item.id} {...plugin} />;
+              return (
+                <div className="plugin-slot" data-plugin={item.id} key={item.id}>
+                  <Banner {...plugin} />
+                </div>
+              );
             })}
         {children}
       </div>

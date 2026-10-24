@@ -1,0 +1,324 @@
+/* WEB_API 1 frozen class surface. Exported component DOM is unchanged. */
+.muted {
+  color: var(--text-3);
+}
+.red-text {
+  color: var(--red);
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.banner.amber {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.banner.red {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.banner .link {
+  margin-left: auto;
+  color: inherit;
+  text-decoration: underline;
+}
+.button,
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  transition:
+    background var(--dur-fast),
+    border-color var(--dur-fast);
+}
+.button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+.primary-button,
+.button.primary,
+.button.primary-button {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--fg-on-ink);
+}
+.primary-button:hover:not(:disabled),
+.button.primary:hover:not(:disabled),
+.button.primary-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-text);
+  font-size: 13px;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.form-error {
+  color: var(--red);
+  background: var(--red-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-header h2,
+.usage-trend h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.panel-header p {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.panel-note {
+  padding: 10px 16px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+  border-top: 1px solid var(--border);
+}
+.panel-header + .panel-note,
+.toolbar + .panel-note {
+  border-top: 0;
+}
+.panel-note.red {
+  color: var(--red);
+}
+.table-wrap {
+  container-type: inline-size;
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  /* Separate hairlines avoid engine-dependent half-pixel collapsed borders. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table td {
+  --cell-border-h: 1px;
+  font: var(--type-small);
+  padding: calc((var(--row-h) - 20px - var(--cell-border-h)) / 2) 12px;
+  border-bottom: var(--cell-border-h) solid var(--border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.table tr.note-row td {
+  white-space: normal;
+}
+.table th:first-child,
+.table td:first-child {
+  padding-left: 16px;
+}
+.table th:last-child,
+.table td:last-child {
+  padding-right: 16px;
+}
+.table tbody tr:last-child td {
+  --cell-border-h: 0px;
+  border-bottom: 0;
+}
+.table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.table tr.clickable {
+  cursor: pointer;
+}
+.table tr.clickable:hover td {
+  background: var(--surface-hover);
+}
+.table tr.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.table tr.dim td {
+  color: var(--text-3);
+}
+.table tr.has-note td {
+  border-bottom: 0;
+}
+.table tr.note-row td {
+  padding-top: 0;
+  font-size: 12px;
+}
+.sub {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+  margin-top: 1px;
+}
+.table td > strong {
+  display: block;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.status i,
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-4);
+  flex-shrink: 0;
+}
+.status.green i,
+.dot.green {
+  background: var(--green);
+}
+.status.amber i,
+.dot.amber {
+  background: var(--amber);
+}
+.status.red i,
+.dot.red {
+  background: var(--red);
+}
+.status.red {
+  color: var(--red);
+}
+.status:not(:has(i)) {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--gray-soft);
+}
+.status.green:not(:has(i)) {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.status.amber:not(:has(i)) {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.status.red:not(:has(i)) {
+  background: var(--red-soft);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.red {
+  color: var(--red);
+}
+.amber {
+  color: var(--amber);
+}
+.link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.button,
+.primary-button,
+.secondary-button {
+  text-decoration: none;
+}
+/* Dot-less WEB_API 1 pills get masks without changing their DOM. F5 shares these
+   outlines with StatusShape; existing <Status> markup is deliberately retained. */
+.status:not(:has(i))::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  flex: none;
+  background: var(--status-unknown-shape);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='4.5' fill='none' stroke='black' stroke-width='1.5' stroke-dasharray='3 2'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.status.green:not(:has(i)) {
+  color: var(--fg-default);
+}
+.status.green:not(:has(i))::before {
+  background: var(--status-ok-shape);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='5'/%3E%3C/svg%3E");
+}
+.status.amber:not(:has(i))::before {
+  background: var(--status-warn-shape);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 1 11 11H1Z'/%3E%3C/svg%3E");
+}
+.status.red:not(:has(i))::before {
+  background: var(--status-error-shape);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m6 0 6 6-6 6-6-6Z'/%3E%3C/svg%3E");
+}
+.plugin-slot:empty {
+  display: none;
+}
+@media (forced-colors: active) {
+  .status:not(:has(i))::before {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+  .button,
+  .primary-button,
+  .secondary-button {
+    border-color: ButtonText;
+  }
+}
+
+.table tr:has(.sub) td {
+  /* Two 20px lines and the existing .sub margin; content can always grow. */
+  padding-block: calc((var(--row-two-h) - 41px - var(--cell-border-h)) / 2);
+}

@@ -51,6 +51,20 @@ export async function checkLayout(page: Page): Promise<DomFinding[]> {
       const box = node.getBoundingClientRect();
       return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
     };
+    for (const cell of document.querySelectorAll('td,th')) {
+      if (
+        visible(cell) &&
+        getComputedStyle(cell).display !== 'table-cell' &&
+        cell.scrollHeight > cell.clientHeight + 1
+      ) {
+        issues.push({
+          kind: 'cell-overflow',
+          identity: identity(cell),
+          height: cell.clientHeight,
+          scrollHeight: cell.scrollHeight,
+        });
+      }
+    }
     for (const slot of document.querySelectorAll('.plugin-slot')) {
       if (
         visible(slot) &&
