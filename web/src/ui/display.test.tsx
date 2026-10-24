@@ -16,7 +16,7 @@ import { HowWorkedOut } from './ScopeLine';
 import { DisplayGallery } from './DisplayGallery';
 import { Monogram } from './Identity';
 import { ScopeLine } from './ScopeLine';
-import { saveClock, clockTime } from '../format';
+import { saveClock, clockTime, dateTime } from '../format';
 import { useClock } from './clock';
 
 const container = document.createElement('div');
@@ -84,8 +84,16 @@ describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
     expect(decorative.hasAttribute('role')).toBe(false);
   });
   it('keeps time disclosures phrasing-only and row descriptions available while collapsed', async () => {
-    const time = <Time value={example.at} descriptionId="row-time" />;
-    await act(async () => root.render(<p>{time}</p>));
+    await act(async () =>
+      root.render(
+        <p>
+          <Time value={example.at} />
+          <Time value={example.at} descriptionId="row-time" />
+        </p>,
+      ),
+    );
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelector('#row-time')?.parentElement?.querySelector('button')).toBeNull();
     const button = container.querySelector('button')!;
     const disclosure = document.getElementById(button.getAttribute('aria-controls')!)!;
     expect(button.type).toBe('button');
@@ -169,9 +177,35 @@ describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
     expect(values[1]).toContain(language === 'zh-CN' ? '≈ US$41.20' : '≈ $41.20');
     expect(values[1]).toContain(t('display.estimate'));
     expect(values[2]).toBe('— · missing');
+    const unknown = container.querySelector('.value-unknown')!;
+    expect(unknown.querySelector('.value-unknown-mark')?.textContent).toBe('—');
+    expect(unknown.querySelector('.value-unit')?.closest('.value-unknown-mark')).toBeNull();
     expect(values[3]).toContain(`${t('display.lastKnown')} 2`);
     expect(values[4]).toBe('— · late');
     expect(values[5]).toBe('≥ 29');
+  });
+  it('shows a date for readings outside today in the local timezone', async () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 0, 15, 14, 0);
+    vi.setSystemTime(now);
+    const today = new Date(2026, 0, 15, 13, 46).toISOString();
+    const yesterday = new Date(2026, 0, 14, 13, 46).toISOString();
+    const lastYear = new Date(2025, 0, 15, 13, 46).toISOString();
+    await act(async () =>
+      root.render(
+        <>
+          <Time value={today} />
+          <Time value={yesterday} />
+          <Time value={lastYear} descriptionId="older-time" />
+        </>,
+      ),
+    );
+    expect([...container.querySelectorAll('time')].map((node) => node.textContent)).toEqual([
+      clockTime(Date.parse(today)),
+      dateTime(yesterday),
+      dateTime(lastYear),
+    ]);
+    expect(container.querySelector('#older-time')?.textContent).toContain('2025');
   });
   it('exposes the server trace and all data states in the gallery', async () => {
     await act(async () => root.render(<DisplayGallery example={example} />));
@@ -267,7 +301,7 @@ it('publishes only minute boundaries and format changes, with one timer under St
   expect(commits).toHaveBeenCalledTimes(1);
   await act(async () => vi.advanceTimersByTime(1));
   expect(commits).toHaveBeenCalledTimes(2);
-  const absolute = container.querySelectorAll('button time')[1];
+  const absolute = container.querySelector('button time')!;
   const previousTime = absolute.textContent;
   await act(async () => saveClock('12'));
   expect(commits).toHaveBeenCalledTimes(3);

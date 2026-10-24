@@ -90,8 +90,6 @@ export function money(value: number | null, currency: string, lowerBound = false
   }
 }
 
-type DurationFormatter = { format: (duration: { hours: number; minutes: number }) => string };
-const durations = new Map<string, DurationFormatter>();
 export function duration(seconds: number, style: 'table' | 'prose' = 'prose') {
   if (!Number.isFinite(seconds) || seconds < 0) return '—';
   const whole = Math.floor(seconds);
@@ -100,16 +98,6 @@ export function duration(seconds: number, style: 'table' | 'prose' = 'prose') {
   if (style === 'table')
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
   if (whole < 60) return t('cost.duration.minutes', { count: 0 });
-  const Constructor = (
-    Intl as typeof Intl & {
-      DurationFormat?: new (language: string, options: { style: string }) => DurationFormatter;
-    }
-  ).DurationFormat;
-  if (Constructor) {
-    if (!durations.has(locale()))
-      durations.set(locale(), new Constructor(locale(), { style: 'short' }));
-    return durations.get(locale())!.format({ hours, minutes });
-  }
   return [
     hours ? t('cost.duration.hours', { count: hours }) : '',
     minutes || !hours ? t('cost.duration.minutes', { count: minutes }) : '',

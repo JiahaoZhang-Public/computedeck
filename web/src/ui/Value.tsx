@@ -27,7 +27,7 @@ export function Value({
   return (
     <span className={`display-value${unknown ? ' value-unknown' : ''}`}>
       {unknown ? (
-        '—'
+        <span className="value-unknown-mark">—</span>
       ) : (
         <>
           {kind === 'lower'

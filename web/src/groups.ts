@@ -45,14 +45,7 @@ export function groupsOf(
   }
   return [...result.values()].map((group, index) => ({
     ...group,
-    color:
-      (data.identity_slots?.[
-        group.kind === 'cluster'
-          ? group.key
-          : group.sources.length
-            ? `platform:${group.sources[0].name.trim().toLowerCase()}`
-            : group.key
-      ] ?? (index % 6) + 1) - 1,
+    color: (data.identity_slots?.[group.key] ?? (index % 6) + 1) - 1,
     initials: initials(group.label),
   }));
 }

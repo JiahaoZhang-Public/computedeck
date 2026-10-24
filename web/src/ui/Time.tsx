@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { absoluteTime, clockTime, duration, relativeTime } from '../format';
+import { absoluteTime, calendarDate, clockTime, dateTime, duration, relativeTime } from '../format';
 import { t } from '../i18n';
 import { useClock } from './clock';
 import { StatusShape } from './Status';
@@ -19,6 +19,20 @@ export function Time({
   const disclosureId = useId();
   const [expanded, setExpanded] = useState(false);
   if (!value || !Number.isFinite(Date.parse(value))) return <span>{t('time.unknown')}</span>;
+  const label = relative
+    ? relativeTime(value, now)
+    : calendarDate(new Date(value)) === calendarDate(new Date(now))
+      ? clockTime(Date.parse(value))
+      : dateTime(value);
+  if (descriptionId)
+    return (
+      <span className="display-time">
+        <time dateTime={value}>{label}</time>
+        <span className="sr-only" id={descriptionId}>
+          {absoluteTime(value)} · {relativeTime(value, now)}
+        </span>
+      </span>
+    );
   return (
     <span className="display-time">
       <button
@@ -33,18 +47,11 @@ export function Time({
           }
         }}
       >
-        <time dateTime={value}>
-          {relative ? relativeTime(value, now) : clockTime(Date.parse(value))}
-        </time>
+        <time dateTime={value}>{label}</time>
       </button>
       <span className="time-disclosure" id={disclosureId} hidden={!expanded}>
         {absoluteTime(value)} · {relativeTime(value, now)}
       </span>
-      {descriptionId && (
-        <span className="sr-only" id={descriptionId}>
-          {absoluteTime(value)} · {relativeTime(value, now)}
-        </span>
-      )}
     </span>
   );
 }

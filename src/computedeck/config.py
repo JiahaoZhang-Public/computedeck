@@ -288,7 +288,7 @@ def export(store: Store) -> str:
         if settings.get(key) is not None:
             lines.append(f"{key} = {_value(settings[key])}")
     lines += ["", "[identity_slots]"]
-    for key, slot in store.identity_slots().items():
+    for key, slot in store.identity_slot_overrides().items():
         lines.append(f"{_value(key)} = {slot}")
     for node in store.nodes():
         lines += ["", "[[node]]"]

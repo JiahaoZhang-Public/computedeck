@@ -117,6 +117,9 @@ test('time disclosures support Enter, Space and Escape and describe collapsed ro
 }) => {
   await page.goto('/?demo=true#/__gallery');
   await ready(page);
+  const row = page.locator('tr:has(.display-row-link)');
+  await expect(row.locator('button')).toHaveCount(0);
+  await expect(row.locator('time')).toHaveCount(1);
   const time = page.locator('.display-time').first();
   const button = time.getByRole('button');
   const disclosure = time.locator('.time-disclosure');
@@ -224,9 +227,76 @@ test('display gallery controls fit the viewport and meet touch targets, collapse
   }
   // Includes the disclosed rule's Time button as well as copy, Clear and first-use links.
   expect(await checkLayout(page)).toEqual([]);
+  // Click auto-scrolling can leave the row link under the sticky mobile header.
+  // Audit the expanded state from the top; axe still checks off-screen targets.
+  await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   const results = await new AxeBuilder({ page })
     .include('.gallery')
     .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
     .analyze();
   expect(results.violations).toEqual([]);
+  if (hasTouch)
+    expect(
+      results.passes
+        .find((rule) => rule.id === 'target-size')
+        ?.nodes.some((node) => node.html.includes('class="display-row-link"')),
+      'The off-screen row link must still pass the target-size audit',
+    ).toBe(true);
+});
+
+for (const contrast of ['no-preference', 'more'] as const) {
+  test(`unknown reasons stay outside the hatch with contrast ${contrast}`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ contrast });
+    await page.goto('/?demo=true#/__gallery');
+    await ready(page);
+    const value = page.locator('.value-unknown').first();
+    const mark = value.locator('.value-unknown-mark');
+    const reason = value.locator('.value-unit');
+    await expect(mark).toHaveText('—');
+    await expect(mark).toHaveCSS('border-top-style', 'dashed');
+    expect(await mark.evaluate((node) => getComputedStyle(node).backgroundImage)).toContain(
+      'linear-gradient',
+    );
+    await expect(value).toHaveCSS('background-image', 'none');
+    await expect(reason).toHaveCSS('background-image', 'none');
+    await withScreenshotViewport(page, testInfo, (options) =>
+      expect(page).toHaveScreenshot(`display-reasons-${contrast}.png`, options),
+    );
+    for (const background of [
+      'canvas',
+      'surface',
+      'sunken',
+      'hover',
+      'selected',
+      'raised',
+      'overlay',
+    ]) {
+      await value.evaluate((node, bg) => {
+        (node as HTMLElement).style.backgroundColor = `var(--bg-${bg})`;
+      }, background);
+      const result = await new AxeBuilder({ page })
+        .include('.value-unknown')
+        .withRules(['color-contrast'])
+        .analyze();
+      expect(result.violations, background).toEqual([]);
+    }
+  });
+}
+
+test('previous-day readings show their date before disclosure', async ({ page, locale }) => {
+  await page.clock.setFixedTime(new Date(Date.parse(demoNow) + 86400000));
+  await page.goto('/?demo=true#/__gallery');
+  await ready(page);
+  const at = new Date(Date.parse(demoNow) - 120000);
+  await expect(page.locator('.scope-line time')).toHaveText(
+    new Intl.DateTimeFormat(locale, {
+      hour12: false,
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    }).format(at),
+  );
 });

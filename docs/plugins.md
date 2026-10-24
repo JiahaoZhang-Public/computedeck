@@ -1267,14 +1267,17 @@ UI 测试构建会启用示例模式插槽并移除示例插件的服务端依�
 The eight `window.ComputeDeck.components` and their DOM remain unchanged. New core
 components in `web/src/ui/` are internal; they are not additions to WEB_API 1.
 Icon-less green/amber/red compat pills use masks generated from the same SVG definitions
-as core `StatusShape`; `compat.css` imports those masks. No frozen class or token is removed.
-The dashboard's additive `identity_slots` map uses 1-based slots (1–6), keyed by cluster id
-or normalized `platform:<name>`; see [configuration](configuration.md#display-identity-and-clock).
+as core `StatusShape`; `compat.css` imports those masks. Their ok/warn/error outlines
+changed slightly in 0.8. No frozen class or token is removed.
+The dashboard's additive `identity_slots` map uses 1-based slots (1–6), keyed by `cluster_id`
+for all source-backed groups (including clouds), or normalized `platform:<name>` for manual
+machines; see [configuration](configuration.md#display-identity-and-clock).
 Consumers must not infer a status from an identity colour or recompute slots from list order.
 The legacy host `format.dateTime` now respects the device's 12/24-hour clock choice;
 `format.relativeTime` keeps its existing output contract.
 
 中文：八个插件导出组件及其 DOM 不变，新显示组件仅供核心内部使用。
-无图标的兼容状态标签与核心组件共用 SVG 蒙版定义，没有移除已有类名或令牌。
+无图标的兼容状态标签与核心组件共用 SVG 蒙版定义，正常、警告和错误轮廓在 0.8 中略有调整，
+没有移除已有类名或令牌。数据源组（含云平台）使用 `cluster_id`，手动机器使用规范化平台键。
 仪表盘新增 `identity_slots`，色位为 1–6；不要用颜色推断状态，也不要按列表顺序重新分配。
 `format.dateTime` 遵循设备的 12/24 小时设置，`format.relativeTime` 保持原有输出约定。

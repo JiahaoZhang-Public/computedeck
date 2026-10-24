@@ -1,4 +1,4 @@
-import { serverDashboard, serverNodeHealth } from './test-server';
+import { serverDashboard, serverDemo, serverNodeHealth } from './test-server';
 type Dashboard = Omit<ServerDashboard, 'summary'>;
 import { describe, expect, it } from 'vitest';
 import { groupLabel, groupsOf, initials, instanceGroupKey } from './groups';
@@ -171,7 +171,7 @@ it('uses the server identity map without changing any group or route key', () =>
     source({ id: 'pods', name: 'RunPod', kind: 'cloud', driver: 'runpod', cluster_id: 'pods' }),
   ];
   const instances = [instance({})];
-  const identity_slots = { 'cluster-a': 6, 'platform:runpod': 4, 'platform:lab workstation': 2 };
+  const identity_slots = { 'cluster-a': 6, pods: 4, 'platform:lab workstation': 2 };
   const groups = groupsOf({ sources, instances, identity_slots });
   expect(groups.map(({ key, color }) => [key, color])).toEqual([
     ['cluster-a', 5],
@@ -182,4 +182,28 @@ it('uses the server identity map without changing any group or route key', () =>
   for (const group of groups)
     expect(reordered.find(({ key }) => key === group.key)?.color).toBe(group.color);
   expect(groupsOf({ sources: sources.slice(1), instances, identity_slots })[0].color).toBe(3);
+});
+
+it('finds every demo group in the server identity map without an order fallback', () => {
+  const data = serverDemo();
+  const groups = groupsOf(data);
+  expect(groups.map(({ key }) => key).sort()).toEqual(Object.keys(data.identity_slots!).sort());
+  for (const group of groups) {
+    expect(data.identity_slots).toHaveProperty(group.key);
+    expect(group.color).toBe(data.identity_slots![group.key] - 1);
+  }
+  const reversed = groupsOf({ ...data, sources: [...data.sources].reverse() });
+  expect(Object.fromEntries(reversed.map(({ key, color }) => [key, color]))).toEqual(
+    Object.fromEntries(groups.map(({ key, color }) => [key, color])),
+  );
+  const cloud = data.sources.find((source) => source.kind === 'cloud')!;
+  const renamed = groupsOf({
+    ...data,
+    sources: data.sources.map((source) =>
+      source.id === cloud.id ? { ...source, name: 'Renamed login' } : source,
+    ),
+  });
+  expect(renamed.find(({ key }) => key === cloud.cluster_id)?.color).toBe(
+    data.identity_slots![cloud.cluster_id] - 1,
+  );
 });

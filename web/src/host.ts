@@ -32,7 +32,7 @@ export interface Host {
   };
   request: typeof api;
   /** Times and links formatted the way the rest of the page does. */
-  format: { relativeTime: typeof relativeTime; dateTime: typeof dateTime };
+  format: { relativeTime: (value: string | null | undefined) => string; dateTime: typeof dateTime };
   routeHash: typeof routeHash;
   routeAliases: typeof routeAliases;
   locale: typeof locale;
@@ -53,7 +53,7 @@ export function installHost() {
     jsxRuntime,
     components: { BrandMark, Chips, Empty, Meter, Panel, Stat, Status, Switch },
     request: api,
-    format: { relativeTime, dateTime },
+    format: { relativeTime: (value) => relativeTime(value), dateTime },
     routeHash,
     routeAliases,
     locale,

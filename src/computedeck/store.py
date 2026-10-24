@@ -271,13 +271,21 @@ class Store:
         for key in keys:
             self._repaired("attention_state", key)
 
+    def identity_slot_overrides(self) -> dict[str, int]:
+        return self._meta("identity_slot_overrides") or {}
+
     def identity_slots(self, overrides: dict[str, int] | None = None) -> dict[str, int]:
         from .identity import assign_slots, group_keys
 
         saved = self._meta("identity_slots") or {}
         sources = self.sources()
         instances = [{**item, "manual": True} for item in self.manual_instances()]
-        slots = assign_slots(group_keys(sources, instances), {**saved, **(overrides or {})})
+        keys = group_keys(sources, instances)
+        explicit = {**self.identity_slot_overrides(), **(overrides or {})}
+        explicit = {key: slot for key, slot in explicit.items() if key in keys}
+        if explicit != self.identity_slot_overrides() and not self.readonly:
+            self._set_meta("identity_slot_overrides", explicit)
+        slots = assign_slots(keys, {**saved, **explicit})
         if slots != saved and not self.readonly:
             self._set_meta("identity_slots", slots)
         return slots

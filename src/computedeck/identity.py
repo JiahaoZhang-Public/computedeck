@@ -5,15 +5,7 @@ from typing import Any
 
 
 def group_keys(sources: list[dict[str, Any]], instances: list[dict[str, Any]]) -> list[str]:
-    groups: dict[str, dict[str, Any]] = {}
-    for source in sources:
-        groups.setdefault(source["cluster_id"], source)
-    keys = [
-        source["cluster_id"]
-        if source["kind"] == "cluster"
-        else f"platform:{source['name'].strip().lower()}"
-        for source in groups.values()
-    ]
+    keys = [source["cluster_id"] for source in sources]
     keys += [
         f"platform:{item['platform'].strip().lower()}"
         for item in instances

@@ -59,7 +59,8 @@ def test_config_round_trip_and_override(store: Store, tmp_path: Path) -> None:
     target = Store(tmp_path / "target.sqlite")
     config.apply(target, exported)
     assert target.identity_slots() == store.identity_slots()
-    assert config.load(exported)["identity_slots"] == store.identity_slots()
+    assert config.load(exported)["identity_slots"] == {"cluster-a": 6}
+    assert target.identity_slot_overrides() == {"cluster-a": 6}
     target.db.close()
 
 
@@ -82,8 +83,12 @@ def test_platform_identity_is_separate_from_legacy_route_key(store: Store) -> No
         InstanceInput(platform="RunPod", external_id="box", name="Box", host="example.test")
     )
     store.save_instance(machine)
-    assert store.identity_slots().keys() == {"platform:runpod"}
-    assert group_keys(store.sources(), [{**machine, "manual": True}]) == ["platform:runpod"]
+    assert store.identity_slots().keys() == {"pods-a", "pods-b", "platform:runpod"}
+    assert group_keys(store.sources(), [{**machine, "manual": True}]) == [
+        "pods-a",
+        "pods-b",
+        "platform:runpod",
+    ]
     store.delete_source(cloud["id"])
     store.delete_source("pods-b")
     assert store.identity_slots().keys() == {"platform:runpod"}
@@ -108,9 +113,16 @@ def test_demo_display_states_are_fixed_and_do_not_persist(
 ) -> None:
     monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
     data = demo.dashboard()
-    assert data["identity_slots"] == assign_slots(
-        group_keys(data["sources"], data["instances"]), {}
-    )
+    assert data["identity_slots"] == {
+        "example:cluster-a": 3,
+        "example:cluster-b": 4,
+        "example:runpod": 1,
+        "example:cluster-c": 5,
+        "example:cluster-d": 6,
+        "example:lab-server": 2,
+        "example:ec2": 1,
+        "platform:lab workstation": 2,
+    }
     example = data["display_example"]
     assert example == {
         "known": 29,
@@ -138,3 +150,52 @@ def test_legacy_machine_without_platform_keeps_its_data(store: Store, platform: 
     store.save_instance(item)
     assert store.dashboard()["instances"][0]["gpu_count"] == 2
     assert group_keys([], [{"id": "old", "manual": True}]) == []
+
+
+def test_cloud_identity_survives_first_login_rename_and_removal(store: Store) -> None:
+    for key in ("cluster-a", "cluster-b", "cluster-c"):
+        store.save_source(source(key))
+    first = source_record(
+        SourceInput(name="Pods", driver="runpod", cluster_id="pods", enabled=False)
+    )
+    store.save_source(first)
+    store.save_source({**first, "id": "pods-second", "name": "Pods second"})
+    initial = store.identity_slots()
+    store.save_source({**first, "name": "Renamed login"})
+    assert store.identity_slots() == initial
+    store.delete_source(first["id"])
+    assert store.identity_slots() == initial
+    assert "pods" in initial
+
+
+def test_merge_import_does_not_turn_automatic_slots_into_overrides(
+    store: Store, tmp_path: Path
+) -> None:
+    store.save_source(source("cluster-a"))
+    target = Store(tmp_path / "target.sqlite")
+    target.save_source(source("cluster-g"))
+    initial = target.identity_slots()
+    assert initial["cluster-g"] == store.identity_slots()["cluster-a"]
+    exported = config.export(store)
+    assert config.load(exported)["identity_slots"] == {}
+    config.apply(target, exported)
+    assert target.identity_slots()["cluster-g"] == initial["cluster-g"]
+    assert len(set(target.identity_slots().values())) == 2
+    for key in ("cluster-b", "cluster-c", "cluster-d", "cluster-e"):
+        target.save_source(source(key))
+    assert set(target.identity_slots().values()) == set(range(1, 7))
+    target.db.close()
+
+
+def test_explicit_overrides_survive_restart_and_can_intentionally_share(store: Store) -> None:
+    for key in ("cluster-a", "cluster-b"):
+        store.save_source(source(key))
+    store.identity_slots({"cluster-a": 6, "cluster-b": 6})
+    restarted = Store(store.path)
+    assert config.load(config.export(restarted))["identity_slots"] == {
+        "cluster-a": 6,
+        "cluster-b": 6,
+    }
+    restarted.delete_source(source("cluster-a")["id"])
+    assert restarted.identity_slot_overrides() == {"cluster-b": 6}
+    restarted.db.close()

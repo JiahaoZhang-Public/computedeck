@@ -63,18 +63,6 @@ describe.each(['en', 'zh-CN'] as const)('formatting %s', (language) => {
     expect(duration(-1)).toBe('—');
     expect(duration(NaN)).toBe('—');
   });
-  it('uses cached native DurationFormat when available', () => {
-    setLocale(language);
-    const format = vi.fn(() => 'native duration');
-    const Constructor = vi.fn(function () {
-      return { format };
-    });
-    vi.stubGlobal('Intl', Object.assign(Object.create(Intl), { DurationFormat: Constructor }));
-    expect(duration(11400)).toBe('native duration');
-    duration(12000);
-    expect(Constructor).toHaveBeenCalledOnce();
-    expect(format).toHaveBeenCalledWith({ hours: 3, minutes: 10 });
-  });
   it('keeps currencies separate and lower-bound rounding downward', () => {
     setLocale(language);
     expect(money(41.209, 'USD', true)).toBe(money(41.2, 'USD'));
@@ -98,63 +86,25 @@ it('survives blocked device storage and ignores invalid clock values', () => {
 });
 
 describe.each(['en', 'zh-CN'] as const)('duration boundaries in %s', (language) => {
-  describe.each([true, false])('DurationFormat present: %s', (present) => {
-    it.each([0, 59, 60, 11520])(
-      'renders %s seconds without an empty prose label',
-      async (seconds) => {
-        const NativeDurationFormat = (
-          Intl as typeof Intl & {
-            DurationFormat?: new (
-              language: string,
-              options: { style: string },
-            ) => {
-              format: (value: { hours: number; minutes: number }) => string;
-            };
-          }
-        ).DurationFormat;
-        // Node 22 CI may lack DurationFormat. Keep the present branch covered there too,
-        // including the native empty-zero behaviour that caused this regression.
-        const labels: Record<number, string> =
-          language === 'en'
-            ? { 0: '', 1: '1 min', 192: '3 hr, 12 min' }
-            : { 0: '', 1: '1分钟', 192: '3小时12分钟' };
-        const native = NativeDurationFormat
-          ? new NativeDurationFormat(language, { style: 'short' })
-          : {
-              format: ({ hours, minutes }: { hours: number; minutes: number }) =>
-                labels[hours * 60 + minutes],
-            };
-        const Constructor = vi.fn(function () {
-          return native;
-        });
-        vi.stubGlobal(
-          'Intl',
-          Object.assign(Object.create(Intl), { DurationFormat: present ? Constructor : undefined }),
-        );
-        // Isolate the formatter cache from the constructor-spy tests above.
-        vi.resetModules();
-        const messages = await import('./i18n');
-        await messages.loadLocale(language);
-        messages.setLocale(language);
-        const { duration: formatDuration } = await import('./format');
-        const value = formatDuration(seconds);
-        expect(value).not.toBe('');
-        expect(Constructor).toHaveBeenCalledTimes(present && seconds >= 60 ? 1 : 0);
-        if (seconds < 60) expect(value).toBe(messages.t('cost.duration.minutes', { count: 0 }));
-        else if (present)
-          expect(value).toBe(
-            native.format({
-              hours: Math.floor(seconds / 3600),
-              minutes: Math.floor(seconds / 60) % 60,
-            }),
-          );
-        else
-          expect(value).toBe(
-            seconds === 60
-              ? messages.t('cost.duration.minutes', { count: 1 })
-              : `${messages.t('cost.duration.hours', { count: 3 })} ${messages.t('cost.duration.minutes', { count: 12 })}`,
-          );
-      },
-    );
-  });
+  it.each([true, false])(
+    'uses the same localized spelling with DurationFormat present: %s',
+    (present) => {
+      setLocale(language);
+      const Constructor = vi.fn(() => {
+        throw new Error('native duration spelling must not be used');
+      });
+      vi.stubGlobal(
+        'Intl',
+        Object.assign(Object.create(Intl), {
+          DurationFormat: present ? Constructor : undefined,
+        }),
+      );
+      expect([0, 59, 60, 11520].map((seconds) => duration(seconds))).toEqual(
+        language === 'en'
+          ? ['0 min', '0 min', '1 min', '3 h 12 min']
+          : ['0 分钟', '0 分钟', '1 分钟', '3 小时 12 分钟'],
+      );
+      expect(Constructor).not.toHaveBeenCalled();
+    },
+  );
 });
