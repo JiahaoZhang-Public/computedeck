@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0 (2026-10-24)
 
 - Fix final-review issues: size copied Slurm flags within the proven partition; allow example-mode copying; wrap copy notes and show explanation factors across the row. Improve preset tap targets, accessible control names and Cloud sampling labels.
 - Treat busy GPU utilization as evidence of use even when processes are invisible. Keep legacy plugin start-time text readable, treating ambiguous instance starts as unknown. Round partial spend down consistently and never guess a currency for low-use costs.
@@ -19,7 +19,7 @@
 - Recognize SSH machines that are also scheduler nodes using a unique session IP match corroborated by the probed hostname. Label the shared host and count its GPUs with the cluster in summaries and new history; keep hardware checks and separate prices. Missing or ambiguous identity stays unmatched, with no extra connections or DNS lookups.
 - Keep plugin API, web API, database schema versions and route IDs unchanged. Add optional measurement, cost, queue, wait-history and host-identity fields, opt-in usage rollups, and low-use settings. Existing event subscriptions are unchanged.
 
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-10-22)
 
 - Collapse QoS lists by default and show their entry counts. Keep cluster account columns readable when expanded, with queue labels wrapping within their column and cards on narrow screens.
 - Browse a searchable Activity page with failed, job, source, gap, your-change and plugin filters, cluster or platform scope, and 24-hour, 7-day or 30-day history. Load older rows, expand recorded facts and open job snapshots; new arrivals wait behind a button instead of moving the list.
