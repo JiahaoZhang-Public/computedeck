@@ -142,10 +142,11 @@ uv run computedeck connect my-server
 
 ```sh
 bash scripts/check.sh    # lint、格式、类型、测试和网页构建
+bash scripts/check-ui.sh # 浏览器 UI 检查：截图、axe、DOM 检查（见 docs/ui-testing.md）
 bash scripts/build.sh    # 本地构建 wheel 和 sdist，包含网页
 ```
 
-使用外部 Playwright 安装检查示例页面布局：`PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs`（可用 `PLAYWRIGHT_EXECUTABLE_PATH` 指定浏览器可执行文件）。
+每个条目完成后都须运行浏览器 UI 检查。Playwright 已包含在 `web/` 的开发依赖中；浏览器选择、页面筛选和基线更新流程见[本地 UI 检查](docs/ui-testing.md)。
 
 Python 服务位于 `src/computedeck`，React 界面位于 `web`，Python 测试位于 `tests`。
 

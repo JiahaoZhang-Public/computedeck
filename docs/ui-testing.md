@@ -30,7 +30,8 @@ minute. Invalid or timezone-less values fail explicitly. The default continues t
 current minute. Example summary freshness and history rollups use the same clock; live
 collection and live API clocks are unchanged. Event range filters use the example clock
 in example mode and the real clock for live data. The harness uses `2026-01-15T14:00:00Z`,
-Playwright's fixed browser clock and UTC. In the test transport only, health's host name,
+exported by `check-ui.sh` for both the service and Playwright's fixed browser clock, and UTC.
+The browser fixture fails if this variable is missing. In the test transport only, health's host name,
 database path and service start time become generic stable values so public artifacts
 contain no developer paths and do not vary with service restarts. Metrics are not mocked.
 The only screenshot mask is Settings → Service → Address (`.page-settings .kv > div >
@@ -122,7 +123,8 @@ Normal PR runs compare those baselines. Until that first artifact is reviewed an
 CI reports missing baselines; an absent baseline is not a passing gate.
 
 In a socket-restricted sandbox, run `npm --prefix web run typecheck` (which includes the
-Playwright suite) and, from `web/`, `npx --no-install playwright test --list`. The browser
+Playwright suite) and, from `web/`,
+`COMPUTEDECK_DEMO_NOW=2026-01-15T14:00:00Z npx --no-install playwright test --list`. The browser
 UI gate must run outside a socket-restricted sandbox. Never skip socket-based
 service/security tests or weaken assertions to make the sandbox pass.
 
@@ -137,6 +139,8 @@ component DOM or page styling; the missing `--text-muted` alias remains visible 
 The build emits Vite's standard manifest. `scripts/build.sh` removes `.vite` from the
 copied package assets, so the wheel and sdist do not ship or serve the manifest; the
 original in `web/dist` and the temporary UI build remain available for size checks.
+Screenshot baselines, browser reports and test results are excluded from the sdist;
+`build.sh` also rejects an sdist containing `web/e2e/snapshots`.
 `web/scripts/check-size.mjs` traverses static imports for initial JS (200,000 bytes gzip
 ceiling; 160,000 target), checks each non-initial
 chunk (30,000; palette 15,000) and all CSS (16,000). `check.sh` runs this after the build.

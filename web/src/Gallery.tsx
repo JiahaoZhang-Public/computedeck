@@ -61,12 +61,14 @@ export function Gallery({ compat }: { compat: boolean }) {
                 <BrandMark size={16} />
               </span>
             </div>
-            <p className="form-error">{t('gallery.error')}</p>
-            <p className="red-text">{t('gallery.error')}</p>
-            <p className="red">{t('gallery.error')}</p>
-            <p className="amber">{t('gallery.warning')}</p>
-            <p className="muted">{t('gallery.example')}</p>
-            <p className="sub">{t('gallery.example')}</p>
+            <div className="gallery-stack">
+              <p className="form-error">{t('gallery.error')}</p>
+              <p className="red-text">{t('gallery.error')}</p>
+              <p className="red">{t('gallery.error')}</p>
+              <p className="amber">{t('gallery.warning')}</p>
+              <p className="muted">{t('gallery.example')}</p>
+              <p className="sub">{t('gallery.example')}</p>
+            </div>
             <div className="banner amber">{t('gallery.warning')}</div>
             <div className="gallery-row">
               <label>
@@ -142,16 +144,18 @@ export function Gallery({ compat }: { compat: boolean }) {
               <Meter value={null} />
               <Stat label={t('gallery.value')} value={42} unit="GPU" hint={t('gallery.note')} />
             </div>
-            <Chips
-              value={tab}
-              label={t('gallery.select')}
-              onChange={setTab}
-              options={[
-                { value: 'running', label: t('status.running') },
-                { value: 'unknown', label: t('status.unknown') },
-              ]}
-            />
-            <Switch checked={enabled} label={t('gallery.switch')} onChange={setEnabled} />
+            <div className="gallery-row">
+              <Chips
+                value={tab}
+                label={t('gallery.select')}
+                onChange={setTab}
+                options={[
+                  { value: 'running', label: t('status.running') },
+                  { value: 'unknown', label: t('status.unknown') },
+                ]}
+              />
+              <Switch checked={enabled} label={t('gallery.switch')} onChange={setEnabled} />
+            </div>
           </Panel>
           <Empty title={t('gallery.empty')} text={t('gallery.note')} />
         </>

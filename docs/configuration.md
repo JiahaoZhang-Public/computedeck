@@ -242,3 +242,7 @@ Set `COMPUTEDECK_DEMO_NOW` to a timezone-qualified ISO datetime, such as
 dashboards, history, events and collection nodes only; live data keeps its normal clock.
 Omit it for the current minute. Invalid or timezone-less values are rejected.
 See [Local UI checks](ui-testing.md) for the isolated service and screenshot workflow.
+
+中文：将 `COMPUTEDECK_DEMO_NOW` 设为带时区的 ISO 时间（如 `2026-01-15T14:00:00Z`），
+即可将示例数据固定在对应的 UTC 分钟，仅影响示例概览、历史、事件和采集节点，实时数据仍使用正常时钟。
+未设置时使用当前分钟；无效或不带时区的值会被拒绝。隔离服务和截图流程见[本地 UI 检查](ui-testing.md)。

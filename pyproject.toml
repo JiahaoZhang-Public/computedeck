@@ -40,7 +40,7 @@ packages = ["src/computedeck"]
 artifacts = ["src/computedeck/static"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["web/node_modules", "web/dist"]
+exclude = ["web/node_modules", "web/dist", "web/e2e/snapshots", "web/test-results", "web/playwright-report"]
 # uv build makes the wheel from the sdist, so the sdist carries the built web app too.
 artifacts = ["src/computedeck/static"]
 

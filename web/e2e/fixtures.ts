@@ -1,6 +1,9 @@
 import { test as base, expect, type Page } from '@playwright/test';
 
-export const demoNow = '2026-01-15T14:00:00Z';
+const configuredDemoNow = process.env.COMPUTEDECK_DEMO_NOW;
+if (!configuredDemoNow)
+  throw new Error('COMPUTEDECK_DEMO_NOW is required; run bash scripts/check-ui.sh');
+export const demoNow = configuredDemoNow;
 
 async function setupPage(page: Page, baseURL: string | undefined, locale: string | undefined) {
   if (!baseURL) throw new Error('Run bash scripts/check-ui.sh to start the isolated service');

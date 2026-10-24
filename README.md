@@ -147,10 +147,11 @@ For core changes, open a focused PR with the behavior changed and the checks you
 
 ```sh
 bash scripts/check.sh    # lint, formatting, types, tests and web build
+bash scripts/check-ui.sh # browser UI gate: screenshots, axe, DOM checks (see docs/ui-testing.md)
 bash scripts/build.sh    # local wheel and sdist, including the web interface
 ```
 
-For demo layout checks with an external Playwright installation, run `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs` (optionally set `PLAYWRIGHT_EXECUTABLE_PATH` to the browser executable).
+Run the browser UI gate after each item. Playwright is included in `web/`'s development dependencies; see [Local UI checks](docs/ui-testing.md) for browser selection, page filters and the baseline workflow.
 
 The Python service is in `src/computedeck`, the React interface in `web`, and Python tests in `tests`.
 
