@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
+import { Puzzle } from 'lucide-react';
+import { registerWebPlugin } from './plugins';
 import { api } from './api';
 import { setLocale, t } from './i18n';
 import { jobReason, jobWaiting } from './jobFacts';
@@ -507,4 +509,298 @@ it('announces that copying submit flags submitted nothing', async () => {
   expect(writeText).toHaveBeenCalledOnce();
   expect(container.textContent).toContain(t('plan.submit.copied'));
   expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+});
+
+// The 0.7 URL inventory, including the combined links documented in configuration.md.
+// Assertions exercise rendered views, rather than just accepting query strings.
+function selected(label: string) {
+  expect(
+    [...container.querySelectorAll('[role="tab"][aria-selected="true"]')].some((tab) =>
+      tab.textContent?.startsWith(label),
+    ),
+  ).toBe(true);
+}
+function searchValue(value: string) {
+  expect(container.querySelector<HTMLInputElement>('.search input')?.value).toBe(value);
+}
+function planValue(index: number, value: string) {
+  expect(container.querySelectorAll<HTMLInputElement>('.plan-form input')[index].value).toBe(value);
+}
+function detailTitle(value: string) {
+  expect(container.querySelector('#detail-title')?.textContent).toContain(value);
+}
+const urlFixtures: [string, () => string, string, () => void][] = [
+  ['app q', () => 'jobs?q=train', 'jobs', () => searchValue('train')],
+  [
+    'app group',
+    () => `jobs?group=${data.jobs[0].cluster_id}`,
+    'jobs',
+    () =>
+      expect(container.querySelector<HTMLSelectElement>('main select.select')?.value).toBe(
+        data.jobs[0].cluster_id,
+      ),
+  ],
+  [
+    'app provider',
+    () => `jobs?provider=${data.jobs[0].cluster_id}`,
+    'jobs',
+    () =>
+      expect(container.querySelector<HTMLSelectElement>('main select.select')?.value).toBe(
+        data.jobs[0].cluster_id,
+      ),
+  ],
+  [
+    'app job',
+    () => `jobs?job=${encodeURIComponent(data.jobs[0].id)}`,
+    'jobs',
+    () => detailTitle(data.jobs[0].name),
+  ],
+  [
+    'app failure',
+    () => `jobs?failure=${encodeURIComponent(data.recent_failures![0].id)}`,
+    'jobs',
+    () => detailTitle(data.recent_failures![0].name),
+  ],
+  [
+    'app instance',
+    () => `cloud?instance=${encodeURIComponent(data.instances[0].id)}`,
+    'cloud',
+    () => detailTitle(data.instances[0].name),
+  ],
+  [
+    'app array',
+    () => {
+      const job = data.jobs.find((job) => job.array_id)!;
+      return `jobs?array=${encodeURIComponent(`${job.cluster_id}:${job.array_id}`)}`;
+    },
+    'jobs',
+    () => expect(container.querySelector('.array-elements-table')).not.toBeNull(),
+  ],
+  ['app event', () => 'activity?event=77', 'activity', () => detailTitle(data.jobs[0].name)],
+  [
+    'Jobs state / documented Jobs link',
+    () => 'jobs?state=pending&q=train',
+    'jobs',
+    () => {
+      selected(t('status.PENDING'));
+      searchValue('train');
+    },
+  ],
+  [
+    'Activity type / range / documented Activity link',
+    () => 'activity?type=failed&range=7d&q=train',
+    'activity',
+    () => {
+      selected(t('activity.filter.failed'));
+      selected(t('activity.range.7d'));
+      searchValue('train');
+    },
+  ],
+  [
+    'Activity job_filter',
+    () => 'activity?job_filter=cluster-a%3A123',
+    'activity',
+    () => {
+      expect(container.textContent).toContain(t('activity.forJob', { job: '123' }));
+      expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('job=cluster-a%3A123'))).toBe(
+        true,
+      );
+    },
+  ],
+  ...(['24h', '7d', '30d', '24', '72', '3d', '168'] as const).map(
+    (range): [string, () => string, string, () => void] => [
+      `Usage range ${range}`,
+      () => `usage?range=${range}`,
+      'usage',
+      () =>
+        selected(
+          t(
+            range === '24h' || range === '24'
+              ? 'chart.range.day'
+              : range === '30d'
+                ? 'usage.month'
+                : 'chart.range.week',
+          ),
+        ),
+    ],
+  ),
+  [
+    'Cloud use low',
+    () => 'cloud?use=low',
+    'cloud',
+    () => selected(t('lowUse.filter', { minutes: data.low_use_settings?.window_minutes ?? 60 })),
+  ],
+  [
+    'Cloud use unknown',
+    () => 'cloud?use=unknown',
+    'cloud',
+    () => selected(t('lowUse.unknownFilter')),
+  ],
+  [
+    'Clusters nodes / documented Nodes link',
+    () => 'resources?nodes=abnormal',
+    'resources',
+    () => {
+      selected(t('clusters.abnormalTab'));
+      expect(routeParams().get('tab')).toBe('nodes');
+    },
+  ],
+  [
+    'Toolbox tab / documented Marketplace link',
+    () => 'toolbox?tab=market',
+    'toolbox',
+    () => selected(t('toolbox.market')),
+  ],
+  [
+    'Toolbox q',
+    () => 'toolbox?q=example-1',
+    'toolbox',
+    () => {
+      searchValue('example-1');
+      expect(container.querySelectorAll('.tool-tile')).toHaveLength(1);
+    },
+  ],
+  [
+    'Marketplace market-q',
+    () => 'toolbox?tab=market&market-q=example-1',
+    'toolbox',
+    () => {
+      selected(t('toolbox.market'));
+      searchValue('example-1');
+      expect(container.querySelectorAll('.tool-tile')).toHaveLength(1);
+    },
+  ],
+  [
+    'Plan from',
+    () => `plan?from=${encodeURIComponent(data.jobs[0].id)}`,
+    'plan',
+    () => expect(container.querySelector('.plan-from')?.textContent).toContain(data.jobs[0].name),
+  ],
+  [
+    'Plan gpus / model / hours / documented Plan link',
+    () => 'plan?gpus=4&model=A100&hours=12',
+    'plan',
+    () => {
+      planValue(0, '4');
+      planValue(1, '12');
+      expect(container.querySelector<HTMLSelectElement>('.plan-form select')?.value).toBe('A100');
+    },
+  ],
+  [
+    'clusters alias',
+    () => 'clusters',
+    'resources',
+    () => expect(container.querySelector('.cluster-cards')).not.toBeNull(),
+  ],
+  [
+    'nodes alias with group',
+    () => `nodes?group=${data.jobs[0].cluster_id}&nodes=abnormal`,
+    'resources',
+    () => {
+      expect(routeParams().get('tab')).toBe('nodes');
+      selected('Cluster A');
+      selected(t('clusters.abnormalTab'));
+      expect(container.querySelectorAll('.cluster-card')).toHaveLength(1);
+    },
+  ],
+  ['marketplace alias', () => 'marketplace', 'toolbox', () => selected(t('toolbox.market'))],
+];
+
+for (const language of ['en', 'zh-CN'] as const) {
+  it.each(urlFixtures)(`restores %s in ${language}`, async (_name, url, page, check) => {
+    const original = vi.mocked(api).getMockImplementation()!;
+    const names = ['example-1', 'example-2', 'example-3', 'example-4'];
+    vi.mocked(api).mockImplementation(async (path, ...args) => {
+      if (path === '/settings') return { language };
+      if (path.startsWith('/history?'))
+        return {
+          points: [],
+          rollups: { start: '2026-01-01T00:00:00Z', end: '2026-01-15T14:00:00Z', buckets: [] },
+        };
+      if (path === '/toolbox')
+        return names.map((id) => ({
+          id,
+          name: { en: id },
+          description: { en: 'Example tool' },
+          enabled: false,
+          origin: { kind: 'builtin' },
+          permissions: [],
+          settings: [],
+          values: {},
+          health: {},
+          notes: [],
+          errors: {},
+        }));
+      if (path === '/marketplace')
+        return {
+          marketplaces: [{ name: 'example', source: 'example.test', tier: 'local', plugins: 4 }],
+          plugins: names.map((name) => ({
+            name,
+            description: { en: 'Example plugin' },
+            marketplace: 'example',
+            tier: 'local',
+            tags: [],
+            compatible: true,
+          })),
+        };
+      if (path.startsWith('/events?id=77'))
+        return [
+          {
+            id: 77,
+            type: 'job.started',
+            at: data.as_of,
+            source_id: data.jobs[0].source_id,
+            data: { driver: 'slurm', job: data.jobs[0] },
+          },
+        ];
+      return original(path, ...args);
+    });
+    await render(`/?demo=true#/${url()}`);
+    expect(container.querySelector('main')?.classList.contains(`page-${page}`)).toBe(true);
+    check();
+    expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+  });
+}
+
+it('switches from resources to overview through the hash store', async () => {
+  await render('/?demo=true#/resources');
+  expect(container.querySelector('main.page-resources')).not.toBeNull();
+  await act(async () => {
+    window.location.hash = '#/overview';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(container.querySelector('main.page-overview')).not.toBeNull();
+  expect(container.querySelector('h1')?.textContent).toBe(t('nav.overview'));
+});
+
+it.each([
+  ['clusters', '#/resources'],
+  ['nodes', '#/resources?tab=nodes'],
+  ['marketplace', '#/toolbox?tab=market'],
+])('uses the shared alias map for plugin navigate(%s)', async (alias, hash) => {
+  const id = `example-routing-${alias}`;
+  registerWebPlugin({
+    id,
+    pages: [
+      {
+        id,
+        label: 'Example routing',
+        icon: Puzzle,
+        render: (props) => (
+          <button id="plugin-navigate" onClick={() => props.navigate(alias)}>
+            Go
+          </button>
+        ),
+      },
+    ],
+  });
+  await render(`/?demo=true#/${id}`);
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('#plugin-navigate')!.click();
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(window.location.hash).toBe(hash);
+  expect(
+    container.querySelector(`main.page-${hash.includes('toolbox') ? 'toolbox' : 'resources'}`),
+  ).not.toBeNull();
 });

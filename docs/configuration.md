@@ -128,6 +128,41 @@ The URL preserves view choices without storing credentials:
   to observed history, not current figures.
 - Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
 
+The route IDs and parameter values from 0.7 remain valid, including `state=pending`
+and `tab=market`. `provider` remains a legacy alias for `group`; an explicit `group`
+takes precedence. These additional route names resolve to the existing pages:
+
+| Link | Canonical URL |
+| --- | --- |
+| `#/clusters` | `#/resources` |
+| `#/nodes` | `#/resources?tab=nodes` |
+| `#/marketplace` | `#/toolbox?tab=market` |
+| `#/resources?nodes=abnormal&group=cluster-a` | `#/resources?nodes=abnormal&group=cluster-a&tab=nodes` |
+
+Aliases replace the current history entry, so Back does not stop on a redirect.
+Other filters, encoded IDs, and the connection/example-mode query before `#` are
+preserved. Nodes and Marketplace aliases select `tab=nodes` and `tab=market` even
+if the alias URL contains a different tab. A legacy `resources?nodes=…` link gains
+`tab=nodes` only when it has no explicit tab. Its `nodes` filter and `group` still
+apply to the existing Clusters view; the separate Nodes tab UI follows with the
+Clusters page update.
+
+Routing also preserves the new view keys `scope`, `reason`, `attention`, `node`,
+`source`, `add`, `edit`, `repair`, `step`, `section`, `plugin`, `rule`, `rate` and
+`tab`, including through filter changes and reloads. `edit=<source-id|instance-id>`
+and `repair=<source-id>` share `step` with `add`; cloud and SSH machine forms use
+`add` / `edit` on `#/cloud` and `#/sources`. These addresses are reserved for the
+upcoming panels and forms; routing alone does not open them yet.
+
+中文：0.7 的路由、参数及参数值保持有效（包括 `state=pending`、`tab=market`）。
+`provider` 仍可代替 `group`，同时提供时以 `group` 为准。上表中的别名替换当前历史记录，
+不会增加浏览器返回步骤；其他筛选、编码后的 ID 和 `#` 前的连接及示例模式参数均保留。
+Nodes 和 Marketplace 别名分别固定选择 `tab=nodes`、`tab=market`；旧节点筛选链接仅在
+未指定 `tab` 时补上 `tab=nodes`。节点和集群筛选继续作用于现有集群页，独立节点标签页
+随集群页更新加入。上述新增参数会在筛选和刷新时保留；它们为后续面板及表单预留地址，
+目前不会单凭参数打开新界面。`add`、`edit`、`repair` 共用 `step`，云和 SSH 机器表单在
+`#/cloud`、`#/sources` 下使用相同的 `add` / `edit` 参数。
+
 Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back
 closes the detail while keeping the prior filters. Reloading a link restores the view, and
 live details follow newly collected data. Arrays use `array=<cluster>:<array_id>`;

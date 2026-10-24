@@ -48,7 +48,7 @@ import { api } from './api';
 import { groupsOf } from './groups';
 import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
 import type { Locale, MessageKey } from './i18n';
-import { corePages, readRoute, routeHash } from './routes';
+import { canonicalHash, corePages, readRoute, routeHash, useHash } from './routes';
 import type { CorePage, Filter, Page } from './routes';
 import {
   activePlugins,
@@ -159,7 +159,7 @@ function initialLocale(): Locale {
 export default function App() {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
-  const [hash, setHash] = useState(() => window.location.hash);
+  const hash = useHash();
   const group = readRoute(startPages, hash).group;
   const query = routeParams(hash).get('q') ?? '';
   const setQuery = (value: string) => setRouteParams({ q: value });
@@ -324,10 +324,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let previous = window.location.hash;
+    let previous = canonicalHash(window.location.hash);
     const onHashChange = () => {
-      const next = window.location.hash;
-      setHash(next);
+      const next = canonicalHash(window.location.hash);
       if (previous.split('?')[0] !== next.split('?')[0]) {
         setSidebarOpen(false);
         setModal(null);

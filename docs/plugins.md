@@ -583,6 +583,16 @@ output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
 `ComputeDeck.jsxRuntime`. Build the bundle before building the wheel, and include the
 folder with `artifacts` (hatch) or package data.
 
+`routeHash(page, group?)` and the page prop `navigate(page)` share the built-in
+aliases: `clusters` → `resources`, `nodes` → `resources?tab=nodes`, and
+`marketplace` → `toolbox?tab=market`. The read-only `routeAliases` map on
+`window.ComputeDeck` exposes these targets (without `#/`). Existing core and
+plugin page IDs keep their meaning; this is additive and `WEB_API` remains 1.
+
+中文：`routeHash(page, group?)` 和页面属性 `navigate(page)` 共用上述别名。
+`window.ComputeDeck.routeAliases` 提供只读映射，目标字符串不含 `#/`。
+现有核心及插件页面 ID 保持有效，`WEB_API` 仍为 1。
+
 While example data is on, the host's `request` rejects every non-GET request before
 fetching, except the access-token check (`POST /session`). This includes requests
 from Notify, Chat and plugins. File uploads use the same guard. Reads still return

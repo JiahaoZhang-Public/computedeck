@@ -83,6 +83,14 @@ to require no clipping; a fix before then fails this check and prompts its updat
 Other browser errors and focus-coverage failures still fail directly. DOM findings are
 compared with their reviewed baselines rather than marked expected-fail.
 
+`routing.spec.ts` checks the Clusters, Nodes and Marketplace aliases across the same six
+Chromium combinations, including reload and browser Back/Forward, plus the legacy node
+filter with a cluster. Run `bash scripts/check-ui.sh 'routing alias|legacy node'` for
+these interaction checks. They use the existing page layouts and require no new screenshot
+baselines. The full gate still compares all existing screenshots. Vitest also renders the
+0.7 URL fixture table in English and Chinese and tests hash changes during startup,
+plugin navigation, alias history replacement and preservation of new view parameters.
+
 The initial 0.7 DOM findings include small touch targets across the 375 px pages and
 horizontal overflow in Marketplace at 375 px. F1 records these without changing the 0.7
 look. U1 owns the frame and shared touch targets, each P-item owns its page's controls,

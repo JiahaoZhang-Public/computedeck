@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { api } from './api';
 import { dateTime, relativeTime } from './domain';
-import { routeHash } from './routes';
+import { routeAliases, routeHash } from './routes';
 import { locale, localized } from './i18n';
 import { registerWebPlugin } from './plugins';
 import type { WebPlugin } from './plugins';
@@ -34,6 +34,7 @@ export interface Host {
   /** Times and links formatted the way the rest of the page does. */
   format: { relativeTime: typeof relativeTime; dateTime: typeof dateTime };
   routeHash: typeof routeHash;
+  routeAliases: typeof routeAliases;
   locale: typeof locale;
   localized: typeof localized;
   register: (plugin: WebPlugin & { api?: number }) => void;
@@ -54,6 +55,7 @@ export function installHost() {
     request: api,
     format: { relativeTime, dateTime },
     routeHash,
+    routeAliases,
     locale,
     localized,
     register: (plugin) => {
