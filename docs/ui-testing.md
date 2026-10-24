@@ -16,10 +16,8 @@ bash scripts/check-ui.sh 'jobs|gallery'
 
 `check-ui.sh` builds into a temporary directory, checks bundle sizes, binds a free loopback
 port, waits for readiness, runs Playwright, then stops the service and removes its build and
-data on success or failure. Its EXIT trap preserves the original status, including shell
-errors (with a completion guard for Bash 3.2 nounset errors that report status zero),
-and it returns non-zero on failed builds, size checks, startup or UI checks. Optional
-arguments work with macOS `/bin/bash` 3.2, including a full run without a page filter.
+data on success or failure, returning non-zero on failed builds, size checks, startup,
+shell errors or UI checks, including with macOS `/bin/bash` 3.2.
 An optional argument filters test titles, including page names. The Chromium channel can
 be selected with `PLAYWRIGHT_CHANNEL`; on macOS, missing bundled Chromium automatically
 selects installed Google Chrome. Missing local WebKit prints **WebKit not installed —
@@ -30,7 +28,8 @@ No browser or package downloads happen in this script.
 responses (dashboard, history, events and collection nodes), in UTC, rounded down to the
 minute. Invalid or timezone-less values fail explicitly. The default continues to use the
 current minute. Example summary freshness and history rollups use the same clock; live
-collection and live API clocks are unchanged. The harness uses `2026-01-15T14:00:00Z`,
+collection and live API clocks are unchanged. Event range filters use the example clock
+in example mode and the real clock for live data. The harness uses `2026-01-15T14:00:00Z`,
 Playwright's fixed browser clock and UTC. In the test transport only, health's host name,
 database path and service start time become generic stable values so public artifacts
 contain no developer paths and do not vary with service restarts. Metrics are not mocked.
@@ -72,11 +71,14 @@ page reads and fonts, and checks:
 - Fully covered focused controls still fail directly; focus coverage has no baseline allowance.
 - Actual rendered Han fonts through Chromium's font API: Noto Sans CJK SC in Linux CI;
   a supported system CJK font on macOS/Windows. Installing a font without rendering its
-  glyphs does not satisfy the guard.
+  glyphs does not satisfy the guard. The page language must match the project's configured
+  locale before the font check, so a failed locale switch cannot silently bypass it.
+- Activity must show example event rows and day headings before capturing a baseline.
 
-The separate **jobs reason at 1280 zh with panel open** check is expected to fail until P2.
+The separate **jobs reason at 1280 zh with panel open** check records a known failure until P2.
 It checks text clipping and drawer occlusion after independently asserting the page and
-panel loaded. An unexpected pass fails too; remove the expected-failure marker in P2.
+panel loaded, and asserts that at least one reason is clipped. P2 must change that assertion
+to require no clipping; a fix before then fails this check and prompts its update.
 Other browser errors and focus-coverage failures still fail directly. DOM findings are
 compared with their reviewed baselines rather than marked expected-fail.
 
@@ -121,7 +123,7 @@ CI reports missing baselines; an absent baseline is not a passing gate.
 
 In a socket-restricted sandbox, run `npm --prefix web run typecheck` (which includes the
 Playwright suite) and, from `web/`, `npx --no-install playwright test --list`. The browser
-UI gate requires the orchestrator's unsandboxed environment. Never skip socket-based
+UI gate must run outside a socket-restricted sandbox. Never skip socket-based
 service/security tests or weaken assertions to make the sandbox pass.
 
 ## Gallery and size budget
@@ -134,8 +136,9 @@ component DOM or page styling; the missing `--text-muted` alias remains visible 
 
 The build emits Vite's standard manifest. `scripts/build.sh` removes `.vite` from the
 copied package assets, so the wheel and sdist do not ship or serve the manifest; the
-original in `web/dist` and the temporary UI build remain available for size checks. `web/scripts/check-size.mjs` traverses static
-imports for initial JS (200,000 bytes gzip ceiling; 160,000 target), checks each non-initial
+original in `web/dist` and the temporary UI build remain available for size checks.
+`web/scripts/check-size.mjs` traverses static imports for initial JS (200,000 bytes gzip
+ceiling; 160,000 target), checks each non-initial
 chunk (30,000; palette 15,000) and all CSS (16,000). `check.sh` runs this after the build.
 F3 will tighten the initial-JS gate to 170,000 bytes as routing becomes lazy. Runtime
 performance budgets remain Q2 work.

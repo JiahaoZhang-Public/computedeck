@@ -6,6 +6,7 @@ import sqlite3
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -1444,6 +1445,17 @@ def test_activity_filters_match_example_mode(
 ) -> None:
     from computedeck import demo
 
+    # Identical windows need identical clocks: demo time is rounded to the minute.
+    fixed = demo.now()
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return fixed
+
+    monkeypatch.setattr(api, "datetime", FixedClock)
+    monkeypatch.setattr(api, "demo_now", lambda: fixed)
+    monkeypatch.setattr(demo, "now", lambda: fixed)
     rows = demo.events()
     data = demo.dashboard()
     monkeypatch.setattr(api, "demo_events", lambda: rows)
@@ -1657,6 +1669,59 @@ def test_activity_categories_keep_changes_opt_in_and_filter_before_limit(
     recent = client.get("/api/events?demo=true&range=24h&group=1").json()
     older = client.get("/api/events?demo=true&range=30d&group=1").json()
     assert len(older) > 30 > len(recent)
+
+
+@pytest.mark.parametrize(("window", "days"), [("24h", 1), ("7d", 7), ("30d", 30)])
+@pytest.mark.parametrize("group", [False, True])
+@pytest.mark.parametrize("since_hours", [None, 12])
+def test_demo_event_ranges_use_fixed_clock(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    window: str,
+    days: int,
+    group: bool,
+    since_hours: int | None,
+) -> None:
+    fixed = datetime(2026, 1, 15, 14, tzinfo=UTC)
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", fixed.isoformat())
+    cutoff = fixed - timedelta(days=days)
+    params = {
+        "demo": "true",
+        "range": window,
+        "group": str(group).lower(),
+        "include": "changes",
+        "limit": "200",
+    }
+    if since_hours is not None:
+        cutoff = max(cutoff, fixed - timedelta(hours=since_hours))
+        params["since"] = cutoff.isoformat()
+    expected = [row for row in api.demo_events() if datetime.fromisoformat(row["at"]) >= cutoff]
+    assert expected
+    assert len(expected) < 200  # Compare the entire window, without pagination truncation.
+    if group:
+        expected = api.group_events(expected)
+    response = client.get("/api/events", params=params)
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+@pytest.mark.parametrize("window", ["24h", "7d", "30d"])
+def test_live_event_ranges_ignore_fixed_demo_clock(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, window: str
+) -> None:
+    fixed = "2026-01-15T14:00:00+00:00"
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", fixed)
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {"key": key, "type": "source.recovered", "at": at, "source_id": "cluster-a", "data": {}}
+            for key, at in [("old", fixed), ("recent", datetime.now(UTC).isoformat())]
+        ]
+    )
+    store.db.close()
+    response = client.get("/api/events", params={"range": window})
+    assert response.status_code == 200
+    assert [row["key"] for row in response.json()] == ["recent"]
 
 
 def attention_fault(client: TestClient, data_dir: Path) -> dict[str, Any]:

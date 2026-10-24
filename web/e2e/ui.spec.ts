@@ -25,10 +25,14 @@ const pages = [
 ];
 
 for (const [name, route] of pages) {
-  test(`${name} UI gate`, async ({ page, freshPage }, testInfo) => {
+  test(`${name} UI gate`, async ({ page, freshPage, locale }, testInfo) => {
     await page.goto(`/?demo=true#/${route}`);
     await ready(page);
-    await fontGuard(page);
+    await fontGuard(page, locale);
+    if (name === 'activity') {
+      await expect(page.locator('.activity-day').first()).toBeVisible();
+      await expect(page.locator('.activity > li').first()).toBeVisible();
+    }
     const first = await settledScreenshot(page, testInfo, 'first-run');
     await expect.soft(page).toHaveScreenshot(`${name}.png`, screenshotOptions(page));
     const axe = await new AxeBuilder({ page })
@@ -61,7 +65,7 @@ for (const [name, route] of pages) {
     // A second run starts with empty storage and scroll history, not an Activity revisit.
     await freshPage.goto(`/?demo=true#/${route}`);
     await ready(freshPage);
-    await fontGuard(freshPage);
+    await fontGuard(freshPage, locale);
     const second = await settledScreenshot(freshPage, testInfo, 'second-run');
     if (!second.equals(first)) {
       await testInfo.attach('first-run', { body: first, contentType: 'image/png' });
@@ -78,8 +82,6 @@ test('jobs reason at 1280 zh with panel open @known-clip', async ({ page }, test
   await expect(page.getByRole('dialog')).toBeVisible();
   const reasons = page.locator('.jobs-table tbody .clamp[title]');
   await expect(reasons.first()).toBeVisible();
-  // Limit expected failure to the clipping assertion; navigation/loading failures still fail.
-  test.fail(true, '0.7 Jobs reason is clipped at 1280 with the drawer open; remove in P2');
   const clipped = await reasons.evaluateAll((nodes) =>
     nodes
       .filter((node) => {
@@ -99,5 +101,7 @@ test('jobs reason at 1280 zh with panel open @known-clip', async ({ page }, test
       })
       .map((node) => node.textContent),
   );
-  expect(clipped).toEqual([]);
+  // TODO P2: require no clipped reasons once the Jobs layout is fixed.
+  // Record the known defect without marking unrelated test or teardown errors as expected.
+  expect(clipped.length, 'Known 0.7 Jobs clipping; update this assertion in P2').toBeGreaterThan(0);
 });

@@ -133,7 +133,7 @@ export function Gallery({ compat }: { compat: boolean }) {
           <Panel title={t('gallery.components')} count={8}>
             <div className="gallery-row">
               <BrandMark />
-              {['RUNNING', 'PENDING', 'SUSPENDED', 'FAILED', 'UNKNOWN', 'STOPPED'].map((state) => (
+              {['RUNNING', 'PENDING', 'stale', 'FAILED', 'unknown', 'stopped'].map((state) => (
                 <Status key={state} state={state} />
               ))}
             </div>

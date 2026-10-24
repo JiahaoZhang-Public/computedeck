@@ -21,6 +21,14 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => root.render(<Gallery compat={false} />));
     expect(container.textContent).toContain(t('gallery.components'));
     expect(container.querySelectorAll('.status')).toHaveLength(6);
+    expect([...container.querySelectorAll('.status')].map((node) => node.textContent)).toEqual(
+      (['RUNNING', 'PENDING', 'stale', 'FAILED', 'unknown', 'stopped'] as const).map((state) =>
+        t(`status.${state}`),
+      ),
+    );
+    for (const tone of ['green', 'amber', 'red', 'gray']) {
+      expect(container.querySelector(`.status.${tone}`), tone).not.toBeNull();
+    }
     const tabs = container.querySelectorAll<HTMLButtonElement>('[role=tab]');
     await act(async () => tabs[1].click());
     expect(tabs[1].getAttribute('aria-selected')).toBe('true');

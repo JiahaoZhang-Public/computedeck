@@ -30,6 +30,7 @@ from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolb
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .demo import delivery_status as demo_delivery_status
+from .demo import now as demo_now
 from .errors import SourceError, message
 from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
 from .history import rollup_history
@@ -888,7 +889,8 @@ def create_app(
             except OverflowError:
                 raise HTTPException(422, message("event_since_invalid")) from None
         if range:
-            cutoff = datetime.now(UTC) - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
+            current = demo_now() if demo else datetime.now(UTC)
+            cutoff = current - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
             since = max(since, cutoff) if since else cutoff
         filters: dict[str, Any] = dict(
             types=type,

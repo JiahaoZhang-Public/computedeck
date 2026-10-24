@@ -102,8 +102,9 @@ export async function ready(page: Page) {
   await expect(page.locator('main')).not.toBeEmpty();
 }
 
-export async function fontGuard(page: Page) {
-  if (!(await page.locator('html').getAttribute('lang'))?.startsWith('zh')) return;
+export async function fontGuard(page: Page, locale = 'en') {
+  await expect(page.locator('html')).toHaveAttribute('lang', locale);
+  if (!locale.startsWith('zh')) return;
   const session = await page.context().newCDPSession(page);
   try {
     await page.evaluate(() => {
