@@ -432,7 +432,9 @@ and six data states. Fictional readings and the rule trace come from `demo.py` t
 keep their DOM. Compat pills use CSS masks from the same shape definitions; their ok,
 warn and error outlines changed slightly in 0.8.
 
-Unknown values hatch only the small dash box, leaving the reason on a solid background.
+Inline unknown values use a plain `--fg-subtle` dash beside their reason, matching the
+mockup; hatching remains for cells and swatches. Copied commands declare `lang="en"`
+inside localized labels.
 Time disclosures use phrasing-only buttons and spans, valid inside paragraphs and values;
 rule disclosures use `details` outside paragraphs. Both expand in flow. Non-today readings
 show the local date while collapsed. Passing `descriptionId` renders a plain `time` and
@@ -486,7 +488,8 @@ baselines.
 **中文：画廊与约定。** F5 保留 WEB_API 1 样例，新增状态、数值、时间、时长、数据年龄、
 范围、服务端规则说明、标识颜色、复制反馈与六种数据状态。示例来自 `demo.py`，不写入
 真实配置。插件导出组件 DOM 不变；兼容状态标签共用 SVG 蒙版，正常、警告和错误轮廓
-在 0.8 中略有调整。未知值只在短横线小框上绘制斜纹，原因文字位于纯色背景上。
+在 0.8 中略有调整。行内未知值按参考稿使用 `--fg-subtle` 纯色长横线，旁边显示原因；
+斜纹保留给单元格与色块。复制命令在本地化标签中声明 `lang="en"`。
 时间使用可置于段落中的按钮与 span，规则使用段落外的 details，均原地展开。
 非当天读数在收起时也显示本地日期；`descriptionId` 模式只输出 time 和行链接的屏幕阅读器
 描述，不增加焦点。各浏览器使用一致的本地化时长，不足一分钟显示带单位的零。

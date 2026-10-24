@@ -352,7 +352,9 @@ sharing is retained when a larger fleet shrinks. Charts must distinguish shared 
 with a neutral/patterned series and direct labels.
 
 Configuration export includes only explicit overrides in `[identity_slots]`; automatic
-assignments stay local, so merging exports still fills free slots first. Import can
+assignments stay local, so merging exports still fills free slots first. The table is
+omitted when there are no overrides; only exports with explicit identity overrides
+require 0.8 or later. Import can
 override existing groups using integers 1–6, for example:
 
 ```toml
@@ -363,6 +365,8 @@ override existing groups using integers 1–6, for example:
 
 Overrides are explicit colour choices and may deliberately share a slot. Unknown group
 keys are ignored; import creates sources and machines before applying these choices.
+Import merges overrides: omitting a key does not clear it. An override persists until
+its group is removed; there is currently no reset to automatic assignment for an existing group.
 Example mode has a separate deterministic map and never writes it to live configuration.
 
 **Settings → Appearance → Clock** selects 24-hour (default) or 12-hour time, stored on
@@ -372,7 +376,7 @@ Readings outside today's local date show a short date even when collapsed. Table
 add the full description to the row link without a separate button. Prose durations use
 the same localized spelling in every browser (for example, `3 h 10 min`).
 Display values distinguish exact counts, lower bounds (`≥`), labelled estimates (`≈`),
-unknown values with reasons outside the small hatched dash, and explicitly dated last-known
+unknown values shown as a plain subtle dash with a reason, and explicitly dated last-known
 readings. Stale exact values are displayed as unknown; a caller must explicitly supply a lower bound or a dated
 last-known reading to retain a number. Copy controls copy text only and append
 `# example data` on a new line in example mode.
@@ -381,12 +385,14 @@ last-known reading to retain a number. Copy controls copy text only and append
 前六个组优先占用空闲色位，之后才共享使用最少的色位。删除组不会改变其他组的颜色；
 超过六组后已有的共享关系在缩减组数时保留。`identity_slots` 随仪表盘返回，配置导入导出
 使用同名表，色位为 1–6；导出仅包含显式覆盖，自动分配留在本地，合并导入时优先使用空闲色位。
+没有覆盖时不导出该表；仅含显式标识颜色覆盖的导出配置需要 0.8 或更高版本。
 所有由数据源组成的组（含云平台）均使用稳定的 `cluster_id`，首个登录改名或删除不改变颜色；
 手动机器键是 `platform:<平台名称>`（去除首尾空格并转小写），现有网址与筛选键不变。
 可手动覆盖已有组的颜色，也可显式共享色位；不存在的组键会被忽略。示例模式不写入真实配置。
+导入会合并覆盖，省略某个键不会清除它。覆盖会一直保留到该组被删除；目前无法将已有组重置为自动分配。
 设置 → 外观 → 时间格式可选 24 或 12 小时制，保存在本设备。新时间组件可通过键盘和触摸
 展开本地完整时间、时区及相对时间。非本地当天的读数在收起时也显示日期；表格时间直接
 加入行链接描述，不增加按钮焦点。所有浏览器使用相同的本地化时长格式。
 数值组件区分准确值、下界、估计值、附原因的未知值和附时间的最后已知值；未知值的原因
-位于斜纹短横线之外，过期准确值不会当作当前数字显示。复制按钮只复制文本，示例模式
+显示在纯色浅色调长横线旁，过期准确值不会当作当前数字显示。复制按钮只复制文本，示例模式
 会在新行附加 `# example data`。

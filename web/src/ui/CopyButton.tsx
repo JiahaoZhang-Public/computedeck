@@ -27,7 +27,7 @@ export function CopyButton({ text, example = false }: { text: string; example?: 
   return (
     <span className="display-copy">
       <button type="button" className="button" onClick={() => void copy()}>
-        {t('display.copies')} <code>{text}</code> · {t('display.runsNothing')}
+        {t('display.copies')} <code lang="en">{text}</code> · {t('display.runsNothing')}
       </button>
       <span role="status">
         {result === 'copied' ? t('display.copied') : result === 'error' ? t('toast.clipboard') : ''}

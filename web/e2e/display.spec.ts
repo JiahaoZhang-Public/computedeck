@@ -201,6 +201,7 @@ test('copy is local, announced, and includes the example marker', async ({ page 
       },
     });
   });
+  await expect(page.locator('.display-copy code')).toHaveAttribute('lang', 'en');
   await page.locator('.display-copy button').click();
   await expect(page.locator('.display-copy [role=status]')).not.toBeEmpty();
   await expect(page.locator('body')).toHaveAttribute(
@@ -246,7 +247,7 @@ test('display gallery controls fit the viewport and meet touch targets, collapse
 });
 
 for (const contrast of ['no-preference', 'more'] as const) {
-  test(`unknown reasons stay outside the hatch with contrast ${contrast}`, async ({
+  test(`unknown inline values stay legible with contrast ${contrast}`, async ({
     page,
   }, testInfo) => {
     await page.emulateMedia({ contrast });
@@ -256,9 +257,11 @@ for (const contrast of ['no-preference', 'more'] as const) {
     const mark = value.locator('.value-unknown-mark');
     const reason = value.locator('.value-unit');
     await expect(mark).toHaveText('—');
-    await expect(mark).toHaveCSS('border-top-style', 'dashed');
-    expect(await mark.evaluate((node) => getComputedStyle(node).backgroundImage)).toContain(
-      'linear-gradient',
+    await expect(mark).toHaveCSS('border-top-style', 'none');
+    await expect(mark).toHaveCSS('background-image', 'none');
+    await expect(mark).toHaveCSS(
+      'color',
+      await reason.evaluate((node) => getComputedStyle(node).color),
     );
     await expect(value).toHaveCSS('background-image', 'none');
     await expect(reason).toHaveCSS('background-image', 'none');

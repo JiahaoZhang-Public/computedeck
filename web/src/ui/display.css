@@ -55,9 +55,7 @@
   color: var(--fg-subtle);
 }
 .value-unknown-mark {
-  border: 1px dashed var(--hatch-edge);
-  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hatch) 3px 4px);
-  padding: 2px 4px;
+  color: var(--fg-subtle);
 }
 .display-time {
   display: inline;
@@ -164,9 +162,6 @@
     background: CanvasText;
   }
   .identity-monogram {
-    border-color: CanvasText;
-  }
-  .value-unknown-mark {
     border-color: CanvasText;
   }
 }

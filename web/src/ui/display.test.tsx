@@ -38,6 +38,15 @@ afterEach(async () => {
 
 describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
   beforeEach(() => setLocale(language));
+  it('marks copied commands as English within localized labels', async () => {
+    await act(async () => root.render(<CopyButton text="squeue --me" />));
+    const command = container.querySelector('code')!;
+    expect(command.lang).toBe('en');
+    expect(command.textContent).toBe('squeue --me');
+    expect(container.querySelector('button')?.textContent).toBe(
+      `${t('display.copies')} squeue --me · ${t('display.runsNothing')}`,
+    );
+  });
   it('renders six SVG shapes, clamps their size and prefixes severity without changing legacy DOM', async () => {
     await act(async () =>
       root.render(
