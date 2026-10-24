@@ -30,7 +30,9 @@ import {
   errorText,
   isLocale,
   loadLocale,
+  rememberServerLocale,
   setLocale,
+  startupLocale,
   storeLocale,
   storedLocale,
   t,
@@ -50,7 +52,7 @@ import { PageBoundary } from './PageBoundary';
 const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
 
 function initialLocale(): Locale {
-  const locale = storedLocale() ?? 'en';
+  const locale = startupLocale();
   setLocale(locale);
   return locale;
 }
@@ -211,9 +213,11 @@ function Application() {
     : health?.server_name || health?.server_host || t('where.server');
 
   const localeChange = useRef(0);
+  const [pendingLocale, setPendingLocale] = useState<Locale | null>(null);
   const changeLocale = useCallback(
     (next: Locale) => {
       const request = ++localeChange.current;
+      setPendingLocale(next);
       void loadLocale(next)
         .then(() => {
           if (request !== localeChange.current) return;
@@ -223,6 +227,9 @@ function Application() {
         })
         .catch(() => {
           if (request === localeChange.current) notify(t('error.locale'), 'error');
+        })
+        .finally(() => {
+          if (request === localeChange.current) setPendingLocale(null);
         });
     },
     [notify],
@@ -241,6 +248,7 @@ function Application() {
           !isLocale(settings.language)
         )
           return;
+        rememberServerLocale(settings.language);
         await loadLocale(settings.language);
         if (cancelled || storedLocale() || request !== localeChange.current) return;
         setLocale(settings.language);
@@ -548,6 +556,7 @@ function Application() {
     diagnose,
     health,
     locale,
+    pendingLocale,
     changeLocale,
     plugin,
     navigate,

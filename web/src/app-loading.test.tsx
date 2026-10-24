@@ -105,7 +105,12 @@ it('keeps the active language and device preference when another dictionary fail
   await choose('zh-CN');
   expect(document.documentElement.lang).toBe('en');
   expect(container.querySelector('h1')?.textContent).toBe('Settings');
+  const language = container.querySelector<HTMLSelectElement>('select[aria-label="Language"]')!;
+  expect(language.value).toBe('zh-CN');
+  expect(language.getAttribute('aria-busy')).toBe('true');
   await act(async () => pending.reject(new Error('offline')));
+  expect(language.value).toBe('en');
+  expect(language.getAttribute('aria-busy')).toBe('false');
   expect(document.documentElement.lang).toBe('en');
   expect(window.localStorage.getItem('computedeck.locale')).toBe('en');
   expect(container.querySelector('.toast[role="alert"]')?.textContent).toContain(
@@ -140,6 +145,27 @@ it('does not let a late server preference replace a device selection', async () 
   expect(window.localStorage.getItem('computedeck.locale')).toBe('zh-CN');
 });
 
+it('remembers the server language for startup, then follows a changed server default', async () => {
+  mockDashboard(Promise.resolve({ language: 'zh-CN' }));
+  await render(<App />);
+  expect(document.documentElement.lang).toBe('zh-CN');
+  expect(i18n.rememberedServerLocale()).toBe('zh-CN');
+  expect(i18n.storedLocale()).toBeNull();
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  const settings = deferred<unknown>();
+  mockDashboard(settings.promise);
+  const load = vi.spyOn(i18n, 'loadLocale');
+  await render(<App />);
+  expect(container.querySelector('h1')?.textContent).toBe('设置');
+  expect(load.mock.calls.every(([language]) => language === 'zh-CN')).toBe(true);
+  expect(load).toHaveBeenCalledWith('zh-CN');
+  await act(async () => settings.resolve({ language: 'en' }));
+  expect(container.querySelector('h1')?.textContent).toBe('Settings');
+  expect(i18n.rememberedServerLocale()).toBe('en');
+  expect(i18n.storedLocale()).toBeNull();
+});
+
 it.each(['en', 'zh-CN'] as const)(
   'shows a named, recoverable error for a failed lazy form in %s',
   async (language) => {
@@ -156,9 +182,8 @@ it.each(['en', 'zh-CN'] as const)(
         </Suspense>
       </div>,
     );
-    expect(container.querySelector('#modal-title[role="alert"]')?.textContent).toContain(
-      i18n.t('error.chunk'),
-    );
+    expect(container.querySelector('strong#modal-title')?.textContent).toBe(i18n.t('form.failed'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(i18n.t('error.chunk'));
     expect(container.querySelector('button')?.textContent).toBe(i18n.t('common.retry'));
   },
 );

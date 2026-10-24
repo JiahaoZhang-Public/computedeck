@@ -54,6 +54,7 @@ export type Ctx = {
   diagnose: (source: Source) => void;
   health: Health | null;
   locale: Locale;
+  pendingLocale?: Locale | null;
   changeLocale: (locale: Locale) => void;
   plugin: PluginProps;
   navigate: (page: Page, group?: Filter) => void;

@@ -1,6 +1,11 @@
-import { afterEach, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-afterEach(() => vi.resetModules());
+beforeEach(() => window.localStorage.clear());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetModules();
+});
 
 it.each(['en', 'zh-CN'] as const)('loads only the selected %s dictionary', async (language) => {
   vi.resetModules();
@@ -23,4 +28,38 @@ it.each(['en', 'zh-CN'] as const)('loads only the selected %s dictionary', async
   await loadLocale(language);
   setLocale(language);
   expect(locale()).toBe(language);
+});
+
+it('loads only the remembered server language on a later cold start without a device choice', async () => {
+  const first = await import('./i18n');
+  first.rememberServerLocale('zh-CN');
+  vi.resetModules();
+  const cold = await import('./i18n');
+  expect(cold.storedLocale()).toBeNull();
+  expect(cold.startupLocale()).toBe('zh-CN');
+  await cold.loadLocale(cold.startupLocale());
+  expect(cold.localeLoaded('zh-CN')).toBe(true);
+  expect(cold.localeLoaded('en')).toBe(false);
+});
+
+it('gives the device choice precedence over the remembered server language', async () => {
+  const { rememberServerLocale, storeLocale, startupLocale } = await import('./i18n');
+  rememberServerLocale('zh-CN');
+  storeLocale('en');
+  expect(startupLocale()).toBe('en');
+});
+
+it('ignores invalid hints and works when storage is blocked', async () => {
+  const { rememberServerLocale, rememberedServerLocale, startupLocale } = await import('./i18n');
+  window.localStorage.setItem('computedeck.serverLocale', 'invalid');
+  expect(rememberedServerLocale()).toBeNull();
+  expect(startupLocale()).toBe('en');
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  expect(() => rememberServerLocale('zh-CN')).not.toThrow();
+  expect(startupLocale()).toBe('en');
 });

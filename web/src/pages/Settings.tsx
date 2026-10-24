@@ -38,7 +38,8 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
             <p>{t('settings.languageHint')}</p>
             <select
               className="select"
-              value={ctx.locale}
+              value={ctx.pendingLocale ?? ctx.locale}
+              aria-busy={!!ctx.pendingLocale}
               aria-label={t('settings.language')}
               onChange={(event) => {
                 if (isLocale(event.target.value)) ctx.changeLocale(event.target.value);

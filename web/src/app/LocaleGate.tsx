@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
-import { loadLocale, localeLoaded, storedLocale } from '../i18n';
+import { loadLocale, localeLoaded, startupLocale } from '../i18n';
 import { loadingLabels } from '../locales/loading';
 
 /** Do not render a page in the wrong language while its dictionary is in flight. */
 export function LocaleGate({ children }: { children: ReactNode }) {
-  const [language] = useState(() => storedLocale() ?? 'en');
+  const [language] = useState(startupLocale);
   const [ready, setReady] = useState(() => localeLoaded(language));
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

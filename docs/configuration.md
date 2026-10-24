@@ -30,14 +30,27 @@ The interface uses the [English glossary](../README.md#terms-in-the-interface) a
 | `language` | Default UI language of this server: `"en"` (default) or `"zh-CN"`. Viewers can still choose their own in Settings. |
 | `server_name` | Name shown in remote mode. Defaults to the host name. |
 
-The browser loads only the selected language dictionary at startup and loads the other
-when you select it in Settings. Your current language stays visible until loading
-succeeds; a failed switch leaves the device preference unchanged and shows a retryable
-error. A device selection takes precedence over a late server-language response.
+The browser starts with the device's language choice, otherwise the last server language
+remembered for this origin, otherwise English. The remembered server language is only a
+startup hint: `/settings` still supplies the current default and never creates a device
+choice. A first visit to a Chinese-default server, a changed default, or unavailable
+browser storage can therefore load both dictionaries. Later visits with a matching hint
+load only that dictionary.
 
-中文：浏览器启动时只加载所选语言，在设置中切换时再加载另一种语言。加载成功前保留
-当前文字；失败时保留原设备偏好并显示错误，可重新选择以重试。设备上的选择优先于
-延迟返回的服务器默认语言。
+When you switch languages in Settings, the select shows the requested language and is
+marked busy until loading finishes. The current page text stays visible until loading
+succeeds; a failed switch restores the select, keeps the device preference unchanged,
+and shows an error so you can select again to retry. A device selection takes precedence
+over a late server-language response.
+
+中文：浏览器优先使用设备上的语言选择，其次使用为当前来源记住的服务器语言，否则
+使用英语。记住的服务器语言只是启动提示；`/settings` 仍提供当前默认值，且不会因此
+保存设备选择。首次访问默认中文的服务器、默认语言发生变化或浏览器存储不可用时，
+可能加载两份字典；之后若记住的语言与服务器一致，则只加载该语言字典。
+
+在设置中切换语言时，下拉框立即显示所选语言并标记为忙碌，页面文字在加载成功前保持
+不变。失败时下拉框恢复原值、设备偏好保持不变，并显示错误，可重新选择以重试。
+设备上的选择优先于延迟返回的服务器默认语言。
 
 ## `[[cluster]]`
 

@@ -1372,6 +1372,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'cloud.col.utilization': '利用率',
   'msg.listing_truncated': '{command} 列出的行数超过 ComputeDeck 读取的 {count} 行，未做任何更改',
   'page.failed': '这个页面无法显示',
+  'form.failed': '这个表单无法显示',
   'page.failedHint':
     '采集到的数据里有内容无法显示。其他页面不受影响，可以重试，或到“来源”页检查对应的来源。',
 };

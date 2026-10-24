@@ -145,10 +145,14 @@ test('language switching waits for the inactive dictionary and keeps the current
     await language.selectOption(next);
     await arrived.promise;
     await expect(page.locator('html')).toHaveAttribute('lang', initial);
-    await expect(language).toHaveValue(initial);
+    await expect(language).toHaveValue(next);
+    await expect(language).toHaveAttribute('aria-busy', 'true');
     release.resolve();
     await expect(page.locator('html')).toHaveAttribute('lang', next);
     await expect(page.locator('.topbar h1')).toHaveText(next === 'en' ? 'Settings' : '设置');
+    await expect(
+      page.getByRole('combobox', { name: next === 'en' ? 'Language' : '语言', exact: true }),
+    ).toHaveAttribute('aria-busy', 'false');
     await expect(page).toHaveURL(/#\/settings\?group=example%3Acluster-a$/);
     expect(await page.evaluate(() => localStorage.getItem('computedeck.locale'))).toBe(next);
     await page
@@ -158,6 +162,30 @@ test('language switching waits for the inactive dictionary and keeps the current
   } finally {
     release.resolve();
   }
+});
+
+test('a failed form uses only its title as the dialog name', async ({ page, locale }) => {
+  await page.route(script('forms'), (route) => route.fulfill({ status: 503, body: 'Unavailable' }));
+  await page.goto('/#/sources');
+  await ready(page);
+  const add = page.locator('.topbar').getByRole('button', {
+    name: locale === 'zh-CN' ? '添加来源' : 'Add source',
+    exact: true,
+  });
+  await add.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveAccessibleName(
+    locale === 'zh-CN' ? '这个表单无法显示' : 'This form could not be shown',
+  );
+  await expect(dialog.getByRole('alert')).toContainText(
+    locale === 'zh-CN' ? '无法加载此视图' : 'Could not load this view',
+  );
+  await expect(
+    dialog.getByRole('button', { name: locale === 'zh-CN' ? '重试' : 'Retry', exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(add).toBeFocused();
 });
 
 test('a cold form keeps its focus shell and can close before the chunk arrives', async ({

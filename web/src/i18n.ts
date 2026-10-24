@@ -30,6 +30,7 @@ export function localeLoaded(locale: Locale): boolean {
   return !!dictionaries[locale];
 }
 const STORAGE_KEY = 'computedeck.locale';
+const SERVER_STORAGE_KEY = 'computedeck.serverLocale';
 let current: Locale = 'en';
 
 export function isLocale(value: unknown): value is Locale {
@@ -38,12 +39,33 @@ export function isLocale(value: unknown): value is Locale {
 
 /** The viewer's own choice on this device, if any. */
 export function storedLocale(): Locale | null {
+  return readStoredLocale(STORAGE_KEY);
+}
+
+function readStoredLocale(key: string): Locale | null {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
+    const value = window.localStorage.getItem(key);
     return isLocale(value) ? value : null;
   } catch {
     return null;
   }
+}
+
+/** A startup hint only; the next settings response remains authoritative. */
+export function rememberedServerLocale(): Locale | null {
+  return readStoredLocale(SERVER_STORAGE_KEY);
+}
+
+export function rememberServerLocale(locale: Locale) {
+  try {
+    window.localStorage.setItem(SERVER_STORAGE_KEY, locale);
+  } catch {
+    /* Storage is optional; the server default still applies to this page. */
+  }
+}
+
+export function startupLocale(): Locale {
+  return storedLocale() ?? rememberedServerLocale() ?? 'en';
 }
 
 export function storeLocale(locale: Locale) {

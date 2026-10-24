@@ -14,9 +14,10 @@ export function Loading({ id }: { id?: string }) {
 export function LoadError({ id }: { id?: string }) {
   return (
     <Panel>
-      <div id={id} role="alert">
+      <div role="alert">
         <Empty
-          title={t('page.failed')}
+          titleId={id}
+          title={t(id ? 'form.failed' : 'page.failed')}
           text={t('error.chunk')}
           action={
             <button className="button" onClick={() => window.location.reload()}>

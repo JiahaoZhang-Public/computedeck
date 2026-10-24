@@ -16,20 +16,39 @@ function importsOf(key, result = new Set()) {
 const initial = importsOf(entry);
 const size = (file) => gzipSync(readFileSync(path.join(directory, file))).length;
 const jsSize = (keys) => [...keys].reduce((sum, key) => sum + size(manifest[key].file), 0);
+// These must remain separate lazy entries, even if no request for them appears on Overview.
+const localeEntries = ['src/locales/en.ts', 'src/locales/zh-CN.ts'];
+const lazyEntries = [
+  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings', 'Clusters'].map(
+    (name) => `src/pages/${name}.tsx`,
+  ),
+  'src/forms.tsx',
+  'src/Gallery.tsx',
+  ...localeEntries,
+];
+for (const key of lazyEntries) {
+  if (!manifest[key]?.isDynamicEntry || initial.has(key))
+    throw new Error(`Expected a lazy entry outside the initial import graph: ${key}`);
+}
 // A cold Overview also needs its selected dictionary, even though it is dynamically imported.
-const localeEntries = Object.keys(manifest).filter((key) =>
-  /^src\/locales\/(en|zh-CN)\.ts$/.test(key),
-);
 const initialSize = Math.max(
-  jsSize(initial),
   ...localeEntries.map((key) => jsSize(new Set([...initial, ...importsOf(key)]))),
+);
+// A new viewer or a changed server default can load both before settings settle.
+const serverDefaultSize = jsSize(
+  new Set([...initial, ...localeEntries.flatMap((key) => [...importsOf(key)])]),
 );
 let failed = false;
 function check(label, bytes, ceiling) {
   console.log(`${label}: ${bytes} bytes gzip / ${ceiling} bytes`);
   if (bytes > ceiling) failed = true;
 }
-check('Initial JS including active locale (target 160 KB)', initialSize, 170_000);
+check('Initial JS with device/remembered locale (target 160 KB)', initialSize, 170_000);
+check(
+  'Initial JS with server-default change (both locales; target 160 KB)',
+  serverDefaultSize,
+  170_000,
+);
 const css = new Set();
 for (const [key, chunk] of Object.entries(manifest)) {
   for (const file of chunk.css || []) css.add(file);

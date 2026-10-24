@@ -1452,6 +1452,7 @@ const en = {
   'msg.listing_truncated':
     '{command} listed more than the {count} rows ComputeDeck reads; nothing was changed',
   'page.failed': 'This page could not be shown',
+  'form.failed': 'This form could not be shown',
   'page.failedHint':
     'Something in the collected data could not be displayed. The other pages still work; try again, or check the source on the Sources page.',
 } as const;

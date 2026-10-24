@@ -18,7 +18,28 @@ function bytes(length) {
   return value;
 }
 
+const requiredEntries = [
+  ...['Plan', 'Usage', 'Toolbox', 'Notify', 'Chat', 'Settings', 'Clusters'].map(
+    (name) => `src/pages/${name}.tsx`,
+  ),
+  'src/forms.tsx',
+  'src/Gallery.tsx',
+  'src/locales/en.ts',
+  'src/locales/zh-CN.ts',
+];
+
 function build(files, manifest, run) {
+  files = { ...files };
+  manifest = { ...manifest };
+  for (const key of requiredEntries) {
+    if (!(key in manifest)) {
+      const file = `${path.basename(key)}.js`;
+      files[file] = 0;
+      manifest[key] = { file, isDynamicEntry: true };
+    } else if (manifest[key] === null) {
+      delete manifest[key];
+    }
+  }
   const directory = mkdtempSync(path.join(tmpdir(), 'computedeck-size-'));
   try {
     mkdirSync(path.join(directory, '.vite'));
@@ -104,8 +125,8 @@ test('includes the larger active locale and its static imports once in the initi
         dynamicImports: ['src/locales/en.ts', 'src/locales/zh-CN.ts'],
       },
       shared: { file: 'shared.js' },
-      'src/locales/en.ts': { file: 'en.js', imports: ['shared'] },
-      'src/locales/zh-CN.ts': { file: 'zh.js', imports: ['shared'] },
+      'src/locales/en.ts': { file: 'en.js', imports: ['shared'], isDynamicEntry: true },
+      'src/locales/zh-CN.ts': { file: 'zh.js', imports: ['shared'], isDynamicEntry: true },
     },
     (directory) => {
       const result = spawnSync(process.execPath, [script, directory], { encoding: 'utf8' });
@@ -115,21 +136,67 @@ test('includes the larger active locale and its static imports once in the initi
   );
 });
 
-test('counts only one active locale at startup, keeping the inactive one lazy', () => {
+test('reports single-locale startup and the server-default case separately', () => {
   build(
-    { 'index.js': 130_000, 'en.js': 20_000, 'zh.js': 24_000 },
+    { 'index.js': 124_000, 'en.js': 20_000, 'zh.js': 24_000 },
     {
       index: {
         isEntry: true,
         file: 'index.js',
         dynamicImports: ['src/locales/en.ts', 'src/locales/zh-CN.ts'],
       },
-      'src/locales/en.ts': { file: 'en.js' },
-      'src/locales/zh-CN.ts': { file: 'zh.js' },
+      'src/locales/en.ts': { file: 'en.js', isDynamicEntry: true },
+      'src/locales/zh-CN.ts': { file: 'zh.js', isDynamicEntry: true },
     },
     (directory) => {
       const output = execFileSync(process.execPath, [script, directory], { encoding: 'utf8' });
-      assert.match(output, /Initial JS.*154\d+ bytes/);
+      assert.match(output, /Initial JS with device\/remembered locale.*148\d+ bytes/);
+      assert.match(output, /Initial JS with server-default change.*168\d+ bytes/);
+    },
+  );
+});
+
+test('rejects a server-default startup over the ceiling even when one locale fits', () => {
+  build(
+    { 'index.js': 130_000, 'en.js': 20_000, 'zh.js': 24_000 },
+    {
+      index: { isEntry: true, file: 'index.js' },
+      'src/locales/en.ts': { file: 'en.js', isDynamicEntry: true },
+      'src/locales/zh-CN.ts': { file: 'zh.js', isDynamicEntry: true },
+    },
+    (directory) => {
+      const result = spawnSync(process.execPath, [script, directory], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /device\/remembered locale.*154\d+ bytes/);
+      assert.match(result.stdout, /server-default change.*174\d+ bytes.*170000 bytes/);
+    },
+  );
+});
+
+for (const key of requiredEntries) {
+  test(`rejects a missing lazy entry: ${key}`, () => {
+    build(
+      { 'index.js': 10 },
+      { index: { isEntry: true, file: 'index.js' }, [key]: null },
+      (directory) => {
+        const result = spawnSync(process.execPath, [script, directory], { encoding: 'utf8' });
+        assert.equal(result.status, 1);
+        assert.ok(
+          result.stderr.includes(`Expected a lazy entry outside the initial import graph: ${key}`),
+        );
+      },
+    );
+  });
+}
+
+test('rejects a lazy entry pulled into the static import graph', () => {
+  build(
+    { 'index.js': 10 },
+    { index: { isEntry: true, file: 'index.js', imports: ['src/pages/Usage.tsx'] } },
+    (directory) => {
+      const result = spawnSync(process.execPath, [script, directory], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Expected a lazy entry.*src\/pages\/Usage.tsx/);
     },
   );
 });
