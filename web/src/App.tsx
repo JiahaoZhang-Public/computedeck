@@ -1,3 +1,4 @@
+import { Gallery } from './Gallery';
 import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
 import { HealthPanel } from './HealthPanel';
@@ -94,7 +95,7 @@ type Detail =
   | null;
 type Toast = { text: string; tone: 'ok' | 'error' } | null;
 
-const startPages = [...corePages, ...pagesOf(buildTimePlugins).map((page) => page.id)];
+const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
 const navGroups: {
   label?: MessageKey;
   items: { id: CorePage; label: MessageKey; icon: typeof Server }[];
@@ -277,7 +278,7 @@ export default function App() {
   const plugins = useMemo(() => activePlugins(allPlugins, tools), [allPlugins, tools]);
   const pluginPages = pagesOf(plugins);
   const knownPages = useMemo(
-    () => [...corePages, ...pagesOf(plugins).map((item) => item.id)],
+    () => [...corePages, '__gallery', ...pagesOf(plugins).map((item) => item.id)],
     [plugins],
   );
   // Re-evaluate the requested route as plugin pages become available or disappear.
@@ -686,7 +687,9 @@ export default function App() {
   };
   const title = activePluginPage
     ? labelText(activePluginPage.label, locale)
-    : t(pageTitles[page as CorePage] ?? 'nav.overview');
+    : page === '__gallery'
+      ? t('gallery.title')
+      : t(pageTitles[page as CorePage] ?? 'nav.overview');
 
   return (
     <div className="app-shell">
@@ -888,7 +891,7 @@ export default function App() {
               const Banner = item.banner!;
               return <Banner key={item.id} {...plugin} />;
             })}
-        <main className={`content page-${page}`}>
+        <main className={`content page-${page}`} aria-busy={loading || refreshing}>
           <PageBoundary page={page}>
             {needsToken ? (
               <TokenGate
@@ -910,6 +913,8 @@ export default function App() {
                   {t('common.loading')}
                 </div>
               )
+            ) : page === '__gallery' ? (
+              <Gallery compat={params.has('compat')} />
             ) : page === 'overview' ? (
               <OverviewPage ctx={ctx} />
             ) : page === 'jobs' ? (

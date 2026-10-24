@@ -1,5 +1,20 @@
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'gallery.title': 'Component gallery',
+  'gallery.note': 'Fictional examples for interface checks.',
+  'gallery.components': 'Components',
+  'gallery.compat': 'Plugin compatibility',
+  'gallery.classes': 'Public CSS classes',
+  'gallery.tokens': 'Public CSS tokens',
+  'gallery.example': 'Example',
+  'gallery.value': 'Value',
+  'gallery.error': 'Example error',
+  'gallery.warning': 'Example warning',
+  'gallery.input': 'Text input',
+  'gallery.select': 'Selection',
+  'gallery.switch': 'Example switch',
+  'gallery.empty': 'No examples to show',
+
   'wait.unsupported':
     '— · This scheduler’s accounting does not report usable submit, start and end times for your finished jobs.',
   'wait.ownOnly': 'Wait history covers only this login’s own jobs.',

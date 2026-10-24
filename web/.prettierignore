@@ -1,3 +1,7 @@
 node_modules
 dist
 package-lock.json
+
+e2e/snapshots
+test-results
+playwright-report

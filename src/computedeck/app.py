@@ -394,7 +394,9 @@ def create_app(
         }
         if rollup:
             result["rollups"] = (
-                rollup_history(points, hours) if demo else store().history_rollups(hours)
+                rollup_history(points, hours, end=datetime.fromisoformat(points[-1]["at"]))
+                if demo
+                else store().history_rollups(hours)
             )
         return result
 

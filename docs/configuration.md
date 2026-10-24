@@ -234,3 +234,11 @@ seven days. See [sustained low GPU use](metrics.md#sustained-low-gpu-use) for co
 更改后按已有读数重新计算，不会开启新的采集或 SSH 检查。至少需要 3 次连续测量覆盖窗口，
 相邻间隔不得超过采集周期的两倍。对于有意保持低负载的推理服务，可在“待处理”中确认或暂缓。
 读数保留 7 天。
+
+## Reproducible example data
+
+Set `COMPUTEDECK_DEMO_NOW` to a timezone-qualified ISO datetime, such as
+`2026-01-15T14:00:00Z`, to hold example data at a fixed UTC minute. It affects example
+dashboards, history, events and collection nodes only; live data keeps its normal clock.
+Omit it for the current minute. Invalid or timezone-less values are rejected.
+See [Local UI checks](ui-testing.md) for the isolated service and screenshot workflow.

@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -36,6 +37,15 @@ _JOBS = [
     ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 1, None, None, "00:00:00"),
     ("example:cluster-b-alice", "rl-agent / rollout", "PENDING", 16, None, None, "00:00:00"),
 ]
+
+
+def now() -> datetime:
+    """Minute-aligned example clock; never used by collectors or live data."""
+    value = os.environ.get("COMPUTEDECK_DEMO_NOW")
+    current = datetime.fromisoformat(value) if value else datetime.now(UTC)
+    if current.tzinfo is None:
+        raise ValueError("COMPUTEDECK_DEMO_NOW must include a timezone")
+    return current.astimezone(UTC).replace(second=0, microsecond=0)
 
 
 def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any]:
@@ -125,7 +135,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
 
 def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """A smooth fictional trace, one point per 30 minutes, up to 30 days."""
-    current = datetime.now(UTC).replace(second=0, microsecond=0)
+    current = now()
     data = dashboard() if data is None else data
     summary = data["summary"]
     gaps = [s for s in data["sources"] if s.get("stale") or s.get("error")]
@@ -226,7 +236,7 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
 
 def dashboard() -> dict[str, Any]:
     # Keep example polls stable within a minute, as if these were collected samples.
-    current = datetime.now(UTC).replace(second=0, microsecond=0)
+    current = now()
     observed = (current - timedelta(minutes=3)).isoformat()
     probed = (current - timedelta(minutes=2)).isoformat()
     sources = [_source(row, observed) for row in _SOURCES]
@@ -688,7 +698,7 @@ def dashboard() -> dict[str, Any]:
             item, readings, now=current, interval_minutes=10, threshold=10, window_minutes=60
         )
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
-    data["summary"] = summarize(data)
+    data["summary"] = summarize(data, now=current)
     # Own accounting demonstrates ranges, small samples and missing GPU counts.
     wait_samples = []
     for source, count, gpus in (
@@ -768,7 +778,7 @@ def events() -> list[dict[str, Any]]:
     sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
     timeout, oom = data["recent_failures"][:2]
-    at = datetime.now(UTC).replace(second=0, microsecond=0)
+    at = now()
 
     def context(source_id: str | None) -> dict[str, Any]:
         if source_id is None:
@@ -943,9 +953,7 @@ def events() -> list[dict[str, Any]]:
 
 def nodes() -> list[dict[str, Any]]:
     """An example collection machine."""
-    observed = (
-        datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=3)
-    ).isoformat()
+    observed = (now() - timedelta(minutes=3)).isoformat()
     return [
         {
             "id": "example:lab-gateway",

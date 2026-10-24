@@ -36,13 +36,13 @@ def timestamp(value: Any) -> str | None:
     return None
 
 
-def manual_state(row: dict[str, Any]) -> str:
+def manual_state(row: dict[str, Any], *, now: datetime | None = None) -> str:
     """A machine added by hand has no provider lifecycle. It is running while its last SSH
     check reached it within two check intervals, and unknown otherwise, never stopped."""
     observed = timestamp(row.get("observed_at"))
     if row.get("ssh_status") != "reachable" or observed is None:
         return "unknown"
-    age = datetime.now(UTC) - datetime.fromisoformat(observed)
+    age = (now or datetime.now(UTC)) - datetime.fromisoformat(observed)
     return "running" if age < 2 * PROBE_INTERVAL else "unknown"
 
 
@@ -184,7 +184,7 @@ def summarize_nodes(
     }
 
 
-def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, Any]:
+def _scope(data: dict[str, Any], *, now: datetime, include_job_ids: bool = False) -> dict[str, Any]:
     sources = [s for s in data["sources"] if s["enabled"]]
     by_id = {s["id"]: s for s in sources}
     disabled = {s["id"] for s in data["sources"] if not s["enabled"]}
@@ -221,7 +221,7 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
     )
     for item in spend_instances:
         source = by_id.get(item["source_id"])
-        state = manual_state(item) if item.get("manual") else item.get("state")
+        state = manual_state(item, now=now) if item.get("manual") else item.get("state")
         lifecycle = instance_lifecycle(state)
         if lifecycle == "not_held":
             continue
@@ -269,7 +269,7 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
                 reason = "summary_probe_failed"
             elif not item.get("observed_at"):
                 reason = "summary_not_probed_yet"
-            elif manual_state(item) != "running":
+            elif manual_state(item, now=now) != "running":
                 reason = "summary_probe_stale"
             elif gpu_allocation(item) is None:
                 reason = "summary_gpu_processes_unavailable"
@@ -317,7 +317,7 @@ def _scope(data: dict[str, Any], *, include_job_ids: bool = False) -> dict[str, 
             for i in instances
             if i.get("ssh_status") == "reachable"
             and (at := ssh_sampled_at(i))
-            and (datetime.now(UTC) - datetime.fromisoformat(at)).total_seconds() < 720
+            and (now - datetime.fromisoformat(at)).total_seconds() < 720
         ],
     ]
     observed = [
@@ -457,8 +457,9 @@ def link_machine_nodes(data: dict[str, Any]) -> None:
         }
 
 
-def summarize(data: dict[str, Any]) -> dict[str, Any]:
+def summarize(data: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
     """One set of figures for the fleet, each group and each configured login."""
+    now = now or datetime.now(UTC)
     link_machine_nodes(data)
     source_groups = {s["id"]: s["cluster_id"] for s in data["sources"]}
 
@@ -480,7 +481,8 @@ def summarize(data: dict[str, Any]) -> dict[str, Any]:
                 "jobs": [j for j in data["jobs"] if source_groups.get(j["source_id"]) == key],
                 "nodes": [n for n in data["nodes"] if source_groups.get(n["source_id"]) == key],
                 "instances": [i for i in data["instances"] if instance_group(i) == key],
-            }
+            },
+            now=now,
         )
     logins = {
         s["id"]: _scope(
@@ -491,8 +493,9 @@ def summarize(data: dict[str, Any]) -> dict[str, Any]:
                     key: [row for row in data[key] if row["source_id"] == s["id"]]
                     for key in ("jobs", "nodes", "instances")
                 },
-            }
+            },
+            now=now,
         )
         for s in data["sources"]
     }
-    return {**_scope(data, include_job_ids=True), "groups": groups, "sources": logins}
+    return {**_scope(data, now=now, include_job_ids=True), "groups": groups, "sources": logins}

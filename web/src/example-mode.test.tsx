@@ -316,3 +316,21 @@ it.each(['en', 'zh-CN'] as const)(
     expect(writes[0][0]).toBe('/api/session');
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'opens the unlisted gallery and compatibility state in %s without writes',
+  async (locale) => {
+    await open('__gallery', locale);
+    expect(container.querySelector('h1')?.textContent).toBe(t('gallery.title'));
+    expect(container.querySelector('main')?.getAttribute('aria-busy')).toBe('false');
+    expect(container.querySelector('.gallery')).not.toBeNull();
+    expect(container.querySelector('nav a[href="#/__gallery"]')).toBeNull();
+    await act(async () => {
+      window.history.replaceState(null, '', '/?demo=true#/__gallery?compat');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(container.querySelectorAll('[data-token]')).toHaveLength(21);
+    await click(container.querySelector('.gallery .primary-button'));
+    expectOnlyReads();
+  },
+);

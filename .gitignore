@@ -10,3 +10,9 @@ dist/
 *.egg-info/
 *.tsbuildinfo
 .DS_Store
+
+# Only CI-generated Linux UI baselines are committed.
+web/e2e/snapshots/*
+!web/e2e/snapshots/linux/
+web/test-results/
+web/playwright-report/

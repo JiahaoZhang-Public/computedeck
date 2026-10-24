@@ -2,6 +2,21 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'gallery.title': '组件展示',
+  'gallery.note': '用于界面检查的虚构示例。',
+  'gallery.components': '组件',
+  'gallery.compat': '插件兼容性',
+  'gallery.classes': '公开 CSS 类',
+  'gallery.tokens': '公开 CSS 变量',
+  'gallery.example': '示例',
+  'gallery.value': '数值',
+  'gallery.error': '错误示例',
+  'gallery.warning': '警告示例',
+  'gallery.input': '文本输入',
+  'gallery.select': '选项',
+  'gallery.switch': '示例开关',
+  'gallery.empty': '暂无可显示的示例',
+
   'wait.unsupported': '— · 此调度器的记账记录不提供你的已结束作业可用的提交、开始和结束时间。',
   'wait.ownOnly': '等待历史仅涵盖此登录自己的作业。',
   'wait.line': '你的作业通常等待多久：{value}',

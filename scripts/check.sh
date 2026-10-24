@@ -11,3 +11,5 @@ npm --prefix web run format:check
 npm --prefix web run typecheck
 npm --prefix web test
 npm --prefix web run build
+npm --prefix web run check:size
+npm --prefix web run test:size

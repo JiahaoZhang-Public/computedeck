@@ -6,6 +6,8 @@ npm --prefix web ci
 npm --prefix web run build
 rm -rf src/computedeck/static
 cp -R web/dist src/computedeck/static
+# The Vite manifest is for development size checks, not shipped browser assets.
+rm -rf src/computedeck/static/.vite
 rm -rf dist
 uv build
 for archive in dist/computedeck-*.whl; do
