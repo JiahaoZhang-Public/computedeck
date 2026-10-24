@@ -34,7 +34,7 @@ const script = new URL('./check-size.mjs', import.meta.url).pathname;
 
 test('counts static imports once and excludes lazy routes from the initial budget', () => {
   build(
-    { 'index.js': 100_000, 'shared.js': 70_000, 'route.js': 25_000, 'other.js': 25_000 },
+    { 'index.js': 100_000, 'shared.js': 60_000, 'route.js': 25_000, 'other.js': 25_000 },
     {
       index: {
         isEntry: true,
@@ -48,7 +48,7 @@ test('counts static imports once and excludes lazy routes from the initial budge
     },
     (directory) => {
       const output = execFileSync(process.execPath, [script, directory], { encoding: 'utf8' });
-      assert.match(output, /Initial JS.*170\d+ bytes/);
+      assert.match(output, /Initial JS.*160\d+ bytes/);
     },
   );
 });
@@ -56,7 +56,7 @@ test('counts static imports once and excludes lazy routes from the initial budge
 for (const [name, files, manifest] of [
   [
     'initial imports',
-    { 'index.js': 130_000, 'shared.js': 80_000 },
+    { 'index.js': 100_000, 'shared.js': 71_000 },
     {
       index: { isEntry: true, file: 'index.js', imports: ['shared'] },
       shared: { file: 'shared.js' },
@@ -92,3 +92,44 @@ for (const [name, files, manifest] of [
     });
   });
 }
+
+test('includes the larger active locale and its static imports once in the initial budget', () => {
+  build(
+    { 'index.js': 135_000, 'en.js': 20_000, 'zh.js': 24_000, 'shared.js': 12_000 },
+    {
+      index: {
+        isEntry: true,
+        file: 'index.js',
+        imports: ['shared'],
+        dynamicImports: ['src/locales/en.ts', 'src/locales/zh-CN.ts'],
+      },
+      shared: { file: 'shared.js' },
+      'src/locales/en.ts': { file: 'en.js', imports: ['shared'] },
+      'src/locales/zh-CN.ts': { file: 'zh.js', imports: ['shared'] },
+    },
+    (directory) => {
+      const result = spawnSync(process.execPath, [script, directory], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /Initial JS.*171\d+ bytes.*170000 bytes/);
+    },
+  );
+});
+
+test('counts only one active locale at startup, keeping the inactive one lazy', () => {
+  build(
+    { 'index.js': 130_000, 'en.js': 20_000, 'zh.js': 24_000 },
+    {
+      index: {
+        isEntry: true,
+        file: 'index.js',
+        dynamicImports: ['src/locales/en.ts', 'src/locales/zh-CN.ts'],
+      },
+      'src/locales/en.ts': { file: 'en.js' },
+      'src/locales/zh-CN.ts': { file: 'zh.js' },
+    },
+    (directory) => {
+      const output = execFileSync(process.execPath, [script, directory], { encoding: 'utf8' });
+      assert.match(output, /Initial JS.*154\d+ bytes/);
+    },
+  );
+});

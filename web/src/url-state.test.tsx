@@ -49,6 +49,9 @@ afterEach(async () => {
 async function render(url: string) {
   window.history.replaceState(null, '', url);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 async function input(element: HTMLInputElement, value: string) {
   await act(async () => {

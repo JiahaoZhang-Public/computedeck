@@ -161,8 +161,50 @@ copied package assets, so the wheel and sdist do not ship or serve the manifest;
 original in `web/dist` and the temporary UI build remain available for size checks.
 Screenshot baselines, browser reports and test results are excluded from the sdist;
 `build.sh` also rejects an sdist containing `web/e2e/snapshots`.
-`web/scripts/check-size.mjs` traverses static imports for initial JS (200,000 bytes gzip
-ceiling; 160,000 target), checks each non-initial
-chunk (30,000; palette 15,000) and all CSS (16,000). `check.sh` runs this after the build.
-F3 will tighten the initial-JS gate to 170,000 bytes as routing becomes lazy. Runtime
-performance budgets remain Q2 work.
+`web/scripts/check-size.mjs` traverses static imports for initial JS (170,000 bytes gzip
+ceiling; 160,000 target), including the larger of the two active locale graphs. Although
+loaded dynamically, the selected dictionary is needed to show Overview; the inactive
+one is excluded. Shared imports count once. Each non-initial chunk is also checked
+(30,000; palette 15,000), as is all CSS (16,000). `check.sh` runs this after the build.
+Runtime performance budgets remain Q2 work.
+
+中文：首屏 JS 的 gzip 上限为 170,000 字节，目标为 160,000 字节。检查会计入当前语言
+字典及其静态依赖，取两种语言中较大的总量，共享依赖只计算一次；未使用的语言不计入
+首屏。每个延迟加载块和全部 CSS 仍分别受原有预算约束。
+
+
+## Lazy views and languages
+
+`App.tsx` owns data and actions; `app/Frame.tsx`, `app/Routes.tsx` and `app/Layers.tsx`
+render the existing frame, route table and layers. The F2 hash store, aliases and plugin
+routes are unchanged. Plan, Usage, Toolbox, Notify, Chat, Settings and Clusters load on
+first visit. Clusters includes the existing single-group view; P6 still owns the new
+detail design. The existing source/instance forms load on opening, and Gallery brings
+its own CSS. The new focus-view wizard and palette remain later items (F6 and U2).
+
+Only the selected language dictionary loads at startup. A small shared loading/error
+vocabulary allows startup to report a failed dictionary request and offer Retry.
+Switching languages keeps the current page in its previous language until the new
+one arrives. A failed switch preserves both the active language and the stored device
+choice and shows an error toast; a late server preference or older selection cannot
+overwrite the newest device choice. Unit-test setup loads both dictionaries before
+synchronous translation tests; the browser tests exercise actual cold imports.
+
+`loading.spec.ts` adds five interaction cases in all six Chromium combinations: deferred
+assets and the unchanged host API, navigating away from a delayed route and back,
+recovery from a failed route import, a delayed language switch, and closing/reopening a
+cold form with focus return. A failed view import offers Retry, which reloads the app
+at its current URL (React caches failed lazy imports). Route rendering errors still use
+the existing page boundary. Suspense loading states carry `aria-busy=true`; modal shells
+and their close controls remain mounted while their content loads.
+
+There is no intended settled-page visual change and no baseline regeneration for F3.
+Run the full `bash scripts/check-ui.sh` outside the socket-restricted sandbox to compare
+all existing screenshots and exercise the new interactions. Example data is unchanged:
+loading and import failures are transport states, exercised with delayed/failed local
+asset requests, rather than new server data states.
+
+中文：页面、表单及语言字典按需加载，组件展示页的 CSS 随页面加载。加载完成后的布局、
+插件 DOM 和样式约定不变。切换语言时保留当前文字，成功后再保存设备选择；失败时保留
+原语言并显示错误。延迟返回的服务器语言或旧选择不会覆盖新的设备选择。新增浏览器
+测试覆盖冷加载、失败重试、前进后退及表单焦点恢复；F3 不更新截图基线或示例数据。

@@ -47,12 +47,18 @@ function deferred<T>() {
 
 async function render(node: ReactNode) {
   await act(async () => root.render(<StrictMode>{node}</StrictMode>));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 
 async function click(selector: string) {
   const element = container.querySelector<HTMLElement>(selector);
   expect(element).not.toBeNull();
   await act(async () => element!.click());
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 
 function sample(hoursAgo: number): HistoryPoint {

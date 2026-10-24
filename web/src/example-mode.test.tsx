@@ -120,6 +120,9 @@ async function open(page: string, locale: 'en' | 'zh-CN' = 'en') {
   window.localStorage.setItem('computedeck.locale', locale);
   window.history.replaceState(null, '', `/?remote=1&demo=true#/${page}`);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 
 async function click(element: Element | null | undefined) {
@@ -225,6 +228,9 @@ it('preserves other query parameters and the route when toggling and reloading',
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demo'));
   expectOnlyReads();
 });

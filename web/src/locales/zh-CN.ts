@@ -1,7 +1,10 @@
+import { loadingLabels } from './loading';
 import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'error.chunk': '无法加载此视图。重试将重新加载应用。',
+  'error.locale': loadingLabels['zh-CN']['error.locale'],
   'gallery.title': '组件展示',
   'gallery.note': '用于界面检查的虚构示例。',
   'gallery.components': '组件',
@@ -279,7 +282,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'common.edit': '编辑',
   'common.installed': '已安装',
   'common.notInstalled': '未安装',
-  'common.loading': '正在载入…',
+  'common.loading': loadingLabels['zh-CN']['common.loading'],
   'common.memory': '内存',
   'common.minutes': '{count} 分钟',
   'common.notSet': '未填写',
@@ -287,7 +290,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'common.off': '未启用',
   'common.optional': '可选',
   'common.remove': '移除',
-  'common.retry': '重试',
+  'common.retry': loadingLabels['zh-CN']['common.retry'],
   'common.sampledAt': '采样时间',
   'common.save': '保存',
   'common.saving': '保存中…',

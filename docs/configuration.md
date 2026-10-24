@@ -30,6 +30,15 @@ The interface uses the [English glossary](../README.md#terms-in-the-interface) a
 | `language` | Default UI language of this server: `"en"` (default) or `"zh-CN"`. Viewers can still choose their own in Settings. |
 | `server_name` | Name shown in remote mode. Defaults to the host name. |
 
+The browser loads only the selected language dictionary at startup and loads the other
+when you select it in Settings. Your current language stays visible until loading
+succeeds; a failed switch leaves the device preference unchanged and shows a retryable
+error. A device selection takes precedence over a late server-language response.
+
+中文：浏览器启动时只加载所选语言，在设置中切换时再加载另一种语言。加载成功前保留
+当前文字；失败时保留原设备偏好并显示错误，可重新选择以重试。设备上的选择优先于
+延迟返回的服务器默认语言。
+
 ## `[[cluster]]`
 
 One table per cluster. `driver` defaults to `"slurm"`.

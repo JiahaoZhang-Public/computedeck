@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // Optional build-time UI plugins: a module whose default export is a WebPlugin[].
@@ -10,6 +10,7 @@ const plugins = process.env.COMPUTEDECK_WEB_PLUGINS
 
 export default defineConfig({
   plugins: [react()],
+  test: { setupFiles: ['./src/test-locales.ts'] },
   resolve: {
     alias: { 'computedeck:plugins': plugins },
     dedupe: ['react', 'react-dom', 'lucide-react'],

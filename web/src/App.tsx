@@ -1,32 +1,13 @@
-import { Gallery } from './Gallery';
 import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
-import { HealthPanel } from './HealthPanel';
-import { SourceDiagnosis } from './SourceDiagnosis';
 import { useVisibleInterval } from './useVisibleInterval';
-import { useDialogFocus } from './useDialogFocus';
+import { LocaleGate } from './app/LocaleGate';
+import { Frame } from './app/Frame';
+import { Layers } from './app/Layers';
+import type { Modal, Detail, Toast } from './app/Layers';
+import { Routes } from './app/Routes';
+import { Loading } from './app/LoadState';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import {
-  Activity,
-  Cable,
-  Check,
-  Cloud,
-  Compass,
-  Gauge,
-  History,
-  LayoutDashboard,
-  Loader2,
-  Menu,
-  Plus,
-  Puzzle,
-  RefreshCw,
-  Server,
-  Settings2,
-  Terminal,
-  TriangleAlert,
-  X,
-} from 'lucide-react';
 import type {
   Attention,
   CollectionNode,
@@ -34,120 +15,39 @@ import type {
   DeckEvent,
   DriverInfo,
   Health,
-  Instance,
-  Job,
   Settings,
   Source,
   SSHConfig,
   Tool,
 } from './types';
-import { arrayLabel, dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
+import { arrayLabel, listedJobs, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { eventJob } from './events';
 import { api } from './api';
 import { groupsOf } from './groups';
-import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
-import type { Locale, MessageKey } from './i18n';
-import { canonicalHash, corePages, readRoute, routeHash, useHash } from './routes';
-import type { CorePage, Filter, Page } from './routes';
 import {
-  activePlugins,
-  buildTimePlugins,
-  labelText,
-  loadBundles,
-  pagesOf,
-  useWebPlugins,
-} from './plugins';
+  ApiError,
+  errorText,
+  isLocale,
+  loadLocale,
+  setLocale,
+  storeLocale,
+  storedLocale,
+  t,
+} from './i18n';
+import type { Locale } from './i18n';
+import { canonicalHash, corePages, readRoute, routeHash, useHash } from './routes';
+import type { Filter, Page } from './routes';
+import { activePlugins, buildTimePlugins, loadBundles, pagesOf, useWebPlugins } from './plugins';
 import type { PluginProps } from './plugins';
-import { InstanceForm, SourceForm } from './forms';
 import type { SourcePreset } from './forms';
 import { TokenGate } from './TokenGate';
 import { sessionRejected, setToken } from './token';
-import { BrandMark, Status } from './ui';
 import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
-import { OverviewPage } from './pages/Overview';
-import { ActivityPage } from './pages/Activity';
-import { JobsPage } from './pages/Jobs';
-import { ClustersPage } from './pages/Clusters';
-import { CloudPage } from './pages/Cloud';
-import { UsagePage } from './pages/Usage';
-import { PlanPage } from './pages/Plan';
-import { SourcesPage } from './pages/Sources';
-import { SettingsPage } from './pages/Settings';
-import { ToolboxPage } from './pages/Toolbox';
 import { PageBoundary } from './PageBoundary';
-import { NotifyPage } from './pages/Notify';
-import { ChatPage } from './pages/Chat';
-import { enabledToolPages } from './tools';
-import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
-
-type Modal =
-  | { kind: 'instance'; item?: Instance }
-  | { kind: 'source'; source?: Source; preset?: SourcePreset }
-  | { kind: 'diagnosis'; sourceId: string }
-  | { kind: 'ssh'; data: SSHConfig }
-  | null;
-type Detail =
-  | { kind: 'job'; item: Job; event?: DeckEvent }
-  | { kind: 'instance'; item: Instance }
-  | { kind: 'array'; item: { id: string; name: string; jobs: Job[] } }
-  | null;
-type Toast = { text: string; tone: 'ok' | 'error' } | null;
 
 const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
-const navGroups: {
-  label?: MessageKey;
-  items: { id: CorePage; label: MessageKey; icon: typeof Server }[];
-}[] = [
-  {
-    items: [
-      { id: 'overview', label: 'nav.overview', icon: LayoutDashboard },
-      { id: 'plan', label: 'nav.plan', icon: Compass },
-    ],
-  },
-  {
-    label: 'nav.resources',
-    items: [
-      { id: 'jobs', label: 'nav.jobs', icon: Activity },
-      { id: 'activity', label: 'nav.activity', icon: History },
-      { id: 'resources', label: 'nav.clusters', icon: Server },
-      { id: 'cloud', label: 'nav.cloud', icon: Cloud },
-      { id: 'usage', label: 'nav.usage', icon: Gauge },
-    ],
-  },
-  {
-    label: 'nav.setup',
-    items: [
-      { id: 'sources', label: 'nav.sources', icon: Cable },
-      { id: 'toolbox', label: 'nav.toolbox', icon: Puzzle },
-    ],
-  },
-];
-const dataPages: Page[] = [
-  'overview',
-  'plan',
-  'jobs',
-  'activity',
-  'resources',
-  'cloud',
-  'usage',
-  'sources',
-];
-const pageTitles: Record<CorePage, MessageKey> = {
-  overview: 'nav.overview',
-  plan: 'nav.plan',
-  sources: 'nav.sources',
-  toolbox: 'nav.toolbox',
-  notify: 'nav.notify',
-  chat: 'nav.chat',
-  jobs: 'nav.jobs',
-  activity: 'nav.activity',
-  resources: 'nav.clusters',
-  cloud: 'nav.cloud',
-  usage: 'nav.usage',
-  settings: 'nav.settings',
-};
 
 function initialLocale(): Locale {
   const locale = storedLocale() ?? 'en';
@@ -155,8 +55,15 @@ function initialLocale(): Locale {
   return locale;
 }
 
-/** "Group · login", or just the group when a source is named like its group. */
 export default function App() {
+  return (
+    <LocaleGate>
+      <Application />
+    </LocaleGate>
+  );
+}
+
+function Application() {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const hash = useHash();
@@ -266,8 +173,6 @@ export default function App() {
     if (window.history.state?.detail) window.history.back();
     else setDetail(null);
   }, [setDetail]);
-  const modalRef = useDialogFocus(undefined, !!modal);
-  const detailRef = useDialogFocus(undefined, !!detailId);
   const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
@@ -299,29 +204,59 @@ export default function App() {
   const followLoaded = useRef(false);
   const notify = useCallback(
     (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
-    [],
+    [setToast],
   );
   const serverName = demo
     ? t('where.local')
     : health?.server_name || health?.server_host || t('where.server');
 
-  const changeLocale = useCallback((next: Locale) => {
-    setLocale(next);
-    storeLocale(next);
-    setLocaleState(next);
-  }, []);
+  const localeChange = useRef(0);
+  const changeLocale = useCallback(
+    (next: Locale) => {
+      const request = ++localeChange.current;
+      void loadLocale(next)
+        .then(() => {
+          if (request !== localeChange.current) return;
+          setLocale(next);
+          storeLocale(next);
+          setLocaleState(next);
+        })
+        .catch(() => {
+          if (request === localeChange.current) notify(t('error.locale'), 'error');
+        });
+    },
+    [notify],
+  );
   useEffect(() => {
     // The server's language applies until the viewer picks one on this device.
     if (storedLocale()) return;
-    api<Settings>('/settings')
-      .then((settings) => {
-        if (isLocale(settings.language)) {
-          setLocale(settings.language);
-          setLocaleState(settings.language);
-        }
+    let cancelled = false;
+    const request = localeChange.current;
+    void api<Settings>('/settings')
+      .then(async (settings) => {
+        if (
+          cancelled ||
+          storedLocale() ||
+          request !== localeChange.current ||
+          !isLocale(settings.language)
+        )
+          return;
+        await loadLocale(settings.language);
+        if (cancelled || storedLocale() || request !== localeChange.current) return;
+        setLocale(settings.language);
+        setLocaleState(settings.language);
       })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
+  useEffect(
+    () => () => {
+      localeChange.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     let previous = canonicalHash(window.location.hash);
@@ -341,11 +276,14 @@ export default function App() {
       window.removeEventListener('popstate', onHashChange);
     };
   }, []);
-  const navigate = useCallback((next: Page, filter: Filter = 'all') => {
-    const hash = routeHash(next, filter);
-    if (window.location.hash === hash) setSidebarOpen(false);
-    else window.location.hash = hash;
-  }, []);
+  const navigate = useCallback(
+    (next: Page, filter: Filter = 'all') => {
+      const hash = routeHash(next, filter);
+      if (window.location.hash === hash) setSidebarOpen(false);
+      else window.location.hash = hash;
+    },
+    [setSidebarOpen],
+  );
   const setGroup = (filter: Filter) => {
     setRouteParams({ group: filter === 'all' ? null : filter, provider: null });
   };
@@ -578,12 +516,7 @@ export default function App() {
     [data],
   );
   const attention = data?.attention ?? [];
-  const problems = data?.attention_count ?? attention.length;
   const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
-  const diagnosisSource =
-    modal?.kind === 'diagnosis'
-      ? data?.sources.find((source) => source.id === modal.sourceId)
-      : undefined;
   const openAttention = (item: Attention) => {
     if (item.action === 'diagnose') {
       const source = data?.sources.find((source) => source.id === item.subject.id);
@@ -595,301 +528,72 @@ export default function App() {
     else if (item.action === 'toolbox') navigate('toolbox');
     else setHealthOpen(true);
   };
-  const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
-  const isDataPage = dataPages.includes(page);
   const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
-  const healthDescription =
-    healthState.label === healthState.age
-      ? healthState.label
-      : t('health.withAge', { label: healthState.label, age: healthState.age });
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
-  const toolNav = enabledToolPages(tools);
 
-  const ctx: Ctx | null = data
-    ? {
-        data,
-        groups,
-        demo,
-        remote,
-        serverName,
-        busy,
-        group,
-        setGroup,
-        query,
-        setQuery,
-        searchRef,
-        attention,
-        openAttention,
-        diagnose,
-        health,
-        locale,
-        changeLocale,
-        plugin,
-        navigate,
-        webPlugins: plugins,
-        drivers,
-        nodes,
-        reload: load,
-        tools,
-        updateTool,
-        configure,
-        collect,
-        addInstance,
-        showSSH,
-        openJob: (item) => setDetail({ kind: 'job', item }),
-        openEvent: (event) => {
-          setSelectedEvent({ demo, event });
-          setRouteParams(
-            { event: String(event.id), job: null, failure: null, instance: null, array: null },
-            true,
-          );
-        },
-        openArray: (item) => setDetail({ kind: 'array', item }),
-        openInstance: (item) => setDetail({ kind: 'instance', item }),
-        copy,
-        notify,
-        backup,
-        toggleDemo,
-      }
-    : null;
-
-  const pageActions: Partial<Record<Page, ReactNode>> = {
-    sources: (
-      <button className="button primary" aria-label={t('source.add')} onClick={() => configure()}>
-        <Plus size={14} />
-        <span className="label">{t('source.add')}</span>
-      </button>
-    ),
-    resources: (
-      <button
-        className="button"
-        aria-label={t('clusters.addAccount')}
-        onClick={() => configure(undefined, { kind: 'cluster' })}
-      >
-        <Plus size={14} />
-        <span className="label">{t('clusters.addAccount')}</span>
-      </button>
-    ),
-    cloud: (
-      <>
-        <button className="button" aria-label={t('settings.ssh')} onClick={() => void showSSH()}>
-          <Terminal size={14} />
-          <span className="label">{t('settings.ssh')}</span>
-        </button>
-        <button className="button primary" aria-label={t('cloud.add')} onClick={addInstance}>
-          <Plus size={14} />
-          <span className="label">{t('cloud.add')}</span>
-        </button>
-      </>
-    ),
+  const context: Omit<Ctx, 'data'> = {
+    groups,
+    demo,
+    remote,
+    serverName,
+    busy,
+    group,
+    setGroup,
+    query,
+    setQuery,
+    searchRef,
+    attention,
+    openAttention,
+    diagnose,
+    health,
+    locale,
+    changeLocale,
+    plugin,
+    navigate,
+    webPlugins: plugins,
+    drivers,
+    nodes,
+    reload: load,
+    tools,
+    updateTool,
+    configure,
+    collect,
+    addInstance,
+    showSSH,
+    openJob: (item) => setDetail({ kind: 'job', item }),
+    openEvent: (event) => {
+      setSelectedEvent({ demo, event });
+      setRouteParams(
+        { event: String(event.id), job: null, failure: null, instance: null, array: null },
+        true,
+      );
+    },
+    openArray: (item) => setDetail({ kind: 'array', item }),
+    openInstance: (item) => setDetail({ kind: 'instance', item }),
+    copy,
+    notify,
+    backup,
+    toggleDemo,
   };
-  const title = activePluginPage
-    ? labelText(activePluginPage.label, locale)
-    : page === '__gallery'
-      ? t('gallery.title')
-      : t(pageTitles[page as CorePage] ?? 'nav.overview');
+  const ctx: Ctx | null = data ? { ...context, data } : null;
 
   return (
     <div className="app-shell">
-      {sidebarOpen && (
-        <button
-          className="scrim"
-          aria-label={t('nav.close')}
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="brand">
-          <BrandMark size={20} />
-          <strong className="brand-name">
-            Compute<b>Deck</b>
-          </strong>
-          <span className="brand-mode">{remote ? t('mode.remote') : t('mode.local')}</span>
-        </div>
-        <nav aria-label={t('nav.main')}>
-          {navGroups.map((navGroup, index) => (
-            <div className="nav-group" key={index}>
-              {navGroup.label && <div className="nav-label">{t(navGroup.label)}</div>}
-              {navGroup.items.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{t(label)}</span>
-                  {id === 'overview' && problems > 0 && (
-                    <b className="badge warn" title={t('nav.problems', { count: problems })}>
-                      {problems}
-                    </b>
-                  )}
-                  {id === 'jobs' && jobCount !== 0 && <b className="badge">{jobCount}</b>}
-                </a>
-              ))}
-            </div>
-          ))}
-          {toolNav.length + pluginPages.length > 0 && (
-            <div className="nav-group">
-              <div className="nav-label">{t('nav.tools')}</div>
-              {toolNav.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{t(label)}</span>
-                </a>
-              ))}
-              {pluginPages.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{labelText(label, locale)}</span>
-                </a>
-              ))}
-            </div>
-          )}
-        </nav>
-        <div className="sidebar-footer">
-          <a
-            href={routeHash('settings')}
-            className={`nav-item ${page === 'settings' ? 'active' : ''}`}
-            aria-current={page === 'settings' ? 'page' : undefined}
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Settings2 size={16} />
-            <span>{t('nav.settings')}</span>
-          </a>
-          <label className="demo-toggle">
-            <span>{t('nav.demo')}</span>
-            <input type="checkbox" role="switch" checked={demo} onChange={toggleDemo} />
-            <i aria-hidden="true" />
-          </label>
-          <div className="service-state" role="status">
-            <span className={`dot ${error ? 'red' : data ? 'green' : ''}`} />
-            {needsToken
-              ? t('token.title')
-              : error
-                ? remote
-                  ? t('service.remoteDown', { server: serverName })
-                  : t('service.localDown')
-                : data
-                  ? remote
-                    ? t('service.remoteUp', { server: serverName })
-                    : t('service.localUp')
-                  : t('service.connecting')}
-          </div>
-        </div>
-      </aside>
-      <div className="main">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-only"
-            aria-label={t('nav.open')}
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={18} />
-          </button>
-          <h1>{title}</h1>
-          <div className="topbar-actions">
-            <div className="health-status">
-              <span className="sr-only" role="status">
-                {healthState.label}
-              </span>
-              <button
-                className={`health-pill health-${healthState.level}`}
-                onClick={() => setHealthOpen(true)}
-                aria-label={t('health.accessible', {
-                  title: t('health.title'),
-                  status: healthDescription,
-                })}
-                aria-haspopup="dialog"
-                aria-expanded={healthOpen}
-                title={
-                  !needsToken && data?.as_of
-                    ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
-                    : healthDescription
-                }
-              >
-                <span aria-hidden="true">
-                  {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
-                </span>
-                <span className="health-label">{healthDescription}</span>
-                <span className="health-age" aria-hidden="true">
-                  {healthState.age}
-                </span>
-              </button>
-            </div>
-            {!!data?.collecting?.length && !needsToken && (
-              <span className="collecting-count">
-                {t('health.collecting', { count: data.collecting.length })}
-              </span>
-            )}
-            {!demo && pageActions[page]}
-            {isDataPage && (
-              <>
-                <button
-                  className="button"
-                  onClick={() => void refresh()}
-                  disabled={refreshing || needsToken}
-                  title={t('topbar.refreshHint')}
-                  aria-label={t('topbar.refresh')}
-                >
-                  <RefreshCw size={14} className={refreshing || data?.refreshing ? 'spin' : ''} />
-                  <span className="label">{t('topbar.refresh')}</span>
-                </button>
-              </>
-            )}
-          </div>
-        </header>
-        {healthState.collectorFault && isDataPage && (
-          <div className="banner red" role="alert">
-            <TriangleAlert size={15} />
-            <span>{t('health.collectorFault')}</span>
-            <button className="link" onClick={() => setHealthOpen(true)}>
-              {t('health.details')}
-            </button>
-          </div>
-        )}
-        {demo && (
-          <div className="banner demo-banner">
-            <span>{t(isDataPage ? 'banner.demo' : 'banner.demoTool')}</span>
-            <button className="link" onClick={toggleDemo}>
-              {t('banner.demoOff')}
-            </button>
-          </div>
-        )}
-        {error && isDataPage && !needsToken && (
-          <div className="banner red" role="alert">
-            <TriangleAlert size={15} />
-            <span>
-              {remote
-                ? t('banner.remoteDown', { server: serverName, error })
-                : t('banner.localDown', { error })}
-            </span>
-            <button className="link" onClick={() => void load()}>
-              {t('common.retry')}
-            </button>
-          </div>
-        )}
-        {!demo &&
-          plugins
-            .filter((item) => item.banner)
-            .map((item) => {
-              const Banner = item.banner!;
-              return <Banner key={item.id} {...plugin} />;
-            })}
+      <Frame
+        ctx={context}
+        data={data}
+        page={page}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        healthOpen={healthOpen}
+        setHealthOpen={setHealthOpen}
+        healthState={healthState}
+        error={error}
+        needsToken={needsToken}
+        refreshing={refreshing}
+        refresh={refresh}
+      >
         <main className={`content page-${page}`} aria-busy={loading || refreshing}>
           <PageBoundary page={page}>
             {needsToken ? (
@@ -906,268 +610,34 @@ export default function App() {
             ) : activePluginPage ? (
               activePluginPage.render(plugin)
             ) : !ctx ? (
-              loading && (
-                <div className="loading">
-                  <Loader2 className="spin" size={18} />
-                  {t('common.loading')}
-                </div>
-              )
-            ) : page === '__gallery' ? (
-              <Gallery compat={params.has('compat')} />
-            ) : page === 'overview' ? (
-              <OverviewPage ctx={ctx} />
-            ) : page === 'jobs' ? (
-              <JobsPage ctx={ctx} />
-            ) : page === 'activity' ? (
-              <ActivityPage ctx={ctx} />
-            ) : page === 'resources' ? (
-              <ClustersPage ctx={ctx} />
-            ) : page === 'cloud' ? (
-              <CloudPage ctx={ctx} />
-            ) : page === 'usage' ? (
-              <UsagePage ctx={ctx} />
-            ) : page === 'plan' ? (
-              <PlanPage ctx={ctx} />
-            ) : page === 'sources' ? (
-              <SourcesPage ctx={ctx} />
-            ) : page === 'toolbox' ? (
-              <ToolboxPage ctx={ctx} />
-            ) : page === 'notify' ? (
-              <NotifyPage ctx={ctx} />
-            ) : page === 'chat' ? (
-              <ChatPage ctx={ctx} />
+              loading && <Loading />
             ) : (
-              <SettingsPage ctx={ctx} />
+              <Routes page={page} ctx={ctx} compat={params.has('compat')} />
             )}
           </PageBoundary>
         </main>
-      </div>
-      {toast && (
-        <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>
-          {toast.tone === 'error' ? <TriangleAlert size={15} /> : <Check size={15} />}
-          <span>{toast.text}</span>
-          <button
-            className="icon-button"
-            aria-label={t('common.dismiss')}
-            onClick={() => setToast(null)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {healthOpen && (
-        <HealthPanel
-          state={healthState}
-          data={needsToken ? null : data}
-          busy={refreshing || needsToken}
-          refresh={refresh}
-          close={() => setHealthOpen(false)}
-          addSource={
-            !demo && !needsToken && data && data.sources.length === 0
-              ? () => {
-                  setHealthOpen(false);
-                  configure();
-                }
-              : undefined
-          }
-        />
-      )}
-      {modal && (
-        <div className="overlay" onMouseDown={() => setModal(null)}>
-          <section
-            className={`modal ${modal.kind === 'ssh' ? 'wide' : ''}`}
-            ref={modalRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button
-              className="icon-button modal-close"
-              aria-label={t('common.close')}
-              onClick={() => setModal(null)}
-            >
-              <X size={16} />
-            </button>
-            {modal.kind === 'diagnosis' &&
-              (diagnosisSource ? (
-                <SourceDiagnosis
-                  key={diagnosisSource.id}
-                  source={diagnosisSource}
-                  configure={() => configure(diagnosisSource)}
-                  collect={() => collect(diagnosisSource)}
-                  collecting={data?.collecting?.includes(diagnosisSource.id)}
-                  demo={demo}
-                  drivers={drivers}
-                />
-              ) : (
-                <h2 id="modal-title">{t('msg.source_not_found')}</h2>
-              ))}
-            {modal.kind === 'instance' && (
-              <InstanceForm
-                item={modal.item}
-                platforms={[
-                  ...new Set(
-                    (data?.instances ?? [])
-                      .filter((item) => item.manual)
-                      .map((item) => item.platform),
-                  ),
-                ]}
-                where={where({ remote, serverName })}
-                busy={busy}
-                onCancel={() => setModal(null)}
-                onSubmit={async (body) => {
-                  await mutate(
-                    modal.item ? `/instances/${encodeURIComponent(modal.item.id)}` : '/instances',
-                    body,
-                    modal.item ? 'PUT' : 'POST',
-                  );
-                  setModal(null);
-                  setDetail(null);
-                  notify(
-                    remote ? t('toast.savedRemote', { server: serverName }) : t('toast.savedSsh'),
-                  );
-                  navigate('cloud');
-                }}
-              />
-            )}
-            {modal.kind === 'source' && (
-              <SourceForm
-                source={modal.source}
-                preset={modal.preset}
-                drivers={drivers}
-                nodes={nodes}
-                sources={data?.sources ?? []}
-                groups={groups}
-                where={where({ remote, serverName })}
-                busy={busy}
-                onCancel={() => setModal(null)}
-                onManual={() => setModal({ kind: 'instance' })}
-                onDelete={async (source) => {
-                  await mutate(`/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE');
-                  setModal(null);
-                  notify(t('toast.sourceRemoved', { name: source.name }));
-                }}
-                onSubmit={async (body, id) => {
-                  const saved = await mutate<Source>(
-                    id ? `/sources/${encodeURIComponent(id)}` : '/sources',
-                    body,
-                    id ? 'PUT' : 'POST',
-                  );
-                  if (saved.enabled) {
-                    await api('/refresh', { source_id: saved.id });
-                    followCollection([saved.id]);
-                  }
-                  if (modal.source) notify(t('toast.sourceSaved'));
-                  return saved;
-                }}
-              />
-            )}
-            {modal.kind === 'ssh' && (
-              <SSHConfigView
-                config={modal.data}
-                remote={remote}
-                serverName={serverName}
-                busy={busy}
-                onInstall={async () => {
-                  try {
-                    await mutate('/ssh/install', { confirm: true });
-                    setModal({ kind: 'ssh', data: await api<SSHConfig>('/ssh/config') });
-                    notify(t('toast.includeInstalled'));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.sshConfig'), 'error');
-                  }
-                }}
-              />
-            )}
-          </section>
-        </div>
-      )}
-      {detailId && !detail && ctx && (
-        <div className="drawer-overlay" onMouseDown={closeDetail}>
-          <aside
-            className="drawer"
-            ref={detailRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="detail-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h2 id="detail-title">
-              {t(eventId && eventLoad === 'loading' ? 'chart.loading' : 'drawer.unavailable')}
-            </h2>
-            <p>
-              {t(eventId && eventLoad === 'error' ? 'event.loadError' : 'drawer.unavailableHint')}
-            </p>
-            <button className="button" onClick={closeDetail}>
-              {t('common.close')}
-            </button>
-          </aside>
-        </div>
-      )}
-      {detail && ctx && (
-        <div className="drawer-overlay" onMouseDown={closeDetail}>
-          <aside
-            className="drawer"
-            ref={detailRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal={!modal}
-            aria-labelledby="detail-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header className="drawer-header">
-              <div>
-                <span className="drawer-kind">
-                  {detail.kind === 'job'
-                    ? t('drawer.job')
-                    : detail.kind === 'array'
-                      ? t('drawer.array')
-                      : t('drawer.instance')}
-                </span>
-                <h2 id="detail-title">{detail.item.name}</h2>
-                {detail.kind !== 'array' && <Status state={detail.item.state} />}
-              </div>
-              <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
-                <X size={16} />
-              </button>
-            </header>
-            {detail.kind === 'array' ? (
-              <ArrayDetail key={detail.item.id} jobs={detail.item.jobs} ctx={ctx} />
-            ) : detail.kind === 'job' ? (
-              <JobDetail job={detail.item} ctx={ctx} event={detail.event} />
-            ) : (
-              <InstanceDetail
-                item={detail.item}
-                ctx={ctx}
-                onProbe={async () => {
-                  try {
-                    await mutate<Instance>(
-                      `/instances/${encodeURIComponent(detail.item.id)}/probe`,
-                      {},
-                    );
-                    notify(t('toast.probed'));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.probe'), 'error');
-                  }
-                }}
-                onEdit={() => setModal({ kind: 'instance', item: detail.item })}
-                onDelete={async () => {
-                  try {
-                    await mutate(`/instances/${encodeURIComponent(detail.item.id)}`, {}, 'DELETE');
-                    setDetail(null);
-                    notify(t('toast.instanceRemoved', { name: detail.item.name }));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.save'), 'error');
-                  }
-                }}
-              />
-            )}
-          </aside>
-        </div>
-      )}
+      </Frame>
+      <Layers
+        ctx={{ ...context, data }}
+        modal={modal}
+        setModal={setModal}
+        detail={detail}
+        setDetail={setDetail}
+        detailId={detailId}
+        closeDetail={closeDetail}
+        eventId={eventId}
+        eventLoad={eventLoad}
+        toast={toast}
+        setToast={setToast}
+        healthOpen={healthOpen}
+        setHealthOpen={setHealthOpen}
+        healthState={healthState}
+        needsToken={needsToken}
+        refreshing={refreshing}
+        refresh={refresh}
+        mutate={mutate}
+        followCollection={followCollection}
+      />
     </div>
   );
 }

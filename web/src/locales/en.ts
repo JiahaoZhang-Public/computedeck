@@ -1,5 +1,8 @@
+import { loadingLabels } from './loading';
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'error.chunk': 'Could not load this view. Retry to reload the app.',
+  'error.locale': loadingLabels['en']['error.locale'],
   'gallery.title': 'Component gallery',
   'gallery.note': 'Fictional examples for interface checks.',
   'gallery.components': 'Components',
@@ -289,7 +292,7 @@ const en = {
   'common.edit': 'Edit',
   'common.installed': 'Installed',
   'common.notInstalled': 'Not installed',
-  'common.loading': 'Loading…',
+  'common.loading': loadingLabels['en']['common.loading'],
   'common.memory': 'Memory',
   'common.minutes': '{count} min',
   'common.notSet': 'Not set',
@@ -297,7 +300,7 @@ const en = {
   'common.off': 'Off',
   'common.optional': 'optional',
   'common.remove': 'Remove',
-  'common.retry': 'Retry',
+  'common.retry': loadingLabels['en']['common.retry'],
   'common.sampledAt': 'Sampled',
   'common.save': 'Save',
   'common.saving': 'Saving…',
