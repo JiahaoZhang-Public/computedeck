@@ -173,16 +173,16 @@ Routing also preserves the new view keys `scope`, `reason`, `attention`, `node`,
 `source`, `add`, `edit`, `repair`, `step`, `section`, `plugin`, `rule`, `rate` and
 `tab`, including through filter changes and reloads. `edit=<source-id|instance-id>`
 and `repair=<source-id>` share `step` with `add`; cloud and SSH machine forms use
-`add` / `edit` on `#/cloud` and `#/sources`. These addresses are reserved for the
-upcoming panels and forms; routing alone does not open them yet.
+`add` / `edit` on `#/cloud` and `#/sources`. The implemented panel and form addresses are listed under “Panels, forms and notifications”
+below; page-specific keys such as `node`, `rule` and `rate` remain reserved.
 
 中文：0.7 的路由、参数及参数值保持有效（包括 `state=pending`、`tab=market`）。
 `provider` 仍可代替 `group`，同时提供时以 `group` 为准。上表中的别名替换当前历史记录，
 不会增加浏览器返回步骤；其他筛选、编码后的 ID 和 `#` 前的连接及示例模式参数均保留。
 Nodes 和 Marketplace 别名分别固定选择 `tab=nodes`、`tab=market`；旧节点筛选链接仅在
 未指定 `tab` 时补上 `tab=nodes`。节点和集群筛选继续作用于现有集群页，独立节点标签页
-随集群页更新加入。上述新增参数会在筛选和刷新时保留；它们为后续面板及表单预留地址，
-目前不会单凭参数打开新界面。`add`、`edit`、`repair` 共用 `step`，云和 SSH 机器表单在
+随集群页更新加入。上述新增参数会在筛选和刷新时保留；已实现的浮层地址见下文，
+`node`、`rule`、`rate` 等页面参数仍为后续页面预留。`add`、`edit`、`repair` 共用 `step`，云和 SSH 机器表单在
 `#/cloud`、`#/sources` 下使用相同的 `add` / `edit` 参数。
 
 Opening a job, failed attempt or machine adds its ID to the current view URL. Browser Back
@@ -396,3 +396,71 @@ last-known reading to retain a number. Copy controls copy text only and append
 数值组件区分准确值、下界、估计值、附原因的未知值和附时间的最后已知值；未知值的原因
 显示在纯色浅色调长横线旁，过期准确值不会当作当前数字显示。复制按钮只复制文本，示例模式
 会在新行附加 `# example data`。
+
+### Panels, forms and notifications
+
+Content panels push a history entry. Back or Escape closes the panel, and a cold
+link closes to the same page with its filters preserved. At 1200 px and wider,
+read-only details use a non-modal beside panel; below that they use a native modal
+sheet. Focus moves to the heading and returns to the opening row or button. The
+beside panel's j/k keys follow the displayed rows of the same table, including its
+filters, order and array grouping, without adding Back stops; fields,
+IME composition and modified keys are ignored. If filters change while a beside panel
+is open, Escape or Close removes only the layer keys and keeps the current filters;
+Back still returns to the preceding history entry.
+
+The existing `job`, `failure`, `event`, `array` and `instance` links keep working.
+These additional links now open layers (IDs below are fictional):
+
+| Address | Layer |
+| --- | --- |
+| `#/sources?source=example-source` | Source diagnosis panel |
+| `#/sources?add=source&step=1` | Existing source type chooser |
+| `#/sources?add=ssh&step=2` | Existing SSH source form (`add` also accepts a driver ID) |
+| `#/cloud?add=instance&step=1` | Manual machine form; also works on Sources |
+| `#/sources?edit=example-source&step=2` | Source edit form |
+| `#/cloud?edit=example-machine&step=1` | Machine edit form |
+| `#/sources?repair=example-source` | Source diagnosis and repair focus view |
+| `#/cloud?section=ssh` | SSH configuration view |
+| `#/toolbox?plugin=notify` | Installed tool panel |
+| `#/toolbox?plugin=notify&edit=notify&step=1` | Tool settings focus view |
+| `#/toolbox?tab=market&plugin=example-tool%40example` | Marketplace plugin panel |
+
+Source steps are 1 (type), 2 (details) and 3 (the existing saved-source check).
+A step-3 add link without a saved source explains that source settings are needed,
+rather than starting a check. Tool settings close after a successful Save and remain
+open with an error on failure. Switching Toolbox tabs clears the plugin and edit view.
+Step changes replace the current entry; Back closes the form. Draft fields are
+not stored in the URL. Focus views and removal confirmations never dismiss from
+a backdrop click. Confirmations start on **Keep**; the other button names the
+removal. The new source-connection wizard remains a later page item.
+
+Health ages, menus and explanatory popovers are transient, with no URL; Escape
+or an outside click dismisses them. A menu becomes a sheet on touch devices.
+Notifications share one polite region, show at most three at once and move inside
+an open modal. Escape dismisses notifications first without moving focus. Undo
+lasts ten seconds, pauses on hover or focus, and supports Command/Ctrl+Z outside
+editable fields. Errors stay until dismissed and also appear as local action-error
+rows; dismissing a toast does not remove its error row. These rows are not server
+attention state and clear when switching example mode. Each row includes the error
+shape, accessible Error prefix and time disclosure. Example-mode read-only notices
+are temporary notifications and do not create error rows.
+
+中文：内容面板打开时增加一条历史记录，返回或 Escape 关闭；直接打开链接时，关闭后
+保留当前页面的筛选。宽度至少 1200 px 使用非模态旁侧面板，较窄时使用原生模态抽屉。
+焦点先到标题，关闭后回到原来的行或按钮。旁侧面板中的 j/k 按相邻表格实际显示的顺序和筛选遍历对象（包括数组分组），不增加返回步骤；
+输入框、输入法组合输入和带修饰键的按键不触发切换。上表中的新地址现已生效；旧详情
+地址仍兼容。来源步骤为 1（类型）、2（详情）、3（保存后的检查），步骤变更替换当前
+历史项，草稿字段不写入 URL。新连接向导仍留待后续页面更新。
+
+编辑、修复及移除确认不会因点击遮罩而关闭；确认默认聚焦“保留”，另一按钮明确说明
+移除对象。健康信息、菜单和说明浮层不占用 URL，触屏菜单使用抽屉。通知最多三条，
+共用一个礼貌播报区域，打开模态框时移入其中。Escape 先清空通知且不移动焦点。
+撤销保留十秒，悬停或聚焦时暂停；非输入区域支持 Command/Ctrl+Z。错误持续到手动关闭，
+并另列为本地操作错误行；清除通知不删除错误行。这些行不写入服务端 attention 状态，
+切换示例模式时清除。
+
+中文：旁侧面板打开后修改筛选，Escape 或“关闭”只移除浮层参数并保留新筛选；浏览器返回
+仍回到上一历史项。未保存数据源的第 3 步链接显示说明，不启动检查。工具设置保存成功后
+关闭，失败时保留表单和错误；切换工具箱标签清除插件及编辑视图。本地错误行包含错误
+形状、辅助技术可读的“错误”前缀和可展开的时间；示例模式的只读提示为临时通知，不加入错误行。

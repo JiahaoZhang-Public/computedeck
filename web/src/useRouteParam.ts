@@ -18,7 +18,7 @@ export function setRouteParams(values: Record<string, string | null>, push = fal
   url.hash = canonicalHash(path + (query ? `?${query}` : ''));
   if (url.href === before) return;
   if (push) window.history.pushState({ detail: true }, '', url);
-  else window.history.replaceState(null, '', url);
+  else window.history.replaceState(window.history.state, '', url);
   window.dispatchEvent(new HashChangeEvent('hashchange', { oldURL: before, newURL: url.href }));
 }
 

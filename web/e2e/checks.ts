@@ -118,8 +118,8 @@ export async function checkLayout(page: Page): Promise<DomFinding[]> {
   });
 }
 
-export async function checkFocus(page: Page) {
-  const covered = await page.evaluate(() => {
+export async function focusObstructions(page: Page) {
+  return page.evaluate(async () => {
     const hidden: string[] = [];
     const controls = document.querySelectorAll<HTMLElement>(
       'a[href],button,input,select,textarea,summary,[tabindex]',
@@ -131,27 +131,41 @@ export async function checkFocus(page: Page) {
       const target = node.matches('input[type="checkbox"]')
         ? (node.closest('label') ?? node)
         : node;
-      const box = target.getBoundingClientRect();
-      const left = Math.max(0, box.left),
-        right = Math.min(innerWidth, box.right);
-      const top = Math.max(0, box.top),
-        bottom = Math.min(innerHeight, box.bottom);
-      const exposed =
-        right > left &&
-        bottom > top &&
-        [0.1, 0.5, 0.9].some((x) =>
-          [0.1, 0.5, 0.9].some((y) => {
-            const hit = document.elementFromPoint(
-              left + (right - left) * x,
-              top + (bottom - top) * y,
-            );
-            return !!hit && (target.contains(hit) || hit.contains(target));
-          }),
+      const exposed = () => {
+        const box = target.getBoundingClientRect();
+        const left = Math.max(0, box.left),
+          right = Math.min(innerWidth, box.right);
+        const top = Math.max(0, box.top),
+          bottom = Math.min(innerHeight, box.bottom);
+        return (
+          right > left &&
+          bottom > top &&
+          [0.1, 0.5, 0.9].some((x) =>
+            [0.1, 0.5, 0.9].some((y) => {
+              const hit = document.elementFromPoint(
+                left + (right - left) * x,
+                top + (bottom - top) * y,
+              );
+              return !!hit && (target.contains(hit) || hit.contains(target));
+            }),
+          )
         );
-      if (!exposed)
+      };
+      let visible = exposed();
+      // WebKit may reveal focused controls two frames after focus(). Let the
+      // browser finish its own reveal; never scroll on its behalf.
+      for (let frame = 0; !visible && frame < 3; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        visible = exposed();
+      }
+      if (!visible)
         hidden.push(node.getAttribute('aria-label') || node.textContent?.trim() || node.tagName);
     }
     return hidden;
   });
+}
+
+export async function checkFocus(page: Page) {
+  const covered = await focusObstructions(page);
   expect.soft(covered, 'Focused targets entirely covered or outside the viewport').toEqual([]);
 }

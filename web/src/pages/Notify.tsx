@@ -1,3 +1,4 @@
+import { useConfirm } from '../layers/useConfirm';
 import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Pencil, Plus, Send, Trash2 } from 'lucide-react';
@@ -387,6 +388,7 @@ function RuleEditor({
 
 /** Rules, channels and the delivery log of the notifications tool. */
 export function NotifyPage({ ctx }: { ctx: Ctx }) {
+  const [confirm, confirmation] = useConfirm();
   const [state, setState] = useState<NotifyState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<
@@ -430,7 +432,8 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
     if (saved) void load();
   };
   async function remove(path: string, name: string) {
-    if (!window.confirm(t('notify.removeConfirm', { name }))) return;
+    if (!(await confirm(t('notify.removeConfirm', { name }), t('layer.removeNamed', { name }))))
+      return;
     try {
       await api(path, {}, 'DELETE');
       await load();
@@ -453,6 +456,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
 
   return (
     <>
+      {confirmation}
       <p className="page-note">{t('notify.intro')}</p>
       <Panel
         title={t('notify.rules')}

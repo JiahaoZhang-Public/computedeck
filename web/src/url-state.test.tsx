@@ -807,3 +807,61 @@ it.each([
     container.querySelector(`main.page-${hash.includes('toolbox') ? 'toolbox' : 'resources'}`),
   ).not.toBeNull();
 });
+
+it.each(['jobs?state=pending', 'cloud?q=box'])(
+  'beside navigation stays in the displayed list and preserves history: %s',
+  async (route) => {
+    const media = window.matchMedia('unused');
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...media,
+      media: query,
+      matches: query.includes('1200'),
+    }));
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      {},
+    ] as unknown as DOMRectList);
+    await render(`/?demo=true#/${route}`);
+    const rows = [...container.querySelectorAll<HTMLElement>('main [data-detail-key]')];
+    expect(rows).toHaveLength(route.startsWith('jobs') ? 3 : 2);
+    const shown = rows.map((row) => ({ key: row.dataset.detailKey!, id: row.dataset.detailId! }));
+    if (route.startsWith('jobs')) expect(shown[2].key).toBe('array');
+    await act(async () => rows[0].click());
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    const length = history.length;
+    const check = (index: number) => {
+      expect(routeParams().get(shown[index].key)).toBe(shown[index].id);
+      expect(history.length).toBe(length);
+    };
+    const key = async (value: string) => {
+      await act(async () =>
+        container
+          .querySelector('.context-panel')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }),
+          ),
+      );
+    };
+    check(0);
+    await key('k');
+    check(0);
+    for (let i = 1; i < shown.length; i++) {
+      await key('j');
+      check(i);
+    }
+    await key('j');
+    check(shown.length - 1);
+    for (let i = shown.length - 2; i >= 0; i--) {
+      await key('k');
+      check(i);
+    }
+    for (const modifier of ['ctrlKey', 'metaKey']) {
+      container.querySelector<HTMLElement>('#detail-title')!.focus();
+      await act(async () =>
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', [modifier]: true })),
+      );
+      expect(document.activeElement).toBe(container.querySelector('main .search input'));
+    }
+  },
+);

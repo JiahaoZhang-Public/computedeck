@@ -1,3 +1,4 @@
+import { useConfirm } from '../layers/useConfirm';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
@@ -88,6 +89,7 @@ function NodeEditor({ node, onDone }: { node?: CollectionNode; onDone: (saved: b
 
 /** Machines that collect sources for this service: a cluster reachable only from one of them. */
 export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promise<void> }) {
+  const [confirm, confirmation] = useConfirm();
   const [editing, setEditing] = useState<{ node?: CollectionNode } | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
   const used = (node: CollectionNode) =>
@@ -111,7 +113,8 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
     }
   }
   async function remove(node: CollectionNode) {
-    if (!window.confirm(t('notify.removeConfirm', { name: node.name }))) return;
+    if (!(await confirm(t('notify.removeConfirm', { name: node.name }), t('layer.removeNode'))))
+      return;
     try {
       await api(`/nodes/${encodeURIComponent(node.id)}`, {}, 'DELETE');
       await onChange();
@@ -132,6 +135,7 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
         )
       }
     >
+      {confirmation}
       {editing && (
         <NodeEditor
           node={editing.node}

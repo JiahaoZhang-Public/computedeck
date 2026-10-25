@@ -1281,3 +1281,20 @@ The legacy host `format.dateTime` now respects the device's 12/24-hour clock cho
 没有移除已有类名或令牌。数据源组（含云平台）使用 `cluster_id`，手动机器使用规范化平台键。
 仪表盘新增 `identity_slots`，色位为 1–6；不要用颜色推断状态，也不要按列表顺序重新分配。
 `format.dateTime` 遵循设备的 12/24 小时设置，`format.relativeTime` 保持原有输出约定。
+
+### Core layers in 0.8
+
+Core uses native modal dialogs for sheets, forms and confirmations, and a
+non-modal beside panel from 1200 px. Installed tool panels use
+`#/toolbox?plugin=<tool-id>`; marketplace panels use
+`#/toolbox?tab=market&plugin=<name>@<marketplace>` (URL-encode the value).
+Back closes an opened panel; a cold link closes to the filtered list.
+`layers/*` remains internal: WEB_API 1, exported component DOM, token aliases and
+frozen compatibility classes are unchanged. Core notifications now share one
+polite region and appear inside the active modal. No default network call or
+plugin permission was added.
+
+中文：核心浮层在 1200 px 起使用非模态旁侧面板，较窄时以及表单/确认使用原生模态框。
+工具与市场插件面板使用上面的 `plugin` 地址，返回关闭面板，直接链接关闭到筛选列表。
+`layers/*` 为内部实现；WEB_API 1、导出组件 DOM、令牌别名和兼容样式类均保持不变。
+通知共用一个礼貌播报区域并移入活动模态框，未增加默认网络请求或插件权限。

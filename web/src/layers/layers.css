@@ -1,0 +1,180 @@
+.layer-sheet {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  color: var(--fg-default);
+  padding: 0;
+  max-width: none;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  overscroll-behavior: contain;
+  scroll-padding: 8px 0 calc(80px + env(safe-area-inset-bottom));
+  animation: fade var(--dur-base) ease-out;
+}
+.layer-sheet::backdrop {
+  background: var(--scrim);
+}
+.layer-sheet.drawer {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: none;
+  width: min(480px, calc(100vw - 48px));
+  border-radius: 12px 0 0 12px;
+}
+dialog.focus-view {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+}
+.focus-view .modal-footer,
+.layer-sheet .drawer-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex-wrap: wrap;
+  background: var(--bg-overlay);
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+dialog.confirm-dialog {
+  padding: 20px;
+  width: min(480px, calc(100vw - 32px));
+}
+.confirm-dialog h2 {
+  font-size: 17px;
+  line-height: 24px;
+}
+.confirm-dialog .modal-footer {
+  margin: 20px -20px -20px;
+}
+.drawer.context-panel {
+  top: var(--topbar-h, 56px);
+  bottom: var(--chrome-bottom, 8px);
+  width: 400px;
+  z-index: 20;
+  border-radius: 0;
+  box-shadow: none;
+  scroll-padding: 8px 0 88px;
+}
+.app-shell:has(.context-panel) .main > :not(.topbar) {
+  margin-right: 400px;
+}
+.layer-popover {
+  position: fixed;
+  z-index: 70;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  box-shadow: var(--shadow-pop);
+}
+:is(.layer-popover, .touch-popover) [role='menu'] {
+  min-width: 200px;
+}
+:is(.layer-popover, .touch-popover) [role='menuitem'] {
+  display: block;
+  width: 100%;
+  text-align: start;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:is(.layer-popover, .touch-popover) [role='menuitem']:focus {
+  background: var(--bg-hover);
+  outline-offset: -2px;
+}
+:is(.layer-popover, .touch-popover) [role='menuitem'][aria-disabled='true'] {
+  color: var(--fg-subtle);
+}
+.touch-popover {
+  padding: 16px;
+}
+.toasts {
+  position: fixed;
+  z-index: 80;
+  right: 12px;
+  bottom: max(var(--chrome-bottom, 8px), env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+  width: min(400px, calc(100vw - 24px));
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  min-height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--fg-on-ink);
+  box-shadow: var(--shadow-pop);
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+.toast > span {
+  flex: 1;
+  min-width: 0;
+}
+.toast .status-shape {
+  color: inherit;
+  flex: none;
+}
+.toast .button,
+.toast .icon-button {
+  color: inherit;
+  background: transparent;
+  flex: none;
+}
+.toast.error {
+  background: var(--status-error-bg);
+  color: var(--fg-default);
+  border-color: var(--status-error-fg);
+}
+.layer-errors > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-default);
+}
+@media (max-width: 599px) {
+  .layer-sheet.drawer,
+  .touch-popover {
+    inset: auto 0 0;
+    margin: auto 0 0;
+    width: 100vw;
+    height: calc(100dvh - 32px);
+    border-radius: 16px 16px 0 0;
+  }
+  .touch-popover {
+    height: auto;
+  }
+  .focus-view:not(.confirm-dialog) {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+html:has(dialog[open]) {
+  overflow: hidden;
+}
+
+.focus-view .modal-header h2,
+.drawer .drawer-header h2 {
+  font-size: 17px;
+  line-height: 24px;
+}

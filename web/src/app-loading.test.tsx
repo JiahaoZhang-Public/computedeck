@@ -140,7 +140,7 @@ it('keeps the active language and device preference when another dictionary fail
   expect(language.getAttribute('aria-busy')).toBe('false');
   expect(document.documentElement.lang).toBe('en');
   expect(window.localStorage.getItem('computedeck.locale')).toBe('en');
-  expect(container.querySelector('.toast[role="alert"]')?.textContent).toContain(
+  expect(container.querySelector('.toasts[role="status"] .toast.error')?.textContent).toContain(
     i18n.t('error.locale'),
   );
 });

@@ -3,11 +3,17 @@ import { computeHealth } from './health';
 import { useVisibleInterval } from './useVisibleInterval';
 import { LocaleGate } from './app/LocaleGate';
 import { Frame } from './app/Frame';
-import { Layers } from './app/Layers';
-import type { Modal, Detail, Toast } from './app/Layers';
+import { lazyView } from './app/lazyView';
+import { Status } from './ui/Status';
+import { Time } from './ui/Time';
+import { Toasts } from './layers/Toasts';
+import type { Toast, ToastAction } from './layers/Toasts';
+import { hasModalLayer } from './layers/stack';
+import { openLayer, closeLayer } from './layers/routes';
+import type { Modal, Detail } from './app/Layers';
 import { Routes } from './app/Routes';
 import { Loading } from './app/LoadState';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Attention,
   CollectionNode,
@@ -48,6 +54,8 @@ import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
 import { PageBoundary } from './PageBoundary';
 
+const Layers = lazyView(async () => ({ default: (await import('./app/Layers')).Layers }));
+
 const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
 
 export default function App() {
@@ -73,8 +81,69 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
-  const [modal, setModal] = useState<Modal>(null);
+  const [sshData, setSSHData] = useState<SSHConfig | null>(null);
+  const [sourcePreset, setSourcePreset] = useState<SourcePreset | undefined>();
   const params = routeParams(hash);
+  const formKeys = ['add', 'edit', 'repair', 'step', 'section', 'source'];
+  const sourceId = params.get('repair') || params.get('source');
+  const editId = hash.split('?')[0] === '#/toolbox' ? null : params.get('edit');
+  const add = params.get('add');
+  const editedSource = data?.sources.find((item) => item.id === editId);
+  const editedInstance = data?.instances.find((item) => item.id === editId);
+  const modal: Modal = sourceId
+    ? { kind: 'diagnosis', sourceId, reading: !params.has('repair') }
+    : params.get('section') === 'ssh' && sshData
+      ? { kind: 'ssh', data: sshData }
+      : editId && editedSource
+        ? { kind: 'source', source: editedSource }
+        : editId && editedInstance
+          ? { kind: 'instance', item: editedInstance }
+          : editId && data
+            ? { kind: 'missing' }
+            : add === 'instance' || add === 'manual'
+              ? { kind: 'instance' }
+              : add
+                ? {
+                    kind: 'source',
+                    preset: { ...sourcePreset, ...(add !== 'source' ? { driver: add } : {}) },
+                  }
+                : null;
+  const setModal = (next: Modal) => {
+    if (!next) {
+      closeLayer(formKeys);
+      return;
+    }
+    if (next.kind === 'ssh') setSSHData(next.data);
+    if (next.kind === 'source') setSourcePreset(next.preset);
+    openLayer(
+      {
+        add:
+          next.kind === 'instance' && !next.item
+            ? 'instance'
+            : next.kind === 'source' && !next.source
+              ? (next.preset?.driver ?? 'source')
+              : null,
+        edit:
+          next.kind === 'instance'
+            ? (next.item?.id ?? null)
+            : next.kind === 'source'
+              ? (next.source?.id ?? null)
+              : null,
+        repair: next.kind === 'diagnosis' ? next.sourceId : null,
+        source: null,
+        section: next.kind === 'ssh' ? 'ssh' : null,
+        step:
+          next.kind === 'source'
+            ? next.source || next.preset?.driver
+              ? '2'
+              : '1'
+            : next.kind === 'instance'
+              ? '1'
+              : null,
+      },
+      !!modal,
+    );
+  };
   const eventId = params.get('event');
   const [selectedEvent, setSelectedEvent] = useState<{ demo: boolean; event: DeckEvent } | null>(
     null,
@@ -109,11 +178,13 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   }, [eventId, demo, selected]);
   const historicalJob = selected ? eventJob(selected) : null;
   const detailId =
-    params.get('job') ||
-    params.get('failure') ||
-    params.get('instance') ||
-    params.get('array') ||
-    eventId;
+    hash.split('?')[0] === '#/__gallery'
+      ? null
+      : params.get('job') ||
+        params.get('failure') ||
+        params.get('instance') ||
+        params.get('array') ||
+        eventId;
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -150,7 +221,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
       const failure =
         next?.kind === 'job' &&
         (!!next.item.end || data?.recent_failures?.some((item) => item === next.item));
-      setRouteParams(
+      openLayer(
         {
           event: null,
           job: next?.kind === 'job' && !failure ? next.item.id : null,
@@ -158,16 +229,22 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
           instance: next?.kind === 'instance' ? next.item.id : null,
           array: next?.kind === 'array' ? next.item.id : null,
         },
-        !!next,
+        !next,
       );
     },
     [data?.recent_failures],
   );
   const closeDetail = useCallback(() => {
-    if (window.history.state?.detail) window.history.back();
-    else setDetail(null);
-  }, [setDetail]);
-  const [toast, setToast] = useState<Toast>(null);
+    closeLayer(['event', 'job', 'failure', 'instance', 'array']);
+  }, []);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [noticeErrors, setNoticeErrors] = useState<(Toast & { at: string })[]>([]);
+  const toastId = useRef(0);
+  const dismissToast = useCallback(
+    (id?: number) =>
+      setToasts((items) => (id === undefined ? [] : items.filter((item) => item.id !== id))),
+    [],
+  );
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
@@ -196,10 +273,38 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const followSources = useRef<string[] | null>(null);
   const latestCollecting = useRef<string[]>([]);
   const followLoaded = useRef(false);
-  const notify = useCallback(
-    (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
-    [setToast],
-  );
+  const notify = useCallback((text: string, tone: 'ok' | 'error' = 'ok', action?: ToastAction) => {
+    const item = { id: ++toastId.current, text, tone, action, at: new Date().toISOString() };
+    setToasts((items) => [...items, item].slice(-3));
+    if (tone === 'error')
+      setNoticeErrors((items) =>
+        items.some((row) => row.text === text) ? items : [...items, item],
+      );
+  }, []);
+  const sshOpen = params.get('section') === 'ssh';
+  useEffect(() => {
+    if (!sshOpen || sshData || !data) return;
+    let active = true;
+    const request =
+      remote || demo
+        ? Promise.resolve({
+            config: clientSSHConfig(data.instances),
+            path: t('ssh.downloadPath'),
+            installed: false,
+          })
+        : api<SSHConfig>('/ssh/config');
+    void request.then(
+      (data) => {
+        if (active) setSSHData(data);
+      },
+      (reason) => {
+        if (active) notify(errorText(reason, 'error.sshConfig'), 'error');
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [sshOpen, sshData, demo, remote, data, notify]);
   const serverName = demo
     ? t('where.local')
     : health?.server_name || health?.server_host || t('where.server');
@@ -264,7 +369,6 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
       const next = canonicalHash(window.location.hash);
       if (previous.split('?')[0] !== next.split('?')[0]) {
         setSidebarOpen(false);
-        setModal(null);
         window.scrollTo(0, 0);
       }
       previous = next;
@@ -381,17 +485,9 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const tickClock = useCallback(() => setClock(Date.now()), []);
   useVisibleInterval(tickClock, 30000);
   useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), toast.tone === 'error' ? 12000 : 4500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-  useEffect(() => {
     function keydown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        if (modal) setModal(null);
-        else if (detailId) closeDetail();
-        else setSidebarOpen(false);
-      }
+      if (event.defaultPrevented || hasModalLayer()) return;
+      if (event.key === 'Escape') setSidebarOpen(false);
       if ((event.metaKey || event.ctrlKey) && event.key === 'k' && searchRef.current) {
         event.preventDefault();
         searchRef.current.focus();
@@ -400,7 +496,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     }
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [modal, detailId, closeDetail]);
+  }, []);
 
   async function refresh(sourceId?: string) {
     setRefreshing(true);
@@ -438,7 +534,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     return saved;
   }
   const blockedInDemo = () => {
-    if (demo) notify(t('toast.demoReadOnly'), 'error');
+    if (demo) notify(t('toast.demoReadOnly'));
     return demo;
   };
   async function showSSH() {
@@ -504,8 +600,14 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     else url.searchParams.delete('demo');
     window.history.replaceState(null, '', url);
     setDemo(next);
-    setModal(null);
-    setDetail(null);
+    setSSHData(null);
+    setToasts([]);
+    setNoticeErrors([]);
+    setRouteParams(
+      Object.fromEntries(
+        [...formKeys, 'event', 'job', 'failure', 'instance', 'array'].map((key) => [key, null]),
+      ),
+    );
     setHealthOpen(false);
     setRouteParams({ group: null, provider: null, q: null });
   };
@@ -565,10 +667,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     openJob: (item) => setDetail({ kind: 'job', item }),
     openEvent: (event) => {
       setSelectedEvent({ demo, event });
-      setRouteParams(
-        { event: String(event.id), job: null, failure: null, instance: null, array: null },
-        true,
-      );
+      openLayer({ event: String(event.id), job: null, failure: null, instance: null, array: null });
     },
     openArray: (item) => setDetail({ kind: 'array', item }),
     openInstance: (item) => setDetail({ kind: 'instance', item }),
@@ -596,6 +695,24 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
         refresh={refresh}
       >
         <main className={`content page-${page}`} aria-busy={loading || refreshing}>
+          {noticeErrors.length > 0 && (
+            <section className="layer-errors" aria-label={t('layer.errors')}>
+              {noticeErrors.map((item) => (
+                <div key={item.id}>
+                  <Status kind="error" label={item.text} />
+                  <Time value={item.at} />
+                  <button
+                    className="button"
+                    onClick={() =>
+                      setNoticeErrors((items) => items.filter((row) => row.id !== item.id))
+                    }
+                  >
+                    {t('common.dismiss')}
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
           <PageBoundary page={page}>
             {needsToken ? (
               <TokenGate
@@ -618,27 +735,30 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
           </PageBoundary>
         </main>
       </Frame>
-      <Layers
-        ctx={{ ...context, data }}
-        modal={modal}
-        setModal={setModal}
-        detail={detail}
-        setDetail={setDetail}
-        detailId={detailId}
-        closeDetail={closeDetail}
-        eventId={eventId}
-        eventLoad={eventLoad}
-        toast={toast}
-        setToast={setToast}
-        healthOpen={healthOpen}
-        setHealthOpen={setHealthOpen}
-        healthState={healthState}
-        needsToken={needsToken}
-        refreshing={refreshing}
-        refresh={refresh}
-        mutate={mutate}
-        followCollection={followCollection}
-      />
+      <Toasts items={toasts} dismiss={dismissToast} />
+      {(modal || detailId || healthOpen) && (
+        <Suspense fallback={null}>
+          <Layers
+            ctx={{ ...context, data }}
+            modal={modal}
+            setModal={setModal}
+            detail={detail}
+            setDetail={setDetail}
+            detailId={detailId}
+            closeDetail={closeDetail}
+            eventId={eventId}
+            eventLoad={eventLoad}
+            healthOpen={healthOpen}
+            setHealthOpen={setHealthOpen}
+            healthState={healthState}
+            needsToken={needsToken}
+            refreshing={refreshing}
+            refresh={refresh}
+            mutate={mutate}
+            followCollection={followCollection}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

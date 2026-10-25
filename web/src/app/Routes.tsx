@@ -45,7 +45,7 @@ export function Routes({ page, ctx, compat }: { page: Page; ctx: Ctx; compat: bo
   return (
     <Suspense fallback={<Loading />}>
       {page === '__gallery' ? (
-        <Gallery compat={compat} data={ctx.data} />
+        <Gallery compat={compat} data={ctx.data} notify={ctx.notify} />
       ) : (
         <PageComponent ctx={ctx} />
       )}

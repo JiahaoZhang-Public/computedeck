@@ -116,6 +116,8 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                   return (
                     <tr
                       key={item.id}
+                      data-detail-key="instance"
+                      data-detail-id={item.id}
                       className={`clickable ${stale ? 'stale-row' : ''}`}
                       tabIndex={0}
                       onClick={() => ctx.openInstance(item)}

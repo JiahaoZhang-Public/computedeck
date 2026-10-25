@@ -1,3 +1,5 @@
+import { LayerGallery } from './layers/LayerGallery';
+import type { Ctx } from './pages/shared';
 import { useState } from 'react';
 import { t } from './i18n';
 import { BrandMark, Chips, Empty, Meter, Panel, Stat, Status, Switch } from './ui';
@@ -30,7 +32,15 @@ const tokens = [
   '--text-muted',
 ];
 
-export function Gallery({ compat, data }: { compat: boolean; data?: Dashboard }) {
+export function Gallery({
+  compat,
+  data,
+  notify,
+}: {
+  compat: boolean;
+  data?: Dashboard;
+  notify?: Ctx['notify'];
+}) {
   const [enabled, setEnabled] = useState(false);
   const [tab, setTab] = useState('running');
   return (
@@ -161,6 +171,9 @@ export function Gallery({ compat, data }: { compat: boolean; data?: Dashboard })
           </Panel>
           <Empty title={t('gallery.empty')} text={t('gallery.note')} />
           <DisplayGallery example={data?.display_example} />
+          {data?.layer_example && notify && (
+            <LayerGallery names={data.layer_example.names} notify={notify} />
+          )}
         </>
       )}
     </div>

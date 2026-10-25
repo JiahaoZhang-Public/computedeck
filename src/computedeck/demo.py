@@ -701,6 +701,7 @@ def dashboard() -> dict[str, Any]:
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
     data["identity_slots"] = assign_slots(group_keys(sources, data["instances"]), {})
     # The component gallery exercises display states without inventing live measurements.
+    data["layer_example"] = {"names": ["build-small", "train-small"]}
     data["display_example"] = {
         "known": 29,
         "estimate": 41.2,

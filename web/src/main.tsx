@@ -9,6 +9,7 @@ import './theme/components.css';
 import './theme/tokens-compat.css';
 import './theme/compat.css';
 import './styles.css';
+import './layers/layers.css';
 
 initializeAppearance();
 

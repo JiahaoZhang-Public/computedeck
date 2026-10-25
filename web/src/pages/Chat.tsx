@@ -1,3 +1,4 @@
+import { useConfirm } from '../layers/useConfirm';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
@@ -74,6 +75,7 @@ export function ChatPage({ ctx }: { ctx: Ctx }) {
 }
 
 function ChatContent({ ctx }: { ctx: Ctx }) {
+  const [confirm, confirmation] = useConfirm();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channel, setChannel] = useState('general');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -185,7 +187,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
   }
 
   async function remove(item: ChatMessage) {
-    if (!window.confirm(t('chat.removeConfirm'))) return;
+    if (!(await confirm(t('chat.removeConfirm'), t('layer.removeMessage')))) return;
     try {
       await api(`${BASE}/messages/${item.id}`, {}, 'DELETE');
       setMessages((current) => current.filter((row) => row.id !== item.id));
@@ -197,6 +199,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
   const current = channels.find((item) => item.id === channel);
   return (
     <div className="chat">
+      {confirmation}
       <nav className="chat-channels" aria-label={t('chat.channels')}>
         {channels.map((item) => (
           <button

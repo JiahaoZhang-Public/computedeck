@@ -2056,3 +2056,11 @@ def test_low_use_settings_api(client: TestClient) -> None:
     ):
         assert client.put("/api/settings", json=values, headers=HEADERS).status_code == 422
     assert client.get("/api/settings").json()["low_use_window_minutes"] == 120
+
+
+def test_demo_layer_examples_are_fictional_and_live_dashboard_omits_them(
+    client: TestClient,
+) -> None:
+    demo = client.get("/api/dashboard?demo=true").json()
+    assert demo["layer_example"] == {"names": ["build-small", "train-small"]}
+    assert "layer_example" not in client.get("/api/dashboard").json()

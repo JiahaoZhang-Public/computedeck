@@ -21,7 +21,7 @@ shell errors or UI checks, including with macOS `/bin/bash` 3.2.
 An optional argument filters test titles, including page names. The Chromium channel can
 be selected with `PLAYWRIGHT_CHANNEL`; on macOS, missing bundled Chromium automatically
 selects installed Google Chrome. Missing local WebKit prints **WebKit not installed —
-skipped**. CI always includes WebKit; F6 adds its overlay tests to `*.overlays.spec.ts`.
+skipped**. CI always includes WebKit; F6 runs its overlay tests in `*.overlays.spec.ts`.
 No browser or package downloads happen in this script.
 
 `COMPUTEDECK_DEMO_NOW` accepts an ISO datetime with a timezone. It freezes only example
@@ -87,12 +87,16 @@ page reads and fonts, and checks:
   locale before the font check, so a failed locale switch cannot silently bypass it.
 - Activity must show example event rows and day headings before capturing a baseline.
 
-The separate **jobs reason at 1280 zh with panel open** check records a known failure until P2.
-It checks text clipping and drawer occlusion after independently asserting the page and
-panel loaded, and asserts that at least one reason is clipped. P2 must change that assertion
-to require no clipping; a fix before then fails this check and prompts its update.
+The separate **jobs reason at 1280 zh with panel open** check now requires no clipped reasons
+with the beside panel open, using the same text geometry and occlusion checks after
+asserting that the page and panel loaded. Failures report the clipped text. P2 must retain
+this guarantee when it adds table column priorities.
 Other browser errors and focus-coverage failures still fail directly. DOM findings are
 compared with their reviewed baselines rather than marked expected-fail.
+
+中文：1280-zh 下打开旁侧面板时，作业原因必须完全可见；原有文字几何和遮挡检查不变，
+失败时报告被裁剪的文字。此用例不再要求重现旧缺陷；P2 增加表格列优先级时必须保留
+原因完整可见的要求。
 
 `routing.spec.ts` checks the Clusters, Nodes and Marketplace aliases across the same six
 Chromium combinations, including reload and browser Back/Forward, plus the legacy node
@@ -122,7 +126,7 @@ remove the corresponding entries in a reviewed baseline update. The same checks 
 baseline policy apply to both languages and every project.
 
 The full release suite grows with each item: F4 adds fallback/contrast and fixture-plugin
-coverage; F5 adds the new display primitives; F6 adds layers in both engines; U1/U2 add
+coverage; F5 adds the new display primitives; F6 tests layers in both engines; U1/U2 add
 navigation, disabled-tool and keyboard states; P1 adds the fold check; later page items
 add their own states. Those unimplemented interfaces are not simulated by F1.
 
@@ -205,7 +209,7 @@ render the existing frame, route table and layers. The F2 hash store, aliases an
 routes are unchanged. Plan, Usage, Toolbox, Notify, Chat and Settings load on first
 visit. Clusters stays eager, including its existing single-group view; P6 owns splitting
 the new cluster detail page. The existing source/instance forms load on opening, and Gallery brings
-its own CSS. The new focus-view wizard and palette remain later items (F6 and U2).
+its own CSS. F6 wraps forms in focus views; the new source wizard and palette remain P8/U2 work.
 
 The first dictionary request starts before React mounts. Startup uses the device choice,
 then a separately remembered server-language hint, then English. The current server default
@@ -292,7 +296,7 @@ renders Overview and the gallery under six theme/contrast contexts, with exact s
 normal/fallback image equality and axe records (named `gallery-…` or `overview-…`). Existing Overview findings remain visible
 in those records until P1/Q1. The gating fallback screenshot suite runs only in Chromium.
 WebKit keeps the screenshot-free theme suite (axe and computed-colour parity), as well as
-F6's future overlay suite. The weekly WebKit fallback-only render is advisory, outside the
+F6's overlay suite. The weekly WebKit fallback-only render is advisory, outside the
 PR gate.
 
 `plugin-compat.spec.ts` exercises the actual `plugin new --web` template through
@@ -311,8 +315,8 @@ records**, plus the fallback and hello screenshots. For intentional visual chang
 regenerate and review affected baselines, then run the full gate without `--update-snapshots`.
 Local macOS baselines remain ignored; Linux artifacts
 are reviewed and committed at PR time as before. No baseline is approved merely because a
-regeneration command succeeds. In particular, inspect 375 px layouts and the old Jobs
-reason-clip assertion. The full six-shape/raster and persisted identity assignment tests
+regeneration command succeeds. In particular, inspect 375 px layouts and the Jobs
+no-clipping regression check. The full six-shape/raster and persisted identity assignment tests
 belong to F5; navigation/scroll chrome remains U1; private-plugin comparison and the advisory
 pinned network-plugin run remain release follow-ups.
 
@@ -322,12 +326,12 @@ pinned network-plugin run remain release follow-ups.
 本地 UI 脚本构建正常版、禁用 `light-dark()` 的兼容版及真实脚手架示例插件版。
 测试覆盖系统/显式主题、增强对比度、设备设置持久化、空插槽、全部组件/类和横幅切换；
 兼容版截图门禁仅在 Chromium 运行；WebKit 保留不截图的主题测试（axe 和计算颜色
-一致性），以及 F6 后续的浮层测试。每周 WebKit 兼容版渲染属于非阻塞巡检，不纳入
+一致性），以及 F6 的浮层测试。每周 WebKit 兼容版渲染属于非阻塞巡检，不纳入
 PR 门禁。界面状态只依赖设备设置和双语测试插件，
 无需修改 `demo.py`。F4 有意改变全站颜色和共享字体/控件，基线覆盖全部旧页面及
 兼容版/插件截图。有意修改视觉效果时，重新生成并检查受影响基线，再运行一次
 不更新基线的完整 UI gate。macOS 基线不提交；Linux 基线在 PR 时生成、审核并提交。
-不得仅凭重新生成成功就接受基线；重点检查 375 像素布局和 Jobs 已知裁剪用例。
+不得仅凭重新生成成功就接受基线；重点检查 375 像素布局和 Jobs 原因完整可见的用例。
 F5 的完整状态形状/身份分配、U1 的导航与滚动边距、发布前的私有插件比较及固定版本
 network 插件巡检仍由后续项目完成。
 
@@ -517,3 +521,81 @@ Vitest 几何超采样补充覆盖面积和圆角检查。实现偏离：jsdom �
 **中文：截图。** 显示变化后审核本地画廊、兼容画廊、设置、兼容色彩画廊、hello 页面及
 使用组标记或兼容标签的页面。显示截图为上述四个文件名，覆盖六种 Chromium 组合。
 审核更新后运行完整门禁；macOS 基线保持忽略，Linux 基线留待 PR。单元测试和编译不改基线。
+
+### F6 layers and interaction checks
+
+**Automated coverage.** `web/e2e/layers.overlays.spec.ts` runs in the six Chromium and
+six WebKit projects. To run only its tests with the isolated service:
+
+```sh
+layer_checks='C1|C18|documented layer address|tool and marketplace'
+layer_checks+='|phone detail|focus visibility probe|source Next|beside j/k'
+layer_checks+='|health pill|beside panel retains|Toolbox tab changes'
+bash scripts/check-ui.sh "$layer_checks"
+```
+
+The suite checks beside panels versus modal sheets, heading focus and focus return,
+Escape/Back, cold links and resize across 1200 px. Focus views and nested confirmations
+check safe focus, no backdrop dismissal, lower-modal inertness and both Tab directions.
+Menus cover keyboard navigation, flipping clear of the trigger and touch sheets; Vitest
+also checks typeahead. Outside clicks on blank content return focus to the popover trigger;
+clicking an outside input closes the popover and lets it receive focus and typed text.
+Three toasts share the modal host; Undo pauses on hover/focus, errors persist, and
+Escape clears toasts first. The Command/Ctrl+Z handler is tested with Command+Z in browsers.
+Every documented layer address in [configuration.md](configuration.md#panels-forms-and-notifications)
+is checked cold, through Escape, and via warm open plus Back, preserving other filters;
+step changes replace the entry. Tool and marketplace URLs, j/k over displayed rows in
+both directions, and the phone action bar with measured scroll padding are covered too.
+Vitest checks prior inert-state restoration, out-of-order closes, unchanged non-modal
+layers, outside clicks/labels without suppressing later pointer sequences, and cancellation
+as Keep exactly once on hash/history changes, including tool-enable consent.
+
+For WebKit's tab-to-text-fields default, the modal trap moves every Tab/Shift+Tab itself.
+For WebKit's nested-modal behaviour, the stack explicitly marks lower modal layers `inert`.
+`checkFocus` measures immediately, then waits up to three animation frames for the browser's
+own reveal of a just-focused control that is not exposed; WebKit reveals asynchronously.
+It never scrolls for the browser or relaxes the exposure test; Chromium's immediately
+exposed controls are unchanged. A fixed-cover probe proves covered controls still fail.
+
+**Screenshots.** New baselines are `context-panel.png` and `modal-toasts.png`. The gallery's
+Layers section uses the example-only `layer_example` dashboard field and changes the
+normal gallery, fallback-gallery and `display.spec.ts` gallery baselines. Review intentional
+updates using the existing baseline workflow; tests and compilation do not approve them.
+See [layers-spike.md](layers-spike.md) for the decision record and owner-only manual checklist.
+
+**中文：F6 浮层检查。** `layers.overlays.spec.ts` 覆盖六种 Chromium 和六种 WebKit 组合，
+上面的筛选命令只运行该文件的测试。检查旁侧面板与模态抽屉、标题焦点与焦点恢复、
+Escape/返回、直接链接和跨 1200 px 缩放；聚焦视图及嵌套确认检查安全初始焦点、遮罩不关闭、
+低层模态 inert 和双向 Tab。菜单覆盖键盘、避免遮住触发控件的翻转与触屏抽屉，Vitest 另查
+按字检索。点击浮层外空白内容后焦点回到触发控件；点击外部输入框则保留其聚焦与输入。
+三条通知共用模态内宿主，检查悬停/聚焦时撤销暂停、错误持续显示、Escape 先清通知；
+Command/Ctrl+Z 共用的撤销处理器在浏览器测试中通过 Command+Z 验证。配置文档的每种浮层地址均覆盖
+直接打开、Escape、压入历史后返回及筛选保留，步骤变更替换历史项；另查工具/市场面板
+URL、j/k 双向遍历实际显示的行、手机操作栏与实测滚动留白。单元测试验证原 inert 状态
+恢复、乱序关闭、非模态层不变、空白/输入框/标签外部点击不影响后续指针序列，以及
+hash/历史变化将待确认操作（含工具启用授权）按“保留”取消且只返回一次决定。
+WebKit 默认只 Tab 到文本框，因此模态焦点循环自行移动每次 Tab/Shift+Tab；其嵌套模态
+行为由显式设置低层 inert 补足。焦点检查先立即测量，不可见时最多等待三个动画帧，让
+浏览器自行显露焦点；不代替浏览器滚动、不放宽遮挡判定，立即显露的 Chromium 控件不受
+影响，固定遮罩探针仍须报告失败。新增截图为 `context-panel.png` 和 `modal-toasts.png`；
+示例专用 `layer_example` 驱动的 Layers 区块改变普通画廊、兼容渲染画廊和 display.spec
+画廊基线，须沿用既有流程审核更新。决策与人工检查清单见 [layers-spike.md](layers-spike.md)。
+
+F6 review regressions also cover health-pill positioning and focus return in both
+engines, edited Jobs filters surviving Escape/Close, Back after filtering, Toolbox
+tab cleanup, and bottom toast placement after mouse clicks. The C18 test resumes
+Playwright's clock before axe runs. Vitest checks plain-toast expiry at 4.5 seconds,
+Undo expiry after hover/focus ends, successful/failed settings saves, and unsaved
+`add=source` / `add=ssh` step-3 links. The gallery confirmation asks a question and
+names the removal outcome; its form label uses the existing stacked-label spacing.
+
+The changed `modal-toasts.png` baselines require visual review and regeneration
+outside the restricted sandbox, followed by `bash scripts/check-ui.sh` without
+`--update-snapshots`. No baseline was regenerated or approved inside the sandbox.
+
+中文：评审回归新增健康按钮定位与焦点恢复、修改 Jobs 筛选后 Escape/关闭仍保留筛选、
+筛选后的浏览器返回、工具箱标签清理，以及点击后通知保持底部位置。C18 在 axe 前恢复
+时钟。单测验证普通通知 4.5 秒过期、撤销通知悬停/聚焦结束后的剩余时间、设置保存成功
+与失败、未保存来源的第 3 步链接。示例确认以问题为标题并明确移除结果，表单标签使用
+现有堆叠间距。`modal-toasts.png` 须在沙箱外审核更新，再不带 `--update-snapshots` 运行
+完整门禁；本次沙箱内没有更新或批准任何截图基线。

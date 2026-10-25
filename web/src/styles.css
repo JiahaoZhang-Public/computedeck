@@ -357,11 +357,7 @@ kbd,
   color: var(--text-3);
   white-space: nowrap;
 }
-.overlay.health-overlay {
-  place-items: start end;
-  padding-top: 60px;
-}
-.modal.health-panel {
+.health-panel {
   padding: 20px;
   width: min(440px, 100%);
   max-height: calc(100dvh - 84px);
@@ -446,7 +442,7 @@ kbd,
     display: inline-flex;
     align-items: center;
   }
-  .modal.health-panel {
+  .health-panel {
     width: 100%;
     max-height: 80dvh;
     border-radius: 12px 12px 0 0;
@@ -1234,74 +1230,13 @@ form > .form-error {
   margin-top: 6px;
 }
 
-/* ---------- Toast ---------- */
-
-.toast {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 80;
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  max-width: min(440px, calc(100vw - 40px));
-  padding: 10px 10px 10px 13px;
-  background: var(--text);
-  color: var(--bg);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-pop);
-  font-size: 13px;
-  overflow-wrap: anywhere;
-  animation: rise 0.18s ease-out;
-}
-.toast > svg {
-  margin-top: 2px;
-}
-.toast.ok > svg {
-  color: var(--green);
-}
-.toast.error {
-  background: var(--red-soft);
-  color: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
-}
-.toast span {
-  flex: 1;
-}
-.toast .icon-button {
-  width: 20px;
-  height: 20px;
-  color: inherit;
-  opacity: 0.7;
-}
-.toast .icon-button:hover {
-  background: transparent;
-  color: inherit;
-  opacity: 1;
-}
-@keyframes rise {
-  from {
-    transform: translateY(6px);
-    opacity: 0;
-  }
-}
-
 /* ---------- Modal ---------- */
 
-.overlay,
-.drawer-overlay,
 .scrim {
   position: fixed;
   inset: 0;
   z-index: 60;
   background: var(--scrim);
-}
-.overlay {
-  /* Instance editing opens a modal above the existing details drawer. */
-  z-index: 61;
-  display: grid;
-  place-items: center;
-  padding: 24px;
 }
 .modal {
   position: relative;
@@ -1367,9 +1302,6 @@ form > .form-error {
 
 /* ---------- Drawer ---------- */
 
-.drawer-overlay {
-  background: var(--scrim);
-}
 .drawer {
   position: fixed;
   inset: 0 0 0 auto;

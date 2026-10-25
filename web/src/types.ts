@@ -314,6 +314,7 @@ export interface DisplayExample {
 export interface Dashboard {
   /** Fictional display states, present only in example mode. */
   display_example?: DisplayExample;
+  layer_example?: { names: string[] };
   /** Server-assigned identity colours (1–6), keyed by cluster or platform. */
   identity_slots?: Record<string, number>;
   /** Own finished-job wait aggregates; older services omit this field. */

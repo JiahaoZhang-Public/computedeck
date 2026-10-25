@@ -1,11 +1,12 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { X } from 'lucide-react';
 import { dateTime, relativeTime } from './domain';
 import { formatMessage, t } from './i18n';
 import { groupsOf, sourceLabel } from './groups';
 import { computeHealth, nextAttemptText } from './health';
 import { Status } from './ui';
-import { useDialogFocus } from './useDialogFocus';
+import { Popover } from './layers/Popover';
+import { captureOpener } from './layers/stack';
 import type { Dashboard } from './types';
 
 export function HealthPanel({
@@ -23,26 +24,11 @@ export function HealthPanel({
   close: () => void;
   addSource?: () => void;
 }) {
-  const ref = useDialogFocus();
-  useEffect(() => {
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close();
-    };
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [close]);
+  const [anchor] = useState(() => captureOpener() ?? document.body);
   const groups = groupsOf(data ?? { sources: [], instances: [] });
   return (
-    <div className="overlay health-overlay" onMouseDown={close}>
-      <section
-        className="modal health-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="health-title"
-        tabIndex={-1}
-        ref={ref}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <Popover anchor={anchor} labelledBy="health-title" close={close}>
+      <section className="health-panel">
         <button className="icon-button modal-close" aria-label={t('common.close')} onClick={close}>
           <X size={16} />
         </button>
@@ -140,6 +126,6 @@ export function HealthPanel({
           </button>
         ) : null}
       </section>
-    </div>
+    </Popover>
   );
 }

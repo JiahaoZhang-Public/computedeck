@@ -1,3 +1,6 @@
+import { useRouteParam, routeParams } from './useRouteParam';
+import { replaceLayer } from './layers/routes';
+import { useConfirm } from './layers/useConfirm';
 import { ConnectionChecks } from './ConnectionChecks';
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -334,9 +337,29 @@ export function SourceForm({
   onManual: () => void;
   onCancel: () => void;
 }) {
-  const [step, setStep] = useState<Step>(source || preset.driver ? 'details' : 'type');
+  const [confirm, confirmation] = useConfirm();
+  const [startedWithDriver] = useState(!!preset.driver);
+  const [localStep, setLocalStep] = useState<Step>(source || preset.driver ? 'details' : 'type');
+  const [routeStep] = useRouteParam('step');
+  const addressed = routeParams().has('add') || routeParams().has('edit');
+  const step: Step =
+    addressed && routeStep === '3'
+      ? 'check'
+      : addressed && routeStep === '2'
+        ? 'details'
+        : localStep;
+  const setStep = (next: Step, driver?: string) => {
+    setLocalStep(next);
+    if (addressed)
+      replaceLayer({
+        step: next === 'type' ? '1' : next === 'details' ? '2' : '3',
+        ...(next === 'type' ? { add: 'source' } : driver ? { add: driver } : {}),
+      });
+  };
   const [selected, setSelected] = useState(source?.driver ?? preset.driver ?? '');
-  const [savedId, setSavedId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(
+    routeStep === '3' ? (source?.id ?? null) : null,
+  );
   const [previousAttempt, setPreviousAttempt] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const info = driverInfo(drivers, selected);
@@ -390,6 +413,7 @@ export function SourceForm({
       if (enabled) {
         setSavedId(result.id);
         setStep('check');
+        if (addressed) replaceLayer({ add: null, edit: result.id, step: '3' });
       } else onCancel();
     } catch (reason) {
       setFormError(errorText(reason, 'error.save'));
@@ -423,7 +447,7 @@ export function SourceForm({
                     info={driver}
                     onChoose={() => {
                       setSelected(driver.name);
-                      setStep('details');
+                      setStep('details', driver.name);
                     }}
                   />
                 ))}
@@ -440,6 +464,21 @@ export function SourceForm({
       </>
     );
   }
+
+  if (step === 'check' && !savedId && !source)
+    return (
+      <>
+        <header className="modal-header">
+          <h2 id="modal-title">{t('source.add')}</h2>
+          <p>{t('layer.unavailable')}</p>
+        </header>
+        <footer className="modal-footer">
+          <button className="button" onClick={onCancel}>
+            {t('common.close')}
+          </button>
+        </footer>
+      </>
+    );
 
   if (step === 'check')
     return (
@@ -494,6 +533,7 @@ export function SourceForm({
   const shown = info.fields.filter((field) => !(editing && field.identity));
   return (
     <>
+      {confirmation}
       <header className="modal-header">
         <h2 id="modal-title">{editing ? editing.name : localized(info.label)}</h2>
         <p>{localized(info.details, { where })}</p>
@@ -582,8 +622,13 @@ export function SourceForm({
                 type="button"
                 className="button danger-text"
                 disabled={busy}
-                onClick={() => {
-                  if (window.confirm(t('source.deleteConfirm', { name: source.name })))
+                onClick={async () => {
+                  if (
+                    await confirm(
+                      t('source.deleteConfirm', { name: source.name }),
+                      t('layer.removeSource'),
+                    )
+                  )
                     void onDelete(source).catch((reason) =>
                       setFormError(errorText(reason, 'error.save')),
                     );
@@ -591,7 +636,7 @@ export function SourceForm({
               >
                 {t('common.remove')}
               </button>
-            ) : !source && step === 'details' && !preset.driver ? (
+            ) : !source && step === 'details' && !startedWithDriver ? (
               <button type="button" className="button" onClick={() => setStep('type')}>
                 {t('common.back')}
               </button>

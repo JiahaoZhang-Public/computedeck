@@ -1,3 +1,4 @@
+import type { ToastAction } from '../layers/Toasts';
 import type { ReactNode, RefObject } from 'react';
 import { ArrowRight, Search, X } from 'lucide-react';
 import type {
@@ -81,7 +82,7 @@ export type Ctx = {
   openArray: (array: JobArray) => void;
   openInstance: (item: Instance) => void;
   copy: (text: string, message?: string) => Promise<void>;
-  notify: (text: string, tone?: 'ok' | 'error') => void;
+  notify: (text: string, tone?: 'ok' | 'error', action?: ToastAction) => void;
   backup: () => Promise<void>;
   toggleDemo: () => void;
 };
@@ -244,6 +245,8 @@ export function JobsTable({
             return (
               <tr
                 key={job.id}
+                data-detail-key="job"
+                data-detail-id={job.id}
                 className={`clickable ${old ? 'stale-row' : ''}`}
                 tabIndex={0}
                 onClick={() => onOpen(job)}
@@ -340,6 +343,8 @@ function ArrayRow({
   return (
     <tr
       className={`clickable array-row ${old ? 'stale-row' : ''}`}
+      data-detail-key="array"
+      data-detail-id={array.id}
       tabIndex={0}
       onClick={() => onOpen?.(array)}
       onKeyDown={(event) => {
@@ -442,6 +447,8 @@ export function FailuresTable({
           {jobs.map((job) => (
             <tr
               key={job.id}
+              data-detail-key={onOpen ? 'failure' : undefined}
+              data-detail-id={job.id}
               className={onOpen ? 'clickable' : undefined}
               tabIndex={onOpen ? 0 : undefined}
               onClick={() => onOpen?.(job)}

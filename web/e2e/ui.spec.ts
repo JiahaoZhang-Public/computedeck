@@ -81,7 +81,9 @@ test('jobs reason at 1280 zh with panel open @known-clip', async ({ page }, test
   test.skip(testInfo.project.name !== 'chromium-1280-zh-CN-dark', '1280 zh regression case');
   await page.goto('/?demo=true#/jobs?state=pending&job=example%3Acluster-a%3A48214');
   await ready(page);
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(
+    page.getByRole('complementary').filter({ has: page.locator('#detail-title') }),
+  ).toBeVisible();
   const reasons = page.locator('.jobs-table tbody .clamp[title]');
   await expect(reasons.first()).toBeVisible();
   const clipped = await reasons.evaluateAll((nodes) =>
@@ -103,7 +105,7 @@ test('jobs reason at 1280 zh with panel open @known-clip', async ({ page }, test
       })
       .map((node) => node.textContent),
   );
-  // TODO P2: require no clipped reasons once the Jobs layout is fixed.
-  // Record the known defect without marking unrelated test or teardown errors as expected.
-  expect(clipped.length, 'Known 0.7 Jobs clipping; update this assertion in P2').toBeGreaterThan(0);
+  // The beside panel now selects the stacked layout, where reasons fit. P2 must
+  // retain this guarantee when it adds table column priorities.
+  expect(clipped, `Clipped Jobs reasons: ${clipped.join(' | ')}`).toEqual([]);
 });

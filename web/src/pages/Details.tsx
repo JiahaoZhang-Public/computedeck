@@ -1,3 +1,5 @@
+import { useMedia } from '../layers/stack';
+import { useConfirm } from '../layers/useConfirm';
 import { useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
@@ -207,15 +209,17 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
     : historical
       ? ctx.data.failure_history_observed_at
       : job.observed_at;
+  const phone = useMedia('(max-width: 599px)');
+  const actions = (pending || failure) && (
+    <div className="drawer-actions">
+      <a className="button" href={jobPlanLink(job, ctx.data.nodes)}>
+        {t('plan.findAnother')}
+      </a>
+    </div>
+  );
   return (
     <div className="drawer-body">
-      {(pending || failure) && (
-        <div className="drawer-actions">
-          <a className="button" href={jobPlanLink(job, ctx.data.nodes)}>
-            {t('plan.findAnother')}
-          </a>
-        </div>
-      )}
+      {!phone && actions}
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">
@@ -454,6 +458,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
           <p className="panel-note">{t('failure.copyOnly')}</p>
         </div>
       )}
+      {phone && actions}
     </div>
   );
 }
@@ -471,6 +476,7 @@ export function InstanceDetail({
   onEdit: () => void;
   onDelete: () => Promise<void>;
 }) {
+  const [confirm, confirmation] = useConfirm();
   const { demo, remote, busy } = ctx;
   const direct = remote || !!item.existing_alias;
   // Busy GPUs, as the last SSH check counted them.
@@ -494,44 +500,54 @@ export function InstanceDetail({
       ctx.notify(errorText(reason, 'error.sshConfig'), 'error');
     }
   }
+  const phone = useMedia('(max-width: 599px)');
+  const actions = (
+    <div className="drawer-actions">
+      <button
+        className="button"
+        disabled={demo || (direct && !directSSHCommand(item))}
+        title={direct && !directSSHCommand(item) ? t('instance.noEndpoint') : undefined}
+        onClick={() => void copyCommand()}
+      >
+        <Copy size={14} />
+        {remote ? t('instance.copyDirect') : t('instance.copyCommand')}
+      </button>
+      <button
+        className="button primary"
+        disabled={busy || demo || !item.host}
+        onClick={() => void onProbe()}
+      >
+        <Wifi size={14} />
+        {remote ? t('instance.probeRemote', { server: ctx.serverName }) : t('instance.probe')}
+      </button>
+      {item.manual && (
+        <>
+          <button className="button" disabled={demo} onClick={onEdit}>
+            {t('common.edit')}
+          </button>
+          <button
+            className="button danger-text"
+            disabled={demo || busy}
+            onClick={async () => {
+              if (
+                await confirm(
+                  t('instance.deleteConfirm', { name: item.name }),
+                  t('layer.removeInstance'),
+                )
+              )
+                void onDelete();
+            }}
+          >
+            {t('common.remove')}
+          </button>
+        </>
+      )}
+    </div>
+  );
   return (
     <div className="drawer-body">
-      <div className="drawer-actions">
-        <button
-          className="button"
-          disabled={demo || (direct && !directSSHCommand(item))}
-          title={direct && !directSSHCommand(item) ? t('instance.noEndpoint') : undefined}
-          onClick={() => void copyCommand()}
-        >
-          <Copy size={14} />
-          {remote ? t('instance.copyDirect') : t('instance.copyCommand')}
-        </button>
-        <button
-          className="button primary"
-          disabled={busy || demo || !item.host}
-          onClick={() => void onProbe()}
-        >
-          <Wifi size={14} />
-          {remote ? t('instance.probeRemote', { server: ctx.serverName }) : t('instance.probe')}
-        </button>
-        {item.manual && (
-          <>
-            <button className="button" disabled={demo} onClick={onEdit}>
-              {t('common.edit')}
-            </button>
-            <button
-              className="button danger-text"
-              disabled={demo || busy}
-              onClick={() => {
-                if (window.confirm(t('instance.deleteConfirm', { name: item.name })))
-                  void onDelete();
-              }}
-            >
-              {t('common.remove')}
-            </button>
-          </>
-        )}
-      </div>
+      {confirmation}
+      {!phone && actions}
       {item.ssh_status === 'error' && item.ssh_error && (
         <div className="callout red">
           <strong>{t('instance.probeFailed')}</strong>
@@ -683,6 +699,7 @@ export function InstanceDetail({
         {remote ? t('instance.note.remote', { server: ctx.serverName }) : t('instance.note.local')}{' '}
         {t('instance.note.scope')}
       </p>
+      {phone && actions}
     </div>
   );
 }

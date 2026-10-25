@@ -44,7 +44,6 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', fetchMock);
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
   HTMLElement.prototype.scrollTo = vi.fn();
   window.localStorage.clear();
   window.localStorage.setItem('computedeck.chatName', 'alice');
@@ -168,8 +167,11 @@ it.each(['en', 'zh-CN'] as const)(
     expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demoTool'));
     await click(button(t('notify.test')));
     expect(container.textContent).toContain(t('toast.demoReadOnly'));
-    for (const remove of container.querySelectorAll(`button[aria-label="${t('common.remove')}"]`))
+    for (const remove of container.querySelectorAll(`button[aria-label="${t('common.remove')}"]`)) {
       await click(remove);
+      await click(container.querySelector('.confirm-dialog .modal-footer button:last-child'));
+      expect(container.textContent).toContain(t('toast.demoReadOnly'));
+    }
     // Both rule and channel edits use the same real request function as the host.
     const edits = [...container.querySelectorAll(`button[aria-label="${t('common.configure')}"]`)];
     for (const edit of edits) {
@@ -190,6 +192,7 @@ it.each(['en', 'zh-CN'] as const)(
   async (locale) => {
     await open('chat', locale);
     await click(container.querySelector(`button[aria-label="${t('common.remove')}"]`));
+    await click(button(t('layer.removeMessage')));
     expect(container.textContent).toContain(t('toast.demoReadOnly'));
     const textarea = container.querySelector('textarea')!;
     await act(async () => {

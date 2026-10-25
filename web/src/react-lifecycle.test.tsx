@@ -160,6 +160,9 @@ describe('dashboard lifecycle', () => {
     );
     expect(missing).toBeDefined();
     await act(async () => missing!.click());
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('build-box');
   });
 
@@ -607,6 +610,9 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => retry.click());
     expect(request).toHaveBeenCalledWith('/refresh', { source_id: data.sources[0].id });
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(container.querySelector('.toasts')?.textContent).toBe('');
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(pill);
     for (const page of ['settings', 'toolbox', 'notify', 'chat']) {
@@ -695,14 +701,12 @@ describe.each(['en', 'zh-CN'] as const)('health panel details in %s', (locale) =
       await act(async () => {
         container
           .querySelector('.health-panel')!
-          .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        container.querySelector<HTMLElement>('.health-overlay')!.click();
+          .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        document.body.click();
       });
       expect(close).not.toHaveBeenCalled();
       await act(async () =>
-        container
-          .querySelector('.health-overlay')!
-          .dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
       );
       expect(close).toHaveBeenCalledOnce();
     },
@@ -1796,7 +1800,7 @@ it.each(['en', 'zh-CN'] as const)(
     );
     assertCounts(4);
     expect(document.activeElement?.id).toBe('attention');
-    expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+    expect(container.querySelector('.toasts[role="status"]')?.textContent).toContain(
       t('attention.acknowledgedToast'),
     );
     expect(container.querySelector('.attention-muted > summary')?.textContent).toBe(
@@ -1806,7 +1810,7 @@ it.each(['en', 'zh-CN'] as const)(
     await click('.attention-muted .attention-actions button');
     assertCounts(5);
     expect(document.activeElement?.id).toBe('attention');
-    expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+    expect(container.querySelector('.toasts[role="status"]')?.textContent).toContain(
       t('attention.unmutedToast'),
     );
     for (const until of ['1h', 'tomorrow']) {
@@ -1826,7 +1830,7 @@ it.each(['en', 'zh-CN'] as const)(
       assertCounts(until === '1h' ? 5 : 4);
       await click(selector);
       expect(document.activeElement?.id).toBe('attention');
-      expect(container.querySelector('.toast[role="status"]')?.textContent).toContain(
+      expect(container.querySelector('.toasts[role="status"]')?.textContent).toContain(
         t('attention.snoozedToast'),
       );
       expect(
