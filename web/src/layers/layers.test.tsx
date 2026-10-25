@@ -714,3 +714,93 @@ it.each(['body', 'dialog', 'aside', 'section'])(
     if (tag !== 'body') target.remove();
   },
 );
+
+it('uses the current subject for focus return and falls back when its row is removed', async () => {
+  function Example({ removeRow = false }: { removeRow?: boolean }) {
+    const [subject, setSubject] = useState('first');
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button id="first" onClick={() => setOpen(true)}>
+          First
+        </button>
+        {!removeRow && <button id="second">Second</button>}
+        {open && (
+          <ContextPanel
+            labelledBy="subject"
+            close={() => setOpen(false)}
+            returnFocus={() => document.getElementById(subject)}
+          >
+            <h2 id="subject">{subject}</h2>
+            <button id="step" onClick={() => setSubject('second')}>
+              Next
+            </button>
+          </ContextPanel>
+        )}
+      </>
+    );
+  }
+  for (const removeRow of [false, true]) {
+    await render(<Example key={String(removeRow)} removeRow={removeRow} />);
+    container.querySelector<HTMLElement>('#first')!.focus();
+    await click('#first');
+    await click('#step');
+    await key('Escape');
+    expect(document.activeElement?.id).toBe(removeRow ? 'first' : 'second');
+  }
+});
+
+it.each(['plain', 'hover', 'focus'])(
+  'toast lifetime and %s pause survive moving into and out of a modal',
+  async (pause) => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    const items: Toast[] = [
+      {
+        id: 1,
+        text: 'Notice',
+        tone: 'ok',
+        ...(pause === 'plain' ? {} : { action: { label: 'Undo', undo: true, run: vi.fn() } }),
+      },
+    ];
+    const tree = (modal: boolean) => (
+      <>
+        {modal && (
+          <FocusView labelledBy="form-title" close={() => {}}>
+            <h2 id="form-title">Form</h2>
+          </FocusView>
+        )}
+        <Toasts items={items} dismiss={dismiss} />
+      </>
+    );
+    await render(tree(false));
+    await act(async () => vi.advanceTimersByTime(2000));
+    const toast = container.querySelector('.toast')!;
+    if (pause !== 'plain')
+      await act(async () =>
+        toast.dispatchEvent(
+          pause === 'hover'
+            ? new MouseEvent('mouseover', { bubbles: true })
+            : new FocusEvent('focusin', { bubbles: true }),
+        ),
+      );
+    await render(tree(true));
+    expect(container.querySelector('dialog .toast')).toBe(toast);
+    await act(async () => vi.advanceTimersByTime(pause === 'plain' ? 2000 : 20000));
+    expect(dismiss).not.toHaveBeenCalled();
+    await render(tree(false));
+    expect(container.querySelector('.toast')).toBe(toast);
+    if (pause !== 'plain')
+      await act(async () =>
+        toast.dispatchEvent(
+          pause === 'hover'
+            ? new MouseEvent('mouseout', { bubbles: true })
+            : new FocusEvent('focusout', { bubbles: true }),
+        ),
+      );
+    await act(async () => vi.advanceTimersByTime(pause === 'plain' ? 499 : 7999));
+    expect(dismiss).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(dismiss).toHaveBeenCalledExactlyOnceWith(1);
+  },
+);

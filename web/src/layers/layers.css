@@ -48,16 +48,17 @@ dialog.confirm-dialog {
   margin: 20px -20px -20px;
 }
 .drawer.context-panel {
-  top: var(--topbar-h, 56px);
-  bottom: var(--chrome-bottom, 8px);
-  width: 400px;
+  /* U1 will align the legacy 52px top bar with --topbar-h. */
+  top: 52px;
+  bottom: max(var(--tabbar-space), var(--hint-h));
+  width: var(--panel-w);
   z-index: 20;
   border-radius: 0;
   box-shadow: none;
   scroll-padding: 8px 0 88px;
 }
 .app-shell:has(.context-panel) .main > :not(.topbar) {
-  margin-right: 400px;
+  margin-right: var(--panel-w);
 }
 .layer-popover {
   position: fixed;

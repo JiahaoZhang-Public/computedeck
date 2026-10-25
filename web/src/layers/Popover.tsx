@@ -86,7 +86,7 @@ function Floating({
       ref={ref as React.Ref<HTMLDivElement>}
       className="layer-popover"
       role={menu ? undefined : 'dialog'}
-      aria-labelledby={labelledBy}
+      aria-labelledby={menu ? undefined : labelledBy}
       tabIndex={-1}
     >
       {children}

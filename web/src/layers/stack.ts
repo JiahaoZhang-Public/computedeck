@@ -168,6 +168,7 @@ export function useLayer({
   anchor,
   initial,
   returnFocusId,
+  returnFocus,
 }: {
   modal: boolean;
   close: () => void;
@@ -175,12 +176,15 @@ export function useLayer({
   anchor?: HTMLElement | null;
   initial?: string;
   returnFocusId?: string;
+  returnFocus?: () => HTMLElement | null;
 }) {
   const ref = useRef<HTMLElement>(null);
   const latest = useRef(close);
+  const focusTarget = useRef(returnFocus);
   const [opener] = useState(captureOpener);
   useLayoutEffect(() => {
     latest.current = close;
+    focusTarget.current = returnFocus;
   });
   useLayoutEffect(() => {
     const node = ref.current;
@@ -223,11 +227,13 @@ export function useLayer({
         // after that restoration, unless a newer layer has already taken ownership.
         queueMicrotask(() => {
           if (focusVersion !== version || stack.at(-1) !== remaining) return;
-          const target =
-            previous instanceof HTMLElement &&
-            previous.isConnected &&
-            previous !== document.body &&
-            previous !== document.documentElement
+          const preferred = focusTarget.current?.();
+          const target = preferred?.isConnected
+            ? preferred
+            : previous instanceof HTMLElement &&
+                previous.isConnected &&
+                previous !== document.body &&
+                previous !== document.documentElement
               ? previous
               : ((returnFocusId ? document.getElementById(returnFocusId) : null) ??
                 document.querySelector<HTMLElement>('main h1, .topbar h1'));

@@ -779,6 +779,8 @@ const en = {
   'source.form.saveAndCheck': 'Save and check',
   'source.deleteConfirm':
     'Remove {name}? Its collected data is deleted from ComputeDeck. Nothing changes on the cluster.',
+  'source.check.ready': 'Run a connection check for these saved settings.',
+  'source.check.run': 'Run check',
   'source.check.title': 'Checking {name}',
   'source.check.running': 'Running the first collection. This usually takes a few seconds.',
   'source.check.done': 'First collection finished. Missing items are optional.',

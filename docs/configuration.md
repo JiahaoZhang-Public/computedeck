@@ -402,9 +402,9 @@ last-known reading to retain a number. Copy controls copy text only and append
 Content panels push a history entry. Back or Escape closes the panel, and a cold
 link closes to the same page with its filters preserved. At 1200 px and wider,
 read-only details use a non-modal beside panel; below that they use a native modal
-sheet. Focus moves to the heading and returns to the opening row or button. The
+sheet. Focus moves to the heading and returns to the current subject’s row, falling back to the opening row or button if it is gone. The
 beside panel's j/k keys follow the displayed rows of the same table, including its
-filters, order and array grouping, without adding Back stops; fields,
+filters, order and array grouping, scrolling the next row into view without adding Back stops; fields,
 IME composition and modified keys are ignored. If filters change while a beside panel
 is open, Escape or Close removes only the layer keys and keeps the current filters;
 Back still returns to the preceding history entry.
@@ -419,6 +419,7 @@ These additional links now open layers (IDs below are fictional):
 | `#/sources?add=ssh&step=2` | Existing SSH source form (`add` also accepts a driver ID) |
 | `#/cloud?add=instance&step=1` | Manual machine form; also works on Sources |
 | `#/sources?edit=example-source&step=2` | Source edit form |
+| `#/sources?edit=example-source&step=3` | Saved-source check; a cold or restored link waits for **Run check** |
 | `#/cloud?edit=example-machine&step=1` | Machine edit form |
 | `#/sources?repair=example-source` | Source diagnosis and repair focus view |
 | `#/cloud?section=ssh` | SSH configuration view |
@@ -427,6 +428,9 @@ These additional links now open layers (IDs below are fictional):
 | `#/toolbox?tab=market&plugin=example-tool%40example` | Marketplace plugin panel |
 
 Source steps are 1 (type), 2 (details) and 3 (the existing saved-source check).
+Only a successful Save in the mounted form starts that check automatically. A cold,
+reloaded or history-restored step-3 edit link waits for **Run check**, sends no check
+request by itself, and does not claim settings were saved in this view.
 A step-3 add link without a saved source explains that source settings are needed,
 rather than starting a check. Tool settings close after a successful Save and remain
 open with an error on failure. Switching Toolbox tabs clears the plugin and edit view.
@@ -438,7 +442,7 @@ removal. The new source-connection wizard remains a later page item.
 Health ages, menus and explanatory popovers are transient, with no URL; Escape
 or an outside click dismisses them. A menu becomes a sheet on touch devices.
 Notifications share one polite region, show at most three at once and move inside
-an open modal. Escape dismisses notifications first without moving focus. Undo
+an open modal without restarting their timers or losing pause state. Escape dismisses notifications first without moving focus. Undo
 lasts ten seconds, pauses on hover or focus, and supports Command/Ctrl+Z outside
 editable fields. Errors stay until dismissed and also appear as local action-error
 rows; dismissing a toast does not remove its error row. These rows are not server
@@ -448,14 +452,15 @@ are temporary notifications and do not create error rows.
 
 中文：内容面板打开时增加一条历史记录，返回或 Escape 关闭；直接打开链接时，关闭后
 保留当前页面的筛选。宽度至少 1200 px 使用非模态旁侧面板，较窄时使用原生模态抽屉。
-焦点先到标题，关闭后回到原来的行或按钮。旁侧面板中的 j/k 按相邻表格实际显示的顺序和筛选遍历对象（包括数组分组），不增加返回步骤；
+焦点先到标题，关闭后回到当前对象的行；该行已移除时才回到原触发行或按钮。旁侧面板中的 j/k 按相邻表格实际显示的顺序和筛选遍历对象（包括数组分组），将下一行滚动到可见范围，不增加返回步骤；
 输入框、输入法组合输入和带修饰键的按键不触发切换。上表中的新地址现已生效；旧详情
 地址仍兼容。来源步骤为 1（类型）、2（详情）、3（保存后的检查），步骤变更替换当前
-历史项，草稿字段不写入 URL。新连接向导仍留待后续页面更新。
+历史项，草稿字段不写入 URL。仅当前表单保存成功后自动检查；直接打开、刷新或历史恢复的
+第 3 步编辑链接等待点击“运行检查”，不自动发送检查请求，也不显示“设置已保存”。新连接向导仍留待后续页面更新。
 
 编辑、修复及移除确认不会因点击遮罩而关闭；确认默认聚焦“保留”，另一按钮明确说明
 移除对象。健康信息、菜单和说明浮层不占用 URL，触屏菜单使用抽屉。通知最多三条，
-共用一个礼貌播报区域，打开模态框时移入其中。Escape 先清空通知且不移动焦点。
+共用一个礼貌播报区域，打开模态框时移入其中，移动不重置计时或暂停状态。Escape 先清空通知且不移动焦点。
 撤销保留十秒，悬停或聚焦时暂停；非输入区域支持 Command/Ctrl+Z。错误持续到手动关闭，
 并另列为本地操作错误行；清除通知不删除错误行。这些行不写入服务端 attention 状态，
 切换示例模式时清除。

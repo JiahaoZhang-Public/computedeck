@@ -360,6 +360,8 @@ export function SourceForm({
   const [savedId, setSavedId] = useState<string | null>(
     routeStep === '3' ? (source?.id ?? null) : null,
   );
+  const [justSaved, setJustSaved] = useState(false);
+  const [checkStarted, setCheckStarted] = useState(false);
   const [previousAttempt, setPreviousAttempt] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const info = driverInfo(drivers, selected);
@@ -411,6 +413,8 @@ export function SourceForm({
       setPreviousAttempt(sources.find((item) => item.id === target?.id)?.last_attempt ?? null);
       const result = await onSubmit(body, target?.id);
       if (enabled) {
+        setJustSaved(true);
+        setCheckStarted(true);
         setSavedId(result.id);
         setStep('check');
         if (addressed) replaceLayer({ add: null, edit: result.id, step: '3' });
@@ -486,34 +490,47 @@ export function SourceForm({
         <header className="modal-header">
           <h2 id="modal-title">{t('source.check.title', { name: saved?.name ?? '' })}</h2>
           <p>
-            {checking
-              ? t('source.check.running')
-              : saved?.status === 'error'
-                ? t('source.check.failed')
-                : t('source.check.done')}
+            {!checkStarted
+              ? t('source.check.ready')
+              : !justSaved
+                ? null
+                : checking
+                  ? t('source.check.running')
+                  : saved?.status === 'error'
+                    ? t('source.check.failed')
+                    : t('source.check.done')}
           </p>
         </header>
-        <p>{t('source.check.savedPending')}</p>
-        {savedId && <ConnectionChecks key={savedId} sourceId={savedId} />}
-        <ul className="checklist">
-          {checklist(checking ? undefined : saved, info).map((row) => (
-            <li key={row.label} className={row.state}>
-              {row.state === 'ok' ? (
-                <CheckCircle2 size={16} />
-              ) : row.state === 'failed' ? (
-                <XCircle size={16} />
-              ) : row.state === 'pending' ? (
-                <Loader2 size={16} className="spin" />
-              ) : (
-                <MinusCircle size={16} />
-              )}
-              <span>
-                <strong>{row.label}</strong>
-                {row.detail && <small>{row.detail}</small>}
-              </span>
-            </li>
+        {justSaved && <p>{t('source.check.savedPending')}</p>}
+        {savedId &&
+          (checkStarted ? (
+            <ConnectionChecks key={savedId} sourceId={savedId} />
+          ) : (
+            <button className="button" onClick={() => setCheckStarted(true)}>
+              {t('source.check.run')}
+            </button>
           ))}
-        </ul>
+        {justSaved && (
+          <ul className="checklist">
+            {checklist(checking ? undefined : saved, info).map((row) => (
+              <li key={row.label} className={row.state}>
+                {row.state === 'ok' ? (
+                  <CheckCircle2 size={16} />
+                ) : row.state === 'failed' ? (
+                  <XCircle size={16} />
+                ) : row.state === 'pending' ? (
+                  <Loader2 size={16} className="spin" />
+                ) : (
+                  <MinusCircle size={16} />
+                )}
+                <span>
+                  <strong>{row.label}</strong>
+                  {row.detail && <small>{row.detail}</small>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         <footer className="modal-footer">
           <span className="grow" />
           {saved?.status === 'error' && (

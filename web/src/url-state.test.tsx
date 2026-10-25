@@ -823,6 +823,10 @@ it.each(['jobs?state=pending', 'cloud?q=box'])(
     await render(`/?demo=true#/${route}`);
     const rows = [...container.querySelectorAll<HTMLElement>('main [data-detail-key]')];
     expect(rows).toHaveLength(route.startsWith('jobs') ? 3 : 2);
+    // jsdom has no layout/scroll implementation; assert the requested reveal.
+    rows.forEach((row) => {
+      row.scrollIntoView = vi.fn();
+    });
     const shown = rows.map((row) => ({ key: row.dataset.detailKey!, id: row.dataset.detailId! }));
     if (route.startsWith('jobs')) expect(shown[2].key).toBe('array');
     await act(async () => rows[0].click());
@@ -849,12 +853,14 @@ it.each(['jobs?state=pending', 'cloud?q=box'])(
     for (let i = 1; i < shown.length; i++) {
       await key('j');
       check(i);
+      expect(rows[i].scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     }
     await key('j');
     check(shown.length - 1);
     for (let i = shown.length - 2; i >= 0; i--) {
       await key('k');
       check(i);
+      expect(rows[i].scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     }
     for (const modifier of ['ctrlKey', 'metaKey']) {
       container.querySelector<HTMLElement>('#detail-title')!.focus();

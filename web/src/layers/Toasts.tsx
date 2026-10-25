@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { t } from '../i18n';
@@ -10,6 +10,12 @@ export type Toast = { id: number; text: string; tone: 'ok' | 'error'; action?: T
 export function Toasts({ items, dismiss }: { items: Toast[]; dismiss: (id?: number) => void }) {
   const host = useModalHost();
   const region = useRef<HTMLDivElement>(null);
+  const home = useRef<HTMLDivElement>(null);
+  const [portal] = useState(() => document.createElement('div'));
+  useLayoutEffect(() => {
+    (host ?? home.current!).append(portal);
+    return () => portal.remove();
+  }, [host, portal]);
   useEffect(() => {
     const node = region.current;
     if (!node) return;
@@ -85,7 +91,12 @@ export function Toasts({ items, dismiss }: { items: Toast[]; dismiss: (id?: numb
       ))}
     </div>
   );
-  return host ? createPortal(content, host) : content;
+  return (
+    <>
+      <div ref={home} />
+      {createPortal(content, portal)}
+    </>
+  );
 }
 function ToastItem({ item, dismiss }: { item: Toast; dismiss: () => void }) {
   const [hover, setHover] = useState(false);

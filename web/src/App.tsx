@@ -743,7 +743,6 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
             modal={modal}
             setModal={setModal}
             detail={detail}
-            setDetail={setDetail}
             detailId={detailId}
             closeDetail={closeDetail}
             eventId={eventId}

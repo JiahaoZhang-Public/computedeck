@@ -263,7 +263,7 @@ test('C18 three toasts: modal host, Undo pause, persistent error and Escape with
   await expect(errorRow.locator('time')).toHaveAttribute('datetime', /T/);
 });
 
-// Keep this table aligned with the 11 addresses in configuration.md. IDs are real
+// Keep this table aligned with the addresses in configuration.md. IDs are real
 // demo records; the two final entries exercise unavailable edit/repair targets.
 const addresses = [
   { route: 'sources?source=example:cluster-a-alice', kind: 'panel', heading: 'diagnosis' },
@@ -271,6 +271,7 @@ const addresses = [
   { route: 'sources?add=ssh&step=2', kind: 'focus', heading: 'sshForm' },
   { route: 'cloud?add=instance&step=1', kind: 'focus', heading: 'addInstance' },
   { route: 'sources?edit=example:cluster-a-alice&step=2', kind: 'focus', heading: 'source' },
+  { route: 'sources?edit=example:cluster-a-alice&step=3', kind: 'focus', heading: 'check' },
   {
     route: 'cloud?edit=example:manual:lab-workstation-devbox&step=1',
     kind: 'focus',
@@ -294,6 +295,7 @@ for (const address of addresses) {
       sshForm: locale === 'zh-CN' ? 'GPU 机器（SSH）' : 'GPU machine (SSH)',
       addInstance: labels['instance.form.add'],
       source: 'Cluster A',
+      check: labels['source.check.title'].replace('{name}', 'Cluster A'),
       instance: labels['instance.form.edit'].replace('{name}', 'dev-box'),
       ssh: labels['ssh.title'],
       tool: locale === 'zh-CN' ? '任务提醒' : 'Notifications',
@@ -326,6 +328,14 @@ for (const address of addresses) {
       if (address.kind === 'focus' || viewport!.width < 1200)
         expect(await layer.evaluate((node) => node.matches(':modal'))).toBe(true);
       else await expect(layer).not.toHaveAttribute('aria-modal');
+      if (address.kind === 'panel' && address.heading === 'diagnosis')
+        await expect(layer.locator('h2').first()).toBeFocused();
+      if (address.heading === 'check') {
+        await expect(
+          layer.getByRole('button', { name: labels['source.check.run'], exact: true }),
+        ).toBeVisible();
+        await expect(layer).not.toContainText(labels['source.check.savedPending']);
+      }
     };
     const assertClosed = async () => {
       await expect(page.locator('.context-panel, dialog[open]')).toHaveCount(0);
@@ -537,6 +547,16 @@ for (const route of ['jobs?state=pending', 'cloud?q=box']) {
     await rows.first().click();
     const length = await page.evaluate(() => history.length);
     const panel = page.locator('.context-panel');
+    const geometry = await panel.evaluate((node) => ({
+      top: node.getBoundingClientRect().top,
+      bottom: node.getBoundingClientRect().bottom,
+      width: node.getBoundingClientRect().width,
+      barBottom: document.querySelector('.topbar')!.getBoundingClientRect().bottom,
+      panelWidth: parseFloat(getComputedStyle(node).getPropertyValue('--panel-w')),
+    }));
+    expect(geometry.top).toBe(geometry.barBottom);
+    expect(geometry.bottom).toBe(800);
+    expect(geometry.width).toBe(geometry.panelWidth);
     const selected = async (index: number) => {
       await expect(panel.locator('#detail-title')).toContainText(shown[index].name);
       const params = new URLSearchParams((await page.evaluate(() => location.hash)).split('?')[1]);
@@ -564,6 +584,14 @@ for (const route of ['jobs?state=pending', 'cloud?q=box']) {
         await expect(panel).toBeVisible();
       }
     }
+    await panel.locator('#detail-title').focus();
+    await page.keyboard.press('j');
+    await selected(1);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(rows.nth(1)).toBeFocused();
+    await expect(page).toHaveURL(`/?demo=true#/${route}`);
+    await rows.first().click();
     await page.goBack();
     await expect(panel).toHaveCount(0);
     await expect(page).toHaveURL(`/?demo=true#/${route}`);

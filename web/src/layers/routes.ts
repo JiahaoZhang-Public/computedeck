@@ -45,7 +45,8 @@ export function stepVisibleDetail(direction: number) {
   if (!current) return;
   const list = rows.filter((row) => row.closest('table') === current.closest('table'));
   const next = list[list.indexOf(current) + direction];
-  if (next)
+  if (next) {
+    next.scrollIntoView({ block: 'nearest' });
     replaceLayer({
       job: null,
       failure: null,
@@ -54,4 +55,5 @@ export function stepVisibleDetail(direction: number) {
       event: null,
       [next.dataset.detailKey!]: next.dataset.detailId!,
     });
+  }
 }

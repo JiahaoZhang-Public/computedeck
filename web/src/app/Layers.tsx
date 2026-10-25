@@ -10,6 +10,7 @@ import { SourceDiagnosis } from '../SourceDiagnosis';
 import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from '../pages/Details';
 import { Status } from '../ui';
 import { ContextPanel, FocusView } from '../layers/Surface';
+import { routeParams } from '../useRouteParam';
 import { replaceLayer, stepVisibleDetail } from '../layers/routes';
 import { where } from '../pages/util';
 import { errorText, t } from '../i18n';
@@ -44,7 +45,6 @@ export function Layers({
   modal,
   setModal,
   detail,
-  setDetail,
   detailId,
   closeDetail,
   eventId,
@@ -62,7 +62,6 @@ export function Layers({
   modal: Modal;
   setModal: (modal: Modal) => void;
   detail: Detail;
-  setDetail: (detail: Detail) => void;
   detailId: string | null;
   closeDetail: () => void;
   eventId: string | null;
@@ -90,6 +89,11 @@ export function Layers({
     notify,
     navigate,
   } = ctx;
+  const params = routeParams();
+  const returnToRow = () =>
+    [...document.querySelectorAll<HTMLElement>('main [data-detail-key]')].find(
+      (row) => params.get(row.dataset.detailKey!) === row.dataset.detailId,
+    ) ?? null;
   const detailCtx = data ? { ...ctx, data } : null;
   const diagnosisSource =
     modal?.kind === 'diagnosis'
@@ -129,7 +133,12 @@ export function Layers({
         </ContextPanel>
       )}
       {detail && detailCtx && (
-        <ContextPanel labelledBy="detail-title" close={closeDetail} onStep={stepVisibleDetail}>
+        <ContextPanel
+          labelledBy="detail-title"
+          close={closeDetail}
+          onStep={stepVisibleDetail}
+          returnFocus={returnToRow}
+        >
           <header className="drawer-header">
             <div>
               <span className="drawer-kind">
@@ -169,7 +178,7 @@ export function Layers({
               onDelete={async () => {
                 try {
                   await mutate(`/instances/${encodeURIComponent(detail.item.id)}`, {}, 'DELETE');
-                  setDetail(null);
+                  closeDetail();
                   notify(t('toast.instanceRemoved', { name: detail.item.name }));
                 } catch (reason) {
                   notify(errorText(reason, 'error.save'), 'error');
@@ -184,7 +193,7 @@ export function Layers({
           className={modal.kind === 'ssh' ? 'wide' : ''}
           labelledBy="modal-title"
           close={() => setModal(null)}
-          initial=".modal-close"
+          initial={ModalHost === FocusView ? '.modal-close' : undefined}
         >
           <button
             className="icon-button modal-close"

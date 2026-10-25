@@ -550,6 +550,17 @@ Vitest checks prior inert-state restoration, out-of-order closes, unchanged non-
 layers, outside clicks/labels without suppressing later pointer sequences, and cancellation
 as Keep exactly once on hash/history changes, including tool-enable consent.
 
+Coverage also includes health-pill positioning and focus return in both engines,
+edited Jobs filters surviving Escape/Close, Back after filtering, Toolbox tab cleanup,
+and bottom toast placement after mouse clicks. Source diagnosis panels focus their
+heading at all widths. After j/k, Escape returns focus to the stepped row.
+The address table includes saved-source step 3; bilingual unit tests require no
+POST /check or saved-settings claim until an explicit check, and verify Save still
+starts the check. Unsaved step-3 links explain the missing source.
+Vitest also checks settings saves, plain-toast expiry at 4.5 seconds, Undo expiry
+after hover/focus ends, and preserved time and pause state across modal-host changes.
+The gallery confirmation names the removal outcome; form labels use stacked spacing.
+
 For WebKit's tab-to-text-fields default, the modal trap moves every Tab/Shift+Tab itself.
 For WebKit's nested-modal behaviour, the stack explicitly marks lower modal layers `inert`.
 `checkFocus` measures immediately, then waits up to three animation frames for the browser's
@@ -557,7 +568,9 @@ own reveal of a just-focused control that is not exposed; WebKit reveals asynchr
 It never scrolls for the browser or relaxes the exposure test; Chromium's immediately
 exposed controls are unchanged. A fixed-cover probe proves covered controls still fail.
 
-**Screenshots.** New baselines are `context-panel.png` and `modal-toasts.png`. The gallery's
+**Screenshots.** Overlay baselines are `context-panel.png` and `modal-toasts.png`. The beside panel
+meets the current top bar and bottom chrome without canvas gaps; its width and list
+margin use `--panel-w`. The gallery's
 Layers section uses the example-only `layer_example` dashboard field and changes the
 normal gallery, fallback-gallery and `display.spec.ts` gallery baselines. Review intentional
 updates using the existing baseline workflow; tests and compilation do not approve them.
@@ -581,21 +594,11 @@ WebKit 默认只 Tab 到文本框，因此模态焦点循环自行移动每次 T
 示例专用 `layer_example` 驱动的 Layers 区块改变普通画廊、兼容渲染画廊和 display.spec
 画廊基线，须沿用既有流程审核更新。决策与人工检查清单见 [layers-spike.md](layers-spike.md)。
 
-F6 review regressions also cover health-pill positioning and focus return in both
-engines, edited Jobs filters surviving Escape/Close, Back after filtering, Toolbox
-tab cleanup, and bottom toast placement after mouse clicks. The C18 test resumes
-Playwright's clock before axe runs. Vitest checks plain-toast expiry at 4.5 seconds,
-Undo expiry after hover/focus ends, successful/failed settings saves, and unsaved
-`add=source` / `add=ssh` step-3 links. The gallery confirmation asks a question and
-names the removal outcome; its form label uses the existing stacked-label spacing.
+中文：还覆盖双引擎健康按钮定位与焦点恢复、修改 Jobs 筛选后 Escape/关闭仍保留筛选、
+筛选后的返回、工具箱标签清理、鼠标点击后通知底部位置。来源诊断面板在所有宽度聚焦
+标题，j/k 后 Escape 回到当前行。地址表包括已保存来源的第 3 步；双语单测要求显式
+检查前无 POST /check、无已保存声明，并验证保存仍启动检查。未保存链接说明前提缺失。
+单测另查设置保存、普通通知 4.5 秒过期、撤销暂停结束后的剩余时间，以及模态宿主切换
+不重置时间或暂停。示例确认明确移除结果，表单标签使用上下排列间距。
 
-F6's review fixes intentionally change `modal-toasts.png` (toasts stay at the bottom
-after a mouse click; the gallery form label is stacked), and local baselines are
-regenerated with the item following the existing review process.
-
-中文：评审回归新增健康按钮定位与焦点恢复、修改 Jobs 筛选后 Escape/关闭仍保留筛选、
-筛选后的浏览器返回、工具箱标签清理，以及点击后通知保持底部位置。C18 在 axe 前恢复
-时钟。单测验证普通通知 4.5 秒过期、撤销通知悬停/聚焦结束后的剩余时间、设置保存成功
-与失败、未保存来源的第 3 步链接。示例确认以问题为标题并明确移除结果，表单标签使用
-现有堆叠间距。F6 评审修复有意改变 `modal-toasts.png`（鼠标点击后通知保持底部位置，画廊表单
-标签上下排列），本地基线随此项按既有审核流程重新生成。
+旁侧面板紧贴当前顶栏与底部栏，不留画布间隙；宽度和列表留白共用 `--panel-w`。

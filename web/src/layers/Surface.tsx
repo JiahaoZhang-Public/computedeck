@@ -9,6 +9,7 @@ type Props = {
   className?: string;
   initial?: string;
   returnFocusId?: string;
+  returnFocus?: () => HTMLElement | null;
   opener?: HTMLElement | null;
 };
 export function Sheet({
@@ -18,6 +19,7 @@ export function Sheet({
   className = '',
   initial,
   returnFocusId,
+  returnFocus,
   opener,
   dismissOutside = true,
 }: Props & { dismissOutside?: boolean }) {
@@ -27,6 +29,7 @@ export function Sheet({
     outside: dismissOutside,
     initial,
     returnFocusId,
+    returnFocus,
     anchor: opener,
   });
   useLayoutEffect(() => {
@@ -94,10 +97,11 @@ function Beside({
   close,
   className = '',
   returnFocusId,
+  returnFocus,
   opener,
   onStep,
 }: Props & { onStep?: (direction: number) => void }) {
-  const ref = useLayer({ modal: false, close, returnFocusId, anchor: opener });
+  const ref = useLayer({ modal: false, close, returnFocusId, returnFocus, anchor: opener });
   return (
     <aside
       className={`drawer context-panel ${className}`}

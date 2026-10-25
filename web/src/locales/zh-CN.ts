@@ -731,6 +731,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'source.form.saveAndCheck': '保存并检查',
   'source.deleteConfirm':
     '移除 {name}？它已采集的数据会从 ComputeDeck 删除，集群上不会有任何改动。',
+  'source.check.ready': '运行连接检查以验证已保存的设置。',
+  'source.check.run': '运行检查',
   'source.check.title': '检查 {name}',
   'source.check.running': '正在进行首次采集，通常需要几秒钟。',
   'source.check.done': '首次采集完成。缺少的项目是可选的。',
