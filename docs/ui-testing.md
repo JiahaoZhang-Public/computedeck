@@ -589,13 +589,13 @@ Undo expiry after hover/focus ends, successful/failed settings saves, and unsave
 `add=source` / `add=ssh` step-3 links. The gallery confirmation asks a question and
 names the removal outcome; its form label uses the existing stacked-label spacing.
 
-The changed `modal-toasts.png` baselines require visual review and regeneration
-outside the restricted sandbox, followed by `bash scripts/check-ui.sh` without
-`--update-snapshots`. No baseline was regenerated or approved inside the sandbox.
+F6's review fixes intentionally change `modal-toasts.png` (toasts stay at the bottom
+after a mouse click; the gallery form label is stacked), and local baselines are
+regenerated with the item following the existing review process.
 
 中文：评审回归新增健康按钮定位与焦点恢复、修改 Jobs 筛选后 Escape/关闭仍保留筛选、
 筛选后的浏览器返回、工具箱标签清理，以及点击后通知保持底部位置。C18 在 axe 前恢复
 时钟。单测验证普通通知 4.5 秒过期、撤销通知悬停/聚焦结束后的剩余时间、设置保存成功
 与失败、未保存来源的第 3 步链接。示例确认以问题为标题并明确移除结果，表单标签使用
-现有堆叠间距。`modal-toasts.png` 须在沙箱外审核更新，再不带 `--update-snapshots` 运行
-完整门禁；本次沙箱内没有更新或批准任何截图基线。
+现有堆叠间距。F6 评审修复有意改变 `modal-toasts.png`（鼠标点击后通知保持底部位置，画廊表单
+标签上下排列），本地基线随此项按既有审核流程重新生成。

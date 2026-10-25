@@ -91,10 +91,7 @@ dialog, aside and non-control focus; only an overlapping focused control moves t
 Tool settings close on successful Save; unavailable saved-source checks explain the
 missing prerequisite. The C18 clock resumes before the real-browser axe audit.
 
-The restricted-sandbox review does not certify the automated C1 gate. The owner or
-orchestrator must review/regenerate the affected local `modal-toasts.png` snapshots
-and run the complete gate without snapshot updates before committing. Manual checks
-above remain to be run by the owner.
+Manual checks above remain to be run by the owner.
 
 P2 follow-up: replace the interim stacked Jobs cards at 1200–1280 px beside the
 panel with container-query column priorities, keeping the list tabular and the
@@ -102,7 +99,6 @@ pending reason fully visible. This remains outside F6.
 
 中文：健康浮层使用指针感知的触发控件；关闭旁侧面板保留期间修改的筛选。通知不再因
 body、dialog、aside 或非控件焦点而移到顶部，仅为重叠的聚焦控件调整位置。工具设置
-保存成功后关闭；缺少已保存来源的检查步骤给出说明；C18 在 axe 前恢复时钟。本次沙箱
-修复不构成 C1 通过证明，提交前须在沙箱外审核更新相关本地截图，再运行完整门禁。
+保存成功后关闭；缺少已保存来源的检查步骤给出说明；C18 在 axe 前恢复时钟。
 人工检查仍待所有者执行。P2 须用容器查询列优先级让 1200–1280 px 旁侧面板旁的 Jobs
 列表保持表格，并继续保证排队原因完整可见；F6 保留现有卡片布局。
