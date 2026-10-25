@@ -602,3 +602,37 @@ WebKit 默认只 Tab 到文本框，因此模态焦点循环自行移动每次 T
 不重置时间或暂停。示例确认明确移除结果，表单标签使用上下排列间距。
 
 旁侧面板紧贴当前顶栏与底部栏，不留画布间隙；宽度和列表留白共用 `--panel-w`。
+
+### Live-data regression checks
+
+`live.spec.ts` checks the four conditional reads at the fine/coarse pointer cadence,
+unchanged response bodies totalling at most 1 KB, retained row elements and focus, and
+one polite transition announcement in both locales. The tests use the existing fixed
+example data and inject one job-state transition; they do not contact providers or add
+new screenshot baselines. Existing page screenshots must remain identical.
+
+Vitest profiles the mounted App on Jobs: both fine and coarse unchanged polls produce
+zero React commits. Store tests check one publication for changed data, no publication
+for equal snapshots, row sharing across changes/reorders/removals, source-scoped row IDs,
+and content comparison without revisions. Clock tests prove that age text updates while
+its parent does not rerender. Minute-clock updates and the legacy chart's independent
+window timer are time updates, not poll commits; F8 replaces that chart. The planner
+also rechecks time-dependent machine eligibility on the minute clock, and running-cost
+labels keep advancing. Its ranking rules are unchanged.
+
+Pytest covers auxiliary since-tokens, plugin changes, external writes, row revisions,
+compression negotiation and the combined unchanged payload budget. Source checks keep
+streaming their NDJSON without gzip buffering. The health path remains dashboard-free.
+
+`live.spec.ts` 检查精细／粗略指针的轮询周期、四个未变响应正文总计不超过 1 KB、行元素与
+焦点保留，以及两种语言共用一个礼貌播报区域。测试复用固定示例数据并注入一次作业状态
+变化，不访问外部服务，也不新增截图基线。现有页面截图应保持一致。
+
+Vitest 对 Jobs 中挂载的 App 计数，精细和粗略指针的未变轮询都必须产生零次 React 提交。
+行存储测试覆盖变化时一次发布、相同快照零发布、重排／删除／更新的结构共享、按来源区分
+行 ID，以及没有 `rev` 的内容比较。时钟测试确保只有年龄文字更新，父组件不重绘。
+每分钟的时间文字更新和旧图表的独立窗口计时不属于轮询提交；F8 将替换旧图表。规划页
+也按分钟重新检查机器样本的有效期，运行费用文字继续更新；排序规则不变。
+
+Pytest 覆盖辅助接口令牌、插件变化、外部写入、行内容标识、gzip 协商与总正文预算。
+源检查保持 NDJSON 流式返回，不因压缩而缓冲；健康接口仍不构建仪表盘。

@@ -42,5 +42,9 @@ function subscribe(listener: () => void) {
 }
 /** Only time labels subscribe; parents and rows do not tick. */
 export function useClock() {
-  return useSyncExternalStore(subscribe, () => current).now;
+  return useSyncExternalStore(
+    subscribe,
+    () => current,
+    () => ({ ...current, now: minute() }),
+  ).now;
 }

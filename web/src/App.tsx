@@ -1,6 +1,12 @@
 import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
 import { useVisibleInterval } from './useVisibleInterval';
+import { usePollCadence } from './data/cadence';
+import { createLiveStore } from './data/store';
+import type { LiveSnapshot } from './data/store';
+import { changed, sincePath, tokenOf } from './data/poll';
+import type { Unchanged } from './data/poll';
+import { transitions } from './data/transitions';
 import { LocaleGate } from './app/LocaleGate';
 import { Frame } from './app/Frame';
 import { lazyView } from './app/lazyView';
@@ -13,7 +19,15 @@ import { openLayer, closeLayer } from './layers/routes';
 import type { Modal, Detail } from './app/Layers';
 import { Routes } from './app/Routes';
 import { Loading } from './app/LoadState';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type {
   Attention,
   CollectionNode,
@@ -75,10 +89,21 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const [demo, setDemo] = useState(
     () => new URLSearchParams(window.location.search).get('demo') === 'true',
   );
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [needsToken, setNeedsToken] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [live] = useState(createLiveStore);
+  const { data, health, tools, nodes, error, needsToken, loading, announcement } =
+    useSyncExternalStore(live.subscribe, live.getSnapshot);
+  const cadence = usePollCadence();
+  const publish = useCallback(
+    (patch: Partial<LiveSnapshot>) => {
+      const before = live.getSnapshot();
+      const text = transitions(before, { ...before, ...patch }, demo);
+      live.update({
+        ...patch,
+        ...(text ? { announcement: { id: before.announcement.id + 1, text } } : {}),
+      });
+    },
+    [live, demo],
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [sshData, setSSHData] = useState<SSHConfig | null>(null);
@@ -246,10 +271,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     [],
   );
   const [busy, setBusy] = useState(false);
-  const [health, setHealth] = useState<Health | null>(null);
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [nodes, setNodes] = useState<CollectionNode[]>([]);
   const allPlugins = useWebPlugins();
   const plugins = useMemo(() => activePlugins(allPlugins, tools), [allPlugins, tools]);
   const pluginPages = pagesOf(plugins);
@@ -267,6 +289,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const loadId = useRef(0);
   const driversLoaded = useRef(false);
   const dashboardToken = useRef<string | undefined>(undefined);
+  const auxTokens = useRef<Record<string, string | undefined>>({});
   const lastAuxLoad = useRef(-Infinity);
   const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
   const [followUntil, setFollowUntil] = useState(0);
@@ -399,28 +422,51 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
       const requestId = loadId.current;
       const requestedAt = Date.now();
       return Promise.all([
-        api<Dashboard | { unchanged: true; token: string }>(
+        api<Dashboard | Unchanged>(
           `/dashboard?demo=${demo}${dashboardToken.current ? `&since=${dashboardToken.current}` : ''}`,
         ),
         // Health also carries plugin state; a failure here must not hide the dashboard.
-        dashboardOnly ? null : api<Health>('/health').catch(() => null),
-        dashboardOnly ? null : api<Tool[]>('/toolbox').catch(() => null),
-        dashboardOnly ? null : api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
+        dashboardOnly
+          ? null
+          : api<Health | Unchanged>(sincePath('/health', auxTokens.current.health)).catch(
+              () => null,
+            ),
+        dashboardOnly
+          ? null
+          : api<Tool[] | Unchanged>(sincePath('/toolbox', auxTokens.current.toolbox)).catch(
+              () => null,
+            ),
+        dashboardOnly
+          ? null
+          : api<CollectionNode[] | Unchanged>(
+              sincePath(`/nodes?demo=${demo}`, auxTokens.current.nodes),
+            ).catch(() => null),
       ])
         .then(([next, status, toolbox, machines]) => {
           if (requestId !== loadId.current) return;
           followLoaded.current = true;
-          if (!('unchanged' in next)) {
+          const patch: Partial<LiveSnapshot> = { error: null, needsToken: false, loading: false };
+          if (changed(next)) {
             dashboardToken.current = next.token;
             latestCollecting.current = next.collecting ?? [];
-            setData(next);
+            patch.data = next;
           }
           if (!dashboardOnly) {
             lastAuxLoad.current = requestedAt;
-            setHealth(status);
+            if (!status || changed(status)) {
+              patch.health = status;
+              auxTokens.current.health = status ? tokenOf(status) : undefined;
+            }
           }
-          if (toolbox) setTools(toolbox);
-          if (machines) setNodes(machines);
+          if (changed(toolbox)) {
+            auxTokens.current.toolbox = tokenOf(toolbox);
+            patch.tools = toolbox;
+          }
+          if (changed(machines)) {
+            auxTokens.current.nodes = tokenOf(machines);
+            patch.nodes = machines;
+          }
+          publish(patch);
           // Driver descriptions do not change while the service runs; fetch them once.
           if (!document.hidden && !driversLoaded.current) {
             driversLoaded.current = true;
@@ -430,19 +476,17 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
                 driversLoaded.current = false;
               });
           }
-          setError(null);
-          setNeedsToken(false);
         })
         .catch((reason) => {
           if (requestId !== loadId.current) return;
-          setNeedsToken(reason instanceof ApiError && reason.status === 401);
-          setError(errorText(reason, 'error.service'));
-        })
-        .finally(() => {
-          if (requestId === loadId.current) setLoading(false);
+          publish({
+            needsToken: reason instanceof ApiError && reason.status === 401,
+            error: errorText(reason, 'error.service'),
+            loading: false,
+          });
         });
     },
-    [demo, setData],
+    [demo, publish],
   );
   useEffect(
     () => () => {
@@ -466,13 +510,13 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     // Give slow replies time to finish, but let polling recover from a stalled tunnel.
     const startedAt = Date.now();
     if (activePoll.current && startedAt - activePoll.current.startedAt < 10000) return;
-    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < 10000);
+    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < cadence);
     activePoll.current = { startedAt, promise: pending };
     return pending.finally(() => {
       if (activePoll.current?.promise === pending) activePoll.current = null;
     });
-  }, [load, followUntil]);
-  useVisibleInterval(poll, followUntil ? 1000 : 10000);
+  }, [load, followUntil, cadence]);
+  useVisibleInterval(poll, followUntil ? 1000 : cadence);
   const followCollection = useCallback((sourceIds: string[] | null = null) => {
     followSources.current = sourceIds;
     followLoaded.current = false;
@@ -481,9 +525,6 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     activePoll.current = null;
     setFollowUntil(Date.now() + 60000);
   }, []);
-  const [, setClock] = useState(Date.now);
-  const tickClock = useCallback(() => setClock(Date.now()), []);
-  useVisibleInterval(tickClock, 30000);
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
       if (event.defaultPrevented || hasModalLayer()) return;
@@ -530,7 +571,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   }
   async function updateTool(id: string, body: unknown): Promise<Tool> {
     const saved = await api<Tool>(`/toolbox/${encodeURIComponent(id)}`, body, 'PUT');
-    setTools((current) => current.map((tool) => (tool.id === id ? saved : tool)));
+    live.update({ tools: live.getSnapshot().tools.map((tool) => (tool.id === id ? saved : tool)) });
     return saved;
   }
   const blockedInDemo = () => {
@@ -590,10 +631,17 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const toggleDemo = () => {
     loadId.current += 1;
     dashboardToken.current = undefined;
+    auxTokens.current = {};
     lastAuxLoad.current = -Infinity;
     setFollowUntil(0);
-    setData(null);
-    setLoading(true);
+    live.update({
+      data: null,
+      health: null,
+      tools: [],
+      nodes: [],
+      loading: true,
+      announcement: { id: 0, text: '' },
+    });
     const next = !demo;
     const url = new URL(window.location.href);
     if (next) url.searchParams.set('demo', 'true');
@@ -721,7 +769,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
                 onSave={async (value) => {
                   const session = await api<{ token: string }>('/session', { token: value });
                   setToken(session.token);
-                  setLoading(true);
+                  live.update({ loading: true });
                   await load();
                 }}
               />
@@ -735,7 +783,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
           </PageBoundary>
         </main>
       </Frame>
-      <Toasts items={toasts} dismiss={dismissToast} />
+      <Toasts items={toasts} dismiss={dismissToast} announcement={announcement} />
       {(modal || detailId || healthOpen) && (
         <Suspense fallback={null}>
           <Layers

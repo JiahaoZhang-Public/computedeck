@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useRouteParam } from '../useRouteParam';
 import { ArrowRight } from 'lucide-react';
 import { groupLabel } from '../groups';
@@ -125,8 +126,13 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
               {covered.length
                 ? t('jobs.failures.coverage', { sources: coverage })
                 : t('jobs.failures.noCoverage')}
-              {data.failure_history_observed_at &&
-                ' ' + t('common.updated', { time: relativeTime(data.failure_history_observed_at) })}
+              <ClockText>
+                {() =>
+                  data.failure_history_observed_at &&
+                  ' ' +
+                    t('common.updated', { time: relativeTime(data.failure_history_observed_at) })
+                }
+              </ClockText>
             </p>
           </>
         ) : (

@@ -1,3 +1,5 @@
+import { useClock } from '../ui/clock';
+import { ClockText } from '../data/ClockText';
 import type { ToastAction } from '../layers/Toasts';
 import type { ReactNode, RefObject } from 'react';
 import { ArrowRight, Search, X } from 'lucide-react';
@@ -268,7 +270,9 @@ export function JobsTable({
                   {old && (
                     <span className="sub">
                       <span className="tag amber">
-                        {t('cloud.staleSince', { time: relativeTime(job.observed_at) })}
+                        <ClockText>
+                          {() => t('cloud.staleSince', { time: relativeTime(job.observed_at) })}
+                        </ClockText>
                       </span>
                     </span>
                   )}
@@ -308,7 +312,7 @@ export function JobsTable({
                   {pending ? jobWaiting(job) : job.elapsed || '—'}
                   {!compact && (
                     <span className="sub" title={job.observed_at ?? ''}>
-                      {relativeTime(job.observed_at)}
+                      <ClockText>{() => relativeTime(job.observed_at)}</ClockText>
                     </span>
                   )}
                 </td>
@@ -362,7 +366,7 @@ function ArrayRow({
         {old && (
           <span className="sub">
             <span className="tag amber">
-              {t('cloud.staleSince', { time: relativeTime(observed) })}
+              <ClockText>{() => t('cloud.staleSince', { time: relativeTime(observed) })}</ClockText>
             </span>
           </span>
         )}
@@ -415,7 +419,7 @@ function ArrayRow({
       <td className="num" data-label={t('jobs.col.timing')}>
         —
         <span className="sub" title={observed ?? ''}>
-          {relativeTime(observed)}
+          <ClockText>{() => relativeTime(observed)}</ClockText>
         </span>
       </td>
     </tr>
@@ -510,6 +514,7 @@ export function ChartLegend({ partial = false }: { partial?: boolean }) {
 
 /** The full estimate and its qualifications in the instance drawer. */
 export function InstanceRunCost({ item, source }: { item: Instance; source?: Source }) {
+  useClock();
   const run = runningHours(item, source);
   const cost = costThisRun(item, source);
   if (!run) return <>—</>;

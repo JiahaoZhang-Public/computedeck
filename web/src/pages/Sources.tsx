@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useEffect, useState } from 'react';
 import { ConnectionChecks } from '../ConnectionChecks';
 import { ArrowRight, Plus, RefreshCw } from 'lucide-react';
@@ -164,7 +165,7 @@ function SourceRow({
           {t('common.minutes', { count: source.interval_minutes })}
         </td>
         <td className="num" data-label={t('clusters.col.lastSuccess')}>
-          {relativeTime(source.last_success)}
+          <ClockText>{() => relativeTime(source.last_success)}</ClockText>
         </td>
         <td data-label={t('clusters.col.state')}>
           <Status state={sourceState(source)} />

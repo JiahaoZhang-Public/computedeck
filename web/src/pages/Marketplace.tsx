@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { ContextPanel } from '../layers/Surface';
 import { openLayer, closeLayer } from '../layers/routes';
 import { useEffect, useState } from 'react';
@@ -194,7 +195,8 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
           <span key={market.name} className="market-source" title={market.source}>
             <strong>{market.name}</strong> <TierTag tier={market.tier} />
             <small>
-              {t('market.count', { count: market.plugins })} · {relativeTime(market.updated_at)}
+              {t('market.count', { count: market.plugins })} ·{' '}
+              <ClockText>{() => relativeTime(market.updated_at)}</ClockText>
             </small>
           </span>
         ))}

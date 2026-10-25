@@ -969,15 +969,55 @@ visible again; this includes plugin requests and writes. Visible requests do
 not wait for visibility. Hidden GETs to the same path share one request on return,
 with a separate response body for each caller; writes remain separate.
 
-Visible dashboard polls run every ten seconds, or every second for up to sixty
+Visible dashboard polls run every ten seconds with a fine pointer or in the native app,
+and every thirty seconds with a coarse pointer. They run every second for up to sixty
 seconds after Refresh or starting collection for an added source. Fast polling stops
 when the targeted sources leave `collecting`; unrelated collections do not prolong a
 source-specific follow-up. Probe and manual-add responses complete before one reload.
 The paired visibility and focus events on return trigger only one refresh. Health, toolbox and
-collection-machine status keep their ten-second cadence; `/api/health` checks
+collection-machine status keep their normal ten/thirty-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
 polls every fifteen seconds and when the dashboard token changes. Relative ages
-continue to advance even when the dashboard is unchanged.
+continue to advance on the shared minute clock even when the dashboard is unchanged,
+without rerendering their parent rows. The existing chart window has its own timer.
+
+`GET /api/health`, `/api/toolbox` and `/api/nodes` also accept `since`. All four
+poll endpoints return `X-ComputeDeck-Since`; the dashboard and health objects also
+include `token`. Toolbox and collection-node full replies remain arrays. A matching
+request returns the same small `{unchanged, token}` object as the dashboard. Do not
+send a token for one path or example/live mode to another. Ordinary requests without
+`since` retain their complete response. The browser remembers tokens only from accepted
+responses; a superseded reply cannot replace newer data or its token.
+
+Dashboard sources, jobs, instances, compute nodes, recent failures, attention and history
+rows, plus toolbox and collection-node rows, include an opaque content `rev`. It is not a
+database revision or a timestamp. The browser keeps equal rows by `source_id` plus `id`
+(or `key` / `at`), including across reorders, and shares other unchanged JSON branches.
+Missing revisions on older services are compared by content. A changed poll publishes
+one snapshot; an unchanged poll publishes nothing. There is no retained row history in
+this store; the later page work owns departed-row presentation.
+
+Responses of at least 1,000 bytes use gzip when the client accepts it. Since-tokens are
+independent of transport encoding; unchanged replies remain below 1 KB combined across
+the four endpoints. Source-check NDJSON stays uncompressed (`Content-Encoding: identity`)
+so progress arrives as it is produced. API versions and the public Request signature
+are unchanged.
+
+仪表盘、健康、工具箱与采集节点的正常轮询周期为精细指针及原生应用 10 秒、粗略指针
+30 秒；页面隐藏时暂停，重新可见或获得焦点时刷新。用户发起采集后的每秒跟进仍保留，
+辅助接口仍使用正常周期。四个接口都支持 `since` 并返回 `X-ComputeDeck-Since` 响应头；
+仪表盘和健康对象另有 `token` 字段。工具箱与采集节点的完整响应仍是数组，内容未变时
+返回 `{unchanged, token}`。不传 `since` 时始终返回完整内容。令牌按接口和示例模式区分，
+过期请求不会覆盖新数据或令牌。现有 Activity、Chat、Notify 的专用轮询周期不变。
+
+上述列表行新增不透明的内容标识 `rev`，不写入数据库。浏览器按来源和行 ID 保留未变行的
+对象身份，重排行也能复用；旧服务缺少 `rev` 时比较内容。更新一次发布一个快照，未变时
+不发布。离开列表的行如何展示由后续页面改造负责。相对时间每分钟只更新文字组件；
+现有图表窗口仍有自己的计时器。
+
+客户端接受 gzip 时，至少 1,000 字节的响应会压缩；内容令牌与压缩方式无关，四个接口
+未变响应的正文总计不超过 1 KB。源检查的 NDJSON 保持不压缩，确保进度及时到达。
+公开 Request 签名与 API 版本均不变。
 
 ### Per-GPU readings (0.7)
 

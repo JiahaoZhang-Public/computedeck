@@ -7,7 +7,15 @@ import { handleToastKeys, listenForLayers, useModalHost } from './stack';
 
 export type ToastAction = { label: string; run: () => void; undo?: boolean };
 export type Toast = { id: number; text: string; tone: 'ok' | 'error'; action?: ToastAction };
-export function Toasts({ items, dismiss }: { items: Toast[]; dismiss: (id?: number) => void }) {
+export function Toasts({
+  items,
+  dismiss,
+  announcement,
+}: {
+  items: Toast[];
+  dismiss: (id?: number) => void;
+  announcement?: { id: number; text: string };
+}) {
   const host = useModalHost();
   const region = useRef<HTMLDivElement>(null);
   const home = useRef<HTMLDivElement>(null);
@@ -84,8 +92,14 @@ export function Toasts({ items, dismiss }: { items: Toast[]; dismiss: (id?: numb
       className="toasts"
       role="status"
       aria-live="polite"
+      aria-atomic="false"
       aria-relevant="additions text"
     >
+      {announcement?.text && (
+        <span className="sr-only" key={announcement.id}>
+          {announcement.text}
+        </span>
+      )}
       {items.map((item) => (
         <ToastItem key={item.id} item={item} dismiss={() => dismiss(item.id)} />
       ))}

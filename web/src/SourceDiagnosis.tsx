@@ -1,3 +1,4 @@
+import { ClockText } from './data/ClockText';
 import { collectionOverdue, nextAttemptText } from './health';
 import { useState } from 'react';
 import { ConnectionChecks } from './ConnectionChecks';
@@ -36,14 +37,20 @@ export function SourceDiagnosis({
             ? t('attention.lastSuccess', { time: dateTime(source.last_success) })
             : t('health.notCollected')}
         </p>
-        <p>{nextAttemptText(source.next_due_at, active)}</p>
         <p>
-          {formatMessage(source.error) ||
-            t(
-              collectionOverdue(source.next_due_at, active)
-                ? 'health.overdueReason'
-                : 'attention.noError',
-            )}
+          <ClockText>{() => nextAttemptText(source.next_due_at, active)}</ClockText>
+        </p>
+        <p>
+          <ClockText>
+            {() =>
+              formatMessage(source.error) ||
+              t(
+                collectionOverdue(source.next_due_at, active)
+                  ? 'health.overdueReason'
+                  : 'attention.noError',
+              )
+            }
+          </ClockText>
         </p>
         {source.warnings?.map((warning, index) => (
           <p key={index}>{formatMessage(warning)}</p>

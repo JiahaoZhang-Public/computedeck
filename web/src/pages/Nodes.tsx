@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useConfirm } from '../layers/useConfirm';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
@@ -173,9 +174,13 @@ export function NodesPanel({ ctx, onChange }: { ctx: Ctx; onChange: () => Promis
                   <td data-label={t('nodes.version')}>
                     {node.version ?? '—'}
                     <span className="sub">
-                      {node.checked_at
-                        ? t('nodes.checkedAt', { time: relativeTime(node.checked_at) })
-                        : t('nodes.notChecked')}
+                      <ClockText>
+                        {() =>
+                          node.checked_at
+                            ? t('nodes.checkedAt', { time: relativeTime(node.checked_at) })
+                            : t('nodes.notChecked')
+                        }
+                      </ClockText>
                     </span>
                   </td>
                   <td className="num" data-label={t('nodes.sources')}>

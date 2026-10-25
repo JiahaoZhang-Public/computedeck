@@ -1,3 +1,4 @@
+import { ClockText } from './data/ClockText';
 import { dateTime, relativeTime } from './domain';
 import { lowUseDuration, t } from './i18n';
 import type { WaitHistory as History } from './types';
@@ -128,7 +129,9 @@ export function WaitHistoryNote({
       {available.length > 0 &&
         (oldest ? (
           <time className="sub" dateTime={oldest} title={dateTime(oldest)}>
-            {t('wait.asOf', { time: relative ? relativeTime(oldest) : dateTime(oldest) })}
+            <ClockText>
+              {() => t('wait.asOf', { time: relative ? relativeTime(oldest) : dateTime(oldest) })}
+            </ClockText>
           </time>
         ) : (
           <span className="sub">{t('wait.asOfUnknown')}</span>

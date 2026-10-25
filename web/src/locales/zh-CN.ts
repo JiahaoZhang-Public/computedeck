@@ -3,6 +3,14 @@ import type en from './en';
 
 // Must define exactly the keys of the English source; TypeScript reports missing or extra keys.
 const zhCN: Record<keyof typeof en, string> = {
+  'live.jobsAdded': '{count} 个作业加入列表',
+  'live.jobsAdded.one': '1 个作业加入列表',
+  'live.jobsChanged': '{count} 个作业状态已变化',
+  'live.jobsChanged.one': '1 个作业状态已变化',
+  'live.jobsLeft': '{count} 个作业离开列表',
+  'live.jobsLeft.one': '1 个作业离开列表',
+  'live.attention': '{count} 项待处理提醒',
+  'live.attention.one': '1 项待处理提醒',
   'layer.keep': '保留',
   'layer.removeSource': '移除数据源',
   'layer.removeInstance': '移除机器',

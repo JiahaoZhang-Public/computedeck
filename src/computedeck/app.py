@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
@@ -76,6 +77,32 @@ class EncodableJSON(JSONResponse):
             return super().render(content)
         except UnicodeEncodeError:
             return json.dumps(content, allow_nan=False, separators=(",", ":")).encode()
+
+
+def revised_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Content revisions let the browser keep unchanged rows across full replies."""
+    return [
+        {
+            **row,
+            "rev": hashlib.sha256(bytes(EncodableJSON(jsonable_encoder(row)).body)).hexdigest()[
+                :16
+            ],
+        }
+        for row in rows
+    ]
+
+
+def poll_response(result: dict[str, Any] | list[dict[str, Any]], since: str | None) -> Response:
+    # Include time-derived state, not just database writes. Reuse the serialized bytes.
+    body = bytes(EncodableJSON(jsonable_encoder(result)).body)
+    token = hashlib.sha256(body).hexdigest()[:16]
+    headers = {"X-ComputeDeck-Since": token}
+    if since == token:
+        return EncodableJSON({"unchanged": True, "token": token}, headers=headers)
+    if isinstance(result, dict):
+        body = body[:-1] + f',"token":"{token}"}}'.encode()
+    # Array endpoints keep their 0.7 JSON shape; their token travels in the header.
+    return Response(content=body, media_type="application/json", headers=headers)
 
 
 def encodable(body: bytes) -> bool:
@@ -180,6 +207,7 @@ def create_app(
     )
     # Lets `serve --open` tell this process from anything else answering on its port.
     app.state.session_nonce = session_nonce
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     # Rejections echo the request, and their details may quote stored text.
@@ -337,16 +365,18 @@ def create_app(
             result["collecting"] = sorted(collector.pending)
             result["attention"] = collector.attention_items(result)
         result["attention_count"] = sum(item["muted"] is None for item in result["attention"])
-        # Hash the complete response, including time-derived state and pending work.
-        # Reuse these bytes so the large dashboard is serialized only once.
-        body = bytes(EncodableJSON(jsonable_encoder(result)).body)
-        token = hashlib.sha256(body).hexdigest()[:16]
-        if since == token:
-            return EncodableJSON({"unchanged": True, "token": token})
-        return Response(
-            content=body[:-1] + f',"token":"{token}"}}'.encode(),
-            media_type="application/json",
-        )
+        for key in (
+            "sources",
+            "jobs",
+            "instances",
+            "nodes",
+            "recent_failures",
+            "attention",
+            "history",
+        ):
+            if key in result:
+                result[key] = revised_rows(result[key])
+        return poll_response(result, since)
 
     @app.put("/api/attention/{key}")
     async def update_attention(key: str, body: AttentionInput) -> dict[str, str]:
@@ -474,7 +504,9 @@ def create_app(
                 with suppress(asyncio.CancelledError):
                     await task
 
-        return StreamingResponse(stream(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            stream(), media_type="application/x-ndjson", headers={"Content-Encoding": "identity"}
+        )
 
     @app.post("/api/sources", status_code=201)
     async def add_source(body: SourceInput) -> dict[str, Any]:
@@ -555,8 +587,8 @@ def create_app(
             raise HTTPException(422, message("node_not_found", node=source["node"]))
 
     @app.get("/api/nodes")
-    async def node_list(demo: bool = False) -> list[dict[str, Any]]:
-        return demo_nodes() if demo else store().nodes()
+    async def node_list(demo: bool = False, since: str | None = None) -> Response:
+        return poll_response(revised_rows(demo_nodes() if demo else store().nodes()), since)
 
     @app.post("/api/nodes", status_code=201)
     async def add_node(body: nodes.NodeInput) -> dict[str, Any]:
@@ -758,10 +790,10 @@ def create_app(
         return store().save_settings(body.model_dump(exclude_unset=True))
 
     @app.get("/api/health")
-    async def health() -> dict[str, Any]:
+    async def health(since: str | None = None) -> Response:
         sources = store().sources()
         enabled = {source["id"] for source in sources if source["enabled"]}
-        return {
+        result = {
             "status": "ok",
             "application": "ComputeDeck",
             "server_host": platform.node(),
@@ -782,6 +814,7 @@ def create_app(
             },
             "unreadable_rows": store().unreadable_rows(),
         }
+        return poll_response(result, since)
 
     def plugin_context(plugin_id: str) -> plugin_host.PluginContext:
         context = next((item for item in contexts if item.id == plugin_id), None)
@@ -790,8 +823,10 @@ def create_app(
         return context
 
     @app.get("/api/toolbox")
-    async def toolbox_list() -> list[dict[str, Any]]:
-        return [toolbox.entry(context, runtime) for context in contexts]
+    async def toolbox_list(since: str | None = None) -> Response:
+        return poll_response(
+            revised_rows([toolbox.entry(context, runtime) for context in contexts]), since
+        )
 
     @app.put("/api/toolbox/{plugin_id}")
     async def toolbox_update(plugin_id: str, body: toolbox.ToolboxUpdate) -> dict[str, Any]:

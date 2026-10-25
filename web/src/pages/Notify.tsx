@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useConfirm } from '../layers/useConfirm';
 import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -599,7 +600,9 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
               <tbody>
                 {state.log.map((row) => (
                   <tr key={row.id}>
-                    <td className="nowrap">{relativeTime(row.at)}</td>
+                    <td className="nowrap">
+                      <ClockText>{() => relativeTime(row.at)}</ClockText>
+                    </td>
                     <td className="wrap">
                       {row.subject ?? '—'}
                       {row.count &&

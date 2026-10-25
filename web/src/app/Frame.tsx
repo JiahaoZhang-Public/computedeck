@@ -16,6 +16,8 @@ import {
   Terminal,
   TriangleAlert,
 } from 'lucide-react';
+import { useClock } from '../ui/clock';
+import { relativeTime } from '../format';
 import { dateTime, partialCount } from '../domain';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -130,10 +132,6 @@ export function Frame({
   const problems = data?.attention_count ?? data?.attention?.length ?? 0;
   const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
-  const healthDescription =
-    healthState.label === healthState.age
-      ? healthState.label
-      : t('health.withAge', { label: healthState.label, age: healthState.age });
   const pageActions: Partial<Record<Page, ReactNode>> = {
     sources: (
       <button className="button primary" aria-label={t('source.add')} onClick={() => configure()}>
@@ -256,7 +254,7 @@ export function Frame({
             <input type="checkbox" role="switch" checked={demo} onChange={toggleDemo} />
             <i aria-hidden="true" />
           </label>
-          <div className="service-state" role="status">
+          <div className="service-state">
             <span className={`dot ${error ? 'red' : data ? 'green' : ''}`} />
             {needsToken
               ? t('token.title')
@@ -284,32 +282,13 @@ export function Frame({
           <h1>{title}</h1>
           <div className="topbar-actions">
             <div className="health-status">
-              <span className="sr-only" role="status">
-                {healthState.label}
-              </span>
-              <button
-                className={`health-pill health-${healthState.level}`}
-                onClick={() => setHealthOpen(true)}
-                aria-label={t('health.accessible', {
-                  title: t('health.title'),
-                  status: healthDescription,
-                })}
-                aria-haspopup="dialog"
-                aria-expanded={healthOpen}
-                title={
-                  !needsToken && data?.as_of
-                    ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
-                    : healthDescription
-                }
-              >
-                <span aria-hidden="true">
-                  {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
-                </span>
-                <span className="health-label">{healthDescription}</span>
-                <span className="health-age" aria-hidden="true">
-                  {healthState.age}
-                </span>
-              </button>
+              <HealthPill
+                data={data}
+                healthState={healthState}
+                needsToken={needsToken}
+                healthOpen={healthOpen}
+                setHealthOpen={setHealthOpen}
+              />
             </div>
             {!!data?.collecting?.length && !needsToken && (
               <span className="collecting-count">
@@ -377,5 +356,51 @@ export function Frame({
         {children}
       </div>
     </>
+  );
+}
+
+function HealthPill({
+  data,
+  healthState,
+  needsToken,
+  healthOpen,
+  setHealthOpen,
+}: {
+  data: Dashboard | null;
+  healthState: ReturnType<typeof computeHealth>;
+  needsToken: boolean;
+  healthOpen: boolean;
+  setHealthOpen: (open: boolean) => void;
+}) {
+  const now = useClock();
+  const age = data?.as_of ? relativeTime(data.as_of, now) : healthState.age;
+  const healthDescription =
+    healthState.label === age
+      ? healthState.label
+      : t('health.withAge', { label: healthState.label, age });
+  return (
+    <button
+      className={`health-pill health-${healthState.level}`}
+      onClick={() => setHealthOpen(true)}
+      aria-label={t('health.accessible', {
+        title: t('health.title'),
+        status: healthDescription,
+      })}
+      aria-haspopup="dialog"
+      aria-expanded={healthOpen}
+      title={
+        !needsToken && data?.as_of
+          ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
+          : healthDescription
+      }
+    >
+      <span aria-hidden="true">
+        {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
+      </span>
+      <span className="health-label">{healthDescription}</span>
+      <span className="health-age" aria-hidden="true">
+        {age}
+      </span>
+    </button>
   );
 }

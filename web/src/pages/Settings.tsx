@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useState } from 'react';
 import { ArrowDownToLine, ArrowRight } from 'lucide-react';
 import { api } from '../api';
@@ -131,7 +132,9 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
           </div>
           <div>
             <dt>{t('settings.service.started')}</dt>
-            <dd>{relativeTime(health?.started_at)}</dd>
+            <dd>
+              <ClockText>{() => relativeTime(health?.started_at)}</ClockText>
+            </dd>
           </div>
         </dl>
         {health?.database_path && (

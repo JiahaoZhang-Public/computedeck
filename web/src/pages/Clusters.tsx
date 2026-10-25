@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { useRouteParam } from '../useRouteParam';
 import { Plus } from 'lucide-react';
@@ -72,7 +73,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                   <GroupMark group={item} />
                   <strong>{item.label}</strong>
                 </span>
-                <Status state={row.state} />
+                <ClockText>{() => <Status state={groupSummary(data, item).state} />}</ClockText>
               </header>
               <div className="cluster-capacity">
                 {row.nodes.nodes === 0 ? (
@@ -123,7 +124,11 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 </div>
                 <div>
                   <dt>{t('clusters.nodeData')}</dt>
-                  <dd>{row.nodes.observed_at ? relativeTime(row.nodes.observed_at) : '—'}</dd>
+                  <dd>
+                    <ClockText>
+                      {() => (row.nodes.observed_at ? relativeTime(row.nodes.observed_at) : '—')}
+                    </ClockText>
+                  </dd>
                 </div>
               </dl>
             </section>
@@ -248,7 +253,7 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                       )}
                     </td>
                     <td className="num muted" data-label={t('clusters.col.sampled')}>
-                      {relativeTime(node.observed_at)}
+                      <ClockText>{() => relativeTime(node.observed_at)}</ClockText>
                     </td>
                   </tr>
                 ))}
@@ -338,7 +343,7 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
           {t('common.minutes', { count: source.interval_minutes })}
         </td>
         <td className="num" data-label={t('clusters.col.lastSuccess')}>
-          {relativeTime(source.last_success)}
+          <ClockText>{() => relativeTime(source.last_success)}</ClockText>
         </td>
         <td data-label={t('clusters.col.state')}>
           <Status state={sourceState(source)} />

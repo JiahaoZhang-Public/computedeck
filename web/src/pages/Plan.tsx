@@ -1,3 +1,5 @@
+import { useClock } from '../ui/clock';
+import { ClockText } from '../data/ClockText';
 import { Fragment, useEffect, useState } from 'react';
 import { setRouteParams, useRouteParam } from '../useRouteParam';
 import { canCopySubmit, jobPlanRequest, jobWaitsHere, planPresets, submitFlags } from '../submit';
@@ -107,6 +109,8 @@ function explain(option: PlanOption, request: PlanRequest, nodes: NodeSummary) {
 }
 
 export function PlanPage({ ctx }: { ctx: Ctx }) {
+  // Machine eligibility expires with sample age even when no collection arrives.
+  useClock();
   const { data } = ctx;
   const [from, setFrom] = useRouteParam('from');
   const jobs = [...data.jobs, ...(data.recent_failures ?? [])];
@@ -345,7 +349,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             )}
             {best.nodesObservedAt && (
               <span className="muted">
-                {t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
+                <ClockText>
+                  {() => t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
+                </ClockText>
               </span>
             )}
             <SubmitCopy result={submissions.get(best.key)!} ctx={ctx} option={best} />
@@ -449,7 +455,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                       <span className="sub">{t('plan.machineUnknown', { count: unknown })}</span>
                     )}
                     <span className="sub" title={dateTime(instance.gpus_observed_at)}>
-                      {t('gpu.sampled', { time: relativeTime(instance.gpus_observed_at) })}
+                      <ClockText>
+                        {() => t('gpu.sampled', { time: relativeTime(instance.gpus_observed_at) })}
+                      </ClockText>
                     </span>
                     {command && (
                       <pre
@@ -555,8 +563,12 @@ function OptionsTable({
                         </strong>
                         <span className="sub">
                           {option.source.username}
-                          {option.nodesObservedAt &&
-                            ` · ${t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}`}
+                          <ClockText>
+                            {() =>
+                              option.nodesObservedAt &&
+                              ` · ${t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}`
+                            }
+                          </ClockText>
                         </span>
                       </span>
                     </span>
@@ -661,12 +673,16 @@ function FactorSources({ factor }: { factor: PlanFactor }) {
   if (factor.key === 'age') evidence.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
   const source = (item: (typeof evidence)[number]) => (
     <span className="sub" key={`${item.source.id}:${item.capability}:${item.at}:${item.current}`}>
-      {t('plan.factor.source', {
-        source: `${item.source.name} · ${item.source.username}`,
-        capability: t(`plan.factor.capability.${item.capability}`),
-        age: item.at ? relativeTime(item.at) : t('status.unknown'),
-        state: t(item.current ? 'plan.factor.current' : 'plan.factor.notCurrent'),
-      })}
+      <ClockText>
+        {() =>
+          t('plan.factor.source', {
+            source: `${item.source.name} · ${item.source.username}`,
+            capability: t(`plan.factor.capability.${item.capability}`),
+            age: item.at ? relativeTime(item.at) : t('status.unknown'),
+            state: t(item.current ? 'plan.factor.current' : 'plan.factor.notCurrent'),
+          })
+        }
+      </ClockText>
       {item.at && (
         <time className="sub" dateTime={item.at}>
           {dateTime(item.at)}

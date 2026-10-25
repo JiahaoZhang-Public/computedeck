@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useConfirm } from '../layers/useConfirm';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -231,7 +232,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
                 <header>
                   <strong>{item.author}</strong>
                   <time dateTime={item.at} title={dateTime(item.at)}>
-                    {relativeTime(item.at)}
+                    <ClockText>{() => relativeTime(item.at)}</ClockText>
                   </time>
                   <span className="grow" />
                   {item.body && (

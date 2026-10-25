@@ -1,6 +1,14 @@
 import { loadingLabels } from './loading';
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
+  'live.jobsAdded': '{count} jobs joined the list',
+  'live.jobsAdded.one': '1 job joined the list',
+  'live.jobsChanged': '{count} jobs changed state',
+  'live.jobsChanged.one': '1 job changed state',
+  'live.jobsLeft': '{count} jobs left the list',
+  'live.jobsLeft.one': '1 job left the list',
+  'live.attention': '{count} open attention items',
+  'live.attention.one': '1 open attention item',
   'layer.keep': 'Keep',
   'layer.removeSource': 'Remove source',
   'layer.removeInstance': 'Remove machine',

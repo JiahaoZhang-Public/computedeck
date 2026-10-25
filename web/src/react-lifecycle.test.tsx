@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { serverDashboard, serverDemo } from './test-server';
-import { act, StrictMode } from 'react';
+import { act, Profiler, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
@@ -11,6 +11,7 @@ import { HealthPanel } from './HealthPanel';
 import { SourceDiagnosis } from './SourceDiagnosis';
 import { computeHealth } from './health';
 import { api } from './api';
+import { responseTokens } from './data/poll';
 import { ApiError, setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
 import TrendChart from './TrendChart';
@@ -989,6 +990,54 @@ it('opens diagnosis from an unmeasured login in the GPUs-in-use hint', async () 
 });
 
 describe('visible dashboard polling', () => {
+  it.each([false, true])(
+    'an unchanged poll makes zero React commits (coarse=%s)',
+    async (coarse) => {
+      vi.stubGlobal('matchMedia', () => ({
+        matches: coarse,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }));
+      const data = { ...dashboard('Cluster A'), token: 'live-token' };
+      request.mockImplementation(async (path) => {
+        if (path.startsWith('/dashboard'))
+          return path.includes('since=')
+            ? { unchanged: true, token: data.token }
+            : structuredClone(data);
+        if (path === '/settings') return { language: 'en' };
+        if (
+          path.startsWith('/health') ||
+          path.startsWith('/toolbox') ||
+          path.startsWith('/nodes')
+        ) {
+          if (path.includes('since=')) return { unchanged: true, token: 'aux-token' };
+          const value = path === '/health' ? { status: 'ok', polling: true } : [];
+          responseTokens.set(value, 'aux-token');
+          return value;
+        }
+        return [];
+      });
+      window.history.replaceState(null, '', '/#/jobs');
+      const commits = vi.fn();
+      await render(
+        <Profiler id="app" onRender={commits}>
+          <App />
+        </Profiler>,
+      );
+      commits.mockClear();
+      request.mockClear();
+      await act(async () => vi.advanceTimersByTimeAsync(coarse ? 30000 : 10000));
+      expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
+      for (const path of [
+        '/health?since=aux-token',
+        '/toolbox?since=aux-token',
+        '/nodes?demo=false&since=aux-token',
+      ])
+        expect(request).toHaveBeenCalledWith(path);
+      expect(commits).not.toHaveBeenCalled();
+    },
+  );
+
   function mockDashboard(data: Dashboard) {
     request.mockImplementation(async (path) => {
       if (path.startsWith('/dashboard'))
@@ -1238,10 +1287,11 @@ it('announces health without clock chatter and gives retry buttons source-specif
     return [];
   });
   await render(<App />);
-  const live = container.querySelector('.health-status [role="status"]')!;
+  const live = container.querySelector('.toasts[role="status"]')!;
   const before = live.textContent;
-  expect(before).toBe(computeHealth(data, null, null, false, false).label);
+  expect(before).toBe(''); // Initial inventory is silent; only later transitions announce.
   expect(live.closest('button')).toBeNull();
+  expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
   await act(async () => vi.advanceTimersByTimeAsync(60000));
   expect(live.textContent).toBe(before);
   await click('.health-pill');

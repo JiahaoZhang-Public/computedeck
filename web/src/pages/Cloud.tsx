@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { Copy, Plus } from 'lucide-react';
 import { useRouteParam } from '../useRouteParam';
 import { findGroup, instanceGroupKey } from '../groups';
@@ -111,8 +112,6 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                   // Rows of a source that no longer collects keep their last reading.
                   const stale = !!source && !sourceHasData(source, 'instances');
                   const price = runningPrice(item);
-                  const run = runningHours(item, source);
-                  const cost = costThisRun(item, source);
                   return (
                     <tr
                       key={item.id}
@@ -133,26 +132,45 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           <span>
                             <strong>{item.name}</strong>
                             <span className="sub">
-                              {[
-                                item.platform,
-                                statusLabel(item.state),
-                                run
-                                  ? t(run.origin === 'provider' ? 'cost.up' : 'cost.seenRunning', {
-                                      duration: runDuration(run.hours),
-                                    })
-                                  : '',
-                                cost != null
-                                  ? t('cost.shortEstimate', { cost: money(cost, item.currency) })
-                                  : '',
-                              ]
-                                .filter(Boolean)
-                                .join(' · ')}
+                              <ClockText>
+                                {() => {
+                                  const run = runningHours(item, source);
+                                  const cost = costThisRun(item, source);
+                                  return [
+                                    item.platform,
+                                    statusLabel(item.state),
+                                    run
+                                      ? t(
+                                          run.origin === 'provider'
+                                            ? 'cost.up'
+                                            : 'cost.seenRunning',
+                                          {
+                                            duration: runDuration(run.hours),
+                                          },
+                                        )
+                                      : '',
+                                    cost != null
+                                      ? t('cost.shortEstimate', {
+                                          cost: money(cost, item.currency),
+                                        })
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ');
+                                }}
+                              </ClockText>
                             </span>
                             <MachineNodeNote item={item} />
                             {stale && (
                               <span className="sub">
                                 <span className="tag amber">
-                                  {t('cloud.staleSince', { time: relativeTime(item.observed_at) })}
+                                  <ClockText>
+                                    {() =>
+                                      t('cloud.staleSince', {
+                                        time: relativeTime(item.observed_at),
+                                      })
+                                    }
+                                  </ClockText>
                                 </span>
                               </span>
                             )}
@@ -214,9 +232,13 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                           {item.last_probe_attempt && (
                             <span className="muted">
                               {' · '}
-                              {t('instance.checked', {
-                                time: relativeTime(item.last_probe_attempt),
-                              })}
+                              <ClockText>
+                                {() =>
+                                  t('instance.checked', {
+                                    time: relativeTime(item.last_probe_attempt),
+                                  })
+                                }
+                              </ClockText>
                             </span>
                           )}
                         </span>
@@ -235,7 +257,7 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                         )}
                       </td>
                       <td className="num muted cloud-sampled" data-label={t('cloud.col.sampled')}>
-                        {relativeTime(item.observed_at)}
+                        <ClockText>{() => relativeTime(item.observed_at)}</ClockText>
                       </td>
                     </tr>
                   );

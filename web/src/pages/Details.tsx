@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useMedia } from '../layers/stack';
 import { useConfirm } from '../layers/useConfirm';
 import { useRef, useState } from 'react';
@@ -223,7 +224,9 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">
-          {t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })}
+          <ClockText>
+            {() => t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })}
+          </ClockText>
           {event?.type === 'job.finished' && (
             <>
               {' '}
@@ -436,7 +439,9 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                   : 'common.sampledAt',
             )}
           </dt>
-          <dd title={jobTime(observed)}>{relativeTime(observed)}</dd>
+          <dd title={jobTime(observed)}>
+            <ClockText>{() => relativeTime(observed)}</ClockText>
+          </dd>
         </div>
       </dl>
       {!historical && (
@@ -606,7 +611,9 @@ export function InstanceDetail({
             {item.last_probe_attempt && (
               <span className="muted">
                 {' · '}
-                {t('instance.checked', { time: relativeTime(item.last_probe_attempt) })}
+                <ClockText>
+                  {() => t('instance.checked', { time: relativeTime(item.last_probe_attempt) })}
+                </ClockText>
               </span>
             )}
           </dd>
@@ -648,7 +655,9 @@ export function InstanceDetail({
         </div>
         <div>
           <dt>{t('common.sampledAt')}</dt>
-          <dd>{relativeTime(item.observed_at)}</dd>
+          <dd>
+            <ClockText>{() => relativeTime(item.observed_at)}</ClockText>
+          </dd>
         </div>
       </dl>
       {item.gpu_count !== 0 && (
@@ -738,9 +747,13 @@ function GpuDetails({ item }: { item: Instance }) {
     <section className="gpu-details">
       <h3>{t('gpu.title')}</h3>
       <p className="panel-note" title={dateTime(item.gpus_observed_at)}>
-        {item.gpus_observed_at
-          ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
-          : t('gpu.sampleUnknown')}
+        <ClockText>
+          {() =>
+            item.gpus_observed_at
+              ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
+              : t('gpu.sampleUnknown')
+          }
+        </ClockText>
       </p>
       <ul className="rows">
         {item.gpus.map((gpu, index) => {

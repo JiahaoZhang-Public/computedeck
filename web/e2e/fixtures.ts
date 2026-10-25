@@ -23,6 +23,7 @@ async function setupPage(page: Page, baseURL: string | undefined, locale: string
     if (url.pathname === '/api/health') {
       const response = await route.fetch();
       const health = await response.json();
+      if (health.unchanged === true) return route.fulfill({ response });
       return route.fulfill({
         response,
         json: {
@@ -51,6 +52,7 @@ export const test = base.extend<{ freshPage: Page }>({
     try {
       await run(page);
     } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
       check();
     }
   },
@@ -87,6 +89,7 @@ export const test = base.extend<{ freshPage: Page }>({
       try {
         await run(page);
       } finally {
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
         check();
       }
     } finally {

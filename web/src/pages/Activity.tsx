@@ -1,3 +1,5 @@
+import { ClockText } from '../data/ClockText';
+import { share } from '../data/store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVisibleInterval } from '../useVisibleInterval';
 import type { DeckEvent, Source, Tool } from '../types';
@@ -39,7 +41,9 @@ export function ActivityPanel({
   onOpen?: (event: DeckEvent) => void;
 }) {
   const [events, setEvents] = useState<DeckEvent[] | null>(null);
+  const currentEvents = useRef<DeckEvent[] | null>(null);
   const [error, setError] = useState(false);
+  const hadError = useRef(false);
   const loadId = useRef(0);
   const load = useCallback(async () => {
     const id = ++loadId.current;
@@ -48,11 +52,21 @@ export function ActivityPanel({
         `/events?limit=${limit}&demo=${demo}&group=1&include=changes&delivery=true`,
       );
       if (id === loadId.current) {
-        setEvents(activityEvents(rows));
-        setError(false);
+        const next = share(currentEvents.current, activityEvents(rows));
+        if (next !== currentEvents.current) {
+          currentEvents.current = next;
+          setEvents(next);
+        }
+        if (hadError.current) {
+          hadError.current = false;
+          setError(false);
+        }
       }
     } catch {
-      if (id === loadId.current) setError(true);
+      if (id === loadId.current && !hadError.current) {
+        hadError.current = true;
+        setError(true);
+      }
     }
   }, [demo, limit]);
   useEffect(
@@ -147,7 +161,7 @@ function ActivityRow({
         )}
       </span>
       <time dateTime={event.at} title={eventTimeTitle(event)}>
-        {eventTimeText(event) ?? relativeTime(event.at)}
+        <ClockText>{() => eventTimeText(event) ?? relativeTime(event.at)}</ClockText>
       </time>
     </>
   );

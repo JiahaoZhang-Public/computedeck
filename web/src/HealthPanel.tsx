@@ -1,3 +1,4 @@
+import { ClockText } from './data/ClockText';
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { dateTime, relativeTime } from './domain';
@@ -34,9 +35,12 @@ export function HealthPanel({
         </button>
         <h2 id="health-title">{t('health.title')}</h2>
         <p>
-          {state.label === state.age
-            ? state.age
-            : t('health.withAge', { label: state.label, age: state.age })}
+          <ClockText>
+            {() => {
+              const age = data?.as_of ? relativeTime(data.as_of) : state.age;
+              return state.label === age ? age : t('health.withAge', { label: state.label, age });
+            }}
+          </ClockText>
         </p>
         {state.faults.map((fault) => (
           <div className="health-row" key={fault.id}>
@@ -60,19 +64,27 @@ export function HealthPanel({
               <Status state={sourceStatus} />
             </div>
             <p title={source.last_success ?? ''}>
-              {t('health.lastSuccess', {
-                time: source.last_success
-                  ? relativeTime(source.last_success)
-                  : t('health.notCollected'),
-              })}
+              <ClockText>
+                {() =>
+                  t('health.lastSuccess', {
+                    time: source.last_success
+                      ? relativeTime(source.last_success)
+                      : t('health.notCollected'),
+                  })
+                }
+              </ClockText>
             </p>
             {source.enabled && (
               <p>
-                {source.status === 'syncing'
-                  ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
-                  : collecting
-                    ? t('health.queued')
-                    : nextAttemptText(source.next_due_at, collecting)}
+                <ClockText>
+                  {() =>
+                    source.status === 'syncing'
+                      ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
+                      : collecting
+                        ? t('health.queued')
+                        : nextAttemptText(source.next_due_at, collecting)
+                  }
+                </ClockText>
                 {!collecting &&
                   (source.failures ?? 0) > 0 &&
                   ` · ${t('health.backoff', { count: source.failures })}`}
@@ -96,10 +108,14 @@ export function HealthPanel({
                   : null;
                 return (
                   <p key={inventory}>
-                    {t('health.retained', {
-                      inventory: t(`health.inventory.${inventory}`),
-                      time: oldest ? relativeTime(oldest) : t('health.unknown'),
-                    })}
+                    <ClockText>
+                      {() =>
+                        t('health.retained', {
+                          inventory: t(`health.inventory.${inventory}`),
+                          time: oldest ? relativeTime(oldest) : t('health.unknown'),
+                        })
+                      }
+                    </ClockText>
                   </p>
                 );
               })}

@@ -1,3 +1,4 @@
+import { ClockText } from '../data/ClockText';
 import { useId, useState } from 'react';
 import { api } from '../api';
 import type { Attention, Summary } from '../types';
@@ -36,7 +37,6 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
   const setupNeeded =
     !demo && !data.sources.length && !data.instances.length && !ctx.attention.length;
   const issues = data.attention_count ?? ctx.attention.length;
-  const connected = data.sources.some(connectedSource) || data.instances.some(recentlyReachable);
   const clusterLogins = data.sources.filter(
     (source) => source.kind === 'cluster' && source.enabled,
   ).length;
@@ -127,10 +127,14 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
               </a>
             ) : ctx.attention.length ? (
               t('attention.allMuted')
-            ) : connected ? (
-              t('overview.issues.none')
             ) : (
-              t('overview.issues.unconfigured')
+              <ClockText>
+                {() =>
+                  data.sources.some(connectedSource) || data.instances.some(recentlyReachable)
+                    ? t('overview.issues.none')
+                    : t('overview.issues.unconfigured')
+                }
+              </ClockText>
             )
           }
         />
@@ -274,31 +278,39 @@ function AttentionRow({ item, ctx }: { item: Attention; ctx: Ctx }) {
             <small key={index}>{formatMessage(detail)}</small>
           ))}
           <small>
-            {item.since
-              ? t('attention.since', {
-                  time: dateTime(item.since),
-                  age: relativeTime(item.since),
-                })
-              : item.observed_at
-                ? t(
-                    item.kind === 'instance_ssh_failed'
-                      ? 'attention.checked'
-                      : 'attention.lastSeen',
-                    {
-                      time: dateTime(item.observed_at),
-                      age: relativeTime(item.observed_at),
-                    },
-                  )
-                : t('attention.sinceUnknown')}
-            {item.next_attempt &&
-              ` · ${nextAttemptText(
-                item.next_attempt,
-                item.subject.kind === 'source' &&
-                  (ctx.data.collecting?.includes(item.subject.id) ||
-                    ctx.data.sources.some(
-                      (source) => source.id === item.subject.id && source.status === 'syncing',
-                    )),
-              )}`}
+            <ClockText>
+              {() =>
+                item.since
+                  ? t('attention.since', {
+                      time: dateTime(item.since),
+                      age: relativeTime(item.since),
+                    })
+                  : item.observed_at
+                    ? t(
+                        item.kind === 'instance_ssh_failed'
+                          ? 'attention.checked'
+                          : 'attention.lastSeen',
+                        {
+                          time: dateTime(item.observed_at),
+                          age: relativeTime(item.observed_at),
+                        },
+                      )
+                    : t('attention.sinceUnknown')
+              }
+            </ClockText>
+            <ClockText>
+              {() =>
+                item.next_attempt &&
+                ` · ${nextAttemptText(
+                  item.next_attempt,
+                  item.subject.kind === 'source' &&
+                    (ctx.data.collecting?.includes(item.subject.id) ||
+                      ctx.data.sources.some(
+                        (source) => source.id === item.subject.id && source.status === 'syncing',
+                      )),
+                )}`
+              }
+            </ClockText>
           </small>
         </span>
         <ChevronRight size={14} />
@@ -527,10 +539,10 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                   )}
                 </td>
                 <td data-label={t('overview.col.state')}>
-                  <Status state={row.state} />
+                  <ClockText>{() => <Status state={groupSummary(data, group).state} />}</ClockText>
                 </td>
                 <td className="num muted" data-label={t('overview.col.updated')}>
-                  {row.updated ? relativeTime(row.updated) : '—'}
+                  <ClockText>{() => (row.updated ? relativeTime(row.updated) : '—')}</ClockText>
                 </td>
               </tr>
             );

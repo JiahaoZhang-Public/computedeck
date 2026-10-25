@@ -15,6 +15,8 @@ export interface QosLimit {
   origin: string;
 }
 export interface Source {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   id: string;
   /** Display label of the cluster or platform this login belongs to. */
   name: string;
@@ -48,6 +50,8 @@ export interface Source {
 }
 /** Another machine that collects sources for this service over SSH. */
 export interface CollectionNode {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   id: string;
   name: string;
   ssh_alias: string;
@@ -94,6 +98,8 @@ export interface DriverInfo {
   beta: boolean;
 }
 export interface Job {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   id: string;
   array_id?: string | null;
   array_index?: string | null;
@@ -151,6 +157,8 @@ export interface LowUse {
   reason: 'no_reading' | 'not_running' | 'stale' | 'coverage' | null;
 }
 export interface Instance {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   same_node?: { id: string; name: string; cluster_id: string; cluster_name: string } | null;
   ssh_endpoint?: { host: string; port: number } | null;
   host_name?: string | null;
@@ -195,6 +203,8 @@ export interface Instance {
   probe_warnings?: (Message | string)[];
 }
 export interface ComputeNode {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   host_addresses?: string[];
   host_names?: string[];
   health?: 'usable' | 'unavailable' | 'on_demand' | 'unknown';
@@ -214,6 +224,8 @@ export interface ComputeNode {
   observed_at: string | null;
 }
 export interface HistoryPoint {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   at: string;
   allocated_gpus: number | null;
   gpu_utilization: number | null;
@@ -281,6 +293,8 @@ export interface FleetSummary extends Summary {
   };
 }
 export interface Attention {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   key: string;
   fingerprint?: string;
   mutable?: boolean;
@@ -359,6 +373,7 @@ export interface SSHConfig {
   installed: boolean;
 }
 export interface Health {
+  token?: string;
   background_errors?: Record<string, { at: string; error: string }>;
   unreadable_rows?: Record<string, number>;
   server_host?: string;
@@ -391,6 +406,8 @@ export interface SettingField {
 }
 /** One plugin in the Toolbox, from `GET /api/toolbox`. */
 export interface Tool {
+  /** Content revision on polled responses; absent on older services and writes. */
+  rev?: string;
   id: string;
   /** Shipped with ComputeDeck, installed from a marketplace (with its tier), or directly. */
   /** Unknown while installed-plugins.json cannot be read (a note says why). */
