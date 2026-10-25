@@ -636,3 +636,41 @@ Vitest 对 Jobs 中挂载的 App 计数，精细和粗略指针的未变轮询�
 
 Pytest 覆盖辅助接口令牌、插件变化、外部写入、行内容标识、gzip 协商与总正文预算。
 源检查保持 NDJSON 流式返回，不因压缩而缓冲；健康接口仍不构建仪表盘。
+
+### F7 review corrections and follow-ups
+
+Twin-login job observations are matched by dashboard job ID for transition announcements;
+changing only the source login stays silent. Both failure end labels tick on the shared
+minute clock. Usage's running-cost visibility condition also uses that clock. The pointer
+rule applies even in WebKit hosts with message handlers. A retained dashboard after a 401
+leaves the health pill Unknown; the health panel already receives null data at the token
+gate. Transition announcements expire after 4.5 seconds while the live region stays mounted.
+
+Bilingual Vitest cases cover twin-login changes, failure end ages without a poll, and
+retained-data authentication failures in both pill and panel. Further tests cover coarse
+WebKit cadence and announcement replacement/expiry without dismissing persistent errors.
+The live Playwright test checks expiry, unchanged region identity and retained row focus.
+No screenshot baseline or CSS/API contract change is intended.
+
+- **P3/Q2:** move Activity's 15-second polling to `usePollCadence` and its arrivals
+  announcement into the shared toast region, avoiding duplicate job-change announcements.
+- **Q2:** avoid serializing dashboard rows once for revisions and again for the response.
+- **Q2:** replace the streaming `Content-Encoding: identity` workaround with content-type
+  exclusions, including plugin NDJSON. The installed Starlette supports exclusions; using
+  that option across the supported FastAPI dependency range needs a separate compatibility
+  check. Changing the runtime floor or adding a wrapper is deferred from this correction.
+- **Q3 CHANGELOG, For plugin authors:** the host no longer rerenders plugin pages or slots
+  on a timer; `format.relativeTime` output does not tick by itself. Plugins own their time
+  updates and timer cleanup. Record the streaming-route compression guidance in plugins.md.
+
+中文：按仪表盘作业 ID 判断变化，双登录仅切换来源时不播报；失败表和详情的结束时间
+按分钟更新，Usage 的运行费用显示条件也使用共享时钟。WebKit 消息处理器不覆盖指针周期。
+401 后即使保留仪表盘，健康按钮仍显示未知；面板已有令牌失效时接收 null 数据的保护。
+变化播报在 4.5 秒后清除，播报区域保持挂载。双语单测覆盖上述作业、时间及认证回归，
+另查粗指针 WebKit、播报替换和过期不影响持续错误；浏览器测试验证过期、区域及行焦点
+保留。无预期截图基线、CSS 或 API 约定变更。
+
+后续：P3/Q2 统一 Activity 的轮询周期和播报区域；Q2 避免行重复序列化，并用内容类型
+排除替换流式响应的 identity 临时措施（需单独核查当前依赖范围内的兼容性）。
+Q3 的 CHANGELOG「For plugin authors」须说明宿主不再定时重绘插件、relativeTime 不会
+自动更新、插件自行管理计时器及清理，并保留 plugins.md 的流式路由压缩说明。

@@ -473,8 +473,9 @@ are temporary notifications and do not create error rows.
 ### Live updates
 
 Dashboard, health, toolbox and collection-machine reads run every 10 seconds with a fine
-pointer or in the native app, and every 30 seconds with a coarse pointer. They pause while
-the page is hidden and refresh on return or focus. This reads the service's stored data;
+pointer (including the native macOS app), and every 30 seconds with a coarse pointer.
+WebKit message handlers do not override this cadence. Reads pause while the page is hidden
+and refresh on return or focus. This reads the service's stored data;
 it does not start a cluster or cloud collection. Refresh and source collection still use
 the existing one-second follow-up for at most 60 seconds. Activity, Chat and Notify keep
 their existing dedicated polling schedules.
@@ -484,9 +485,10 @@ minute without rerendering the whole page. The shared polite notification region
 health transitions, jobs joining/leaving the list or changing state, and changes in the
 open attention count. It stays silent for the initial inventory, timestamps and unchanged
 polls. A job leaving the list is not claimed to have finished successfully. Announcements
-use the same region as toasts, including inside an open modal.
+use the same region as toasts, including inside an open modal, and clear after 4.5 seconds.
 
-仪表盘、健康、工具箱与采集机器的读取周期为精细指针及原生应用 10 秒、粗略指针 30 秒。
+仪表盘、健康、工具箱与采集机器的读取周期为精细指针 10 秒（含 macOS 原生应用）、粗略指针 30 秒。
+WebKit 消息处理器不改变该周期。
 页面隐藏时暂停，返回或获得焦点时刷新；只读取服务中已有数据，不会自动向集群或云端
 发起采集。刷新和源采集仍保留最多 60 秒的每秒跟进。Activity、Chat 和 Notify 保持各自
 现有的专用轮询周期。
@@ -494,4 +496,4 @@ use the same region as toasts, including inside an open modal.
 未变响应保留列表行和焦点；相对时间每分钟只更新文字，不重绘整个页面。共享的礼貌播报
 区域仅报告健康变化、作业加入或离开列表、作业状态变化及待处理提醒数量变化，首次载入、
 时间戳和未变轮询均不播报。作业离开列表不代表成功结束。播报与通知共用一个区域，打开
-模态视图时也随通知移入其中。
+模态视图时也随通知移入其中，4.5 秒后清除播报文字。
