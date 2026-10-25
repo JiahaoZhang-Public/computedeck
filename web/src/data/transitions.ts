@@ -1,5 +1,5 @@
 import { computeHealth } from '../health';
-import { t } from '../i18n';
+import { locale, t } from '../i18n';
 import type { LiveSnapshot } from './store';
 
 /** Announce state transitions, never ages, sample times or the initial inventory. */
@@ -23,7 +23,7 @@ export function transitions(before: LiveSnapshot, after: LiveSnapshot, demo: boo
       demo,
       snapshot.nodes,
     ).label;
-  if (health(before) !== health(after)) messages.push(health(after));
+  if (health(before) !== health(after)) messages.push(t('live.health', { status: health(after) }));
   // Dashboard jobs are deduplicated by id; twin logins may alternate as their source.
   const previous = new Map(before.data.jobs.map((job) => [job.id, job.state]));
   const current = new Map(after.data.jobs.map((job) => [job.id, job.state]));
@@ -40,5 +40,5 @@ export function transitions(before: LiveSnapshot, after: LiveSnapshot, demo: boo
     after.data.attention_count !== undefined
   )
     messages.push(t('live.attention', { count: after.data.attention_count }));
-  return messages.join(' · ');
+  return messages.join(locale() === 'zh-CN' ? '；' : '. ');
 }

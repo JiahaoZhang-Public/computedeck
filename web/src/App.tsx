@@ -636,8 +636,6 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     setFollowUntil(0);
     live.update({
       data: null,
-      health: null,
-      tools: [],
       nodes: [],
       loading: true,
       announcement: { id: 0, text: '' },

@@ -652,6 +652,11 @@ WebKit cadence and announcement replacement/expiry without dismissing persistent
 The live Playwright test checks expiry, unchanged region identity and retained row focus.
 No screenshot baseline or CSS/API contract change is intended.
 
+Mode-switch lifecycle tests cover both directions in English and Chinese with the new
+dashboard held pending: required plugin pages keep their state and health props without
+remounting, and plugin, Notify and Chat links stay present. Transition tests also check
+sentence separators and a localized health prefix, including an Unknown status after a 401.
+
 - **P3/Q2:** move Activity's 15-second polling to `usePollCadence` and its arrivals
   announcement into the shared toast region, avoiding duplicate job-change announcements.
 - **Q2:** avoid serializing dashboard rows once for revisions and again for the response.
@@ -669,6 +674,10 @@ No screenshot baseline or CSS/API contract change is intended.
 变化播报在 4.5 秒后清除，播报区域保持挂载。双语单测覆盖上述作业、时间及认证回归，
 另查粗指针 WebKit、播报替换和过期不影响持续错误；浏览器测试验证过期、区域及行焦点
 保留。无预期截图基线、CSS 或 API 约定变更。
+
+模式切换生命周期测试覆盖中英文及双向切换，在新仪表盘尚未返回时验证依赖工具的插件
+页面保留状态和健康属性、不重新挂载，插件、Notify 与 Chat 链接持续显示。变化播报测试
+另查句子分隔符及本地化健康前缀，包括 401 后的未知状态。
 
 后续：P3/Q2 统一 Activity 的轮询周期和播报区域；Q2 避免行重复序列化，并用内容类型
 排除替换流式响应的 identity 临时措施（需单独核查当前依赖范围内的兼容性）。

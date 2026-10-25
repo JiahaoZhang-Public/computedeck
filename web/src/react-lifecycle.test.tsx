@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { serverDashboard, serverDemo } from './test-server';
-import { act, Profiler, StrictMode } from 'react';
+import { act, Profiler, StrictMode, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
@@ -14,6 +14,7 @@ import { api } from './api';
 import { responseTokens } from './data/poll';
 import { ApiError, setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
+import type { PluginProps } from './plugins';
 import TrendChart from './TrendChart';
 import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
@@ -28,7 +29,7 @@ import { SourcesPage } from './pages/Sources';
 import { EMPTY_RULE } from './notify';
 import { changeFieldLabel, OUTCOME_LABELS } from './events';
 import type { Ctx } from './pages/shared';
-import type { Dashboard, DeckEvent, HistoryPoint, Tool } from './types';
+import type { Dashboard, DeckEvent, Health, HistoryPoint, Tool } from './types';
 
 vi.mock('./api', () => ({ api: vi.fn(), upload: vi.fn(), download: vi.fn() }));
 const request = vi.mocked(api);
@@ -290,6 +291,86 @@ describe('dashboard lifecycle', () => {
     expect(container.textContent).not.toContain('Live cluster');
     expect(container.textContent).toContain('Example cluster');
   });
+
+  it.each([
+    ['en', false],
+    ['en', true],
+    ['zh-CN', false],
+    ['zh-CN', true],
+  ] as const)(
+    'keeps a required plugin mounted while switching modes in %s (initial demo: %s)',
+    async (language, initialDemo) => {
+      const id = `mode-tool-${language}-${initialDemo}`;
+      window.history.replaceState(null, '', `/?demo=${initialDemo}#/${id}`);
+      window.localStorage.setItem('computedeck.locale', language);
+      setLocale(language);
+      const pending = deferred<Dashboard>();
+      const health: Health = {
+        status: 'ok',
+        started_at: now.toISOString(),
+        database_path: '',
+        polling: true,
+        ssh_installed: false,
+        source_count: 1,
+      };
+      const mounted = vi.fn();
+      const unmounted = vi.fn();
+      function PluginPage() {
+        const [count, setCount] = useState(0);
+        useEffect(() => {
+          mounted();
+          return () => unmounted();
+        }, []);
+        return (
+          <button data-plugin-counter onClick={() => setCount(count + 1)}>
+            {count}
+          </button>
+        );
+      }
+      const renderPlugin = vi.fn((props: PluginProps) => {
+        expect(props.health).toEqual(health);
+        return <PluginPage />;
+      });
+      registerWebPlugin({
+        id,
+        requires: id,
+        pages: [{ id, label: 'Mode tool', icon: Puzzle, render: renderPlugin }],
+      });
+      request.mockImplementation(async (path) => {
+        if (path === `/dashboard?demo=${!initialDemo}`) return pending.promise;
+        if (path.startsWith('/dashboard')) return dashboard('Cluster A');
+        if (path === '/settings') return { language };
+        if (path === '/health') return health;
+        if (path === '/toolbox') return [id, 'notify', 'chat'].map((id) => ({ id, enabled: true }));
+        return [];
+      });
+      await render(<App />);
+      await click('[data-plugin-counter]');
+      const counter = container.querySelector('[data-plugin-counter]');
+      const links = [id, 'notify', 'chat'].map((page) =>
+        container.querySelector(`a[href="#/${page}"]`),
+      );
+      links.forEach((link) => expect(link).not.toBeNull());
+      mounted.mockClear();
+      unmounted.mockClear();
+      renderPlugin.mockClear();
+
+      await click('[role="switch"]');
+      expect(request).toHaveBeenCalledWith(`/dashboard?demo=${!initialDemo}`);
+      const expectPreserved = () => {
+        expect(container.querySelector('[data-plugin-counter]')).toBe(counter);
+        expect(counter?.textContent).toBe('1');
+        links.forEach((link) => expect(container.contains(link)).toBe(true));
+        expect(mounted).not.toHaveBeenCalled();
+        expect(unmounted).not.toHaveBeenCalled();
+        expect(renderPlugin).toHaveBeenCalled();
+        expect(renderPlugin.mock.calls.at(-1)?.[0].demo).toBe(!initialDemo);
+      };
+      expectPreserved();
+      await act(async () => pending.resolve(dashboard('Cluster B')));
+      expectPreserved();
+    },
+  );
 
   it('resolves a plugin deep link after registration and hides it when disabled', async () => {
     window.history.replaceState(null, '', '/#/example-tool');

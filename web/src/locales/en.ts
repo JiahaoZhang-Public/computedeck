@@ -2,6 +2,7 @@ import { loadingLabels } from './loading';
 // English is the source language. Every other locale must define exactly these keys.
 const en = {
   'live.jobsAdded': '{count} jobs joined the list',
+  'live.health': 'Health: {status}',
   'live.jobsAdded.one': '1 job joined the list',
   'live.jobsChanged': '{count} jobs changed state',
   'live.jobsChanged.one': '1 job changed state',

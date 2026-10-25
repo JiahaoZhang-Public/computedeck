@@ -122,9 +122,13 @@ describe.each(['en', 'zh-CN'] as const)('transition announcements in %s', (langu
     after.data!.jobs.pop();
     after.data!.attention_count = 1;
     const text = transitions(before, after, true);
-    expect(text).toContain(t('live.jobsChanged', { count: 1 }));
-    expect(text).toContain(t('live.jobsLeft', { count: 1 }));
-    expect(text).toContain(t('live.attention', { count: 1 }));
+    expect(text).toBe(
+      [
+        t('live.jobsChanged', { count: 1 }),
+        t('live.jobsLeft', { count: 1 }),
+        t('live.attention', { count: 1 }),
+      ].join(language === 'zh-CN' ? '；' : '. '),
+    );
     after.data!.jobs.push({ ...after.data!.jobs[0], id: 'new-job' });
     expect(transitions(before, after, true)).toContain(t('live.jobsAdded', { count: 1 }));
   });
@@ -141,9 +145,18 @@ describe.each(['en', 'zh-CN'] as const)('transition announcements in %s', (langu
     setLocale(language);
     const before = snapshot();
     const failed = { ...before, error: 'unreachable' };
-    expect(transitions(before, failed, true)).toBe(t('health.unreachable'));
+    expect(transitions(before, failed, true)).toBe(
+      t('live.health', { status: t('health.unreachable') }),
+    );
     expect(transitions(failed, { ...failed }, true)).toBe('');
     expect(transitions(failed, before, true)).not.toBe('');
+  });
+  it('gives health context when authentication makes the status unknown', () => {
+    setLocale(language);
+    const before = { ...snapshot(), error: 'unreachable' };
+    expect(transitions(before, { ...before, needsToken: true }, false)).toBe(
+      t('live.health', { status: t('health.unknown') }),
+    );
   });
 });
 
