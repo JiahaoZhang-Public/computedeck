@@ -42,7 +42,8 @@ describe.each(['en', 'zh-CN'] as const)('chart input %s', (locale) => {
   beforeEach(() => setLocale(locale));
   it('uses one plot tab stop, bucket/tick jumps, series keys, pin, Escape and range keys', async () => {
     const onRange = vi.fn();
-    await act(async () => root.render(<Chart data={data()} onRange={onRange} />));
+    const onPage = vi.fn();
+    await act(async () => root.render(<Chart data={data()} onRange={onRange} onPage={onPage} />));
     expect(container.querySelectorAll('.chart-plot[tabindex="0"]')).toHaveLength(1);
     await key('Home');
     expect(container.querySelector('[aria-live]')!.textContent).toContain('0 %');
@@ -80,6 +81,15 @@ describe.each(['en', 'zh-CN'] as const)('chart input %s', (locale) => {
     await key('1', { isComposing: true });
     await key('2', { ctrlKey: true });
     expect(onRange).toHaveBeenCalledTimes(3);
+    plot().focus();
+    await key('[');
+    await key(']');
+    for (const modifier of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey', 'isComposing']) {
+      await key('[', { [modifier]: true });
+      await key(']', { [modifier]: true });
+    }
+    expect(onPage.mock.calls).toEqual([[-1], [1]]);
+    expect(document.activeElement).toBe(plot());
     const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
     plot().dispatchEvent(tab);
     expect(tab.defaultPrevented).toBe(false);
@@ -139,6 +149,12 @@ describe.each(['en', 'zh-CN'] as const)('chart input %s', (locale) => {
       container.querySelector<HTMLButtonElement>('button[aria-pressed]')!.click(),
     );
     expect(container.querySelectorAll('tbody tr')).toHaveLength(24);
+    expect(container.querySelector('tbody td:nth-child(2) .sub')!.textContent).toBe(
+      t('chart.statistics', { min: '0 %', mean: '0 %', max: '0 %', samples: 1, expected: 1 }),
+    );
+    for (const button of container.querySelectorAll('.chart-pages button')) {
+      expect(button.getAttribute('type')).toBe('button');
+    }
     expect(container.querySelector('tbody td:nth-child(2)')!.textContent).toContain('%');
     expect(container.querySelector('tbody td:nth-child(3)')!.textContent).toContain(
       t('chart.gpuUnit'),
@@ -225,3 +241,41 @@ it('exposes the full local time and zone through the readout Time disclosure', a
     container.querySelector('.chart-readout button[aria-expanded]')!.getAttribute('aria-expanded'),
   ).toBe('true');
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'keeps short readouts compact and labels live/empty states in %s',
+  async (locale) => {
+    setLocale(locale);
+    const value = data();
+    await act(async () => root.render(<Chart data={value} />));
+    expect(readout()).not.toContain(
+      t('chart.statistics', { min: '47 %', mean: '47 %', max: '47 %', samples: 1, expected: 1 }),
+    );
+    expect(container.querySelector('.chart-ticks')!.lastElementChild!.textContent).toBe(
+      t('chart.now'),
+    );
+    expect(container.querySelectorAll('.bucket-now')).toHaveLength(2);
+    const aggregated = structuredClone(value);
+    aggregated.bucket_seconds = 3600;
+    await act(async () => root.render(<Chart data={aggregated} />));
+    expect(readout()).toContain(
+      t('chart.statistics', { min: '47 %', mean: '47 %', max: '47 %', samples: 1, expected: 1 }),
+    );
+    const multiple = structuredClone(value);
+    multiple.series[0].buckets[47].samples = 2;
+    await act(async () => root.render(<Chart data={multiple} />));
+    expect(readout()).toContain(
+      t('chart.statistics', { min: '47 %', mean: '47 %', max: '47 %', samples: 2, expected: 1 }),
+    );
+    const historical = { ...value, as_of: '2026-01-16T16:00:00Z' };
+    await act(async () => root.render(<Chart data={historical} />));
+    const ticks = container.querySelector('.chart-ticks')!;
+    expect(ticks.firstElementChild!.textContent).not.toBe(ticks.lastElementChild!.textContent);
+    expect(container.querySelector('.bucket-now')).toBeNull();
+    const empty = chartFixture([]);
+    await act(async () => root.render(<Chart data={empty} />));
+    expect(container.querySelector('.chart-empty')!.textContent).toBe(t('chart.noLastSample'));
+    await act(async () => root.render(<Chart data={{ ...empty, last_sample: value.start }} />));
+    expect(container.querySelector('.chart-empty')!.textContent).toContain(t('chart.lastSample'));
+  },
+);

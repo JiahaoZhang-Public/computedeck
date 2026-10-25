@@ -1037,7 +1037,12 @@ extrema. `samples` counts numeric observations. Expected samples sum the configu
 collection rates, rounded up for the bin; this is informational and never makes a bin
 partial or a lower bound. Source counts and intervals are recorded at collection time;
 older records return null coverage/expected counts. Aggregate known count is the minimum
-and total count the maximum observed in the bin.
+and total count the maximum observed in the bin. Utilization coverage counts subjects
+with running GPU jobs or instances (`gpu_count > 0`), plus subjects whose allocation
+is unknown at collection time, because whether they had GPU work is also unknown.
+Linked `same_node` instances do not count twice. Fresh idle and CPU-only sources do
+not imply missing utilization samples.
+Allocation coverage still includes all enabled sources and monitored manual machines.
 
 An empty bin holds the most recent observation from an earlier bin or preceding row
 when its age **at the bin's start** is less than twice the fastest recorded interval
@@ -1054,15 +1059,24 @@ Allocation is a lower bound only if some contributing sample (or held observatio
 has a null allocation with a known subtotal, a positive unknown-allocation-source count,
 or recorded allocation coverage known < total. Partial means that lower-bound condition,
 a sample with an unknown value, or recorded known < total for that metric. A measured
-utilisation mean is never an allocation lower bound. A five-of-six complete sample hour
+utilization mean is never an allocation lower bound. A five-of-six complete sample hour
 is exact; scheduler drift is not missing source coverage.
 
 Only lower-bound lines are dashed. Hatches mark merged missing-data bands, whose reasons
 stay in the readout/table. Other partial coverage is labelled in text. Longer ranges show
 min/max bands, not uncertainty or forecasts. Compact local labels have full time/zone
 disclosures. The server summary includes held readings in the bucket means and extrema,
-and reports gap duration and partial count. `last_sample` includes the most recent retained
-observation before an empty window. Tables and schema versions are unchanged.
+and reports contiguous gap runs, their total duration and the partial bucket count.
+`last_sample` includes the most recent retained observation before an empty window. Tables and schema versions are unchanged.
+
+Chart summaries return null `mean`, `min` and `max` when no value is known. Otherwise
+all three use one decimal place (rounded down for bounds). Summary `lower_bound` is
+true when any contributing allocation bucket is a bound; it applies to all three
+statistics. Utilization summaries never imply a lower bound. The UI attaches units
+to each figure and formats gap `minutes` as prose duration. Unsupported UTC `end`
+conversions or windows return 422 with `chart_end_invalid` in both live and example mode.
+The sample count includes an observation exactly at the final end; the expected count
+is a cadence estimate, not a maximum.
 
 ### 图表分桶
 
@@ -1076,7 +1090,10 @@ observation before an empty window. Tables and schema versions are unchanged.
 不完整/下界标记、缺失原因、“截至目前”及 `held_from`。有新样本时只对已知值求均值。
 预期样本数由配置频率乘区间长度后向上取整，仅供参考，不能导致不完整或下界标记。
 覆盖数及周期在采集时记录；旧记录缺失部分返回 null。聚合覆盖数取已知源最小值和
-全部源最大值。
+全部源最大值。利用率覆盖统计有运行中 GPU 作业或实例（`gpu_count > 0`）的来源，
+也将采集时分配量未知的对象计入总数，因为无法确定它们是否有 GPU 工作。
+不重复计入 `same_node` 实例；数据新鲜的空闲或纯 CPU 来源不意味着利用率采样缺失。
+分配量覆盖仍包含所有启用来源及开启监测的手动机器。
 
 空区间在**起点**距最近观测未满最快记录周期的两倍时，沿用前一区间或窗口前记录的
 读数；无周期记录时使用 `HOLD_SECONDS`（1800 秒）。均值、最小值、最大值均为该读数，
@@ -1093,26 +1110,11 @@ observation before an empty window. Tables and schema versions are unchanged.
 
 虚线仅表示下界，斜线仅表示合并缺失区间，原因保留在读数和表格中。其余不完整情况
 使用文字说明。长范围色带是最小/最大值，不是置信区间或预测。紧凑本地时间可展开完整
-时间及时区。服务端摘要的区间均值和极值包含沿用读数，并报告缺失时长和不完整数量。
+时间及时区。服务端摘要的区间均值和极值包含沿用读数，并报告连续缺失段数、总缺失时长和不完整区间数。
 `last_sample` 保留空窗口前最近观测。数据库表和版本不变。
 
-Chart summaries return null `mean`, `min` and `max` when no value is known. Otherwise
-all three use one decimal place (rounded down for bounds). Summary `lower_bound` is
-true when any contributing allocation bucket is a bound; it applies to all three
-statistics. Utilisation summaries never imply a lower bound. The UI attaches units
-to each figure and formats gap `minutes` as prose duration. Unsupported UTC `end`
-conversions or windows return 422 with `chart_end_invalid` in both live and example mode.
-The sample count includes an observation exactly at the final end; the expected count
-is a cadence estimate, not a maximum.
-
-中文：摘要在无已知值时将 `mean`、`min`、`max` 返回 null，否则统一保留一位小数，
+摘要在无已知值时将 `mean`、`min`、`max` 返回 null，否则统一保留一位小数，
 下界向下取整。任一贡献分配区间为下界时，摘要 `lower_bound` 为 true，适用于三个
 统计值；利用率摘要不标下界。界面每个数值紧跟单位，将间隙 `minutes` 转为文字时长。
 实时和示例模式中，超出 UTC 日期范围的 `end` 转换或窗口返回 422 / `chart_end_invalid`。
 样本数包含恰好位于最终终点的观测；预计样本数为频率估算，不是上限。
-
-Follow-ups: P4 aligns day buckets to local dates. Q2 should assess an additive
-`points=0` option for chart-only refreshes, which still return the legacy points array.
-
-后续：P4 将日区间对齐本地日期；Q2 评估新增 `points=0` 选项，减少仅刷新图表时仍返回
-旧 `points` 数组的负担。

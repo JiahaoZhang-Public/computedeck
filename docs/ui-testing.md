@@ -728,3 +728,32 @@ Python 覆盖原始未抽稀分桶、边界、未知与零、极值均值、覆�
 
 P4 负责每日 GPU 小时/费用明细和预测文案调整，P1 负责 Overview 接入；U2 将图表焦点
 键位纳入共享注册表。图表交互不会写入集群或云端。
+
+### F8 review corrections
+
+Regression tests cover idle/CPU-only/linked-instance utilization exclusions and unknown
+allocation subjects (a failing source and an unreachable monitored manual machine)
+remaining in the utilization total, contiguous gap runs, demo source counts/cadence,
+`[` / `]` paging with retained plot focus and the live no-op, compact readouts, live/dated
+edge ticks, and labelled empty states. Activity tests
+cover valid, invalid, reversed and equal intervals, range-chip replacement, both Clear
+controls and filtered empty wording in English and Chinese. The Playwright chart checks
+also assert that coarse-pointer hints remain described but are visually hidden.
+
+The additional week-total request has neither `chart=1` nor `end`.
+Follow-ups remain P4 local-date day buckets and Q2 evaluation of an additive `points=0`
+option for chart-only refreshes, which still return the legacy points array.
+Usage and `chart-*.png` baselines change for the live “Now” tick, dashed now rule,
+dated edge ticks, compact 24 h readouts, keyboard hints hidden on coarse pointers,
+and example coverage/cadence at 375, 900 and 1280 px in the existing locale/theme matrix.
+Other baselines stay unchanged. Linux baselines still come only from CI.
+
+中文：回归测试覆盖空闲/纯 CPU/同节点来源不计入利用率总数，以及分配量未知的对象
+（故障来源、无法连接的受监测手动机器）仍计入利用率总数、连续缺失段、示例来源数及
+周期、`[` / `]` 翻页保留图表焦点和最新窗口无操作、紧凑读数、现在/日期端点、带标签
+空状态。动态测试覆盖有效/无效/倒序/相等时段、范围切换、两个清除入口及双语筛选空状态。
+浏览器用例另查粗指针提示视觉隐藏且保留无障碍描述。额外周汇总请求不带 `chart=1` 或
+`end`。后续仍为 P4 本地日期日区间、Q2 评估 `points=0`。Usage 与 `chart-*.png` 基线
+因实时“现在”刻度、现在虚线、带日期的边缘刻度、紧凑的 24 小时读数、粗指针下隐藏
+键位提示、示例覆盖数及采集周期而变化，覆盖既有 375、900、1280 像素及语言/主题矩阵。
+其余基线保持不变，Linux 基线仅来自 CI。

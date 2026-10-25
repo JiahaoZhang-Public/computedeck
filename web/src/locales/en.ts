@@ -465,11 +465,12 @@ const en = {
   'chart.interval': 'Time interval',
   'chart.previous': 'Previous',
   'chart.next': 'Next',
+  'chart.now': 'Now',
   'chart.latest': 'Latest',
   'chart.activity': 'See in Activity',
   'chart.kind': 'chart',
   'chart.keys':
-    '←/→: one bucket; Shift: ten; Page Up/Down: hour or day; Home/End: first/last; ↑/↓: series; Enter: pin; Esc: clear; 1/2/3: 24 h/7 d/30 d.',
+    '←/→: one bucket; Shift: ten; Page Up/Down: hour or day; Home/End: first/last; ↑/↓: series; Enter: pin; Esc: clear; [/]: previous/next period; 1/2/3: 24 h/7 d/30 d.',
   'chart.legend':
     'Hatch: no data. Dashed line and ≥: allocation lower bound. Partial coverage is labelled in the reading. Band: min–max. No projection.',
   'chart.noLastSample': 'No sample in this range',
@@ -480,8 +481,8 @@ const en = {
   'msg.chart_not_collecting': 'No data · collection overdue',
   'msg.chart_unknown': 'Collected; value unknown',
   'msg.chart_summary':
-    'Observed bucket mean {mean} (min {min}, max {max}); {gaps} empty buckets ({duration}); {partial} partial buckets.',
-  'msg.chart_empty_summary': 'No measured values; {gaps} empty buckets ({duration}).',
+    'Observed bucket mean {mean} (min {min}, max {max}); gaps: {gaps} ({duration}); partial buckets: {partial}.',
+  'msg.chart_empty_summary': 'No measured values; gaps: {gaps} ({duration}).',
   'chart.aria': 'GPU utilization and GPUs in use over time',
   'chart.utilization': 'GPU utilization',
   'chart.allocated': 'GPUs in use',

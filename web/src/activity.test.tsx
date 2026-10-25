@@ -541,3 +541,66 @@ it.each(['en', 'zh-CN'] as const)(
     }
   },
 );
+
+it.each(['en', 'zh-CN'] as const)(
+  'uses and clears exact Activity intervals in %s',
+  async (language) => {
+    setLocale(language);
+    request.mockResolvedValue([]);
+    const from = '2026-10-21T10:00:00Z',
+      to = '2026-10-21T10:05:00Z';
+    await act(async () => setRouteParams({ from, to, range: '30d' }));
+    await render(<ActivityPage ctx={context()} />);
+    const params = () => new URLSearchParams(request.mock.calls.at(-1)![0].split('?')[1]);
+    expect(params().get('since')).toBe(from);
+    expect(params().get('until')).toBe(to);
+    expect(params().has('range')).toBe(false);
+    expect(container.textContent).toContain(t('activity.filtered'));
+    for (const key of ['activity.range.24h', 'activity.range.7d', 'activity.range.30d'] as const) {
+      const chip = [...container.querySelectorAll('button')].find((b) => b.textContent === t(key))!;
+      expect(chip.getAttribute('aria-selected')).toBe('false');
+    }
+    await click(t('activity.range.7d'));
+    expect(window.location.hash).not.toMatch(/from=|to=/);
+    expect(params().get('range')).toBe('7d');
+    expect(params().has('since')).toBe(false);
+    expect(params().has('until')).toBe(false);
+    await act(async () => setRouteParams({ from, to, range: '30d' }));
+    await click(t('activity.range.24h'));
+    expect(window.location.hash).toBe('#/activity');
+    expect(params().get('range')).toBe('24h');
+    expect(params().has('since')).toBe(false);
+    expect(params().has('until')).toBe(false);
+    for (const index of [0, 1]) {
+      await act(async () => setRouteParams({ from, to, range: null }));
+      const clear = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === t('activity.clear'),
+      );
+      expect(clear).toHaveLength(2);
+      expect(container.textContent).toContain(t('activity.filtered'));
+      await act(async () => clear[index].click());
+      expect(window.location.hash).toBe('#/activity');
+      expect(params().get('range')).toBe('24h');
+      expect(params().has('since')).toBe(false);
+      expect(params().has('until')).toBe(false);
+    }
+  },
+);
+
+it.each([
+  ['invalid', '2026-10-21T10:05:00Z'],
+  ['2026-10-21T10:00:00Z', 'invalid'],
+  ['2026-10-21T10:05:00Z', '2026-10-21T10:00:00Z'],
+  ['2026-10-21T10:00:00Z', '2026-10-21T10:00:00Z'],
+  ['', '2026-10-21T10:05:00Z'],
+  ['2026-10-21T10:00:00Z', ''],
+])('ignores invalid or non-increasing Activity interval %s – %s', async (from, to) => {
+  request.mockResolvedValue([]);
+  await act(async () => setRouteParams({ from, to, range: '7d' }));
+  await render(<ActivityPage ctx={context()} />);
+  const params = new URLSearchParams(request.mock.calls.at(-1)![0].split('?')[1]);
+  expect(params.get('range')).toBe('7d');
+  expect(params.has('since')).toBe(false);
+  expect(params.has('until')).toBe(false);
+  expect(container.textContent).not.toContain(t('activity.filtered'));
+});

@@ -11,7 +11,7 @@ from .drivers.aws_ec2 import parse_instances as parse_ec2_instances
 from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
-from .history import group_history
+from .history import chart_observation, group_history
 from .identity import assign_slots, group_keys
 from .low_use import low_use
 from .summary import fresh, freshness, summarize
@@ -1017,11 +1017,13 @@ def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
-    """Five-minute chart examples: an outage, unknown readings and partial coverage."""
+    """Chart examples at the demo sources' cadence, including missing/partial data."""
     current = now()
+    coverage = chart_observation(dashboard(), current=current)
+    cadence = int(min(coverage["intervals"]))
     points = []
-    for age in range(hours * 12, -1, -1):
-        at = end - timedelta(minutes=age * 5)
+    for age in range(hours * 3600 // cadence, -1, -1):
+        at = end - timedelta(seconds=age * cadence)
         ago = (current - at).total_seconds() / 3600
         if 10 < ago < 12 or ago > 240:
             continue
@@ -1036,9 +1038,14 @@ def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
                 "unknown_allocation_sources": 1 if partial else 0,
                 "gpu_utilization": None if unknown else round(60 + 20 * math.sin(ago), 1),
                 "chart_coverage": {
-                    "allocation": {"known": 2 if partial else 3, "total": 3},
-                    "utilization": {"known": 2, "total": 3},
-                    "intervals": [900, 900, 900],
+                    **{
+                        metric: {
+                            "known": 0 if unknown else coverage[metric]["total"] - int(partial),
+                            "total": coverage[metric]["total"],
+                        }
+                        for metric in ("allocation", "utilization")
+                    },
+                    "intervals": coverage["intervals"],
                 },
             }
         )

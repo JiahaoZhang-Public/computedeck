@@ -20,10 +20,12 @@ import './chart.css';
 export function Chart({
   data,
   onRange,
+  onPage,
   controls,
 }: {
   data: ChartData;
   onRange?: (range: string) => void;
+  onPage?: (direction: -1 | 1) => void;
   controls?: ReactNode;
 }) {
   const id = useId();
@@ -106,6 +108,11 @@ export function Chart({
         setPinned(false);
         setAnnouncement('');
         break;
+      case '[':
+      case ']':
+        if (!onPage || event.shiftKey) return;
+        onPage(event.key === '[' ? -1 : 1);
+        break;
       case '1':
       case '2':
       case '3':
@@ -161,8 +168,9 @@ export function Chart({
       </div>
       {!data.series.some((series) => series.buckets.some((bucket) => bucket.value !== null)) && (
         <p className="chart-empty">
-          {t('chart.empty')} ·{' '}
-          {data.last_sample ? compactTime(data.last_sample) : t('chart.noLastSample')}
+          {data.last_sample
+            ? `${t('chart.empty')} · ${t('chart.lastSample')} ${compactTime(data.last_sample)}`
+            : t('chart.noLastSample')}
         </p>
       )}
       <div className="chart-readout" data-pinned={isPinned}>
@@ -182,15 +190,16 @@ export function Chart({
                 {seriesLabel(series)} ·{' '}
                 {t(series.id === 'utilization' ? 'chart.measuredScope' : 'chart.mineScope')} ·{' '}
                 {reading(series.buckets[index], series.id)}
-                {series.buckets[index].value !== null && (
-                  <span> · {statistics(series.buckets[index], series.id)}</span>
-                )}
+                {series.buckets[index].value !== null &&
+                  (data.bucket_seconds > 300 || series.buckets[index].samples > 1) && (
+                    <span> · {statistics(series.buckets[index], series.id)}</span>
+                  )}
               </div>
             ))}
             {isPinned && (
               <a
                 className="link"
-                href={`#/activity?range=30d&from=${encodeURIComponent(active.start)}&to=${encodeURIComponent(active.end)}`}
+                href={`#/activity?from=${encodeURIComponent(active.start)}&to=${encodeURIComponent(active.end)}`}
               >
                 {t('chart.activity')}
               </a>
@@ -234,7 +243,12 @@ export function Chart({
             </table>
           </div>
           <div className="chart-pages">
-            <button className="button" disabled={page === 0} onClick={() => setTablePage(page - 1)}>
+            <button
+              type="button"
+              className="button"
+              disabled={page === 0}
+              onClick={() => setTablePage(page - 1)}
+            >
               {t('chart.previous')}
             </button>
             <span>
@@ -242,6 +256,7 @@ export function Chart({
             </span>
             <button
               className="button"
+              type="button"
               disabled={page + 1 >= pageCount}
               onClick={() => setTablePage(page + 1)}
             >
@@ -251,7 +266,7 @@ export function Chart({
         </>
       ) : (
         <>
-          <p id={`${id}-keys`} className="sub">
+          <p id={`${id}-keys`} className="sub chart-keys">
             {t('chart.keys')}
           </p>
           <div
@@ -425,7 +440,7 @@ export function Chart({
                       );
                     })}
                     {data.end === data.as_of && (
-                      <line className="bucket-cursor" x1={width - 8} x2={width - 8} y1="0" y2={H} />
+                      <line className="bucket-now" x1={width - 8} x2={width - 8} y1="0" y2={H} />
                     )}
                     {active && (
                       <line className="bucket-cursor" x1={x(index)} x2={x(index)} y1="0" y2={H} />
@@ -486,9 +501,11 @@ export function Chart({
                 data.end,
               ].map((at) => (
                 <span key={at}>
-                  {data.bucket_seconds === 300
-                    ? clockTime(Date.parse(at))
-                    : formatDate(new Date(at), { month: 'short', day: 'numeric' })}
+                  {at === data.end && data.end === data.as_of
+                    ? t('chart.now')
+                    : data.bucket_seconds === 300
+                      ? `${at === data.start || at === data.end ? `${formatDate(new Date(at), { month: 'short', day: 'numeric' })} · ` : ''}${clockTime(Date.parse(at))}`
+                      : formatDate(new Date(at), { month: 'short', day: 'numeric' })}
                 </span>
               ))}
             </div>

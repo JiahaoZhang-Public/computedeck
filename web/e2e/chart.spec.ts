@@ -3,13 +3,22 @@ import { test, expect, ready } from './fixtures';
 import { withScreenshotViewport } from './screenshots';
 
 for (const forcedColors of ['none', 'active'] as const) {
-  test(`chart kit keyboard, pin and table ${forcedColors}`, async ({ page, locale }, testInfo) => {
+  test(`chart kit keyboard, pin and table ${forcedColors}`, async ({
+    page,
+    locale,
+    hasTouch,
+  }, testInfo) => {
     await page.emulateMedia({ forcedColors });
     await page.goto('/?demo=true#/usage');
     await ready(page);
     const chart = page.locator('.chart-kit');
     const plot = chart.locator('.chart-plot');
     await expect(plot).toHaveCSS('touch-action', 'pan-y');
+    await expect(chart.locator('.chart-keys')).toHaveCSS(
+      'position',
+      hasTouch ? 'absolute' : 'static',
+    );
+    await expect(plot).toHaveAttribute('aria-describedby', /keys/);
     await expect(chart.locator('.chart-multiple')).toHaveCount(2);
     await expect(
       chart.getByRole('button', {
@@ -114,7 +123,35 @@ test('chart tap pins and opens the exact Activity interval', async ({ page, hasT
 test('chart range keys and previous/next windows use server buckets', async ({ page, locale }) => {
   await page.goto('/?demo=true#/usage');
   await ready(page);
-  await page.locator('.chart-plot').press('2');
+  const plot = page.locator('.chart-plot');
+  await plot.focus();
+  const liveUrl = page.url();
+  await plot.press(']');
+  expect(page.url()).toBe(liveUrl);
+  await expect(plot).toBeFocused();
+  const back = page.waitForRequest(
+    (req) => req.url().includes('/api/history?') && new URL(req.url()).searchParams.has('end'),
+  );
+  await plot.press('[');
+  const previousEnd = new URL((await back).url()).searchParams.get('end');
+  await ready(page);
+  expect(previousEnd).toBeTruthy();
+  expect(new URLSearchParams(page.url().split('#')[1].split('?')[1]).get('end')).toBe(previousEnd);
+  await expect(plot).toBeFocused();
+  await expect(page.locator('.bucket-now')).toHaveCount(0);
+  const forward = page.waitForRequest(
+    (req) =>
+      req.url().includes('/api/history?') &&
+      new URL(req.url()).searchParams.get('chart') === '1' &&
+      !new URL(req.url()).searchParams.has('end'),
+  );
+  await plot.press(']');
+  await forward;
+  await ready(page);
+  expect(page.url()).toBe(liveUrl);
+  await expect(plot).toBeFocused();
+  await expect(page.locator('.bucket-now')).toHaveCount(2);
+  await plot.press('2');
   await ready(page);
   await expect(page).toHaveURL(/range=7d/);
   await expect(page.locator('.chart-plot')).toBeFocused();

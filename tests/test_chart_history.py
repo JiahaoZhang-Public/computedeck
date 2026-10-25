@@ -164,6 +164,7 @@ def test_new_history_coverage_excludes_old_ssh_metrics_and_counts_job_reporters(
             {
                 "id": "machine",
                 "source_id": "manual",
+                "state": "running",
                 "manual": True,
                 "monitoring": True,
                 "ssh_status": "reachable",
@@ -296,3 +297,97 @@ def test_demo_chart_starts_with_recorded_rollups(monkeypatch: pytest.MonkeyPatch
     assert points[0]["at"] == first_recorded
     assert all(p["at"] >= first_recorded for p in points)
     assert demo_chart_history(24, END - timedelta(days=11)) == []
+
+
+def test_utilization_coverage_excludes_idle_cpu_and_same_node_sources() -> None:
+    from computedeck.history import chart_observation
+
+    source = {
+        "enabled": True,
+        "interval_minutes": 5,
+        "status": "ready",
+        "capabilities": ["jobs"],
+        "last_success": END.isoformat(),
+    }
+    job = {
+        "id": "job-a",
+        "source_id": "active",
+        "state": "RUNNING",
+        "gpu_count": 2,
+        "gpu_utilization": 30,
+    }
+    data = {
+        "sources": [
+            {**source, "id": name} for name in ("active", "idle", "cpu", "linked", "stopped")
+        ],
+        "jobs": [job, {**job, "id": "cpu-job", "source_id": "cpu", "gpu_count": 0}],
+        "instances": [
+            {
+                "id": "linked-host",
+                "source_id": "linked",
+                "same_node": {"id": "node-a"},
+                "gpu_count": 8,
+                "state": "running",
+            },
+            {"id": "stopped-host", "source_id": "stopped", "gpu_count": 8, "state": "stopped"},
+        ],
+        "summary": {"unmeasured": []},
+    }
+    coverage = chart_observation(data, current=END)
+    assert coverage["allocation"] == {"known": 5, "total": 5}
+    assert coverage["utilization"] == {"known": 1, "total": 1}
+    sample = point(0)
+    sample["chart_coverage"] = coverage
+    assert chart([sample])["series"][0]["buckets"][-1]["partial"] is False
+    data["sources"].append({**source, "id": "failing", "status": "error"})
+    data["instances"].append(
+        {
+            "id": "manual-machine",
+            "source_id": "manual",
+            "manual": True,
+            "monitoring": True,
+            "ssh_status": "error",
+            "state": "unknown",
+        }
+    )
+    data["summary"]["unmeasured"] = [
+        {"subject": {"id": "failing", "kind": "source"}},
+        {"subject": {"id": "manual-machine", "kind": "instance"}},
+    ]
+    coverage = chart_observation(data, current=END)
+    assert coverage["allocation"] == {"known": 5, "total": 7}
+    assert coverage["utilization"] == {"known": 1, "total": 3}
+    sample["chart_coverage"] = coverage
+    bucket = chart([sample])["series"][0]["buckets"][-1]
+    assert (bucket["known_sources"], bucket["total_sources"]) == (1, 3)
+    assert bucket["partial"] is True
+    data["jobs"].append({**job, "id": "unmeasured", "source_id": "idle", "gpu_utilization": None})
+    assert chart_observation(data, current=END)["utilization"] == {"known": 1, "total": 4}
+
+
+def test_summary_counts_contiguous_gap_runs_and_their_duration() -> None:
+    result = chart([point(120), point(60, None), point(0)])
+    for series in result["series"]:
+        # Gaps: window start at 14:02 to 12:00 next day, then 12:35 to 14:00.
+        assert series["summary"]["gaps"] == 2
+        assert series["summary"]["minutes"] == 1318 + 85
+
+
+def test_demo_coverage_uses_dashboard_subjects_and_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
+    from computedeck.demo import dashboard
+    from computedeck.history import chart_observation
+
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", END.isoformat())
+    coverage = chart_observation(dashboard(), current=END)
+    points = demo_chart_history(24, END)
+    for metric in ("allocation", "utilization"):
+        assert all(
+            p["chart_coverage"][metric]["total"] == coverage[metric]["total"] for p in points
+        )
+    assert all(p["chart_coverage"]["intervals"] == coverage["intervals"] for p in points)
+    assert (
+        datetime.fromisoformat(points[-1]["at"]) - datetime.fromisoformat(points[-2]["at"])
+    ).total_seconds() == min(coverage["intervals"])
+    utilization = chart(points)["series"][0]["buckets"]
+    assert any(b["value"] is not None and not b["partial"] for b in utilization)
+    assert any(b["value"] is not None and b["partial"] for b in utilization)

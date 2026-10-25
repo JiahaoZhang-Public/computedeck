@@ -301,7 +301,7 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
   const category = categories.includes(requestedCategory as (typeof categories)[number])
     ? requestedCategory
     : '';
-  const [requestedRange, setRange] = useRouteParam('range', '24h');
+  const [requestedRange] = useRouteParam('range', '24h');
   const range = ['24h', '7d', '30d'].includes(requestedRange) ? requestedRange : '24h';
   const { query } = ctx;
   const [job] = useRouteParam('job_filter');
@@ -359,11 +359,10 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
           />
           <Chips
             label={t('activity.range')}
-            value={range}
-            onChange={(value) => {
-              setRange(value);
-              setRouteParams({ from: null, to: null });
-            }}
+            value={windowed ? '' : range}
+            onChange={(range) =>
+              setRouteParams({ range: range === '24h' ? null : range, from: null, to: null })
+            }
             options={['24h', '7d', '30d'].map((value) => ({
               value,
               label: t(`activity.range.${value}` as MessageKey),

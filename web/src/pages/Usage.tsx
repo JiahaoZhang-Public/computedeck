@@ -275,6 +275,13 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
       });
     return invalidateRequests;
   }, [hours, ctx.demo, latest, retry, chartRequest, invalidateRequests]);
+  function pageWindow(direction: -1 | 1, fromButton = false) {
+    if (!result?.chart || (direction === 1 && !end)) return;
+    const next = Date.parse(result.chart.end) + hours * HOUR;
+    const latest = direction === 1 && next >= Date.parse(result.chart.as_of);
+    if (latest && fromButton) previousButton.current?.focus();
+    setEnd(direction === -1 ? result.chart.start : latest ? '' : new Date(next).toISOString());
+  }
   const failure = failed && (
     <Empty
       title={`${t('chart.failed')} · ${errorText(failed.reason, 'chart.failed')} · ${absoluteTime(failed.at)}`}
@@ -313,7 +320,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
                   count: hours === 24 ? hours : hours / 24,
                 })}
                 ref={previousButton}
-                onClick={() => setEnd(result.chart!.start)}
+                onClick={() => pageWindow(-1)}
               >
                 {t(hours === 24 ? 'chart.previousHours' : 'chart.previousDays', {
                   count: hours === 24 ? hours : hours / 24,
@@ -326,13 +333,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
                   count: hours === 24 ? hours : hours / 24,
                 })}
                 disabled={!end}
-                onClick={() => {
-                  const next = Date.parse(result.chart!.end) + hours * HOUR;
-                  if (next >= Date.parse(result.chart!.as_of)) previousButton.current?.focus();
-                  setEnd(
-                    next >= Date.parse(result.chart!.as_of) ? '' : new Date(next).toISOString(),
-                  );
-                }}
+                onClick={() => pageWindow(1, true)}
               >
                 {t(hours === 24 ? 'chart.nextHours' : 'chart.nextDays', {
                   count: hours === 24 ? hours : hours / 24,
@@ -354,6 +355,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
           )
         }
         data={result.chart}
+        onPage={pageWindow}
         onRange={(range) => setRouteParams({ range, end: null })}
         note={ctx.demo ? t('usage.demo') : t('usage.historyNote', { where: where(ctx) })}
       />

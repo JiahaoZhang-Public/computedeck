@@ -512,8 +512,7 @@ only the trend; the existing usage totals and daily breakdown retain their relat
 The shared minute clock checks for a new chart bucket while the current live window is
 visible (5 minutes, 1 hour or 1 day). At that boundary, only the chart is requested,
 without rollups or a second week request. A new history point still refreshes the usual
-history and rollups. The additional week-total request has neither `chart=1` nor `end`.
-Example and historical windows stay fixed. Failed requests keep
+history and rollups. Example and historical windows stay fixed. Failed requests keep
 the last data alongside their error reason and time.
 
 Between collections, a bin holds the last observation while it is younger than twice
@@ -534,19 +533,25 @@ Unpinned Escape remains available to a containing layer. The readout stays above
 plots and can be copied. Times are compact and local, with dates when needed; the
 readout's start time and last-sample time disclose the full date, time and zone.
 The Activity link opens the exact interval (`from` inclusive, `to` exclusive).
-Activity's range chips replace it with the usual relative range. Charts allow vertical
-page scrolling; there is no brush, pinch, pan or scrub.
+Activity's range chips replace it with the usual relative range; none is selected during
+an exact interval. Charts allow vertical page scrolling; there is no brush, pinch, pan or scrub.
 
 Tab focuses the plot stack once. Left/Right move one bucket (Shift moves ten),
 Page Up/Down move an hour in the 24 h range or a day in longer ranges, Home/End reach
 the first/last bucket, and Up/Down choose a series. Enter pins; 1/2/3 select the range
-while the plot has focus. Range loading retains the plot and its focus with `aria-busy`;
-Next at the latest window and Latest return focus to Previous. Table view shows the same values, held readings, coverage,
+while the plot has focus. `[` / `]` page to the previous/next period, keeping plot focus;
+`]` does nothing at the latest window. Keyboard hints are visually hidden on touch devices.
+Range loading retains the plot and its focus with `aria-busy`. Clicking Next to reach
+the latest window or clicking Latest returns focus to Previous. Table view shows the
+same values, held readings, coverage,
 bounds and reasons in pages of 24 buckets. Missing historical coverage remains unknown.
 Readings and statistics place % or GPUs beside each value, and gap durations use prose
 hours/minutes. Empty explanations precede the plots. Contiguous exact/lower-bound readings
 remain connected; an isolated lower-bound point has a hollow ring marker and ≥.
-Example charts share the ten-day recorded span of the daily breakdown.
+Readout statistics appear only for longer buckets or multiple samples; the table always
+keeps them. The live right edge says “Now” with a muted dashed rule; historical edges
+include dates. Example charts share the ten-day recorded span of the daily breakdown,
+with subject counts and collection cadence derived from the example sources.
 
 ### 历史图表
 
@@ -556,7 +561,7 @@ Example charts share the ten-day recorded span of the daily breakdown.
 
 当前实时图表可见时，共享分钟时钟检查是否跨入新区间（5 分钟、1 小时或 1 天）。
 跨界后仅请求图表，不请求汇总或额外的周数据。出现新历史点时仍按原流程刷新历史和
-汇总；额外的周总计请求不包含 `chart=1` 或 `end`。示例及历史窗口固定。请求失败保留上次数据，同时显示原因和失败时间。
+汇总。示例及历史窗口固定。请求失败保留上次数据，同时显示原因和失败时间。
 
 两次采集之间，区间起点距最近观测未满记录中最快采集周期的两倍时，沿用最近读数；
 无周期的旧记录使用 30 分钟。沿用区间标注“沿用……的读数 · 最近样本”，新样本数为零。
@@ -570,12 +575,15 @@ Example charts share the ten-day recorded span of the daily breakdown.
 点击或轻触固定读数，再次点击或 Escape 取消；未固定时 Escape 继续传递给外层。
 读数在图上方，可复制。时间使用紧凑的本地格式，需要时显示日期；起始时间和最近采集
 时间可展开完整时间及其时区。动态链接使用 `from`（含）至 `to`（不含）的精确时段，
-动态范围按钮清除该时段。图上允许纵向滚动，不提供框选、缩放、平移或滑动取值。
+精确时段内不选中相对范围按钮，点击范围按钮会清除该时段。图上允许纵向滚动，不提供框选、缩放、平移或滑动取值。
 
 图表仅有一个 Tab 焦点：左右移动一个区间，Shift 移动十个；Page Up/Down 移动一小时
-或一天；Home/End 到首尾；上下切换序列；Enter 固定；1/2/3 切换范围。表格每页展示
+或一天；Home/End 到首尾；上下切换序列；Enter 固定；1/2/3 切换范围；
+`[` / `]` 前后翻页且保留图表焦点，最新窗口中 `]` 无操作。触摸设备隐藏键位提示。表格每页展示
 24 个相同区间及其沿用读数、下界、覆盖数和缺失原因。旧记录缺失的覆盖数保持未知。
 切换范围时保留图表及焦点，以 `aria-busy` 标记加载；“最新”或到达当前窗口的“后”按钮
 将焦点移到“前”按钮。读数及统计的单位紧随数值，间隙时长使用小时/分钟文字格式。
 空状态原因置于图前；相邻精确值与下界保持连接，孤立下界使用空心圆环标记及 ≥。
-示例图表与每日明细共用最近十天的已记录时段。
+长区间或多样本读数显示统计，表格始终保留统计。实时右端标“现在”，使用弱化的虚线；
+历史端点显示日期。示例图表与每日明细共用最近十天的已记录时段，覆盖数及采集周期
+由示例来源推导。

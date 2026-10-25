@@ -4,6 +4,7 @@ import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .drivers.cloud import instance_lifecycle
 from .summary import PROBE_INTERVAL, RUNNING, fresh, ssh_sampled_at
 
 HOLD_SECONDS = 1800
@@ -101,7 +102,7 @@ def rollup_history(
     return {"start": start.isoformat(), "end": end.isoformat(), "buckets": list(buckets.values())}
 
 
-def chart_observation(data: dict[str, Any]) -> dict[str, Any]:
+def chart_observation(data: dict[str, Any], *, current: datetime | None = None) -> dict[str, Any]:
     """Coverage at collection time, not inferred later from today's configuration."""
     sources = {s["id"]: s for s in data["sources"] if s["enabled"]}
     manuals = {i["id"]: i for i in data["instances"] if i.get("manual") and i.get("monitoring")}
@@ -111,20 +112,30 @@ def chart_observation(data: dict[str, Any]) -> dict[str, Any]:
         owners.get(entry["subject"]["id"], entry["subject"]["id"])
         for entry in data["summary"]["unmeasured"]
     }
-    current = datetime.now(UTC)
-    sampled = [
+    current = current or datetime.now(UTC)
+    running_jobs = [
         j
         for j in data["jobs"]
         if j.get("state", "").upper() in RUNNING
         and j["source_id"] in sources
-        and fresh(sources[j["source_id"]], "jobs")
-    ] + [
+        and (j.get("gpu_count") or 0) > 0
+    ]
+    running_instances = [
         i
         for i in data["instances"]
         if not i.get("same_node")
         and (not i.get("manual") or i.get("monitoring"))
         and (i.get("manual") or i["source_id"] in sources)
-        and i.get("ssh_status") == "reachable"
+        and instance_lifecycle(i.get("state")) == "held"
+        and (i.get("gpu_count") or 0) > 0
+    ]
+    utilization_subjects = {
+        owners.get(i["id"], i["source_id"]) for i in running_jobs + running_instances
+    } | unknown
+    sampled = [j for j in running_jobs if fresh(sources[j["source_id"]], "jobs")] + [
+        i
+        for i in running_instances
+        if i.get("ssh_status") == "reachable"
         and (at := ssh_sampled_at(i))
         and (current - datetime.fromisoformat(at)).total_seconds() < 720
     ]
@@ -136,7 +147,7 @@ def chart_observation(data: dict[str, Any]) -> dict[str, Any]:
     }
     return {
         "allocation": {"known": len(subjects - unknown), "total": len(subjects)},
-        "utilization": {"known": len(subjects & measured), "total": len(subjects)},
+        "utilization": {"known": len(measured), "total": len(utilization_subjects)},
         "intervals": [s["interval_minutes"] * 60 for s in sources.values()]
         + [PROBE_INTERVAL.total_seconds() for _ in manuals],
     }
@@ -263,7 +274,10 @@ def chart_history(
                     if bucket_values
                     else None,
                     "lower_bound": lower_bound,
-                    "gaps": len(gaps),
+                    "gaps": sum(
+                        b["value"] is None and (i == 0 or buckets[i - 1]["value"] is not None)
+                        for i, b in enumerate(buckets)
+                    ),
                     "minutes": round(
                         sum(
                             (

@@ -122,3 +122,21 @@
   fill: currentColor;
   font-size: 12px;
 }
+
+.bucket-now {
+  stroke: var(--fg-subtle);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+@media (pointer: coarse) {
+  .chart-kit .chart-keys {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

@@ -9,6 +9,7 @@ export function HistoryPanel({
   note,
   empty,
   onRange,
+  onPage,
   controls,
   busy = false,
 }: {
@@ -18,6 +19,7 @@ export function HistoryPanel({
   controls?: ReactNode;
   empty?: string;
   onRange?: (range: string) => void;
+  onPage?: (direction: -1 | 1) => void;
 }) {
   return (
     <section className="usage-trend" aria-busy={busy}>
@@ -25,7 +27,7 @@ export function HistoryPanel({
         <h3>{t('chart.heading')}</h3>
       </header>
       {data ? (
-        <Chart data={data} onRange={onRange} controls={controls} />
+        <Chart data={data} onRange={onRange} onPage={onPage} controls={controls} />
       ) : (
         <p className="chart-empty">{empty ?? t('chart.unavailable')}</p>
       )}

@@ -448,11 +448,12 @@ const zhCN: Record<keyof typeof en, string> = {
   'chart.interval': '时间区间',
   'chart.previous': '上一段',
   'chart.next': '下一段',
+  'chart.now': '现在',
   'chart.latest': '最新',
   'chart.activity': '查看此时段动态',
   'chart.kind': '图表',
   'chart.keys':
-    '←/→：一个区间；Shift：十个；Page Up/Down：一小时或一天；Home/End：首尾；↑/↓：序列；Enter：固定；Esc：清除；1/2/3：24 小时/7 天/30 天。',
+    '←/→：一个区间；Shift：十个；Page Up/Down：一小时或一天；Home/End：首尾；↑/↓：序列；Enter：固定；Esc：清除；[/]：前/后时段；1/2/3：24 小时/7 天/30 天。',
   'chart.legend':
     '斜线：无数据。虚线和 ≥：分配量下界。覆盖不完整在读数中标注。色带：最小–最大值。不作预测。',
   'chart.noLastSample': '此时段无样本',
@@ -462,8 +463,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'msg.chart_not_collecting': '无数据 · 采集超时',
   'msg.chart_unknown': '已采集；数值未知',
   'msg.chart_summary':
-    '已观测区间均值 {mean}（最小 {min}，最大 {max}）；{gaps} 个空区间（{duration}）；{partial} 个不完整区间。',
-  'msg.chart_empty_summary': '无测量值；{gaps} 个空区间（{duration}）。',
+    '已观测区间均值 {mean}（最小 {min}，最大 {max}）；{gaps} 段缺失（{duration}）；{partial} 个不完整区间。',
+  'msg.chart_empty_summary': '无测量值；{gaps} 段缺失（{duration}）。',
   'chart.aria': 'GPU 利用率与在用 GPU 的变化',
   'chart.utilization': 'GPU 利用率',
   'chart.allocated': '在用 GPU',
