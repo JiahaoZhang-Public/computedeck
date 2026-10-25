@@ -1,7 +1,10 @@
 """Observed usage integrals. Missing collection time is never filled with zero."""
 
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from .summary import PROBE_INTERVAL, RUNNING, fresh, ssh_sampled_at
 
 HOLD_SECONDS = 1800
 
@@ -96,3 +99,184 @@ def rollup_history(
             group["gpu_partial"] |= missing
             group["spend_partial"] |= missing
     return {"start": start.isoformat(), "end": end.isoformat(), "buckets": list(buckets.values())}
+
+
+def chart_observation(data: dict[str, Any]) -> dict[str, Any]:
+    """Coverage at collection time, not inferred later from today's configuration."""
+    sources = {s["id"]: s for s in data["sources"] if s["enabled"]}
+    manuals = {i["id"]: i for i in data["instances"] if i.get("manual") and i.get("monitoring")}
+    subjects = set(sources) | set(manuals)
+    owners = {i["id"]: i["id"] if i.get("manual") else i["source_id"] for i in data["instances"]}
+    unknown = {
+        owners.get(entry["subject"]["id"], entry["subject"]["id"])
+        for entry in data["summary"]["unmeasured"]
+    }
+    current = datetime.now(UTC)
+    sampled = [
+        j
+        for j in data["jobs"]
+        if j.get("state", "").upper() in RUNNING
+        and j["source_id"] in sources
+        and fresh(sources[j["source_id"]], "jobs")
+    ] + [
+        i
+        for i in data["instances"]
+        if not i.get("same_node")
+        and (not i.get("manual") or i.get("monitoring"))
+        and (i.get("manual") or i["source_id"] in sources)
+        and i.get("ssh_status") == "reachable"
+        and (at := ssh_sampled_at(i))
+        and (current - datetime.fromisoformat(at)).total_seconds() < 720
+    ]
+    measured = {
+        owners.get(i["id"], i["source_id"])
+        for i in sampled
+        if i.get("gpu_utilization") is not None
+        and (i.get("gpu_observed_count", i.get("gpu_count")) or 0) > 0
+    }
+    return {
+        "allocation": {"known": len(subjects - unknown), "total": len(subjects)},
+        "utilization": {"known": len(subjects & measured), "total": len(subjects)},
+        "intervals": [s["interval_minutes"] * 60 for s in sources.values()]
+        + [PROBE_INTERVAL.total_seconds() for _ in manuals],
+    }
+
+
+def chart_history(
+    points: list[dict[str, Any]], hours: int, *, end: datetime, current: datetime
+) -> dict[str, Any]:
+    """Aggregate raw observations; empty bins and unknown values never become zero."""
+    seconds = 300 if hours <= 24 else 3600 if hours <= 168 else 86400
+    start = end - timedelta(hours=hours)
+    available = [p for p in points if datetime.fromisoformat(p["at"]) <= end]
+    last_sample = max((p["at"] for p in available), default=None)
+    preceding = [p for p in available if datetime.fromisoformat(p["at"]) < start]
+    previous_sample = max(preceding, key=lambda p: p["at"], default=None)
+    points = sorted(
+        (p for p in available if start <= datetime.fromisoformat(p["at"])),
+        key=lambda p: p["at"],
+    )
+    bins: list[tuple[datetime, datetime, list[dict[str, Any]]]] = []
+    cursor = start
+    index = 0
+    while cursor < end:
+        boundary = datetime.fromtimestamp((int(cursor.timestamp()) // seconds + 1) * seconds, UTC)
+        right = min(end, boundary)
+        samples = []
+        while index < len(points):
+            at = datetime.fromisoformat(points[index]["at"])
+            if at >= right and not (right == end and at == end):
+                break
+            samples.append(points[index])
+            index += 1
+        bins.append((cursor, right, samples))
+        cursor = right
+    series = []
+    for metric, field in (("utilization", "gpu_utilization"), ("allocation", "allocated_gpus")):
+        buckets: list[dict[str, Any]] = []
+        previous: dict[str, Any] | None = previous_sample
+        for left, right, samples in bins:
+            observation = samples[-1] if samples else previous
+            intervals = (observation or {}).get("chart_coverage", {}).get("intervals", [])
+            expected = (
+                max(1, math.ceil(sum((right - left).total_seconds() / n for n in intervals)))
+                if intervals
+                else None
+            )
+            threshold = 2 * min(intervals) if intervals else HOLD_SECONDS
+            held = (
+                not samples
+                and previous is not None
+                and (left - datetime.fromisoformat(previous["at"])).total_seconds() < threshold
+            )
+            readings = [previous] if held and previous is not None else samples
+            values = [
+                p.get(field)
+                if p.get(field) is not None or metric == "utilization"
+                else p.get("known_allocated_gpus")
+                for p in readings
+            ]
+            known_values = [v for v in values if v is not None]
+            coverage = [p.get("chart_coverage", {}).get(metric) for p in readings]
+            complete_coverage = bool(coverage) and all(c is not None for c in coverage)
+            known = min(c["known"] for c in coverage) if complete_coverage else None
+            total = max(c["total"] for c in coverage) if complete_coverage else None
+            missing_sources = any(c is not None and c["known"] < c["total"] for c in coverage)
+            lower_bound = metric == "allocation" and (
+                missing_sources
+                or any(
+                    (p.get("allocated_gpus") is None and p.get("known_allocated_gpus") is not None)
+                    or bool(p.get("unknown_allocation_sources", 0))
+                    for p in readings
+                )
+            )
+            partial = lower_bound or any(v is None for v in values) or missing_sources
+            reason = None
+            if not known_values:
+                reason = (
+                    "chart_unknown"
+                    if readings
+                    else "chart_not_collecting"
+                    if previous is not None
+                    else "chart_no_samples"
+                )
+            buckets.append(
+                {
+                    "start": left.isoformat(),
+                    "end": right.isoformat(),
+                    "value": sum(known_values) / len(known_values) if known_values else None,
+                    "min": min(known_values) if known_values else None,
+                    "max": max(known_values) if known_values else None,
+                    "samples": 0 if held else len(known_values),
+                    "held_from": previous["at"] if held and previous is not None else None,
+                    "expected_samples": expected,
+                    "known_sources": known,
+                    "total_sources": total,
+                    "partial": partial,
+                    "lower_bound": lower_bound,
+                    "gap_reason": {"code": reason} if reason else None,
+                    "so_far": right == current,
+                }
+            )
+            if samples:
+                previous = samples[-1]
+        bucket_values = [b["value"] for b in buckets if b["value"] is not None]
+        gaps = [b for b in buckets if b["value"] is None]
+        series.append(
+            {
+                "id": metric,
+                "buckets": buckets,
+                "summary": {
+                    "code": "chart_summary" if bucket_values else "chart_empty_summary",
+                    "mean": round(sum(bucket_values) / len(bucket_values), 1)
+                    if bucket_values
+                    else 0,
+                    "min": min(b["min"] for b in buckets if b["min"] is not None)
+                    if bucket_values
+                    else 0,
+                    "max": max(b["max"] for b in buckets if b["max"] is not None)
+                    if bucket_values
+                    else 0,
+                    "gaps": len(gaps),
+                    "minutes": round(
+                        sum(
+                            (
+                                datetime.fromisoformat(b["end"])
+                                - datetime.fromisoformat(b["start"])
+                            ).total_seconds()
+                            / 60
+                            for b in gaps
+                        )
+                    ),
+                    "partial": sum(b["partial"] for b in buckets),
+                },
+            }
+        )
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "as_of": current.isoformat(),
+        "bucket_seconds": seconds,
+        "last_sample": last_sample,
+        "series": series,
+    }

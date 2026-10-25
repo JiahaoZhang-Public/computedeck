@@ -31,10 +31,11 @@ from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolb
 from . import plugins as plugin_host
 from .collector import Collector, ProbeConflict
 from .demo import delivery_status as demo_delivery_status
+from .demo import demo_chart_history
 from .demo import now as demo_now
 from .errors import SourceError, message
 from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
-from .history import rollup_history
+from .history import chart_history, rollup_history
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -415,7 +416,11 @@ def create_app(
 
     @app.get("/api/history")
     async def history(
-        hours: int = Query(default=24, ge=1, le=720), demo: bool = False, rollup: bool = False
+        hours: int = Query(default=24, ge=1, le=720),
+        demo: bool = False,
+        rollup: bool = False,
+        chart: bool = False,
+        end: datetime | None = None,
     ) -> dict[str, Any]:
         """Chart points, with optional raw-observation rollups (up to 30 days)."""
         points = demo_history(hours) if demo else store().history(hours)
@@ -423,6 +428,16 @@ def create_app(
             "hours": hours,
             "points": [{k: v for k, v in point.items() if k != "by_group"} for point in points],
         }
+        if end is not None and end.tzinfo is None:
+            raise HTTPException(422, message("chart_end_invalid"))
+        if chart:
+            current = demo_now() if demo else datetime.now(UTC)
+            right = min(end.astimezone(UTC), current) if end else current
+            result["chart"] = (
+                chart_history(demo_chart_history(hours, right), hours, end=right, current=current)
+                if demo
+                else store().history_chart(hours, right, current)
+            )
         if rollup:
             result["rollups"] = (
                 rollup_history(points, hours, end=datetime.fromisoformat(points[-1]["at"]))
@@ -897,6 +912,7 @@ def create_app(
         job: str | None = None,
         range: Literal["24h", "7d", "30d"] | None = None,
         since: datetime | None = None,
+        until: datetime | None = None,
         q: str | None = Query(default=None, max_length=64),
     ) -> list[dict[str, Any]]:
         def with_delivery(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -923,6 +939,11 @@ def create_app(
                 since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
             except OverflowError:
                 raise HTTPException(422, message("event_since_invalid")) from None
+        if until is not None:
+            try:
+                until = until.replace(tzinfo=until.tzinfo or UTC).astimezone(UTC)
+            except OverflowError:
+                raise HTTPException(422, message("event_until_invalid")) from None
         if range:
             current = demo_now() if demo else datetime.now(UTC)
             cutoff = current - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
@@ -934,6 +955,7 @@ def create_app(
             cluster_id=cluster_id,
             job=job,
             since=since.isoformat() if since else None,
+            until=until.isoformat() if until else None,
             q=q,
             include_changes=include_changes,
         )
@@ -960,6 +982,7 @@ def create_app(
                 cluster_id is not None,
                 job is not None,
                 since,
+                until,
                 q,
             )
         ):

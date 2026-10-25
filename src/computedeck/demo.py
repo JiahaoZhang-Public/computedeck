@@ -1014,3 +1014,32 @@ def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 statuses = ["sent"]
         result.append({**row, "delivery": statuses})
     return result
+
+
+def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
+    """Five-minute chart examples: an outage, unknown readings and partial coverage."""
+    current = now()
+    points = []
+    for age in range(hours * 12, -1, -1):
+        at = end - timedelta(minutes=age * 5)
+        ago = (current - at).total_seconds() / 3600
+        if 10 < ago < 12 or ago > 24 * 30:
+            continue
+        partial = ago < 2
+        unknown = 5 < ago < 5.5
+        value = round(16 + 4 * math.sin(at.timestamp() / 3600), 1)
+        points.append(
+            {
+                "at": at.isoformat(),
+                "allocated_gpus": None if partial or unknown else value,
+                "known_allocated_gpus": None if unknown else value,
+                "unknown_allocation_sources": 1 if partial else 0,
+                "gpu_utilization": None if unknown else round(60 + 20 * math.sin(ago), 1),
+                "chart_coverage": {
+                    "allocation": {"known": 2 if partial else 3, "total": 3},
+                    "utilization": {"known": 2, "total": 3},
+                    "intervals": [900, 900, 900],
+                },
+            }
+        )
+    return points

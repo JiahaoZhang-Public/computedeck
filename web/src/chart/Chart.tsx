@@ -1,0 +1,433 @@
+import { useEffect, useId, useRef, useState } from 'react';
+import type { PointerEvent, KeyboardEvent, ReactNode } from 'react';
+import { absoluteTime, clockTime, formatDate, number, relativeTime } from '../format';
+import { formatMessage, t } from '../i18n';
+import { ClockText } from '../data/ClockText';
+import { Time } from '../ui/Time';
+import type { ChartData } from './types';
+import { compactRange, compactTime, intervalEnd, reading, seriesLabel, statistics } from './labels';
+import { H, W, LEFT, gapBands, segments, seriesStyles, timeX, y } from './geometry';
+import './chart.css';
+
+export function Chart({
+  data,
+  onRange,
+  controls,
+}: {
+  data: ChartData;
+  onRange?: (range: string) => void;
+  controls?: ReactNode;
+}) {
+  const id = useId();
+  const pointer = useRef({ x: 0, y: 0, moved: false });
+  const hatch = `bucket-hatch-${id.replace(/[^\w-]/g, '')}`;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const [activeSeries, setActiveSeries] = useState(0);
+  const [table, setTable] = useState(false);
+  const plot = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(W);
+  useEffect(() => {
+    if (!plot.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setWidth(entry.contentRect.width);
+    });
+    observer.observe(plot.current);
+    return () => observer.disconnect();
+  }, [table]);
+  const [tablePage, setTablePage] = useState(0);
+  const [announcement, setAnnouncement] = useState('');
+  const buckets = data.series[0]?.buckets ?? [];
+  const selectedIndex = buckets.findIndex((bucket) => bucket.start === selected);
+  const index = selectedIndex < 0 ? Math.max(0, buckets.length - 1) : selectedIndex;
+  const active = buckets[index];
+  const edgeX = (at: string) =>
+    timeX(Date.parse(at), Date.parse(data.start), Date.parse(data.end), width);
+  const x = (i: number) => (edgeX(buckets[i].start) + edgeX(buckets[i].end)) / 2;
+  const isPinned = pinned && selectedIndex >= 0;
+  const styles = seriesStyles(data.series);
+  const title = t('chart.scope');
+  const summary = data.series
+    .map((series) => `${seriesLabel(series)}: ${formatMessage(series.summary)}`)
+    .join(' ');
+  function select(next: number, series = activeSeries, pin = isPinned) {
+    const i = Math.max(0, Math.min(buckets.length - 1, next));
+    if (!buckets[i]) return;
+    setSelected(buckets[i].start);
+    setActiveSeries(series);
+    setPinned(pin);
+    setAnnouncement(
+      `${absoluteTime(buckets[i].start)} · ${seriesLabel(data.series[series])} · ${reading(data.series[series].buckets[i])}`,
+    );
+  }
+  function key(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+    const step = event.shiftKey ? 10 : 1;
+    const tick = Math.max(1, (data.bucket_seconds === 300 ? 3600 : 86400) / data.bucket_seconds);
+    let next = index;
+    switch (event.key) {
+      case 'ArrowLeft':
+        next -= step;
+        break;
+      case 'ArrowRight':
+        next += step;
+        break;
+      case 'PageUp':
+        next -= tick;
+        break;
+      case 'PageDown':
+        next += tick;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = buckets.length - 1;
+        break;
+      case 'ArrowUp':
+        select(index, Math.max(0, activeSeries - 1));
+        break;
+      case 'ArrowDown':
+        select(index, Math.min(data.series.length - 1, activeSeries + 1));
+        break;
+      case 'Enter':
+        select(index, activeSeries, !isPinned);
+        break;
+      case 'Escape':
+        if (!isPinned) return;
+        setPinned(false);
+        setAnnouncement('');
+        break;
+      case '1':
+      case '2':
+      case '3':
+        if (!onRange || event.shiftKey) return;
+        onRange({ '1': '24h', '2': '7d', '3': '30d' }[event.key]);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key))
+      select(next);
+  }
+  function nearest(event: { clientX: number; currentTarget: HTMLElement }) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = ((event.clientX - rect.left) / rect.width) * width;
+    let nearest = 0;
+    buckets.forEach((_, i) => {
+      if (Math.abs(x(i) - position) < Math.abs(x(nearest) - position)) nearest = i;
+    });
+    return nearest;
+  }
+  function hover(event: PointerEvent<HTMLDivElement>) {
+    if (
+      event.buttons &&
+      Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 8
+    )
+      pointer.current.moved = true;
+    if (event.pointerType !== 'mouse' || event.buttons || isPinned || !buckets.length) return;
+    setSelected(buckets[nearest(event)].start);
+  }
+  const pageCount = Math.ceil(buckets.length / 24);
+  const page = Math.min(tablePage, Math.max(0, pageCount - 1));
+  return (
+    <section className="chart-kit" aria-label={title}>
+      <p>
+        {title} · {compactRange(data.start, data.end)}
+      </p>
+      <p id={`${id}-summary`} className="sub">
+        {summary}
+      </p>
+      <div className="chart-tools">
+        {controls}
+        <button
+          className="button"
+          type="button"
+          aria-pressed={table}
+          onClick={() => setTable(!table)}
+        >
+          {t('chart.table')}
+        </button>
+      </div>
+      <div className="chart-readout" data-pinned={isPinned}>
+        {active && (
+          <>
+            <strong>{t(isPinned ? 'chart.pinned' : 'chart.reading')}</strong>{' '}
+            <ClockText>
+              {() => (
+                <span>
+                  <Time value={active.start} /> – {intervalEnd(active.start, active.end)} ·{' '}
+                  {relativeTime(active.start)}
+                </span>
+              )}
+            </ClockText>
+            {data.series.map((series, i) => (
+              <div key={series.id} data-active={i === activeSeries}>
+                {seriesLabel(series)} ·{' '}
+                {t(series.id === 'utilization' ? 'chart.measuredScope' : 'chart.mineScope')} ·{' '}
+                {reading(series.buckets[index])}
+                {series.buckets[index].value !== null && (
+                  <span> · {statistics(series.buckets[index])}</span>
+                )}
+              </div>
+            ))}
+            {isPinned && (
+              <a
+                className="link"
+                href={`#/activity?range=30d&from=${encodeURIComponent(active.start)}&to=${encodeURIComponent(active.end)}`}
+              >
+                {t('chart.activity')}
+              </a>
+            )}
+          </>
+        )}
+      </div>
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
+      {table ? (
+        <>
+          <div className="table-wrap" tabIndex={0} role="region" aria-label={t('chart.table')}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t('chart.interval')}</th>
+                  {data.series.map((series) => (
+                    <th key={series.id}>{seriesLabel(series)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {buckets.slice(page * 24, (page + 1) * 24).map((bucket, offset) => (
+                  <tr key={bucket.start}>
+                    <td>
+                      <Time value={bucket.start} /> – {intervalEnd(bucket.start, bucket.end)}
+                    </td>
+                    {data.series.map((series) => {
+                      const b = series.buckets[page * 24 + offset];
+                      return (
+                        <td key={series.id}>
+                          {reading(b)}
+                          <span className="sub">{statistics(b)}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="chart-pages">
+            <button className="button" disabled={page === 0} onClick={() => setTablePage(page - 1)}>
+              {t('chart.previous')}
+            </button>
+            <span>
+              {page + 1} / {pageCount || 1}
+            </span>
+            <button
+              className="button"
+              disabled={page + 1 >= pageCount}
+              onClick={() => setTablePage(page + 1)}
+            >
+              {t('chart.next')}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p id={`${id}-keys`} className="sub">
+            {t('chart.keys')}
+          </p>
+          <div
+            ref={plot}
+            className="chart-plot"
+            role="group"
+            aria-roledescription={t('chart.kind')}
+            aria-label={title}
+            aria-describedby={`${id}-summary ${id}-keys`}
+            tabIndex={0}
+            onKeyDown={key}
+            onPointerDown={(event) => {
+              pointer.current = { x: event.clientX, y: event.clientY, moved: false };
+            }}
+            onPointerMove={hover}
+            onClick={(event) => {
+              if (pointer.current.moved) return;
+              select(nearest(event), activeSeries, !(isPinned && nearest(event) === index));
+            }}
+          >
+            {data.series.map((series, n) => {
+              const max =
+                series.id === 'utilization'
+                  ? 100
+                  : Math.max(1, ...series.buckets.map((b) => b.max ?? 0));
+              return (
+                <div key={series.id} className="chart-multiple" style={{ color: styles[n].color }}>
+                  <div>
+                    {series.id === 'utilization'
+                      ? t('chart.percentLabel', { label: seriesLabel(series) })
+                      : seriesLabel(series)}
+                  </div>
+                  <svg viewBox={`0 0 ${width} ${H}`} aria-hidden="true">
+                    {n === 0 && (
+                      <defs>
+                        <pattern
+                          id={hatch}
+                          width="6"
+                          height="6"
+                          patternUnits="userSpaceOnUse"
+                          patternTransform="rotate(135)"
+                        >
+                          <path className="bucket-hatch" d="M0 0v6" />
+                        </pattern>
+                      </defs>
+                    )}
+                    {[0, 0.5, 1].map((tick) => (
+                      <g key={tick}>
+                        <line
+                          className="bucket-grid"
+                          x1={LEFT}
+                          x2={width - 8}
+                          y1={y(tick * max, max)}
+                          y2={y(tick * max, max)}
+                        />
+                        <text
+                          className="bucket-axis"
+                          x={LEFT - 6}
+                          y={y(tick * max, max) + 4}
+                          textAnchor="end"
+                        >
+                          {number(tick * max, { maximumFractionDigits: 1 })}
+                        </text>
+                      </g>
+                    ))}
+                    {gapBands(series.buckets).map((band) => {
+                      const left = edgeX(band.start),
+                        span = edgeX(band.end) - left;
+                      return (
+                        <g key={band.start}>
+                          <rect
+                            className="bucket-gap"
+                            x={left}
+                            width={span}
+                            y="4"
+                            height={H - 8}
+                            fill={`url(#${hatch})`}
+                          />
+                          {span >= 48 && (
+                            <text
+                              className="bucket-gap-label"
+                              x={left + span / 2}
+                              y={H / 2}
+                              textAnchor="middle"
+                            >
+                              {t('chart.noData')}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {segments(series.buckets).map((indices) => {
+                      const first = series.buckets[indices[0]];
+                      const path = indices
+                        .map(
+                          (i, j) => `${j ? 'L' : 'M'}${x(i)} ${y(series.buckets[i].value!, max)}`,
+                        )
+                        .join(' ');
+                      const band = [
+                        ...indices.map((i) => `${x(i)},${y(series.buckets[i].max!, max)}`),
+                        ...[...indices]
+                          .reverse()
+                          .map((i) => `${x(i)},${y(series.buckets[i].min!, max)}`),
+                      ].join(' ');
+                      return (
+                        <g key={indices[0]}>
+                          {data.bucket_seconds > 300 && (
+                            <polygon className="bucket-band" points={band} />
+                          )}
+                          <path
+                            className="bucket-line"
+                            data-lower-bound={first.lower_bound}
+                            d={path}
+                            strokeDasharray={first.lower_bound ? '3 3' : undefined}
+                          />
+                          {indices.length === 1 &&
+                            (styles[n].square ? (
+                              <rect
+                                className="bucket-dot"
+                                x={x(indices[0]) - 2.5}
+                                y={y(first.value!, max) - 2.5}
+                                width="5"
+                                height="5"
+                              />
+                            ) : (
+                              <circle
+                                className="bucket-dot"
+                                cx={x(indices[0])}
+                                cy={y(first.value!, max)}
+                                r="2.5"
+                              />
+                            ))}
+                        </g>
+                      );
+                    })}
+                    {data.end === data.as_of && (
+                      <line className="bucket-cursor" x1={width - 8} x2={width - 8} y1="0" y2={H} />
+                    )}
+                    {active && (
+                      <line className="bucket-cursor" x1={x(index)} x2={x(index)} y1="0" y2={H} />
+                    )}
+                    {active &&
+                      series.buckets[index].value !== null &&
+                      (styles[n].square ? (
+                        <rect
+                          className="bucket-dot"
+                          x={x(index) - 3}
+                          y={y(series.buckets[index].value!, max) - 3}
+                          width="6"
+                          height="6"
+                        />
+                      ) : (
+                        <circle
+                          className="bucket-dot"
+                          cx={x(index)}
+                          cy={y(series.buckets[index].value!, max)}
+                          r="3"
+                        />
+                      ))}
+                  </svg>
+                </div>
+              );
+            })}
+            <div className="chart-ticks">
+              {[
+                data.start,
+                new Date((Date.parse(data.start) + Date.parse(data.end)) / 2).toISOString(),
+                data.end,
+              ].map((at) => (
+                <span key={at}>
+                  {data.bucket_seconds === 300
+                    ? clockTime(Date.parse(at))
+                    : formatDate(new Date(at), { month: 'short', day: 'numeric' })}
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      <p className="sub">{t('chart.legend')}</p>
+      <p className="sub">
+        {t('chart.lastSample')} ·{' '}
+        {data.last_sample ? <Time value={data.last_sample} /> : t('chart.noLastSample')}
+      </p>
+      {!data.series.some((series) => series.buckets.some((bucket) => bucket.value !== null)) && (
+        <p className="chart-empty">
+          {t('chart.empty')} ·{' '}
+          {data.last_sample ? compactTime(data.last_sample) : t('chart.noLastSample')}
+        </p>
+      )}
+    </section>
+  );
+}

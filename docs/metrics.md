@@ -1019,3 +1019,79 @@ Slurm 的 `NodeAddr` 通常默认为主机名，PBS 的 `Mom` 也通常是主机
 名称，就不会匹配，机器的 GPU 读数仍会单独计入。为避免重复计数，手动添加的机器可以
 关闭监控（仍可按需检查硬件）；SSH 数据源没有独立的监控开关，需要暂停数据源，这也会
 停止其定期读数采集。
+
+## Observed chart buckets
+
+`GET /api/history?chart=1` adds `chart`; existing `points` and opt-in `rollups` keep
+their meaning. Charts use raw stored observations, without the legacy 600-point
+thinning. Bins align to UTC boundaries: five minutes for up to 24 hours, one hour
+for up to seven days, one day thereafter. Edge bins are clipped to the resolved range.
+`end` (timezone required, capped at now) pages only the chart. Visible current charts
+refresh at a new bucket boundary, requesting `chart=1` without rollups or a week request;
+new history points retain the existing full refetch. Summaries and table use these same bins.
+
+Each bucket returns `start`, `end`, `value`, `min`, `max`, `samples`, `expected_samples`,
+`known_sources`, `total_sources`, `partial`, `lower_bound`, `gap_reason`, `so_far`, and
+`held_from`. With new samples, value is their known-value mean, and min/max are their
+extrema. `samples` counts numeric observations. Expected samples sum the configured
+collection rates, rounded up for the bin; this is informational and never makes a bin
+partial or a lower bound. Source counts and intervals are recorded at collection time;
+older records return null coverage/expected counts. Aggregate known count is the minimum
+and total count the maximum observed in the bin.
+
+An empty bin holds the most recent observation from an earlier bin or preceding row
+when its age **at the bin's start** is less than twice the fastest recorded interval
+(`HOLD_SECONDS`, 1800 seconds, if no interval was recorded). Its value, min and max all
+equal that reading, `samples` is zero, and `held_from` names the observation time.
+Coverage and completeness flags come from that observation. These bins continue the
+line as last readings, not interpolated samples. The UI labels the held time explicitly.
+An unknown held reading stays a `chart_unknown` gap. At or beyond the threshold, empty
+bins are `chart_not_collecting`; `chart_no_samples` means no earlier observation exists.
+`held_from` also identifies a held unknown reading; it is null on new-sample bins and
+on overdue/no-prior gaps. No unknown is replaced by zero.
+
+Allocation is a lower bound only if some contributing sample (or held observation)
+has a null allocation with a known subtotal, a positive unknown-allocation-source count,
+or recorded allocation coverage known < total. Partial means that lower-bound condition,
+a sample with an unknown value, or recorded known < total for that metric. A measured
+utilisation mean is never an allocation lower bound. A five-of-six complete sample hour
+is exact; scheduler drift is not missing source coverage.
+
+Only lower-bound lines are dashed. Hatches mark merged missing-data bands, whose reasons
+stay in the readout/table. Other partial coverage is labelled in text. Longer ranges show
+min/max bands, not uncertainty or forecasts. Compact local labels have full time/zone
+disclosures. The server summary includes held readings in the bucket means and extrema,
+and reports gap duration and partial count. `last_sample` includes the most recent retained
+observation before an empty window. Tables and schema versions are unchanged.
+
+### 图表分桶
+
+`/api/history?chart=1` 增加 `chart`，原有 `points` 和可选 `rollups` 含义不变。
+图表使用未抽稀样本：24 小时按 5 分钟、7 天按小时、更长范围按 UTC 天分桶，
+边界按请求时段裁切。带时区的 `end` 仅翻阅图表，不能超过当前时间。可见的当前图表
+跨入新区间时仅请求 `chart=1`，不请求汇总或额外周数据；新历史点仍触发原有完整刷新。
+摘要和表格使用相同区间。
+
+区间返回起止、均值、最小/最大值、新数值样本数、预期样本数、已知/全部源数、
+不完整/下界标记、缺失原因、“截至目前”及 `held_from`。有新样本时只对已知值求均值。
+预期样本数由配置频率乘区间长度后向上取整，仅供参考，不能导致不完整或下界标记。
+覆盖数及周期在采集时记录；旧记录缺失部分返回 null。聚合覆盖数取已知源最小值和
+全部源最大值。
+
+空区间在**起点**距最近观测未满最快记录周期的两倍时，沿用前一区间或窗口前记录的
+读数；无周期记录时使用 `HOLD_SECONDS`（1800 秒）。均值、最小值、最大值均为该读数，
+新样本数为零，`held_from` 为观测时间，覆盖数和完整性标记取自同一观测。线继续连接
+这些最近读数，但不将其算作新采样或插值；界面明确标注沿用时间。未知读数仍是
+`chart_unknown` 间隙。达到或超过阈值后，空区间为 `chart_not_collecting`；只有此前
+完全没有观测时才用 `chart_no_samples`。沿用的未知读数也保留 `held_from`；新样本区间
+及超时/从未观测的间隙为 null。未知绝不补零。
+
+仅当贡献样本或沿用观测的分配总数为 null 但有已知小计、未知分配源数大于零，或分配
+覆盖数已知 < 全部时，才标下界。不完整表示该下界条件、样本数值未知，或该指标覆盖数
+已知 < 全部。利用率均值不标分配量下界。一小时只有 5 个完整样本、预计 6 个，仍然
+是完整数据；采集时间漂移不等于缺失数据源。
+
+虚线仅表示下界，斜线仅表示合并缺失区间，原因保留在读数和表格中。其余不完整情况
+使用文字说明。长范围色带是最小/最大值，不是置信区间或预测。紧凑本地时间可展开完整
+时间及时区。服务端摘要的区间均值和极值包含沿用读数，并报告缺失时长和不完整数量。
+`last_sample` 保留空窗口前最近观测。数据库表和版本不变。

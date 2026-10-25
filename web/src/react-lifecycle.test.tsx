@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { absoluteTime } from './format';
 import { serverDashboard, serverDemo } from './test-server';
 import { act, Profiler, StrictMode, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -15,7 +16,8 @@ import { responseTokens } from './data/poll';
 import { ApiError, setLocale, t } from './i18n';
 import { registerWebPlugin } from './plugins';
 import type { PluginProps } from './plugins';
-import TrendChart from './TrendChart';
+import { Chart } from './chart/Chart';
+import { chartFixture } from './chart/test-data';
 import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
 import { dateTime, relativeTime } from './domain';
@@ -416,7 +418,7 @@ describe('dashboard lifecycle', () => {
 describe('history lifecycle', () => {
   function historyResult(points: HistoryPoint[]) {
     return {
-      points,
+      chart: chartFixture(points),
       rollups: {
         start: new Date(now.getTime() - 168 * 3600000).toISOString(),
         end: now.toISOString(),
@@ -435,14 +437,20 @@ describe('history lifecycle', () => {
     await render(<UsagePage ctx={usageContext()} />);
     await click('[role="tab"]:nth-child(2)');
     await act(async () => week.resolve(historyResult([sample(2), sample(3)])));
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
     await act(async () => day.reject(new Error('Old request failed')));
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
     await click('[role="tab"]:nth-child(1)');
     expect(container.textContent).toContain(t('chart.failed'));
     await click('[role="tab"]:nth-child(2)');
     expect(container.textContent).not.toContain(t('chart.failed'));
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
   });
 
   it('does not display history from the previous demo mode while the new range loads', async () => {
@@ -451,35 +459,105 @@ describe('history lifecycle', () => {
       path.includes('demo=true') ? demo.promise : historyResult([sample(2)]),
     );
     await render(<UsagePage ctx={usageContext()} />);
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      1,
+    );
     await click('[role="tab"]:nth-child(2)');
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      1,
+    );
     await click('[role="tab"]:nth-child(2)');
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      1,
+    );
     await render(<UsagePage ctx={usageContext(true)} />);
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(0);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      0,
+    );
     expect(container.textContent).toContain(t('chart.loading'));
     await act(async () => demo.resolve(historyResult([sample(3), sample(4)])));
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(2);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
   });
 
   it('presents supplied points, empty text and note without fetching or range controls', async () => {
-    await render(
-      <HistoryPanel points={[]} hours={24} empty={t('chart.loading')} note={t('usage.demo')} />,
-    );
+    await render(<HistoryPanel empty={t('chart.loading')} note={t('usage.demo')} />);
     expect(container.querySelector('.chart-empty')?.textContent).toBe(t('chart.loading'));
     expect(container.textContent).toContain(t('usage.demo'));
     expect(container.querySelector('[role="tab"]')).toBeNull();
     expect(request).not.toHaveBeenCalled();
-    await render(<HistoryPanel points={[sample(2)]} hours={24} />);
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
+    await render(<HistoryPanel data={chartFixture([sample(2)])} />);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      1,
+    );
   });
 
-  it('advances the time window without new data and stops its timer on unmount', async () => {
-    await render(<TrendChart history={[sample(23.999)]} />);
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(1);
-    await act(async () => vi.advanceTimersByTimeAsync(10000));
-    expect(container.querySelectorAll('.chart-bar')).toHaveLength(0);
+  it('refreshes only the chart at bucket boundaries and preserves the loaded rollups', async () => {
+    request.mockResolvedValue(historyResult([sample(2)]));
+    await render(<UsagePage ctx={usageContext()} />);
+    const before = request.mock.calls.length;
+    const rollups = container.querySelector('.usage-history')!.innerHTML;
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(request).toHaveBeenCalledTimes(before);
+    request.mockResolvedValueOnce({ chart: chartFixture([sample(1)]) });
+    await act(async () => vi.advanceTimersByTimeAsync(4 * 60000));
+    expect(request).toHaveBeenCalledTimes(before + 1);
+    expect(request.mock.calls.at(-1)?.[0]).toBe('/history?hours=24&chart=1&demo=false');
+    expect(container.querySelector('.usage-history')!.innerHTML).toBe(rollups);
+    await render(<UsagePage ctx={usageContext(true)} />);
+    const demoCalls = request.mock.calls.length;
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(request).toHaveBeenCalledTimes(demoCalls);
+  });
+
+  it('ignores an old bucket refresh after a new history point has loaded', async () => {
+    const ctx = usageContext();
+    request.mockResolvedValue(historyResult([sample(2)]));
+    await render(<UsagePage ctx={ctx} />);
+    const old = deferred<{ chart: ReturnType<typeof chartFixture> }>();
+    request.mockImplementation((path) =>
+      path.includes('rollup=')
+        ? Promise.resolve(historyResult([sample(1), sample(0)]))
+        : old.promise,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(5 * 60000));
+    ctx.data.history = [sample(0)];
+    await render(<UsagePage ctx={ctx} />);
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
+    await act(async () => old.resolve({ chart: chartFixture([sample(3)]) }));
+    expect(container.querySelectorAll('.chart-multiple:nth-of-type(2) .bucket-line')).toHaveLength(
+      2,
+    );
+  });
+
+  it('keeps the last chart on a failed refresh and shows the reason and failure time', async () => {
+    const ctx = usageContext();
+    request.mockResolvedValue(historyResult([sample(2)]));
+    await render(<UsagePage ctx={ctx} />);
+    const plot = container.querySelector('.chart-plot');
+    expect(plot).not.toBeNull();
+    request.mockRejectedValue(new Error('Collection unavailable'));
+    ctx.data.history = [sample(0)];
+    await render(<UsagePage ctx={ctx} />);
+    expect(container.querySelector('.chart-plot')).toBe(plot);
+    expect(container.textContent).toContain('Collection unavailable');
+    expect(container.textContent).toContain(t('chart.failed'));
+    expect(container.textContent).toContain(absoluteTime(now.toISOString()));
+  });
+
+  it('keeps server bucket geometry fixed while only the shared age label ticks', async () => {
+    const data = chartFixture([sample(23.999)]);
+    await render(<Chart data={data} />);
+    const svg = container.querySelector('svg')!;
+    const geometry = svg.innerHTML;
+    const readout = container.querySelector('.chart-readout')!.textContent;
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(container.querySelector('svg')).toBe(svg);
+    expect(svg.innerHTML).toBe(geometry);
+    expect(container.querySelector('.chart-readout')!.textContent).not.toBe(readout);
     await render(null);
     expect(vi.getTimerCount()).toBe(0);
   });

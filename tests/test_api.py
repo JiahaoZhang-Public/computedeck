@@ -2064,3 +2064,87 @@ def test_demo_layer_examples_are_fictional_and_live_dashboard_omits_them(
     demo = client.get("/api/dashboard?demo=true").json()
     assert demo["layer_example"] == {"names": ["build-small", "train-small"]}
     assert "layer_example" not in client.get("/api/dashboard").json()
+
+
+def test_chart_is_opt_in_and_does_not_replace_legacy_history(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    old = client.get("/api/history?hours=24&demo=true&rollup=1").json()
+    new = client.get("/api/history?hours=24&demo=true&rollup=1&chart=1").json()
+    assert {k: v for k, v in new.items() if k != "chart"} == old
+    assert new["chart"]["bucket_seconds"] == 300
+    assert len(new["chart"]["series"][0]["buckets"]) == 288
+    assert client.get("/api/history?chart=1&end=2026-01-01T12:00:00").status_code == 422
+    historical = client.get(
+        "/api/history?hours=168&chart=1&demo=true&end=2026-01-14T14:00:00Z"
+    ).json()["chart"]
+    assert historical["end"] == "2026-01-14T14:00:00+00:00"
+    assert not any(b["so_far"] for s in historical["series"] for b in s["buckets"])
+
+
+@pytest.mark.parametrize("group", [False, True])
+def test_chart_activity_window_precedes_grouping(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, group: bool
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    events = api.demo_events()
+    left = sorted(events, key=lambda e: e["at"])[len(events) // 3]["at"]
+    right = sorted(events, key=lambda e: e["at"])[2 * len(events) // 3]["at"]
+    params = {
+        "demo": "true",
+        "include": "changes",
+        "since": left,
+        "until": right,
+        "group": str(group).lower(),
+        "limit": 200,
+    }
+    rows = client.get("/api/events", params=params).json()
+    expected = api.filter_events(events, since=left, until=right, include_changes=True)
+    assert rows == (api.group_events(expected) if group else expected)[:200]
+
+
+def test_chart_live_raw_samples_and_activity_bounds(client: TestClient, data_dir: Path) -> None:
+    end = datetime.now(UTC)
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        for i in range(650):
+            at = (end - timedelta(seconds=650 - i)).isoformat()
+            point = {"at": at, "allocated_gpus": i, "gpu_utilization": None}
+            store.db.execute("INSERT INTO history VALUES (?, ?)", (at, json.dumps(point)))
+        store.db.commit()
+        chart = store.history_chart(24, end, end)
+        assert sum(b["samples"] for b in chart["series"][1]["buckets"]) == 650
+        assert max(b["max"] or 0 for b in chart["series"][1]["buckets"]) == 649
+        store.add_events(
+            [
+                {
+                    "key": f"chart-event-{i}",
+                    "type": "source.failed",
+                    "at": (end - timedelta(minutes=i)).isoformat(),
+                    "source_id": "example",
+                    "data": {},
+                }
+                for i in range(5)
+            ]
+        )
+    finally:
+        store.db.close()
+    result = client.get(
+        "/api/events",
+        params={
+            "since": (end - timedelta(minutes=3)).isoformat(),
+            "until": (end - timedelta(minutes=1)).isoformat(),
+        },
+    ).json()
+    assert sorted((datetime.fromisoformat(r["at"]) for r in result), reverse=True) == [
+        end - timedelta(minutes=2),
+        end - timedelta(minutes=3),
+    ]
+
+
+@pytest.mark.parametrize("until", ["0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00"])
+def test_activity_until_outside_utc_range_names_end_time(client: TestClient, until: str) -> None:
+    response = client.get("/api/events", params={"until": until})
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "event_until_invalid"}

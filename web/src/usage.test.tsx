@@ -357,7 +357,7 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       try {
         await act(async () => root.render(<UsagePage ctx={ctx} />));
         expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
-          `/history?hours=${hours}&rollup=1&demo=false`,
+          `/history?hours=${hours}&rollup=1&chart=1&demo=false`,
         ]);
         expect(host.querySelector('.panel .panel')).toBeNull();
         expect(host.querySelector('.usage-trend h3')?.textContent).toBe(t('chart.heading'));

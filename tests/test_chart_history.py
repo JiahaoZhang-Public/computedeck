@@ -1,0 +1,265 @@
+"""Server buckets keep outages, coverage, bounds and original rollups honest."""
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from computedeck.demo import demo_chart_history
+from computedeck.history import chart_history
+from computedeck.store import Store
+
+END = datetime(2026, 1, 15, 14, 2, tzinfo=UTC)
+
+
+def point(minutes: float, value: float | None = 8, **extra: Any) -> dict[str, Any]:
+    return {
+        "at": (END - timedelta(minutes=minutes)).isoformat(),
+        "allocated_gpus": value,
+        "gpu_utilization": value,
+        "chart_coverage": {
+            "allocation": {"known": 3, "total": 3},
+            "utilization": {"known": 2, "total": 3},
+            "intervals": [900, 900, 900],
+        },
+        **extra,
+    }
+
+
+def chart(points: list[dict[str, Any]], hours: int = 24) -> dict[str, Any]:
+    return chart_history(points, hours, end=END, current=END)
+
+
+@pytest.mark.parametrize(
+    ("hours", "seconds", "count"), [(24, 300, 289), (168, 3600, 169), (720, 86400, 31)]
+)
+def test_resolved_bucket_edges_and_sizes(hours: int, seconds: int, count: int) -> None:
+    result = chart([], hours)
+    buckets = result["series"][0]["buckets"]
+    assert result["bucket_seconds"] == seconds
+    assert len(buckets) == count
+    assert buckets[0]["start"] == (END - timedelta(hours=hours)).isoformat()
+    assert buckets[-1]["end"] == END.isoformat()
+    assert all(a["end"] == b["start"] for a, b in zip(buckets, buckets[1:], strict=False))
+    assert all(b["value"] is None and b["samples"] == 0 for b in buckets)
+    assert [b["so_far"] for b in buckets].count(True) == 1
+
+
+def test_empty_bins_and_unknown_readings_are_not_zero_or_interpolated() -> None:
+    result = chart([point(90), point(30, None), point(0, 0)])
+    buckets = result["series"][1]["buckets"]
+    assert [b["value"] for b in buckets if b["samples"]] == [8, 0]
+    held = [b for b in buckets if b["held_from"] == point(90)["at"]]
+    assert held and all(b["value"] == b["min"] == b["max"] == 8 for b in held)
+    assert all(b["samples"] == 0 and b["held_from"] == point(90)["at"] for b in held)
+    assert all(b["value"] is None for b in buckets if b["gap_reason"])
+    unknown = next(b for b in buckets if b["gap_reason"] == {"code": "chart_unknown"})
+    assert unknown["samples"] == 0
+    assert any(b["held_from"] == point(30, None)["at"] and b["value"] is None for b in buckets)
+    assert any(b["gap_reason"] == {"code": "chart_not_collecting"} for b in buckets)
+    assert result["last_sample"] == END.isoformat()
+
+
+def test_means_extrema_sample_counts_and_partial_bounds() -> None:
+    samples = [
+        point(1.5, 4),
+        point(1, 8),
+        point(0, None, known_allocated_gpus=6, unknown_allocation_sources=1),
+    ]
+    result = chart(samples)
+    allocation = result["series"][1]["buckets"][-1]
+    assert (allocation["value"], allocation["min"], allocation["max"]) == (6, 4, 8)
+    assert allocation["samples"] == 3
+    assert allocation["expected_samples"] == 1
+    assert allocation["lower_bound"] is True
+    assert allocation["partial"] is True
+    # A mean of measured utilisation is not a lower bound on unmeasured GPUs.
+    utilization = result["series"][0]["buckets"][-1]
+    assert utilization["partial"] is True
+    assert utilization["lower_bound"] is False
+    assert (utilization["known_sources"], utilization["total_sources"]) == (2, 3)
+    assert result["series"][1]["summary"]["partial"] == 1
+
+
+def test_older_observations_do_not_invent_coverage_or_intervals() -> None:
+    old = point(0, None, known_allocated_gpus=4)
+    del old["chart_coverage"]
+    bucket = chart([old])["series"][1]["buckets"][-1]
+    assert bucket["known_sources"] is None
+    assert bucket["total_sources"] is None
+    assert bucket["expected_samples"] is None
+    assert bucket["value"] == 4
+    assert bucket["lower_bound"] is True
+
+
+def test_expired_and_future_readings_do_not_enter_buckets_but_last_sample_is_kept() -> None:
+    result = chart([point(1500), point(-1)])
+    assert result["last_sample"] == point(1500)["at"]
+    assert all(b["value"] is None for s in result["series"] for b in s["buckets"])
+
+
+def test_stale_threshold_uses_recorded_collection_interval() -> None:
+    slow = point(20)
+    fast = point(20)
+    fast["chart_coverage"]["intervals"] = [300]
+    a = chart([slow])["series"][0]["buckets"][-1]
+    b = chart([fast])["series"][0]["buckets"][-1]
+    assert a["gap_reason"] is None
+    assert a["value"] == a["min"] == a["max"] == 8
+    assert a["samples"] == 0 and a["held_from"] == slow["at"]
+    assert b["gap_reason"] == {"code": "chart_not_collecting"}
+
+
+def test_historical_window_is_not_so_far() -> None:
+    result = chart_history([point(60)], 24, end=END - timedelta(minutes=30), current=END)
+    assert not any(b["so_far"] for s in result["series"] for b in s["buckets"])
+
+
+def test_demo_contains_gap_unknown_partial_and_current_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", END.isoformat())
+    result = chart(demo_chart_history(24, END))
+    buckets = result["series"][1]["buckets"]
+    assert any(b["gap_reason"] == {"code": "chart_unknown"} for b in buckets)
+    assert any(b["gap_reason"] == {"code": "chart_not_collecting"} for b in buckets)
+    assert any(b["lower_bound"] for b in buckets)
+    assert buckets[-1]["so_far"]
+    assert result == chart(demo_chart_history(24, END))
+
+
+def test_demo_readings_are_stable_across_ranges_and_paging(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", END.isoformat())
+    first = {p["at"]: p for p in demo_chart_history(24, END)}
+    earlier = demo_chart_history(24, END - timedelta(hours=12))
+    assert all(first[p["at"]] == p for p in earlier if p["at"] in first)
+    assert earlier[-1]["at"] in first
+
+
+def test_new_history_coverage_excludes_old_ssh_metrics_and_counts_job_reporters() -> None:
+    from computedeck.history import chart_observation
+
+    source = {
+        "id": "cluster-a",
+        "enabled": True,
+        "interval_minutes": 5,
+        "status": "ready",
+        "capabilities": ["jobs"],
+        "last_success": END.isoformat(),
+    }
+    data = {
+        "sources": [source],
+        "jobs": [
+            {
+                "id": "job-a",
+                "source_id": "cluster-a",
+                "state": "RUNNING",
+                "gpu_utilization": 30,
+                "gpu_count": 2,
+            }
+        ],
+        "instances": [
+            {
+                "id": "machine",
+                "source_id": "manual",
+                "manual": True,
+                "monitoring": True,
+                "ssh_status": "reachable",
+                "observed_at": "2000-01-01T00:00:00Z",
+                "gpu_utilization": 80,
+                "gpu_count": 1,
+            }
+        ],
+        "summary": {"unmeasured": [{"subject": {"id": "machine", "kind": "instance"}}]},
+    }
+    coverage = chart_observation(data)
+    assert coverage["allocation"] == {"known": 1, "total": 2}
+    assert coverage["utilization"] == {"known": 1, "total": 2}
+    assert coverage["intervals"] == [300, 600]
+
+
+@pytest.mark.parametrize(("hours", "cadence"), [(24, 600), (168, 3600)])
+def test_regular_cadence_holds_between_collections(
+    tmp_path: Path, hours: int, cadence: int
+) -> None:
+    start = END - timedelta(hours=hours)
+    at = start.replace(minute=0, second=0, microsecond=0)
+    samples = []
+    while at <= END:
+        sample = point(0)
+        sample["at"] = at.isoformat()
+        sample["chart_coverage"] = {
+            "intervals": [cadence],
+            "allocation": {"known": 1, "total": 1},
+            "utilization": {"known": 1, "total": 1},
+        }
+        samples.append(sample)
+        at += timedelta(seconds=cadence)
+    store = Store(tmp_path / "history.sqlite")
+    try:
+        with store.db:
+            store.db.executemany(
+                "INSERT INTO history VALUES (?, ?)", [(p["at"], json.dumps(p)) for p in samples]
+            )
+        result = store.history_chart(hours, END, END)
+    finally:
+        store.db.close()
+    for series in result["series"]:
+        buckets = series["buckets"]
+        assert all(b["value"] == 8 and b["gap_reason"] is None for b in buckets)
+        held = [b for b in buckets if b["samples"] == 0]
+        assert held
+        assert all(b["held_from"] and b["min"] == b["max"] == 8 for b in held)
+        assert all(b["held_from"] is None for b in buckets if b["samples"])
+    assert not any(b["partial"] or b["lower_bound"] for b in result["series"][1]["buckets"])
+
+
+def test_hold_expires_at_bucket_start_and_does_not_revive_an_unknown_value() -> None:
+    sample = point(32, None, known_allocated_gpus=5, unknown_allocation_sources=1)
+    sample["chart_coverage"]["intervals"] = [600]
+    sample["chart_coverage"]["allocation"] = {"known": 2, "total": 3}
+    result = chart([sample])
+    for bucket in result["series"][1]["buckets"]:
+        age = (
+            datetime.fromisoformat(bucket["start"]) - datetime.fromisoformat(sample["at"])
+        ).total_seconds()
+        if 0 < age < 1200:
+            assert bucket["held_from"] == sample["at"]
+            assert bucket["samples"] == 0 and bucket["value"] == 5
+            assert bucket["partial"] and bucket["lower_bound"]
+            assert (bucket["known_sources"], bucket["total_sources"]) == (2, 3)
+        elif age >= 1200:
+            assert bucket["value"] is None and bucket["held_from"] is None
+            assert bucket["gap_reason"] == {"code": "chart_not_collecting"}
+    # The utilisation reading was unknown; holding never replaces it by zero.
+    util = result["series"][0]["buckets"]
+    assert all(b["value"] is None for b in util)
+    assert any(b["held_from"] == sample["at"] and b["samples"] == 0 for b in util)
+    assert any(b["gap_reason"] == {"code": "chart_unknown"} for b in util)
+
+
+def test_expected_sample_shortfall_is_informational() -> None:
+    samples = []
+    for minute in [122, 112, 102, 92, 82]:
+        sample = point(minute)
+        sample["chart_coverage"] = {
+            "intervals": [600],
+            "allocation": {"known": 1, "total": 1},
+            "utilization": {"known": 1, "total": 1},
+        }
+        samples.append(sample)
+    bucket = next(b for b in chart(samples, 168)["series"][1]["buckets"] if b["samples"] == 5)
+    assert bucket["expected_samples"] == 6
+    assert not bucket["partial"] and not bucket["lower_bound"]
+
+
+def test_hold_uses_legacy_threshold_without_inventing_source_coverage() -> None:
+    sample = point(32, 0)
+    del sample["chart_coverage"]
+    buckets = chart([sample])["series"][1]["buckets"]
+    held = [b for b in buckets if b["held_from"]]
+    assert held and all(b["value"] == 0 and b["samples"] == 0 for b in held)
+    assert all(b["known_sources"] is None and b["total_sources"] is None for b in held)
+    assert buckets[-1]["gap_reason"] == {"code": "chart_not_collecting"}

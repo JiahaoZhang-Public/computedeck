@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useClock } from '../ui/clock';
 import { ClockText } from '../data/ClockText';
 import { api } from '../api';
-import { t } from '../i18n';
+import { errorText, t } from '../i18n';
+import { DataState } from '../ui/DataState';
 import {
   money,
   runningPrice,
@@ -13,10 +15,12 @@ import {
 } from '../domain';
 import { findGroup } from '../groups';
 import { Chips, Empty, Panel, RankedBars, Stat } from '../ui';
-import { useRouteParam } from '../useRouteParam';
+import { setRouteParams, useRouteParam } from '../useRouteParam';
 import { usageDays, usageTotal, mergeUnrecordedDays } from '../usage';
 import type { UsageTotal } from '../usage';
-import type { HistoryPoint, UsageRollups } from '../types';
+import type { UsageRollups } from '../types';
+import type { ChartData } from '../chart/types';
+import { absoluteTime } from '../format';
 import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
 import { InstanceRunCost } from './shared';
@@ -34,7 +38,7 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
   const { data, demo, groups } = ctx;
   const summary = data.summary;
   const spend = summary.spend;
-  const [range, setRange] = useRouteParam('range', '24h');
+  const [range] = useRouteParam('range', '24h');
   // Keep old bookmarked ranges readable; new controls always write units.
   const hours =
     RANGES.find((item) => item.value === range)?.hours ??
@@ -185,7 +189,10 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
             label={t('chart.range')}
             value={String(hours)}
             onChange={(value) =>
-              setRange(RANGES.find((item) => item.hours === Number(value))!.value)
+              setRouteParams({
+                range: RANGES.find((item) => item.hours === Number(value))!.value,
+                end: null,
+              })
             }
             options={RANGES.map((item) => ({
               value: String(item.hours),
@@ -206,59 +213,157 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
   );
 }
 
-type HistoryResponse = { points: HistoryPoint[]; rollups: UsageRollups };
+type HistoryResponse = { chart?: ChartData; rollups: UsageRollups };
 
 function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
   const [result, setResult] = useState<(HistoryResponse & { week: UsageRollups }) | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<{ at: string; reason: unknown } | null>(null);
+  const [end, setEnd] = useRouteParam('end');
   const [retry, setRetry] = useState(0);
+  const requestId = useRef(0);
+  const loading = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    requestId.current++;
+  }, []);
+  const refreshChart = useCallback(async () => {
+    if (loading.current) return;
+    const id = ++requestId.current;
+    loading.current = true;
+    try {
+      const value = await api<Pick<HistoryResponse, 'chart'>>(
+        `/history?hours=${hours}&chart=1&demo=${ctx.demo}`,
+      );
+      if (id === requestId.current) {
+        setResult((previous) => (previous ? { ...previous, chart: value.chart } : previous));
+        setFailed(null);
+      }
+    } catch (reason) {
+      if (id === requestId.current) setFailed({ at: new Date().toISOString(), reason });
+    } finally {
+      if (id === requestId.current) loading.current = false;
+    }
+  }, [hours, ctx.demo]);
   const latest = ctx.data.history.at(-1)?.at;
   useEffect(() => {
-    let active = true;
+    const id = ++requestId.current;
+    loading.current = true;
     const request = (range: number) =>
-      api<HistoryResponse>(`/history?hours=${range}&rollup=1&demo=${ctx.demo}`);
+      api<HistoryResponse>(
+        `/history?hours=${range}&rollup=1&chart=1&demo=${ctx.demo}${end ? `&end=${encodeURIComponent(end)}` : ''}`,
+      );
     const selected = request(hours);
     Promise.all([selected, hours >= 168 ? selected : request(168)])
       .then(([value, week]) => {
-        if (active) {
+        if (id === requestId.current) {
           setResult({ ...value, week: week.rollups });
-          setFailed(false);
+          setFailed(null);
         }
       })
-      .catch(() => {
-        if (active) setFailed(true);
+      .catch((reason: unknown) => {
+        if (id === requestId.current) setFailed({ at: new Date().toISOString(), reason });
+      })
+      .finally(() => {
+        if (id === requestId.current) loading.current = false;
       });
-    return () => {
-      active = false;
-    };
-  }, [hours, ctx.demo, latest, retry]);
-  if (failed)
-    return (
-      <Empty
-        title={t('chart.failed')}
-        action={
-          <button className="button small" onClick={() => setRetry(retry + 1)}>
-            {t('usage.retry')}
-          </button>
-        }
-      />
-    );
+    return invalidateRequests;
+  }, [hours, ctx.demo, latest, retry, end, invalidateRequests]);
+  const failure = failed && (
+    <Empty
+      title={`${t('chart.failed')} · ${errorText(failed.reason, 'chart.failed')} · ${absoluteTime(failed.at)}`}
+      action={
+        <button className="button small" onClick={() => setRetry(retry + 1)}>
+          {t('usage.retry')}
+        </button>
+      }
+    />
+  );
   if (!result)
     return (
-      <p className="panel-note" role="status">
-        {t('chart.loading')}
-      </p>
+      failure || (
+        <div className="chart-loading">
+          <p>{t('chart.loading')}</p>
+          <DataState state="loading" rows={2} rowHeight={120} />
+        </div>
+      )
     );
   return (
     <>
+      {!ctx.demo && !end && result.chart && (
+        <HistoryClock bucketSeconds={result.chart.bucket_seconds} onBucket={refreshChart} />
+      )}
+      {failure}
       <UsageHistory rollups={result.rollups} week={result.week} hours={hours} ctx={ctx} />
       <HistoryPanel
-        points={result.points}
-        hours={hours}
+        controls={
+          result.chart && (
+            <>
+              <button
+                className="button"
+                type="button"
+                aria-label={t(hours === 24 ? 'chart.previousHours' : 'chart.previousDays', {
+                  count: hours === 24 ? hours : hours / 24,
+                })}
+                onClick={() => setEnd(result.chart!.start)}
+              >
+                {t(hours === 24 ? 'chart.previousHours' : 'chart.previousDays', {
+                  count: hours === 24 ? hours : hours / 24,
+                })}
+              </button>
+              <button
+                className="button"
+                type="button"
+                aria-label={t(hours === 24 ? 'chart.nextHours' : 'chart.nextDays', {
+                  count: hours === 24 ? hours : hours / 24,
+                })}
+                disabled={!end}
+                onClick={() => {
+                  const next = Date.parse(result.chart!.end) + hours * HOUR;
+                  setEnd(
+                    next >= Date.parse(result.chart!.as_of) ? '' : new Date(next).toISOString(),
+                  );
+                }}
+              >
+                {t(hours === 24 ? 'chart.nextHours' : 'chart.nextDays', {
+                  count: hours === 24 ? hours : hours / 24,
+                })}
+              </button>
+              {end && (
+                <button className="button" type="button" onClick={() => setEnd('')}>
+                  {t('chart.latest')}
+                </button>
+              )}
+            </>
+          )
+        }
+        data={result.chart}
+        onRange={(range) => setRouteParams({ range, end: null })}
         note={ctx.demo ? t('usage.demo') : t('usage.historyNote', { where: where(ctx) })}
       />
     </>
   );
+}
+
+/** Advance a live server window even during a collection outage. No chart-local timer. */
+function HistoryClock({
+  bucketSeconds,
+  onBucket,
+}: {
+  bucketSeconds: number;
+  onBucket: () => void;
+}) {
+  const minute = useClock();
+  const previous = useRef<number | null>(null);
+  const bucket = Math.floor(minute / (bucketSeconds * 1000));
+  useEffect(() => {
+    if (previous.current === null) {
+      previous.current = Math.floor(Date.now() / (bucketSeconds * 1000));
+      return;
+    }
+    if (bucket === previous.current) return;
+    previous.current = bucket;
+    if (!document.hidden) onBucket();
+  }, [bucket, bucketSeconds, onBucket]);
+  return null;
 }
 
 function emptySpend(total: UsageTotal) {

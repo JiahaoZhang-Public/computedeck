@@ -491,28 +491,6 @@ export function FailuresTable({
 }
 
 /** `partial`: some samples count only part of the sources; their bars are hatched. */
-export function ChartLegend({ partial = false }: { partial?: boolean }) {
-  return (
-    <span className="legend">
-      <span>
-        <i className="legend-line" />
-        {t('chart.utilization')}
-      </span>
-      <span>
-        <i className="legend-bar" />
-        {t('chart.allocated')}
-      </span>
-      {partial && (
-        <span>
-          <i className="legend-bar partial" />
-          {t('chart.partial')}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/** The full estimate and its qualifications in the instance drawer. */
 export function InstanceRunCost({ item, source }: { item: Instance; source?: Source }) {
   useClock();
   const run = runningHours(item, source);

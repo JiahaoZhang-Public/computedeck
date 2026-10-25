@@ -89,7 +89,7 @@ it('finds visible text and attribute literals without treating translation keys 
 });
 
 it('keeps visible JSX text and title/placeholder/aria-label literals translated', () => {
-  const files = ['', 'pages/', 'app/', 'ui/', 'layers/'].flatMap((directory) =>
+  const files = ['', 'pages/', 'app/', 'ui/', 'layers/', 'chart/'].flatMap((directory) =>
     readdirSync(new URL(`./${directory}`, import.meta.url))
       .filter((name) => name.endsWith('.tsx') && !name.endsWith('.test.tsx'))
       .map((name) => directory + name),

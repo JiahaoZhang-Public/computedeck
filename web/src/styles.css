@@ -987,125 +987,6 @@ form > .form-error {
   gap: 4px;
   color: var(--text-2);
 }
-.legend {
-  display: inline-flex;
-  gap: 14px;
-  font-size: 12px;
-  color: var(--text-3);
-}
-.legend > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.legend-line {
-  width: 14px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--chart-line);
-}
-.legend-bar {
-  width: 8px;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--chart-bar);
-}
-/* A partial sample: hatched like its bars, since its height is only a lower bound. */
-.legend-bar.partial {
-  background: repeating-linear-gradient(45deg, var(--chart-hatch) 0 1.5px, transparent 1.5px 3px);
-}
-
-/* ---------- Chart ---------- */
-
-.chart {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 30px;
-  gap: 8px;
-  padding: 14px 12px 10px;
-}
-.chart-axis {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  height: 180px;
-  font-size: 12px;
-  color: var(--text-4);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.chart-axis.right {
-  text-align: left;
-}
-.chart-body {
-  position: relative;
-}
-.chart-body svg {
-  display: block;
-  width: 100%;
-  height: 180px;
-  overflow: visible;
-}
-.chart-grid {
-  stroke: var(--chart-grid);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-.chart-bar {
-  fill: var(--chart-bar);
-}
-.chart-hatch {
-  fill: var(--chart-hatch);
-}
-.chart-line {
-  fill: none;
-  stroke: var(--chart-line);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.chart-cursor {
-  stroke: var(--text-4);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
-.chart-tooltip {
-  position: absolute;
-  top: 0;
-  transform: translateX(10px);
-  display: grid;
-  gap: 1px;
-  padding: 7px 9px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-pop);
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.chart-tooltip.left {
-  transform: translateX(calc(-100% - 10px));
-}
-.chart-tooltip span {
-  color: var(--text-2);
-}
-.chart-empty {
-  position: absolute;
-  inset: 0 0 20px;
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-  font-size: 13px;
-}
-.chart-time {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 6px;
-  font-size: 12px;
-  color: var(--text-4);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------- Clusters ---------- */
 
 .cluster-cards {
@@ -2452,9 +2333,6 @@ td.wrap {
   }
 }
 
-.chart-dot {
-  fill: var(--accent);
-}
 .tool-drawer-title {
   min-width: 0;
 }

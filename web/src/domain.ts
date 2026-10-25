@@ -113,13 +113,6 @@ export function historyAllocation(point: HistoryPoint): number | null {
     ? point.known_allocated_gpus
     : point.allocated_gpus;
 }
-/** A recorded allocation that leaves some sources out: a lower bound, not the total. */
-export function historyPartial(point: HistoryPoint) {
-  return (
-    historyAllocation(point) != null &&
-    (point.allocated_gpus == null || (point.unknown_allocation_sources ?? 0) > 0)
-  );
-}
 /**
  * GPUs an instance holds: those with processes or significant memory use over SSH, the
  * allocation a provider lists otherwise. A machine added by hand counts only what an SSH

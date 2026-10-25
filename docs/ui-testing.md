@@ -683,3 +683,48 @@ sentence separators and a localized health prefix, including an Unknown status a
 排除替换流式响应的 identity 临时措施（需单独核查当前依赖范围内的兼容性）。
 Q3 的 CHANGELOG「For plugin authors」须说明宿主不再定时重绘插件、relativeTime 不会
 自动更新、插件自行管理计时器及清理，并保留 plugins.md 的流式路由压缩说明。
+
+## Chart kit checks
+
+The Usage trend deliberately changes to stacked plots. `chart.spec.ts` covers keyboard
+and click/tap pinning, range changes, restored historical windows, the exact Activity
+request bounds, table paging, axe, and normal/forced-colors screenshots in all six
+Chromium combinations. The existing Usage UI screenshots also change; other page
+baselines should remain unchanged. Review the local Usage and new `chart-*.png`
+baselines before updating them, then run the full gate without snapshot updates.
+Linux baselines follow the existing CI artifact procedure.
+
+Python tests cover raw (unthinned) aggregation, all bucket sizes and edges, unknown
+versus zero, min/mean/max, source coverage, collection intervals, lower bounds, old
+records, deterministic demo states and Activity bounds before grouping. Cadence tests write
+10-minute and hourly history, check held readings and stale expiry, and keep expected-sample
+shortfalls separate from source completeness. Invalid Activity end dates name the end time. Vitest covers
+one plot tab stop, all chart keys, IME/modifier guards, pin retention across updates,
+mouse/touch behavior, table equality, identity collisions and disconnected geometry. Checks
+also cover Escape bubbling, merged gap bands, CSS-pixel sizing, axis labels, compact time
+disclosures and chart-only bucket-boundary refreshes that preserve rollups. Playwright
+checks the padded controls and their span labels at every viewport.
+The previous TrendChart outage/partial tests now exercise server-shaped buckets; the
+old ten-second timer test asserts stable geometry and shared-clock labels instead.
+
+Usage's existing daily GPU-hours/spend breakdown and projection copy are left for P4;
+Overview adoption belongs to P1. U2 can register the chart's focused-widget key handler
+in its shared key registry. No chart gestures perform writes to a cluster or cloud.
+
+### 图表检查
+
+Usage 趋势有意改成上下分图。`chart.spec.ts` 在六种 Chromium 组合检查键盘、点击/轻触
+固定、切换范围、历史窗口重载、动态精确边界、表格分页、axe 和正常/强制颜色截图。
+既有 Usage 截图及新增 `chart-*.png` 需要审阅更新，其余页面应不变。更新后重新运行
+完整门禁；Linux 基线仍按 CI 产物流程生成。
+
+Python 覆盖原始未抽稀分桶、边界、未知与零、极值均值、覆盖数、周期、下界、旧记录、
+确定性示例和分组前时间过滤；另写入 10 分钟及小时采集历史，检查沿用读数、过期和
+预期样本不足不影响源完整性，并检查动态结束时间错误提示。Vitest 覆盖单焦点、全部键位、输入法/修饰键、更新后
+固定读数、触摸、表格一致性、身份色冲突及断线，还检查 Escape 传递、合并间隙、实际
+像素尺寸、纵轴、紧凑时间展开及跨桶仅刷新图表并保留汇总。Playwright 检查各宽度工具
+行的内边距和时长标签。旧图的断档/不完整测试迁移为服务端
+形状的分桶测试，10 秒计时器测试改为图形保持不变且共享时钟更新标签。
+
+P4 负责每日 GPU 小时/费用明细和预测文案调整，P1 负责 Overview 接入；U2 将图表焦点
+键位纳入共享注册表。图表交互不会写入集群或云端。

@@ -15,7 +15,7 @@ from . import drivers, nodes
 from .drivers.base import job_time, node_health_fields, validate_row
 from .drivers.cloud import instance_lifecycle, provider_console_url
 from .errors import SourceError, checked
-from .history import HOLD_SECONDS, group_history, rollup_history
+from .history import HOLD_SECONDS, chart_history, chart_observation, group_history, rollup_history
 from .low_use import low_use
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
@@ -520,6 +520,7 @@ class Store:
         cluster_id: str | None = None,
         job: str | None = None,
         since: str | None = None,
+        until: str | None = None,
         q: str | None = None,
         include_changes: bool = False,
         group: bool = False,
@@ -570,6 +571,9 @@ class Store:
         if since is not None:
             where.append("julianday(at) >= julianday(?)")
             args.append(since)
+        if until is not None:
+            where.append("julianday(at) < julianday(?)")
+            args.append(until)
         if q:
             # Treat LIKE metacharacters as literal search text.
             pattern = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
@@ -1206,6 +1210,27 @@ class Store:
                 points.append(row)
         return rollup_history(points, hours, end=end)
 
+    def history_chart(self, hours: int, end: datetime, current: datetime) -> dict[str, Any]:
+        points = []
+        for at, data in self.db.execute(
+            "SELECT at, data FROM history WHERE julianday(at) >= julianday(?) "
+            "AND julianday(at) <= julianday(?) ORDER BY at",
+            ((end - timedelta(hours=hours)).isoformat(), end.isoformat()),
+        ):
+            row = self._read("history", at, data, {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.append(row)
+        preceding = self.db.execute(
+            "SELECT at, data FROM history WHERE julianday(at) < julianday(?) "
+            "ORDER BY at DESC LIMIT 1",
+            ((end - timedelta(hours=hours)).isoformat(),),
+        ).fetchone()
+        if preceding:
+            row = self._read("history", preceding[0], preceding[1], {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.insert(0, row)
+        return chart_history(points, hours, end=end, current=current)
+
     def record_history(self) -> None:
         dashboard = self.dashboard()
         summary = dashboard["summary"]
@@ -1217,6 +1242,7 @@ class Store:
             "gpu_utilization": summary["utilization"],
             "coverage_count": summary["covered"],
             "by_group": group_history(dashboard),
+            "chart_coverage": chart_observation(dashboard),
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))

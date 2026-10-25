@@ -1355,3 +1355,26 @@ plugin permission was added.
 工具与市场插件面板使用上面的 `plugin` 地址，返回关闭面板，直接链接关闭到筛选列表。
 `layers/*` 为内部实现；WEB_API 1、导出组件 DOM、令牌别名和兼容样式类均保持不变。
 通知共用一个礼貌播报区域并移入活动模态框，未增加默认网络请求或插件权限。
+
+### Chart history and Activity windows (0.8)
+
+The internal `chart/` kit replaces the core trend chart; it is not added to
+`window.ComputeDeck.components`. WEB_API, PLUGIN_API, SCHEMA_VERSION, exported
+component DOM, compat tokens/classes and existing route values are unchanged.
+`/api/history?chart=1` adds server bucket series and localized summary message codes;
+`end` pages only that chart, leaving the legacy points and rollups unchanged.
+See [metrics](metrics.md#observed-chart-buckets) for the fields and coverage rules.
+New recorded history has `chart_coverage` (allocation/utilisation source counts and
+collection intervals). Older records remain readable with unknown coverage.
+
+`/api/events` accepts an optional `until` timestamp (exclusive), alongside the existing
+inclusive `since`. Both bounds apply before grouping and pagination, including in
+example mode. `#/activity?from=<ISO>&to=<ISO>` uses these bounds; ordinary Activity
+range links retain their meaning.
+
+内部 `chart/` 替代核心趋势图，不扩展 `window.ComputeDeck.components`。各 API 版本、
+导出组件 DOM、兼容样式及旧 URL 含义不变。`/api/history?chart=1` 增加服务端分桶和摘要，
+`end` 只翻阅图表，不改变旧 `points`、`rollups`。新历史记录保存 `chart_coverage`
+（覆盖源数和周期），旧记录缺失部分按未知处理。`/api/events` 新增 `until`（不含），
+与原有 `since`（含）均在分组分页前应用，示例模式相同。动态链接的 `from`/`to` 映射
+到这两个边界；普通范围链接不变。

@@ -496,3 +496,72 @@ use the same region as toasts, including inside an open modal, and clear after 4
 区域仅报告健康变化、作业加入或离开列表、作业状态变化及待处理提醒数量变化，首次载入、
 时间戳和未变轮询均不播报。作业离开列表不代表成功结束。播报与通知共用一个区域，打开
 模态视图时也随通知移入其中，4.5 秒后清除播报文字。
+
+### History charts
+
+Usage's observed trend uses separate utilisation and allocation plots with a shared
+crosshair. Choose 24 h, 7 d or 30 d. Previous/Next name that span and sit beside Table
+view inside the chart; Latest returns to the current window.
+`#/usage?range=7d&end=<ISO time with timezone>` restores the chart window. Paging affects
+only the trend; the existing usage totals and daily breakdown retain their relative range.
+
+The shared minute clock checks for a new chart bucket while the current live window is
+visible (5 minutes, 1 hour or 1 day). At that boundary, only the chart is requested,
+without rollups or a second week request. A new history point still refreshes the usual
+history and rollups. Example and historical windows stay fixed. Failed requests keep
+the last data alongside their error reason and time.
+
+Between collections, a bin holds the last observation while it is younger than twice
+the fastest recorded interval at the bin's start (30 minutes for old records without
+intervals). These bins say “Held from … · last sample” and have zero new samples.
+Unknown readings remain unknown; overdue collection becomes a gap. Sample-count
+shortfalls alone never mean partial coverage or a lower bound.
+
+Metric lines are ink. Identity colours apply only to group series; a shared slot gets
+a neutral square marker and its own label. Hatching is reserved for merged missing-data
+bands. Only allocation lower bounds use a dashed line and “≥”; other partial coverage
+is stated in the readout/table. The 7 d/30 d band shows min/max, not a forecast.
+Plots measure their width so hatch angles and marker shapes survive phone resizing,
+and each has a labelled y-axis. The current bucket says “So far”.
+
+Click or tap a reading to pin it, and click it again or press Escape to release it.
+Unpinned Escape remains available to a containing layer. The readout stays above the
+plots and can be copied. Times are compact and local, with dates when needed; the
+readout's start time and last-sample time disclose the full date, time and zone.
+The Activity link opens the exact interval (`from` inclusive, `to` exclusive).
+Activity's range chips replace it with the usual relative range. Charts allow vertical
+page scrolling; there is no brush, pinch, pan or scrub.
+
+Tab focuses the plot stack once. Left/Right move one bucket (Shift moves ten),
+Page Up/Down move an hour in the 24 h range or a day in longer ranges, Home/End reach
+the first/last bucket, and Up/Down choose a series. Enter pins; 1/2/3 select the range
+while the plot has focus. Table view shows the same values, held readings, coverage,
+bounds and reasons in pages of 24 buckets. Missing historical coverage remains unknown.
+
+### 历史图表
+
+使用情况页面的利用率和分配量分图展示，共享读数。选择 24 小时、7 天或 30 天，
+带具体时长的前后翻页按钮与表格视图同处图内工具行，“最新”返回当前窗口。
+`end` 参数恢复图表窗口；翻页仅影响趋势，已有总计和每日明细保留所选相对范围。
+
+当前实时图表可见时，共享分钟时钟检查是否跨入新区间（5 分钟、1 小时或 1 天）。
+跨界后仅请求图表，不请求汇总或额外的周数据。出现新历史点时仍按原流程刷新历史和
+汇总。示例及历史窗口固定。请求失败保留上次数据，同时显示原因和失败时间。
+
+两次采集之间，区间起点距最近观测未满记录中最快采集周期的两倍时，沿用最近读数；
+无周期的旧记录使用 30 分钟。沿用区间标注“沿用……的读数 · 最近样本”，新样本数为零。
+未知读数保持未知，采集超时后显示间隙。样本数低于预期本身不表示覆盖不完整或下界。
+
+指标线使用墨色；身份色仅用于组序列，共享色槽的后续序列使用中性色、方形标记及直接
+标签。斜线仅表示合并的缺失区间；虚线和“≥”仅表示分配量下界，其余覆盖不完整在
+读数和表格中说明。7 天/30 天色带表示最小–最大值，不作预测。图表测量实际宽度，
+手机上斜线角度和标记形状保持一致，每幅图均有纵轴数字。当前区间标注“截至目前”。
+
+点击或轻触固定读数，再次点击或 Escape 取消；未固定时 Escape 继续传递给外层。
+读数在图上方，可复制。时间使用紧凑的本地格式，需要时显示日期；起始时间和最近采集
+时间可展开完整时间及其时区。动态链接使用 `from`（含）至 `to`（不含）的精确时段，
+动态范围按钮清除该时段。图上允许纵向滚动，不提供框选、缩放、平移或滑动取值。
+
+图表仅有一个 Tab 焦点：左右移动一个区间，Shift 移动十个；Page Up/Down 移动一小时
+或一天；Home/End 到首尾；上下切换序列；Enter 固定；1/2/3 切换范围。表格每页展示
+24 个相同区间及其沿用读数、下界、覆盖数和缺失原因。旧记录缺失的覆盖数保持未知。

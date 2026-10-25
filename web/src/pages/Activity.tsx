@@ -305,6 +305,14 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
   const range = ['24h', '7d', '30d'].includes(requestedRange) ? requestedRange : '24h';
   const { query } = ctx;
   const [job] = useRouteParam('job_filter');
+  const [from] = useRouteParam('from');
+  const [to] = useRouteParam('to');
+  const windowed =
+    !!from &&
+    !!to &&
+    Number.isFinite(Date.parse(from)) &&
+    Number.isFinite(Date.parse(to)) &&
+    Date.parse(from) < Date.parse(to);
   const [search, setSearch] = useState(query);
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query), 250);
@@ -317,12 +325,25 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
     delivery: 'true',
     range,
   });
+  if (windowed) {
+    params.delete('range');
+    params.set('since', from);
+    params.set('until', to);
+  }
   if (category) params.set('category', category);
   if (ctx.group !== 'all') params.set('cluster_id', ctx.group);
   if (search) params.set('q', search.slice(0, 64));
   if (job) params.set('job', job);
   const clear = () =>
-    setRouteParams({ type: null, range: null, group: null, q: null, job_filter: null });
+    setRouteParams({
+      type: null,
+      range: null,
+      group: null,
+      q: null,
+      job_filter: null,
+      from: null,
+      to: null,
+    });
   return (
     <>
       <Panel>
@@ -339,7 +360,10 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
           <Chips
             label={t('activity.range')}
             value={range}
-            onChange={setRange}
+            onChange={(value) => {
+              setRange(value);
+              setRouteParams({ from: null, to: null });
+            }}
             options={['24h', '7d', '30d'].map((value) => ({
               value,
               label: t(`activity.range.${value}` as MessageKey),
@@ -360,8 +384,13 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
             </select>
           </label>
           <SearchBox ctx={ctx} placeholder={t('activity.search')} maxLength={64} />
+          {windowed && (
+            <p>
+              {dateTime(from)} – {dateTime(to)}
+            </p>
+          )}
           {job && <p>{t('activity.forJob', { job: job.split(':').at(-1) })}</p>}
-          {(category || query || job || ctx.group !== 'all' || range !== '24h') && (
+          {(category || query || job || windowed || ctx.group !== 'all' || range !== '24h') && (
             <button className="link" onClick={clear}>
               {t('activity.clear')}
             </button>
@@ -372,7 +401,7 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
         key={params.toString()}
         query={params.toString()}
         ctx={ctx}
-        filtered={Boolean(category || search || job || ctx.group !== 'all')}
+        filtered={Boolean(category || search || job || windowed || ctx.group !== 'all')}
         range={range}
         clear={clear}
       />
