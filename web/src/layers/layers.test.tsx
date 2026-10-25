@@ -181,6 +181,26 @@ it('URLs push once, preserve filters and connection query, replace steps, and co
   expect(back).toHaveBeenCalledOnce();
 });
 
+it.each([
+  { hash: '', key: 'event', openedHash: '#/overview?event=example-event' },
+  { hash: '#/jobs?q=a%20b', key: 'job', openedHash: '#/jobs?q=a+b&job=example-job' },
+])(
+  'closing a layer from "$hash" normalizes both hashes and goes Back',
+  ({ hash, key, openedHash }) => {
+    history.replaceState(null, '', `/?demo=true${hash}`);
+    const back = vi.spyOn(history, 'back').mockImplementation(() => {});
+    const length = history.length;
+    openLayer({ [key]: `example-${key}` });
+    expect(history.length).toBe(length + 1);
+    expect(location.hash).toBe(openedHash);
+    expect(history.state.layerBase).toBe(hash);
+    const replace = vi.spyOn(history, 'replaceState');
+    closeLayer([key]);
+    expect(back).toHaveBeenCalledOnce();
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
+
 it('menu arrows, Home/End, typeahead and disabled items follow the APG contract', async () => {
   const action = vi.fn();
   await render(

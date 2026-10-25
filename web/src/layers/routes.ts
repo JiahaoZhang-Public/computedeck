@@ -12,13 +12,21 @@ export function openLayer(values: Record<string, string | null>, replace = false
     opened.add(state.layerBase);
   }
 }
+function normalizedHash(hash: string, without: string[] = []) {
+  const params = routeParams(hash);
+  for (const key of without) params.delete(key);
+  const path = canonicalHash(hash).split('?')[0] || '#/overview';
+  const query = params.toString();
+  return path + (query ? `?${query}` : '');
+}
 export function closeLayer(keys: string[]) {
   const state = window.history.state;
-  const params = routeParams();
-  for (const key of keys) params.delete(key);
-  const path = canonicalHash(window.location.hash).split('?')[0];
-  const base = path + (params.size ? `?${params}` : '');
-  if (state?.layerBase === base && opened.has(state.layerBase)) window.history.back();
+  if (
+    typeof state?.layerBase === 'string' &&
+    opened.has(state.layerBase) &&
+    normalizedHash(state.layerBase) === normalizedHash(window.location.hash, keys)
+  )
+    window.history.back();
   else setRouteParams(Object.fromEntries(keys.map((key) => [key, null])));
 }
 export function replaceLayer(values: Record<string, string | null>) {
