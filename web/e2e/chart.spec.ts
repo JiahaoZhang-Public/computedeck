@@ -117,6 +117,7 @@ test('chart range keys and previous/next windows use server buckets', async ({ p
   await page.locator('.chart-plot').press('2');
   await ready(page);
   await expect(page).toHaveURL(/range=7d/);
+  await expect(page.locator('.chart-plot')).toBeFocused();
   expect(await page.locator('.bucket-band').count()).toBeGreaterThan(0);
   const previous = page
     .locator('.usage-trend .chart-tools')
@@ -125,6 +126,13 @@ test('chart range keys and previous/next windows use server buckets', async ({ p
   await previous.click();
   await ready(page);
   await expect(page).toHaveURL(/end=/);
+  await page
+    .getByRole('button', { name: locale === 'en' ? 'Next 7 days' : '后 7 天', exact: true })
+    .click();
+  await ready(page);
+  await expect(previous).toBeFocused();
+  await previous.click();
+  await ready(page);
   await page.reload();
   await ready(page);
   await expect(page).toHaveURL(/end=/);
@@ -133,4 +141,5 @@ test('chart range keys and previous/next windows use server buckets', async ({ p
     .click();
   await ready(page);
   expect(new URLSearchParams(page.url().split('?').at(-1)).has('end')).toBe(false);
+  await expect(previous).toBeFocused();
 });

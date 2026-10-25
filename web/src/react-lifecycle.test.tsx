@@ -493,6 +493,64 @@ describe('history lifecycle', () => {
     );
   });
 
+  it('keeps plot focus while a range loads and after its buckets arrive', async () => {
+    request.mockResolvedValue(historyResult([sample(2)]));
+    await render(<UsagePage ctx={usageContext()} />);
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      '/history?hours=24&rollup=1&chart=1&demo=false',
+      '/history?hours=168&rollup=1&demo=false',
+      '/history?hours=24&rollup=1&chart=1&demo=false',
+      '/history?hours=168&rollup=1&demo=false',
+    ]);
+    const plot = container.querySelector<HTMLDivElement>('.chart-plot')!;
+    plot.focus();
+    const pending = deferred<ReturnType<typeof historyResult>>();
+    request.mockReturnValue(pending.promise);
+    await act(async () =>
+      plot.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true })),
+    );
+    expect(document.activeElement).toBe(plot);
+    expect(container.querySelector('.usage-trend')!.getAttribute('aria-busy')).toBe('true');
+    const week = historyResult([sample(2), sample(3)]);
+    week.chart.bucket_seconds = 3600;
+    await act(async () => pending.resolve(week));
+    expect(container.querySelector('.chart-plot')).toBe(plot);
+    expect(document.activeElement).toBe(plot);
+    expect(container.querySelector('.usage-trend')!.getAttribute('aria-busy')).toBe('false');
+    await act(async () =>
+      plot.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true })),
+    );
+    expect(window.location.hash).toContain('range=30d');
+    expect(document.activeElement).toBe(plot);
+  });
+
+  it.each(['next', 'latest'] as const)(
+    'moves focus before %s returns to the current window',
+    async (action) => {
+      const end = new Date(now.getTime() - 24 * 3600000).toISOString();
+      window.history.replaceState(null, '', `/#/usage?end=${encodeURIComponent(end)}`);
+      const historical = historyResult([sample(26)]);
+      historical.chart.end = end;
+      historical.chart.start = new Date(Date.parse(end) - 24 * 3600000).toISOString();
+      request.mockResolvedValue(historical);
+      await render(<UsagePage ctx={usageContext()} />);
+      expect(request.mock.calls.slice(0, 2).map(([path]) => path)).toEqual([
+        `/history?hours=24&rollup=1&chart=1&demo=false&end=${encodeURIComponent(end)}`,
+        '/history?hours=168&rollup=1&demo=false',
+      ]);
+      const previous = container.querySelector<HTMLButtonElement>('.chart-tools button')!;
+      const label = action === 'latest' ? t('chart.latest') : t('chart.nextHours', { count: 24 });
+      const control = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === label,
+      )!;
+      control.focus();
+      request.mockResolvedValue(historyResult([sample(2)]));
+      await act(async () => control.click());
+      expect(document.activeElement).toBe(previous);
+      expect(window.location.hash).not.toContain('end=');
+    },
+  );
+
   it('refreshes only the chart at bucket boundaries and preserves the loaded rollups', async () => {
     request.mockResolvedValue(historyResult([sample(2)]));
     await render(<UsagePage ctx={usageContext()} />);

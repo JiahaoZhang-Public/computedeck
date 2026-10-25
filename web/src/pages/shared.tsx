@@ -490,7 +490,7 @@ export function FailuresTable({
   );
 }
 
-/** `partial`: some samples count only part of the sources; their bars are hatched. */
+/** The full estimate and its qualifications in the instance drawer. */
 export function InstanceRunCost({ item, source }: { item: Instance; source?: Source }) {
   useClock();
   const run = runningHours(item, source);

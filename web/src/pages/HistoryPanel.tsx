@@ -10,20 +10,22 @@ export function HistoryPanel({
   empty,
   onRange,
   controls,
+  busy = false,
 }: {
   data?: ChartData;
+  busy?: boolean;
   note?: ReactNode;
   controls?: ReactNode;
   empty?: string;
   onRange?: (range: string) => void;
 }) {
   return (
-    <section className="usage-trend">
+    <section className="usage-trend" aria-busy={busy}>
       <header className="panel-header">
         <h3>{t('chart.heading')}</h3>
       </header>
       {data ? (
-        <Chart key={data.bucket_seconds} data={data} onRange={onRange} controls={controls} />
+        <Chart data={data} onRange={onRange} controls={controls} />
       ) : (
         <p className="chart-empty">{empty ?? t('chart.unavailable')}</p>
       )}

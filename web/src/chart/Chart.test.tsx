@@ -45,6 +45,7 @@ describe.each(['en', 'zh-CN'] as const)('chart input %s', (locale) => {
     await act(async () => root.render(<Chart data={data()} onRange={onRange} />));
     expect(container.querySelectorAll('.chart-plot[tabindex="0"]')).toHaveLength(1);
     await key('Home');
+    expect(container.querySelector('[aria-live]')!.textContent).toContain('0 %');
     await key('ArrowRight', { shiftKey: true });
     await key('Enter');
     expect(pin()).toBe('true');
@@ -138,6 +139,10 @@ describe.each(['en', 'zh-CN'] as const)('chart input %s', (locale) => {
       container.querySelector<HTMLButtonElement>('button[aria-pressed]')!.click(),
     );
     expect(container.querySelectorAll('tbody tr')).toHaveLength(24);
+    expect(container.querySelector('tbody td:nth-child(2)')!.textContent).toContain('%');
+    expect(container.querySelector('tbody td:nth-child(3)')!.textContent).toContain(
+      t('chart.gpuUnit'),
+    );
     expect(container.querySelector('tbody')!.textContent).toContain(
       t('chart.sources', { known: 2, total: 2 }),
     );
@@ -200,7 +205,7 @@ it('measures the plot in CSS pixels, keeps three y labels per plot, and disconne
     expect(svg.querySelectorAll('.bucket-axis')).toHaveLength(3);
   }
   expect(container.querySelectorAll('.bucket-axis')).toHaveLength(6);
-  expect(container.querySelector('pattern')!.getAttribute('patternTransform')).toBe('rotate(135)');
+  expect(container.querySelector('pattern')!.getAttribute('patternTransform')).toBe('rotate(45)');
   expect(container.querySelectorAll('.bucket-partial')).toHaveLength(0);
   expect(container.querySelectorAll('[data-lower-bound=false][stroke-dasharray]')).toHaveLength(0);
   await act(async () => root.render(null));

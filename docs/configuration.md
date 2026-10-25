@@ -141,13 +141,15 @@ The URL preserves view choices without storing credentials:
 
 - Jobs: `#/jobs?state=pending&q=train`; add `group=<cluster-id>` to filter a cluster.
 - Activity: `#/activity?type=failed&range=7d&q=train`; `group` scopes a cluster or platform,
-  and `job_filter` selects one job's history.
+  and `job_filter` selects one job's history. `#/activity?from=<ISO>&to=<ISO>` selects
+  an exact interval (start inclusive, end exclusive; both timestamps include a timezone).
 - Planner: `#/plan?gpus=4&model=A100&hours=12`; `from=<job-id>` links a pending or failed job to alternatives. Recent-job presets fill resources, not run time.
 - Cloud and machines: `#/cloud?use=low` for sustained low use, or `use=unknown` for insufficient readings.
 - Cluster nodes: `#/resources?nodes=abnormal`.
 - Usage & cost: `#/usage?range=24h`, `7d` or `30d`; old numeric history ranges
   (`24` → `24h`; `72`, `3d`, `168` → `7d`) map to offered chips. The range applies
-  to observed history, not current figures.
+  to observed history, not current figures. `#/usage?end=<ISO with timezone>` selects
+  the chart window ending at that time.
 - Tools: `#/toolbox?tab=market`; searches use `q` or `market-q`.
 
 The route IDs and parameter values from 0.7 remain valid, including `state=pending`
@@ -176,7 +178,9 @@ and `repair=<source-id>` share `step` with `add`; cloud and SSH machine forms us
 `add` / `edit` on `#/cloud` and `#/sources`. The implemented panel and form addresses are listed under “Panels, forms and notifications”
 below; page-specific keys such as `node`, `rule` and `rate` remain reserved.
 
-中文：0.7 的路由、参数及参数值保持有效（包括 `state=pending`、`tab=market`）。
+中文：`#/usage?end=<含时区的 ISO 时间>` 恢复以该时间结束的图表窗口；
+`#/activity?from=<ISO>&to=<ISO>` 选择精确时段（起点含、终点不含，均须带时区）。
+0.7 的路由、参数及参数值保持有效（包括 `state=pending`、`tab=market`）。
 `provider` 仍可代替 `group`，同时提供时以 `group` 为准。上表中的别名替换当前历史记录，
 不会增加浏览器返回步骤；其他筛选、编码后的 ID 和 `#` 前的连接及示例模式参数均保留。
 Nodes 和 Marketplace 别名分别固定选择 `tab=nodes`、`tab=market`；旧节点筛选链接仅在
@@ -508,7 +512,8 @@ only the trend; the existing usage totals and daily breakdown retain their relat
 The shared minute clock checks for a new chart bucket while the current live window is
 visible (5 minutes, 1 hour or 1 day). At that boundary, only the chart is requested,
 without rollups or a second week request. A new history point still refreshes the usual
-history and rollups. Example and historical windows stay fixed. Failed requests keep
+history and rollups. The additional week-total request has neither `chart=1` nor `end`.
+Example and historical windows stay fixed. Failed requests keep
 the last data alongside their error reason and time.
 
 Between collections, a bin holds the last observation while it is younger than twice
@@ -535,8 +540,13 @@ page scrolling; there is no brush, pinch, pan or scrub.
 Tab focuses the plot stack once. Left/Right move one bucket (Shift moves ten),
 Page Up/Down move an hour in the 24 h range or a day in longer ranges, Home/End reach
 the first/last bucket, and Up/Down choose a series. Enter pins; 1/2/3 select the range
-while the plot has focus. Table view shows the same values, held readings, coverage,
+while the plot has focus. Range loading retains the plot and its focus with `aria-busy`;
+Next at the latest window and Latest return focus to Previous. Table view shows the same values, held readings, coverage,
 bounds and reasons in pages of 24 buckets. Missing historical coverage remains unknown.
+Readings and statistics place % or GPUs beside each value, and gap durations use prose
+hours/minutes. Empty explanations precede the plots. Contiguous exact/lower-bound readings
+remain connected; an isolated lower-bound point has a hollow ring marker and ≥.
+Example charts share the ten-day recorded span of the daily breakdown.
 
 ### 历史图表
 
@@ -546,7 +556,7 @@ bounds and reasons in pages of 24 buckets. Missing historical coverage remains u
 
 当前实时图表可见时，共享分钟时钟检查是否跨入新区间（5 分钟、1 小时或 1 天）。
 跨界后仅请求图表，不请求汇总或额外的周数据。出现新历史点时仍按原流程刷新历史和
-汇总。示例及历史窗口固定。请求失败保留上次数据，同时显示原因和失败时间。
+汇总；额外的周总计请求不包含 `chart=1` 或 `end`。示例及历史窗口固定。请求失败保留上次数据，同时显示原因和失败时间。
 
 两次采集之间，区间起点距最近观测未满记录中最快采集周期的两倍时，沿用最近读数；
 无周期的旧记录使用 30 分钟。沿用区间标注“沿用……的读数 · 最近样本”，新样本数为零。
@@ -565,3 +575,7 @@ bounds and reasons in pages of 24 buckets. Missing historical coverage remains u
 图表仅有一个 Tab 焦点：左右移动一个区间，Shift 移动十个；Page Up/Down 移动一小时
 或一天；Home/End 到首尾；上下切换序列；Enter 固定；1/2/3 切换范围。表格每页展示
 24 个相同区间及其沿用读数、下界、覆盖数和缺失原因。旧记录缺失的覆盖数保持未知。
+切换范围时保留图表及焦点，以 `aria-busy` 标记加载；“最新”或到达当前窗口的“后”按钮
+将焦点移到“前”按钮。读数及统计的单位紧随数值，间隙时长使用小时/分钟文字格式。
+空状态原因置于图前；相邻精确值与下界保持连接，孤立下界使用空心圆环标记及 ≥。
+示例图表与每日明细共用最近十天的已记录时段。

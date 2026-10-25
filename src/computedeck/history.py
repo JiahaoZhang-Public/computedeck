@@ -242,21 +242,27 @@ def chart_history(
                 previous = samples[-1]
         bucket_values = [b["value"] for b in buckets if b["value"] is not None]
         gaps = [b for b in buckets if b["value"] is None]
+        lower_bound = any(b["lower_bound"] for b in buckets if b["value"] is not None)
+
+        def rounded(value: float, lower: bool = lower_bound) -> float:
+            return math.floor(value * 10) / 10 if lower else round(value, 1)
+
         series.append(
             {
                 "id": metric,
                 "buckets": buckets,
                 "summary": {
                     "code": "chart_summary" if bucket_values else "chart_empty_summary",
-                    "mean": round(sum(bucket_values) / len(bucket_values), 1)
+                    "mean": rounded(sum(bucket_values) / len(bucket_values))
                     if bucket_values
-                    else 0,
-                    "min": min(b["min"] for b in buckets if b["min"] is not None)
+                    else None,
+                    "min": rounded(min(b["min"] for b in buckets if b["min"] is not None))
                     if bucket_values
-                    else 0,
-                    "max": max(b["max"] for b in buckets if b["max"] is not None)
+                    else None,
+                    "max": rounded(max(b["max"] for b in buckets if b["max"] is not None))
                     if bucket_values
-                    else 0,
+                    else None,
+                    "lower_bound": lower_bound,
                     "gaps": len(gaps),
                     "minutes": round(
                         sum(

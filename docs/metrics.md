@@ -1095,3 +1095,24 @@ observation before an empty window. Tables and schema versions are unchanged.
 使用文字说明。长范围色带是最小/最大值，不是置信区间或预测。紧凑本地时间可展开完整
 时间及时区。服务端摘要的区间均值和极值包含沿用读数，并报告缺失时长和不完整数量。
 `last_sample` 保留空窗口前最近观测。数据库表和版本不变。
+
+Chart summaries return null `mean`, `min` and `max` when no value is known. Otherwise
+all three use one decimal place (rounded down for bounds). Summary `lower_bound` is
+true when any contributing allocation bucket is a bound; it applies to all three
+statistics. Utilisation summaries never imply a lower bound. The UI attaches units
+to each figure and formats gap `minutes` as prose duration. Unsupported UTC `end`
+conversions or windows return 422 with `chart_end_invalid` in both live and example mode.
+The sample count includes an observation exactly at the final end; the expected count
+is a cadence estimate, not a maximum.
+
+中文：摘要在无已知值时将 `mean`、`min`、`max` 返回 null，否则统一保留一位小数，
+下界向下取整。任一贡献分配区间为下界时，摘要 `lower_bound` 为 true，适用于三个
+统计值；利用率摘要不标下界。界面每个数值紧跟单位，将间隙 `minutes` 转为文字时长。
+实时和示例模式中，超出 UTC 日期范围的 `end` 转换或窗口返回 422 / `chart_end_invalid`。
+样本数包含恰好位于最终终点的观测；预计样本数为频率估算，不是上限。
+
+Follow-ups: P4 aligns day buckets to local dates. Q2 should assess an additive
+`points=0` option for chart-only refreshes, which still return the legacy points array.
+
+后续：P4 将日区间对齐本地日期；Q2 评估新增 `points=0` 选项，减少仅刷新图表时仍返回
+旧 `points` 数组的负担。

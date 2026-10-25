@@ -1,11 +1,19 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { PointerEvent, KeyboardEvent, ReactNode } from 'react';
 import { absoluteTime, clockTime, formatDate, number, relativeTime } from '../format';
-import { formatMessage, t } from '../i18n';
+import { t } from '../i18n';
 import { ClockText } from '../data/ClockText';
 import { Time } from '../ui/Time';
 import type { ChartData } from './types';
-import { compactRange, compactTime, intervalEnd, reading, seriesLabel, statistics } from './labels';
+import {
+  compactRange,
+  compactTime,
+  intervalEnd,
+  reading,
+  seriesLabel,
+  statistics,
+  summaryText,
+} from './labels';
 import { H, W, LEFT, gapBands, segments, seriesStyles, timeX, y } from './geometry';
 import './chart.css';
 
@@ -48,7 +56,7 @@ export function Chart({
   const styles = seriesStyles(data.series);
   const title = t('chart.scope');
   const summary = data.series
-    .map((series) => `${seriesLabel(series)}: ${formatMessage(series.summary)}`)
+    .map((series) => `${seriesLabel(series)}: ${summaryText(series)}`)
     .join(' ');
   function select(next: number, series = activeSeries, pin = isPinned) {
     const i = Math.max(0, Math.min(buckets.length - 1, next));
@@ -57,7 +65,7 @@ export function Chart({
     setActiveSeries(series);
     setPinned(pin);
     setAnnouncement(
-      `${absoluteTime(buckets[i].start)} · ${seriesLabel(data.series[series])} · ${reading(data.series[series].buckets[i])}`,
+      `${absoluteTime(buckets[i].start)} · ${seriesLabel(data.series[series])} · ${reading(data.series[series].buckets[i], data.series[series].id)}`,
     );
   }
   function key(event: KeyboardEvent<HTMLDivElement>) {
@@ -151,6 +159,12 @@ export function Chart({
           {t('chart.table')}
         </button>
       </div>
+      {!data.series.some((series) => series.buckets.some((bucket) => bucket.value !== null)) && (
+        <p className="chart-empty">
+          {t('chart.empty')} ·{' '}
+          {data.last_sample ? compactTime(data.last_sample) : t('chart.noLastSample')}
+        </p>
+      )}
       <div className="chart-readout" data-pinned={isPinned}>
         {active && (
           <>
@@ -167,9 +181,9 @@ export function Chart({
               <div key={series.id} data-active={i === activeSeries}>
                 {seriesLabel(series)} ·{' '}
                 {t(series.id === 'utilization' ? 'chart.measuredScope' : 'chart.mineScope')} ·{' '}
-                {reading(series.buckets[index])}
+                {reading(series.buckets[index], series.id)}
                 {series.buckets[index].value !== null && (
-                  <span> · {statistics(series.buckets[index])}</span>
+                  <span> · {statistics(series.buckets[index], series.id)}</span>
                 )}
               </div>
             ))}
@@ -209,8 +223,8 @@ export function Chart({
                       const b = series.buckets[page * 24 + offset];
                       return (
                         <td key={series.id}>
-                          {reading(b)}
-                          <span className="sub">{statistics(b)}</span>
+                          {reading(b, series.id)}
+                          <span className="sub">{statistics(b, series.id)}</span>
                         </td>
                       );
                     })}
@@ -278,7 +292,7 @@ export function Chart({
                           width="6"
                           height="6"
                           patternUnits="userSpaceOnUse"
-                          patternTransform="rotate(135)"
+                          patternTransform="rotate(45)"
                         >
                           <path className="bucket-hatch" d="M0 0v6" />
                         </pattern>
@@ -329,7 +343,7 @@ export function Chart({
                         </g>
                       );
                     })}
-                    {segments(series.buckets).map((indices) => {
+                    {segments(series.buckets).map(({ indices, lowerBound }, segment) => {
                       const first = series.buckets[indices[0]];
                       const path = indices
                         .map(
@@ -343,17 +357,18 @@ export function Chart({
                           .map((i) => `${x(i)},${y(series.buckets[i].min!, max)}`),
                       ].join(' ');
                       return (
-                        <g key={indices[0]}>
+                        <g key={segment}>
                           {data.bucket_seconds > 300 && (
                             <polygon className="bucket-band" points={band} />
                           )}
                           <path
                             className="bucket-line"
-                            data-lower-bound={first.lower_bound}
+                            data-lower-bound={lowerBound}
                             d={path}
-                            strokeDasharray={first.lower_bound ? '3 3' : undefined}
+                            strokeDasharray={lowerBound ? '3 3' : undefined}
                           />
                           {indices.length === 1 &&
+                            !first.lower_bound &&
                             (styles[n].square ? (
                               <rect
                                 className="bucket-dot"
@@ -373,6 +388,42 @@ export function Chart({
                         </g>
                       );
                     })}
+                    {series.buckets.map((bucket, i) => {
+                      if (bucket.value === null || !bucket.lower_bound) return null;
+                      const before = series.buckets[i - 1],
+                        after = series.buckets[i + 1];
+                      if (
+                        (before?.lower_bound &&
+                          before.value !== null &&
+                          before.end === bucket.start) ||
+                        (after?.lower_bound && after.value !== null && bucket.end === after.start)
+                      )
+                        return null;
+                      return (
+                        <g key={bucket.start} className="bucket-bound-mark">
+                          <circle
+                            className="bucket-bound"
+                            cx={x(i)}
+                            cy={y(bucket.value, max)}
+                            r="4"
+                          />
+                          <circle
+                            className="bucket-bound-hole"
+                            cx={x(i)}
+                            cy={y(bucket.value, max)}
+                            r="2.5"
+                          />
+                          <text
+                            className="bucket-bound-label"
+                            x={x(i)}
+                            y={Math.max(12, y(bucket.value, max) - 8)}
+                            textAnchor="middle"
+                          >
+                            ≥
+                          </text>
+                        </g>
+                      );
+                    })}
                     {data.end === data.as_of && (
                       <line className="bucket-cursor" x1={width - 8} x2={width - 8} y1="0" y2={H} />
                     )}
@@ -383,7 +434,11 @@ export function Chart({
                       series.buckets[index].value !== null &&
                       (styles[n].square ? (
                         <rect
-                          className="bucket-dot"
+                          className={
+                            series.buckets[index].lower_bound
+                              ? 'bucket-dot bucket-bound'
+                              : 'bucket-dot'
+                          }
                           x={x(index) - 3}
                           y={y(series.buckets[index].value!, max) - 3}
                           width="6"
@@ -391,10 +446,33 @@ export function Chart({
                         />
                       ) : (
                         <circle
-                          className="bucket-dot"
+                          className={
+                            series.buckets[index].lower_bound
+                              ? 'bucket-dot bucket-bound'
+                              : 'bucket-dot'
+                          }
                           cx={x(index)}
                           cy={y(series.buckets[index].value!, max)}
                           r="3"
+                        />
+                      ))}
+                    {active &&
+                      series.buckets[index].value !== null &&
+                      series.buckets[index].lower_bound &&
+                      (styles[n].square ? (
+                        <rect
+                          className="bucket-bound-hole"
+                          x={x(index) - 1.5}
+                          y={y(series.buckets[index].value!, max) - 1.5}
+                          width="3"
+                          height="3"
+                        />
+                      ) : (
+                        <circle
+                          className="bucket-bound-hole"
+                          cx={x(index)}
+                          cy={y(series.buckets[index].value!, max)}
+                          r="1.5"
                         />
                       ))}
                   </svg>
@@ -422,12 +500,6 @@ export function Chart({
         {t('chart.lastSample')} ·{' '}
         {data.last_sample ? <Time value={data.last_sample} /> : t('chart.noLastSample')}
       </p>
-      {!data.series.some((series) => series.buckets.some((bucket) => bucket.value !== null)) && (
-        <p className="chart-empty">
-          {t('chart.empty')} ·{' '}
-          {data.last_sample ? compactTime(data.last_sample) : t('chart.noLastSample')}
-        </p>
-      )}
     </section>
   );
 }

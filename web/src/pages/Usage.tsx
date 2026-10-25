@@ -207,7 +207,7 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
           />
         }
       >
-        <UsageRange key={`${demo}:${hours}`} ctx={ctx} hours={hours} />
+        <UsageRange key={String(demo)} ctx={ctx} hours={hours} />
       </Panel>
     </>
   );
@@ -216,9 +216,13 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
 type HistoryResponse = { chart?: ChartData; rollups: UsageRollups };
 
 function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
-  const [result, setResult] = useState<(HistoryResponse & { week: UsageRollups }) | null>(null);
+  const [result, setResult] = useState<
+    (HistoryResponse & { week: UsageRollups; hours: number }) | null
+  >(null);
   const [failed, setFailed] = useState<{ at: string; reason: unknown } | null>(null);
   const [end, setEnd] = useRouteParam('end');
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const [settledRange, setSettledRange] = useState('');
   const [retry, setRetry] = useState(0);
   const requestId = useRef(0);
   const loading = useRef(false);
@@ -244,18 +248,19 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
     }
   }, [hours, ctx.demo]);
   const latest = ctx.data.history.at(-1)?.at;
+  const chartRequest = `/history?hours=${hours}&rollup=1&chart=1&demo=${ctx.demo}${end ? `&end=${encodeURIComponent(end)}` : ''}`;
   useEffect(() => {
     const id = ++requestId.current;
     loading.current = true;
-    const request = (range: number) =>
-      api<HistoryResponse>(
-        `/history?hours=${range}&rollup=1&chart=1&demo=${ctx.demo}${end ? `&end=${encodeURIComponent(end)}` : ''}`,
-      );
-    const selected = request(hours);
-    Promise.all([selected, hours >= 168 ? selected : request(168)])
+    const selected = api<HistoryResponse>(chartRequest);
+    const week =
+      hours >= 168
+        ? selected
+        : api<HistoryResponse>(`/history?hours=168&rollup=1&demo=${ctx.demo}`);
+    Promise.all([selected, week])
       .then(([value, week]) => {
         if (id === requestId.current) {
-          setResult({ ...value, week: week.rollups });
+          setResult({ ...value, week: week.rollups, hours });
           setFailed(null);
         }
       })
@@ -263,10 +268,13 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
         if (id === requestId.current) setFailed({ at: new Date().toISOString(), reason });
       })
       .finally(() => {
-        if (id === requestId.current) loading.current = false;
+        if (id === requestId.current) {
+          loading.current = false;
+          setSettledRange(chartRequest);
+        }
       });
     return invalidateRequests;
-  }, [hours, ctx.demo, latest, retry, end, invalidateRequests]);
+  }, [hours, ctx.demo, latest, retry, chartRequest, invalidateRequests]);
   const failure = failed && (
     <Empty
       title={`${t('chart.failed')} · ${errorText(failed.reason, 'chart.failed')} · ${absoluteTime(failed.at)}`}
@@ -292,8 +300,9 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
         <HistoryClock bucketSeconds={result.chart.bucket_seconds} onBucket={refreshChart} />
       )}
       {failure}
-      <UsageHistory rollups={result.rollups} week={result.week} hours={hours} ctx={ctx} />
+      <UsageHistory rollups={result.rollups} week={result.week} hours={result.hours} ctx={ctx} />
       <HistoryPanel
+        busy={settledRange !== chartRequest}
         controls={
           result.chart && (
             <>
@@ -303,6 +312,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
                 aria-label={t(hours === 24 ? 'chart.previousHours' : 'chart.previousDays', {
                   count: hours === 24 ? hours : hours / 24,
                 })}
+                ref={previousButton}
                 onClick={() => setEnd(result.chart!.start)}
               >
                 {t(hours === 24 ? 'chart.previousHours' : 'chart.previousDays', {
@@ -318,6 +328,7 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
                 disabled={!end}
                 onClick={() => {
                   const next = Date.parse(result.chart!.end) + hours * HOUR;
+                  if (next >= Date.parse(result.chart!.as_of)) previousButton.current?.focus();
                   setEnd(
                     next >= Date.parse(result.chart!.as_of) ? '' : new Date(next).toISOString(),
                   );
@@ -328,7 +339,14 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
                 })}
               </button>
               {end && (
-                <button className="button" type="button" onClick={() => setEnd('')}>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => {
+                    previousButton.current?.focus();
+                    setEnd('');
+                  }}
+                >
                   {t('chart.latest')}
                 </button>
               )}

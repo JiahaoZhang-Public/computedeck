@@ -432,7 +432,12 @@ def create_app(
             raise HTTPException(422, message("chart_end_invalid"))
         if chart:
             current = demo_now() if demo else datetime.now(UTC)
-            right = min(end.astimezone(UTC), current) if end else current
+            try:
+                right = min(end.astimezone(UTC), current) if end else current
+                # Validate the whole window before either backend subtracts it.
+                right - timedelta(hours=hours)
+            except OverflowError:
+                raise HTTPException(422, message("chart_end_invalid")) from None
             result["chart"] = (
                 chart_history(demo_chart_history(hours, right), hours, end=right, current=current)
                 if demo

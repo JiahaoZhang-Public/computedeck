@@ -263,3 +263,36 @@ def test_hold_uses_legacy_threshold_without_inventing_source_coverage() -> None:
     assert held and all(b["value"] == 0 and b["samples"] == 0 for b in held)
     assert all(b["known_sources"] is None and b["total_sources"] is None for b in held)
     assert buckets[-1]["gap_reason"] == {"code": "chart_not_collecting"}
+
+
+@pytest.mark.parametrize("points", [[], [point(0, None)]])
+def test_empty_summary_has_null_statistics(points: list[dict[str, Any]]) -> None:
+    for series in chart(points)["series"]:
+        summary = series["summary"]
+        assert summary["code"] == "chart_empty_summary"
+        assert summary["mean"] is summary["min"] is summary["max"] is None
+        assert summary["lower_bound"] is False
+
+
+def test_summary_rounds_utilization_and_marks_allocation_bounds() -> None:
+    samples = [point(1, 44 + 1 / 3), point(0, None, known_allocated_gpus=55.59)]
+    util, allocation = chart(samples)["series"]
+    assert (util["summary"]["mean"], util["summary"]["min"], util["summary"]["max"]) == (
+        44.3,
+        44.3,
+        44.3,
+    )
+    assert util["summary"]["lower_bound"] is False
+    assert allocation["summary"]["lower_bound"] is True
+    assert allocation["summary"]["max"] == 55.5
+
+
+def test_demo_chart_starts_with_recorded_rollups(monkeypatch: pytest.MonkeyPatch) -> None:
+    from computedeck.demo import demo_history
+
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", END.isoformat())
+    first_recorded = next(p["at"] for p in demo_history(720) if p.get("by_group"))
+    points = demo_chart_history(720, END)
+    assert points[0]["at"] == first_recorded
+    assert all(p["at"] >= first_recorded for p in points)
+    assert demo_chart_history(24, END - timedelta(days=11)) == []

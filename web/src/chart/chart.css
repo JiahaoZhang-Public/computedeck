@@ -52,7 +52,7 @@
   fill: currentColor;
 }
 .bucket-hatch {
-  stroke: var(--hatch-edge);
+  stroke: var(--hatch);
   stroke-width: 1;
 }
 .bucket-gap {
@@ -106,4 +106,19 @@
   stroke: var(--bg-surface);
   stroke-width: 4;
   paint-order: stroke;
+}
+
+.chart-ticks {
+  margin-inline: 36px 8px;
+}
+/* Markers are fill-only: stroked circles/rects made dotted time underlines rasterize nondeterministically in the UI gate. */
+.bucket-bound {
+  fill: currentColor;
+}
+.bucket-bound-hole {
+  fill: var(--bg-surface);
+}
+.bucket-bound-label {
+  fill: currentColor;
+  font-size: 12px;
 }

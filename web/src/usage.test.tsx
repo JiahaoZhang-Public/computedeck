@@ -341,6 +341,28 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     expect(money(1.239, 'USD')).toBe(money(1.24, 'USD'));
   });
 
+  it.each(['', '2026-01-14T14:00:00Z'])(
+    'requests only current week rollups beside the selected chart (end=%s)',
+    async (at) => {
+      setLocale(locale);
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      const suffix = at ? `&end=${encodeURIComponent(at)}` : '';
+      window.history.replaceState(null, '', `/#/usage?range=24h${suffix}`);
+      vi.mocked(api).mockResolvedValue({ points: [], rollups: rollups() });
+      const host = document.createElement('div'),
+        root = createRoot(host);
+      try {
+        await act(async () => root.render(<UsagePage ctx={context()} />));
+        expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+          `/history?hours=24&rollup=1&chart=1&demo=false${suffix}`,
+          '/history?hours=168&rollup=1&demo=false',
+        ]);
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
   it.each([
     ['7d', 168],
     ['30d', 720],

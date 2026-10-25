@@ -7,19 +7,17 @@ export const timeX = (at: number, start: number, end: number, width = W) =>
   LEFT + ((at - start) / (end - start)) * (width - LEFT - 8);
 export const y = (value: number, max: number) => H - 8 - (value / max) * (H - 16);
 
-/** Break at every unknown bucket and every change between exact and lower-bound data. */
+/** Break only at gaps; an edge touching a lower bound is dashed. */
 export function segments(buckets: Bucket[]) {
-  const result: number[][] = [];
+  const result: { indices: number[]; lowerBound: boolean }[] = [];
   buckets.forEach((bucket, i) => {
     if (bucket.value === null) return;
     const previous = result.at(-1);
-    if (
-      previous?.at(-1) === i - 1 &&
-      buckets[i - 1].end === bucket.start &&
-      buckets[i - 1].lower_bound === bucket.lower_bound
-    )
-      previous.push(i);
-    else result.push([i]);
+    if (previous?.indices.at(-1) === i - 1 && buckets[i - 1].end === bucket.start) {
+      const lowerBound = buckets[i - 1].lower_bound || bucket.lower_bound;
+      if (previous.lowerBound === lowerBound) previous.indices.push(i);
+      else result.push({ indices: [i - 1, i], lowerBound });
+    } else result.push({ indices: [i], lowerBound: bucket.lower_bound });
   });
   return result;
 }

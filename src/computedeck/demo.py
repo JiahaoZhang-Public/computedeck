@@ -1023,7 +1023,7 @@ def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
     for age in range(hours * 12, -1, -1):
         at = end - timedelta(minutes=age * 5)
         ago = (current - at).total_seconds() / 3600
-        if 10 < ago < 12 or ago > 24 * 30:
+        if 10 < ago < 12 or ago > 240:
             continue
         partial = ago < 2
         unknown = 5 < ago < 5.5

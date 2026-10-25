@@ -2148,3 +2148,22 @@ def test_activity_until_outside_utc_range_names_end_time(client: TestClient, unt
     response = client.get("/api/events", params={"until": until})
     assert response.status_code == 422
     assert response.json()["detail"] == {"code": "event_until_invalid"}
+
+
+@pytest.mark.parametrize("demo", [False, True])
+@pytest.mark.parametrize(
+    "end",
+    [
+        "0001-01-01T00:30:00Z",
+        "0001-01-01T00:00:00+05:00",
+        "9999-12-31T23:59:59-05:00",
+    ],
+)
+def test_chart_end_outside_utc_range_names_end_time(
+    client: TestClient, demo: bool, end: str
+) -> None:
+    response = client.get(
+        "/api/history", params={"chart": "1", "demo": str(demo).lower(), "end": end}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "chart_end_invalid"}
