@@ -8,7 +8,7 @@ import { setLocale, t } from '../i18n';
 import { relativeTime } from '../format';
 import { money } from '../domain';
 import { SourceDiagnosis } from '../SourceDiagnosis';
-import { InstanceRunCost } from '../pages/shared';
+import { FailuresTable, InstanceRunCost } from '../pages/shared';
 import { createLiveStore, share } from './store';
 import { transitions } from './transitions';
 import { sincePath, tokenOf } from './poll';
@@ -128,6 +128,15 @@ describe.each(['en', 'zh-CN'] as const)('transition announcements in %s', (langu
     after.data!.jobs.push({ ...after.data!.jobs[0], id: 'new-job' });
     expect(transitions(before, after, true)).toContain(t('live.jobsAdded', { count: 1 }));
   });
+  it('is silent when the same job is observed through a different twin login', () => {
+    setLocale(language);
+    const before = snapshot();
+    const after = structuredClone(before);
+    after.data.jobs[0].source_id = 'cluster-a-twin';
+    expect(transitions(before, after, true)).toBe('');
+    after.data.jobs[0].state = 'COMPLETED';
+    expect(transitions(before, after, true)).toBe(t('live.jobsChanged', { count: 1 }));
+  });
   it('announces a service failure and recovery but not repeated failures', () => {
     setLocale(language);
     const before = snapshot();
@@ -221,7 +230,7 @@ it('adapts pointer cadence, pauses hidden requests, coalesces return events and 
   expect(poll).not.toHaveBeenCalled();
 });
 
-it('keeps the native app on ten seconds even with a coarse pointer', async () => {
+it('keeps coarse-pointer WebKit hosts on thirty seconds even with message handlers', async () => {
   vi.stubGlobal('matchMedia', () => ({
     matches: true,
     addEventListener: vi.fn(),
@@ -232,8 +241,23 @@ it('keeps the native app on ten seconds even with a coarse pointer', async () =>
     return usePollCadence();
   }
   await act(async () => root.render(<View />));
-  expect(container.textContent).toBe('10000');
+  expect(container.textContent).toBe('30000');
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'updates failure end ages without a poll in %s',
+  async (locale) => {
+    setLocale(locale);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-15T14:00:00Z'));
+    const job = { ...data.recent_failures![0], ended_at: '2026-01-15T13:57:00Z' };
+    await act(async () => root.render(<FailuresTable jobs={[job]} groups={[]} />));
+    const cell = container.querySelector('tbody tr td:last-child')!;
+    expect(cell.textContent).toBe(t('time.minutesAgo', { count: 3 }));
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(cell.textContent).toBe(t('time.minutesAgo', { count: 4 }));
+  },
+);
 
 it('keeps overdue diagnosis text and running-cost estimates advancing without a poll', async () => {
   vi.useFakeTimers();

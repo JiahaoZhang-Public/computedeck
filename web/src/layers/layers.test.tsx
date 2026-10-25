@@ -238,6 +238,34 @@ it('menu arrows, Home/End, typeahead and disabled items follow the APG contract'
   expect(container.querySelector('[role="menu"]')).toBeNull();
 });
 
+it('expires transition announcements without removing the live region or persistent toasts', async () => {
+  vi.useFakeTimers();
+  const items: Toast[] = [{ id: 1, text: 'Error', tone: 'error' }];
+  const dismiss = vi.fn();
+  const view = (id: number) => (
+    <Toasts items={items} dismiss={dismiss} announcement={{ id, text: 'Job changed state' }} />
+  );
+  await render(view(1));
+  const region = container.querySelector('[role="status"]')!;
+  expect(region.textContent).toContain('Job changed state');
+  await act(async () => vi.advanceTimersByTime(3000));
+  await render(view(2));
+  await act(async () => vi.advanceTimersByTime(1500));
+  expect(region.textContent).toContain('Job changed state');
+  await act(async () => vi.advanceTimersByTime(3000));
+  expect(region.textContent).toBe('Error: Error');
+  expect(container.querySelector('[role="status"]')).toBe(region);
+  await render(view(2));
+  expect(region.textContent).toBe('Error: Error');
+  await render(view(3));
+  expect(region.textContent).toContain('Job changed state');
+  // Changing example/live mode clears announcements and restarts their ids.
+  await render(<Toasts items={items} dismiss={dismiss} announcement={{ id: 0, text: '' }} />);
+  await render(view(2));
+  expect(region.textContent).toContain('Job changed state');
+  expect(dismiss).not.toHaveBeenCalled();
+});
+
 it('Undo pauses on hover and focus, errors persist, Escape dismisses toasts before the layer', async () => {
   vi.useFakeTimers();
   const undo = vi.fn();

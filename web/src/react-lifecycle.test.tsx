@@ -2305,6 +2305,33 @@ it('hides the empty health panel add action in example mode', async () => {
 });
 
 describe.each(['en', 'zh-CN'] as const)('unknown source inventory in %s', (locale) => {
+  it('keeps the pill and panel unknown after a 401 with retained dashboard data', async () => {
+    setLocale(locale);
+    const data = { ...dashboard('Cluster A'), as_of: now.toISOString() };
+    let needsToken = false;
+    request.mockImplementation(async (path) => {
+      if (path === '/settings') return { language: locale };
+      if (path.startsWith('/dashboard')) {
+        if (needsToken) throw new ApiError(401, { code: 'token_required' });
+        return data;
+      }
+      return [];
+    });
+    await render(<App />);
+    const pill = container.querySelector<HTMLButtonElement>('.health-pill')!;
+    expect(pill.querySelector('.health-age')!.textContent).not.toBe(t('health.unknown'));
+    needsToken = true;
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(container.querySelector('.token-gate')).not.toBeNull();
+    expect(pill.querySelector('.health-label')!.textContent).toBe(t('health.unknown'));
+    expect(pill.querySelector('.health-age')!.textContent).toBe(t('health.unknown'));
+    expect(pill.title).toBe(t('health.unknown'));
+    expect(pill.getAttribute('aria-label')).toBe(
+      t('health.accessible', { title: t('health.title'), status: t('health.unknown') }),
+    );
+    await click('.health-pill');
+    expect(container.querySelector('.health-panel > p')!.textContent).toBe(t('health.unknown'));
+  });
   it.each(['token gate', 'loading', 'unreachable'])(
     'does not offer source actions while %s',
     async (state) => {

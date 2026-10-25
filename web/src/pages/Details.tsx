@@ -334,7 +334,9 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
         {(job.ended_at || job.end) && (
           <div>
             <dt>{t('jobs.col.ended')}</dt>
-            <dd title={jobTime(job.ended_at || job.end)}>{failureEnd(job)}</dd>
+            <dd title={jobTime(job.ended_at || job.end)}>
+              <ClockText>{() => failureEnd(job)}</ClockText>
+            </dd>
           </div>
         )}
         {job.exit_code != null && (

@@ -95,11 +95,7 @@ export function Toasts({
       aria-atomic="false"
       aria-relevant="additions text"
     >
-      {announcement?.text && (
-        <span className="sr-only" key={announcement.id}>
-          {announcement.text}
-        </span>
-      )}
+      {announcement?.text && <Announcement key={announcement.id} text={announcement.text} />}
       {items.map((item) => (
         <ToastItem key={item.id} item={item} dismiss={() => dismiss(item.id)} />
       ))}
@@ -111,6 +107,14 @@ export function Toasts({
       {createPortal(content, portal)}
     </>
   );
+}
+function Announcement({ text }: { text: string }) {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true), 4500);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return expired ? null : <span className="sr-only">{text}</span>;
 }
 function ToastItem({ item, dismiss }: { item: Toast; dismiss: () => void }) {
   const [hover, setHover] = useState(false);

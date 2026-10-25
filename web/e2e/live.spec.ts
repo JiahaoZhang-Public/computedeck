@@ -82,8 +82,11 @@ test('a job transition announces once in the shared polite region and keeps the 
   await expect(live).toHaveAttribute('aria-live', 'polite');
   await expect(live).toHaveAttribute('aria-atomic', 'false');
   await expect(row).toBeFocused();
-  const announcement = await live.locator('.sr-only').elementHandle();
+  const region = await live.elementHandle();
+  await page.clock.runFor(4500);
+  await expect(live).toHaveText('');
+  expect(await region!.evaluate((node) => node.isConnected)).toBe(true);
   await page.clock.runFor(30000);
-  expect(await announcement!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(live).toHaveText('');
   await expect(row).toBeFocused();
 });

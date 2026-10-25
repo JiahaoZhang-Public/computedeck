@@ -24,9 +24,9 @@ export function transitions(before: LiveSnapshot, after: LiveSnapshot, demo: boo
       snapshot.nodes,
     ).label;
   if (health(before) !== health(after)) messages.push(health(after));
-  const key = (job: { source_id: string; id: string }) => JSON.stringify([job.source_id, job.id]);
-  const previous = new Map(before.data.jobs.map((job) => [key(job), job.state]));
-  const current = new Map(after.data.jobs.map((job) => [key(job), job.state]));
+  // Dashboard jobs are deduplicated by id; twin logins may alternate as their source.
+  const previous = new Map(before.data.jobs.map((job) => [job.id, job.state]));
+  const current = new Map(after.data.jobs.map((job) => [job.id, job.state]));
   const added = [...current.keys()].filter((id) => !previous.has(id)).length;
   const updated = [...current].filter(
     ([id, state]) => previous.has(id) && previous.get(id) !== state,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ClockText } from '../data/ClockText';
 import { api } from '../api';
 import { t } from '../i18n';
 import {
@@ -158,15 +159,16 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
                       currency: item.currency,
                     })}
                   </button>
-                  {runningHours(
-                    item,
-                    data.sources.find((source) => source.id === item.source_id),
-                  ) && (
-                    <InstanceRunCost
-                      item={item}
-                      source={data.sources.find((source) => source.id === item.source_id)}
-                    />
-                  )}
+                  <ClockText>
+                    {() => {
+                      const source = data.sources.find((row) => row.id === item.source_id);
+                      return (
+                        runningHours(item, source) && (
+                          <InstanceRunCost item={item} source={source} />
+                        )
+                      );
+                    }}
+                  </ClockText>
                 </li>
               ))}
             </ul>

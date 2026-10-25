@@ -373,7 +373,7 @@ function HealthPill({
   setHealthOpen: (open: boolean) => void;
 }) {
   const now = useClock();
-  const age = data?.as_of ? relativeTime(data.as_of, now) : healthState.age;
+  const age = !needsToken && data?.as_of ? relativeTime(data.as_of, now) : healthState.age;
   const healthDescription =
     healthState.label === age
       ? healthState.label

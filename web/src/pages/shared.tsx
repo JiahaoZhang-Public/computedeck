@@ -480,7 +480,7 @@ export function FailuresTable({
                 {job.exit_code ?? '—'}
               </td>
               <td title={jobTime(job.ended_at || job.end)} data-label={t('jobs.col.ended')}>
-                {failureEnd(job)}
+                <ClockText>{() => failureEnd(job)}</ClockText>
               </td>
             </tr>
           ))}
