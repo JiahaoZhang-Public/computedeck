@@ -138,8 +138,9 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
   it.each<[number, MessageKey, number | undefined]>([
     [20 * 1000, 'job.startEstimate.soon', undefined],
     [-20 * 1000, 'job.startEstimate.justPassed', undefined],
-    [45 * 60000, 'job.startEstimate.inMinutes', 45],
-    [-45 * 60000, 'job.startEstimate.minutesAgo', 45],
+    // Half a minute inside the bucket so a slow render still floors to 45.
+    [45 * 60000 + 30 * 1000, 'job.startEstimate.inMinutes', 45],
+    [-(45 * 60000 + 30 * 1000), 'job.startEstimate.minutesAgo', 45],
     [(3 * 60 + 20) * 60000, 'job.startEstimate.inHours', 3],
     [-(3 * 60 + 20) * 60000, 'job.startEstimate.hoursAgo', 3],
     [(2 * 1440 + 30) * 60000, 'job.startEstimate.inDays', 2],
@@ -158,12 +159,17 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     let text = drawer().textContent ?? '';
     expect(text).toContain(t('job.startEstimate.unknown'));
     expect(text).not.toContain(t('job.startEstimate.notCollected'));
-    job.expected_start_at = new Date(Date.now() + 3 * 3600000).toISOString();
+    const at = new Date(Date.now() + (3 * 60 + 20) * 60000).toISOString();
+    job.expected_start_at = at;
     job.queue_unknown = 'private_data';
     job.queue = null;
     text = drawer().textContent ?? '';
-    expect(text).toContain(t('job.startEstimate.private'));
-    expect(text).not.toContain(jobTime(job.expected_start_at));
+    expect(text).toContain(t('job.queue.private'));
+    expect(text).toContain(
+      t('job.startEstimate', { time: jobTime(at), relative: relativeStart(at) }),
+    );
+    expect(text).toContain(t('job.startEstimate.inHours', { count: 3 }));
+    expect(text).not.toContain(t('job.startEstimate.unknown'));
     job.expected_start_at = '2026-01-05T08:00:00';
     job.queue_unknown = null;
     text = drawer().textContent ?? '';

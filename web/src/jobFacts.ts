@@ -91,13 +91,12 @@ export function relativeStart(value: string, now = Date.now()): string | null {
   });
 }
 
-/** Slurm's pending start estimate for the waiting-job drawer. Missing means not collected. */
+/** Slurm's pending start estimate. A hidden queue does not hide the user's own time. */
 export function startEstimateLabel(
   job: Pick<Job, 'expected_start_at' | 'queue_unknown'>,
   now = Date.now(),
 ): string {
   if (job.expected_start_at === undefined) return t('job.startEstimate.notCollected');
-  if (job.queue_unknown === 'private_data') return t('job.startEstimate.private');
   if (!job.expected_start_at) return t('job.startEstimate.unknown');
   const relative = relativeStart(job.expected_start_at, now);
   return t(relative ? 'job.startEstimate' : 'job.startEstimate.absolute', {

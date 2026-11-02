@@ -112,7 +112,7 @@ export interface Job {
   elapsed: string;
   submitted_at?: string | null;
   started_at?: string | null;
-  /** Slurm's expected start for a pending job. Never the actual start. */
+  /** Slurm's expected start for a pending job. Never the actual start. Kept when the queue is hidden. */
   expected_start_at?: string | null;
   end?: string | null;
   exit_code?: string | null;

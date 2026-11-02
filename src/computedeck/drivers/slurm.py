@@ -6,7 +6,7 @@ import re
 import shlex
 import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar, Literal
 
 from ..host_identity import host_address
@@ -65,6 +65,10 @@ _HISTORY_FIELDS = (
 )
 _FINISHED_FIELDS = (*_HISTORY_FIELDS, "Submit", "Start")
 HISTORY_MARKER = "COMPUTEDECK_TERMINAL_HISTORY"
+# Separates `date +%z` from squeue in the same SSH call. The login node's current
+# offset is how collection reads cluster-local times that Slurm prints without one.
+CLOCK_MARKER = "COMPUTEDECK_SLURM_CLOCK"
+_OFFSET = re.compile(r"^([+-])(\d{2})(\d{2})$")
 
 FAILURE_STATES = (
     "FAILED",
@@ -113,8 +117,64 @@ def gpus_tracked(nodes_output: str) -> bool:
     return re.search(r"(?:^|\s)CfgTRES=\S*gres/gpu", nodes_output, re.M) is not None
 
 
+def cluster_zone(clock: str) -> timezone | None:
+    """Login-node offset from `date +%z`, or None when that output is unreadable.
+
+    The last line shaped `+hhmm` or `-hhmm` wins. Hours above 14 or minutes of 60
+    or more are not a timezone. A daylight-saving change can make this current
+    offset differ from the offset that was in force at the printed local time.
+    """
+    zone: timezone | None = None
+    for line in clock.splitlines():
+        match = _OFFSET.fullmatch(line.strip())
+        if not match:
+            continue
+        sign, hours, minutes = match.groups()
+        hours_n, minutes_n = int(hours), int(minutes)
+        if hours_n > 14 or minutes_n >= 60:
+            continue
+        delta = timedelta(hours=hours_n, minutes=minutes_n)
+        zone = timezone(-delta if sign == "-" else delta)
+    return zone
+
+
+def slurm_time(value: Any, zone: timezone | None) -> str | None:
+    """Offset-bearing Slurm time, or a cluster-local time placed in ``zone``.
+
+    An offset already on the value wins. ``N/A``, ``Unknown`` and other non-times
+    stay unknown. Without a login-node offset, a value that has none stays unknown
+    instead of being read as the viewer's timezone.
+    """
+    known = job_time(value)
+    if known is not None or zone is None or not isinstance(value, str):
+        return known
+    try:
+        stamp = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if stamp.tzinfo is not None:
+        return stamp.isoformat()
+    return stamp.replace(tzinfo=zone).isoformat()
+
+
+def split_squeue(output: str) -> tuple[timezone | None, str]:
+    """Split `date +%z`, the clock marker and the squeue listing from one SSH reply."""
+    if CLOCK_MARKER not in output:
+        raise SourceError("unexpected_output", command="squeue")
+    clock, _, jobs = output.partition(CLOCK_MARKER)
+    if jobs.startswith("\r\n"):
+        jobs = jobs[2:]
+    elif jobs.startswith("\n"):
+        jobs = jobs[1:]
+    return cluster_zone(clock), jobs
+
+
 def parse_jobs(
-    output: str, source: dict[str, Any], *, tracked: bool = False
+    output: str,
+    source: dict[str, Any],
+    *,
+    tracked: bool = False,
+    zone: timezone | None = None,
 ) -> list[dict[str, Any]]:
     jobs: dict[str, dict[str, Any]] = {}
     observed_at = now()
@@ -166,10 +226,11 @@ def parse_jobs(
             "cpu_count": integer(row["NumCPUs"]),
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
             "elapsed": row["TimeUsed"],
-            "submitted_at": job_time(row["SubmitTime"]),
+            "submitted_at": slurm_time(row["SubmitTime"], zone),
             # Pending StartTime is the expected start `squeue --start` reports.
-            # It is never an actual start. N/A, Unknown and offset-free values stay unknown.
-            "started_at": None if row["State"] == "PENDING" else job_time(row["StartTime"]),
+            # It is never an actual start. N/A and Unknown stay unknown. A time
+            # without an offset uses the login node's current offset when known.
+            "started_at": None if row["State"] == "PENDING" else slurm_time(row["StartTime"], zone),
             "reason": None if row["Reason"] in EMPTY else row["Reason"],
             "gpu_utilization": None,
             "cpu_utilization": None,
@@ -177,7 +238,7 @@ def parse_jobs(
             "observed_at": observed_at,
         }
         if row["State"] == "PENDING":
-            jobs[job_id]["expected_start_at"] = job_time(row["StartTime"])
+            jobs[job_id]["expected_start_at"] = slurm_time(row["StartTime"], zone)
     return list(jobs.values())
 
 
@@ -440,11 +501,8 @@ async def collect_queue(
         if "jobs" in private or "all" in private:
             for job in jobs:
                 job["queue_unknown"] = "private_data"
-            # The estimate is derived from other users' jobs. Do not keep it when
-            # the cluster hides those jobs.
-            for job in batch.jobs or []:
-                if job.get("state") == "PENDING":
-                    job["expected_start_at"] = None
+            # Queue counts need other users' jobs, which this cluster hides.
+            # The user's own StartTime does not, so expected_start_at stays.
             return
         partitions = sorted(
             {
@@ -647,7 +705,9 @@ class SlurmDriver:
         # squeue's documented field suffix permits unpadded pipe-separated output.
         # https://slurm.schedmd.com/squeue.html
         output_format = ",".join(f"{field}:0\x1f" for field in _FIELDS)
-        command = shlex.join(
+        # Same SSH call: login-node offset, then the own-job listing. `;` lets
+        # squeue run when date(1) is missing; its exit status is still squeue's.
+        command = f"{shlex.join(['date', '+%z'])}; echo {CLOCK_MARKER}; " + shlex.join(
             [
                 "env",
                 "SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z",
@@ -666,6 +726,7 @@ class SlurmDriver:
             raise SourceError("ssh_failed", str(error)) from None
         except TimeoutError:
             raise SourceError("ssh_timeout") from None
+        zone, job_output = split_squeue(job_output)
         batch = Batch(capabilities=["jobs"], history_window_seconds=86400)
         node_output = ""
         try:
@@ -675,7 +736,9 @@ class SlurmDriver:
             batch.capabilities.append("nodes")
         except (RuntimeError, TimeoutError, SourceError) as error:
             batch.warnings.append(_unavailable("nodes_unavailable", error))
-        jobs = batch.jobs = parse_jobs(job_output, source, tracked=gpus_tracked(node_output))
+        jobs = batch.jobs = parse_jobs(
+            job_output, source, tracked=gpus_tracked(node_output), zone=zone
+        )
         qos = {
             job["qos"]: {
                 "name": job["qos"],

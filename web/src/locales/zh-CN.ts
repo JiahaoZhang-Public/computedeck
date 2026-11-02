@@ -527,7 +527,6 @@ const zhCN: Record<keyof typeof en, string> = {
   'job.startEstimate.hoursAgo': '估计约 {count} 小时前',
   'job.startEstimate.daysAgo': '估计约 {count} 天前',
   'job.startEstimate.unknown': 'Slurm 预计开始时间：— · 暂无估计。',
-  'job.startEstimate.private': 'Slurm 预计开始时间：— · 集群隐藏了其他用户的作业。',
   'job.startEstimate.notCollected': 'Slurm 预计开始时间：— · 尚未采集。',
 
   'clusters.empty': '没有集群',
