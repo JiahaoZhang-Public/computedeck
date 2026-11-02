@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Show Slurm's expected start time for pending Priority and Resources jobs beside the queue position and fair-share. The time is the pending job's StartTime (what `squeue --start` reports) from the existing read-only collection. N/A, Unknown and missing values stay unknown. Clusters that hide other users' jobs do not keep the estimate. It is labelled as an estimate, not a guarantee, shown in the viewer's timezone, and never stored as the job's actual start.
+
 ## 0.7.0 (2026-10-24)
 
 - Fix final-review issues: size copied Slurm flags within the proven partition; allow example-mode copying; wrap copy notes and show explanation factors across the row. Improve preset tap targets, accessible control names and Cloud sampling labels.

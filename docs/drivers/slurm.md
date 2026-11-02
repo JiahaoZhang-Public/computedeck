@@ -98,8 +98,16 @@ Missing or unrecognised resource information stays unknown; it is not treated as
 The `squeue` command runs under `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z` and reads
 SubmitTime and StartTime. Offset-bearing times can be shown in the viewer's timezone;
 older or offset-free output remains explicitly labelled scheduler time. A pending job's
-StartTime is an estimate and is never stored as its actual `started_at`. Observed waiting
-time stops at the job's last collection, even when that sample becomes stale.
+StartTime is the expected start that `squeue --start` reports. It is stored as
+`expected_start_at` and is never stored as the job's actual `started_at`. `N/A`,
+`Unknown`, an empty value and a timestamp without an offset are unknown (`null`).
+No extra command or privilege is used: the field is already in the own-job query.
+When a Priority or Resources wait has already caused collection to read `PrivateData`,
+and that setting includes `jobs` or `all`, the estimate is discarded for every pending
+job in the collection. The projection is derived from other users' jobs, which the
+cluster hides, so the drawer explains the restriction instead of showing a time.
+A failed queue step does not discard a start time the own-job query already returned.
+Observed waiting time stops at the job's last collection, even when that sample becomes stale.
 
 Array elements such as `1234_7` carry `array_id=1234` and `array_index=7` in queue and
 accounting rows. Ranges, heterogeneous jobs and job steps are not inferred as elements.
@@ -168,7 +176,10 @@ become `ties`, separate from `ahead`; the drawer shows `ahead` to `ahead + ties`
 Reservations, preemption and backfill can change the order. Resources waits say they
 are next in line and waiting for nodes to free up only when both `ahead` and `ties`
 are zero for that partition; otherwise they show the same count or range as Priority
-waits. Neither message predicts a start time or changes Where-to-run rankings.
+waits. Neither the queue count nor fair-share predicts a start time or changes
+Where-to-run rankings. Slurm's own expected start, when `expected_start_at` is known,
+is shown beside them and labelled as an estimate, not a guarantee. See
+[Job requests and times](#job-requests-and-times).
 
 Other users' job ids exist only in the transient query/parser input: they are never
 stored, logged, returned in the dashboard or included in warnings. Only counts per
