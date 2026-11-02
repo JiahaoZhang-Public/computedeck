@@ -96,10 +96,23 @@ An untyped GPU total takes precedence over its typed breakdown to avoid double c
 Missing or unrecognised resource information stays unknown; it is not treated as zero.
 
 The `squeue` command runs under `env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z` and reads
-SubmitTime and StartTime. Offset-bearing times can be shown in the viewer's timezone;
-older or offset-free output remains explicitly labelled scheduler time. A pending job's
-StartTime is an estimate and is never stored as its actual `started_at`. Observed waiting
-time stops at the job's last collection, even when that sample becomes stale.
+SubmitTime and StartTime. The same SSH call first runs `date +%z` on the login node
+(`date +%z; echo COMPUTEDECK_SLURM_CLOCK; env SLURM_TIME_FORMAT=... squeue ...`).
+Offset-bearing times can be shown in the viewer's timezone. Slurm often prints
+cluster-local time with no offset even when `%z` was requested. Collection attaches
+the login node's current offset (`+hhmm` or `-hhmm`) to those timestamps. That
+current offset can differ across a daylight-saving transition, the same caveat as
+PBS and LSF. If `date +%z` is missing or not an offset, an offset-free time stays
+unknown rather than being read as the viewer's timezone. A pending job's StartTime
+is the expected start that `squeue --start` reports. It is stored as
+`expected_start_at` and is never stored as the job's actual `started_at`. `N/A`,
+`Unknown` and an empty value are unknown (`null`). No extra SSH connection or
+privilege is used: the field is already in the own-job query, and `date` runs in
+that call. A failed `date` does not fail job collection.
+`PrivateData` that includes `jobs` or `all` still hides other users' jobs, so queue
+counts stay unknown. The user's own StartTime does not depend on those jobs and is
+kept. A failed queue step does not discard a start time the own-job query already returned.
+Observed waiting time stops at the job's last collection, even when that sample becomes stale.
 
 Array elements such as `1234_7` carry `array_id=1234` and `array_index=7` in queue and
 accounting rows. Ranges, heterogeneous jobs and job steps are not inferred as elements.
@@ -168,7 +181,10 @@ become `ties`, separate from `ahead`; the drawer shows `ahead` to `ahead + ties`
 Reservations, preemption and backfill can change the order. Resources waits say they
 are next in line and waiting for nodes to free up only when both `ahead` and `ties`
 are zero for that partition; otherwise they show the same count or range as Priority
-waits. Neither message predicts a start time or changes Where-to-run rankings.
+waits. Neither the queue count nor fair-share predicts a start time or changes
+Where-to-run rankings. Slurm's own expected start, when `expected_start_at` is known,
+is shown beside them and labelled as an estimate, not a guarantee. See
+[Job requests and times](#job-requests-and-times).
 
 Other users' job ids exist only in the transient query/parser input: they are never
 stored, logged, returned in the dashboard or included in warnings. Only counts per
@@ -186,8 +202,9 @@ in process for one hour per source and SSH identity. Missing `PriorityType` or
 missing weight leaves fair-share unknown without preventing queue counts, including
 on `priority/basic` clusters, which do not print priority weights.
 `PrivateData=jobs` suppresses the partition query entirely
-and explains that the cluster hides other users' jobs. The queue query also has a
-15-second timeout. Neither extra query runs when there are no eligible waits.
+and explains that the cluster hides other users' jobs. The user's own expected start
+from the job listing is kept; only the queue count needs the hidden jobs. The queue
+query also has a 15-second timeout. Neither extra query runs when there are no eligible waits.
 
 Fair-share uses the last value on `SharesRaw/Norm/Level/Factor=` in the association
 output already collected for this login, keyed by Account. Conflicting account

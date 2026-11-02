@@ -514,6 +514,20 @@ const zhCN: Record<keyof typeof en, string> = {
   'job.queue.failed': '队列估计：— · 无法读取该值。',
   'job.queue.notCollected': '队列估计：— · 尚未采集。',
   'job.queue.fairshareUnknown': '公平共享因子：— · 数据不可用，或调度器的优先级策略未使用此因子。',
+  'job.startEstimate':
+    'Slurm 预计开始时间：{time}（{relative}）。这是估计，不是保证；资源预留、抢占和回填调度可能改变它。',
+  'job.startEstimate.absolute':
+    'Slurm 预计开始时间：{time}。这是估计，不是保证；资源预留、抢占和回填调度可能改变它。',
+  'job.startEstimate.soon': '不到 1 分钟后',
+  'job.startEstimate.justPassed': '估计已过不到 1 分钟',
+  'job.startEstimate.inMinutes': '约 {count} 分钟后',
+  'job.startEstimate.inHours': '约 {count} 小时后',
+  'job.startEstimate.inDays': '约 {count} 天后',
+  'job.startEstimate.minutesAgo': '估计约 {count} 分钟前',
+  'job.startEstimate.hoursAgo': '估计约 {count} 小时前',
+  'job.startEstimate.daysAgo': '估计约 {count} 天前',
+  'job.startEstimate.unknown': 'Slurm 预计开始时间：— · 暂无估计。',
+  'job.startEstimate.notCollected': 'Slurm 预计开始时间：— · 尚未采集。',
 
   'clusters.empty': '没有集群',
   'clusters.emptyHint': '添加一个集群登录身份并填写 SSH Host 别名。查询只读，使用你自己的账户。',

@@ -4,7 +4,7 @@ All sample outputs are hand-written from the documented formats and use fictiona
 """
 
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,11 @@ def job_line(**changes: str) -> str:
         changes["JobArrayID"] = changes.pop("JobID")
     row.update(changes)
     return "|".join(row[field] for field in slurm._FIELDS) + "|"
+
+
+def clocked(jobs: str, offset: str = "+0400") -> str:
+    """`date +%z` and the marker the collector expects in front of an squeue listing."""
+    return f"{offset}\n{slurm.CLOCK_MARKER}\n{jobs}"
 
 
 def sacct_line(**changes: str) -> str:
@@ -394,7 +399,7 @@ def fake_cluster(
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         calls.append((destination, command, options))
         if " squeue " in command:
-            return job_line(UserName=SOURCE["username"]) + "\n"
+            return clocked(job_line(UserName=SOURCE["username"]) + "\n")
         if failure is not None:
             raise failure
         if command == "scontrol -d show nodes -o":
@@ -455,7 +460,7 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         if " squeue " in command:
             calls.append((destination, command, options))
-            return job_line(UserName=user, QOS="long") + "\n"
+            return clocked(job_line(UserName=user, QOS="long") + "\n")
         if command.startswith("sacctmgr"):
             calls.append((destination, command, options))
             return f"cluster-a|lab|{user}||normal,debug,long\n"
@@ -500,7 +505,10 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     squeue = next(command for command in commands if " squeue " in command)
     assert f"--user={user}" in squeue
     assert "--array" in squeue
-    assert squeue.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z squeue ")
+    assert squeue.startswith(
+        f"date +%z; echo {slurm.CLOCK_MARKER}; env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z squeue "
+    )
+    assert "--start" not in squeue.split()
     assert "SubmitTime" in squeue and "StartTime" in squeue
     sacct = next(command for command in commands if " sacct " in command)
     assert sacct.startswith("env SLURM_TIME_FORMAT=%Y-%m-%dT%H:%M:%S%z sacct ")
@@ -511,6 +519,7 @@ async def test_collect_reads_jobs_nodes_qos_and_failures(monkeypatch: pytest.Mon
     assert "--state=" + ",".join(slurm.FAILURE_STATES) in sacct
     # Collection is read-only.
     assert {command.split()[0] for command in commands} == {
+        "date",
         "env",
         "scontrol",
         "sacctmgr",
@@ -774,10 +783,76 @@ def test_job_timestamps_keep_offsets_and_do_not_treat_estimated_starts_as_actual
     running = slurm.parse_jobs(job_line(), SOURCE)[0]
     assert running["submitted_at"] == "2026-01-05T07:00:00+04:00"
     assert running["started_at"] == "2026-01-05T08:00:00+04:00"
+    assert "expected_start_at" not in running
     pending = slurm.parse_jobs(job_line(State="PENDING"), SOURCE)[0]
     assert pending["started_at"] is None
+    assert pending["expected_start_at"] == "2026-01-05T08:00:00+04:00"
     unknown = slurm.parse_jobs(job_line(SubmitTime="Unknown", StartTime="N/A"), SOURCE)[0]
     assert unknown["submitted_at"] is None and unknown["started_at"] is None
+    assert "expected_start_at" not in unknown
+
+
+@pytest.mark.parametrize(
+    "start",
+    ["N/A", "Unknown", "UNKNOWN", "None", "NONE", "", "2026-01-05T08:00:00", "not-a-time"],
+)
+def test_pending_start_estimate_treats_missing_values_as_unknown(start: str) -> None:
+    # No login-node offset: a cluster-local time is unknown, same as N/A.
+    job = slurm.parse_jobs(job_line(State="PENDING", StartTime=start), SOURCE)[0]
+    assert job["expected_start_at"] is None
+    assert job["started_at"] is None
+
+
+def test_offset_free_times_use_the_login_node_zone() -> None:
+    zone = slurm.cluster_zone("+0800\n")
+    pending = slurm.parse_jobs(
+        job_line(
+            State="PENDING",
+            SubmitTime="2026-11-03T08:00:00",
+            StartTime="2026-11-03T09:26:00",
+        ),
+        SOURCE,
+        zone=zone,
+    )[0]
+    assert pending["submitted_at"] == "2026-11-03T08:00:00+08:00"
+    assert pending["expected_start_at"] == "2026-11-03T09:26:00+08:00"
+    assert pending["started_at"] is None
+    running = slurm.parse_jobs(
+        job_line(SubmitTime="2026-11-03T08:00:00", StartTime="2026-11-04T07:34:49"),
+        SOURCE,
+        zone=zone,
+    )[0]
+    assert running["submitted_at"] == "2026-11-03T08:00:00+08:00"
+    assert running["started_at"] == "2026-11-04T07:34:49+08:00"
+    assert "expected_start_at" not in running
+    # An offset already printed by Slurm wins over the login node.
+    offset = slurm.parse_jobs(
+        job_line(State="PENDING", StartTime="2026-11-03T09:26:00+0400"),
+        SOURCE,
+        zone=zone,
+    )[0]
+    assert offset["expected_start_at"] == "2026-11-03T09:26:00+04:00"
+    assert offset["started_at"] is None
+    missing = slurm.parse_jobs(job_line(State="PENDING", StartTime="N/A"), SOURCE, zone=zone)[0]
+    assert missing["expected_start_at"] is None
+    assert missing["started_at"] is None
+
+
+def test_login_offset_uses_the_last_readable_zone_line() -> None:
+    assert slurm.cluster_zone("noise\n+0800\n+0530\n") == timezone(timedelta(hours=5, minutes=30))
+    assert slurm.cluster_zone("-0000") == UTC
+    assert slurm.cluster_zone("+0000") == UTC
+
+
+@pytest.mark.parametrize(
+    "clock",
+    ["", "date: not found", "+08", "+0860", "+1500", "UTC", "+0800 extra", "++0800"],
+)
+def test_unreadable_login_offset_is_not_a_timezone(clock: str) -> None:
+    assert slurm.cluster_zone(clock) is None
+    with pytest.raises(SourceError) as error:
+        slurm.split_squeue("2026-11-03T09:26:00\n")
+    assert error.value.message() == {"code": "unexpected_output", "command": "squeue"}
 
 
 def test_terminal_history_has_offsets_and_keeps_failure_end_unchanged() -> None:
@@ -854,7 +929,7 @@ async def test_upgrade_seeds_full_history_before_an_accounting_outage(
 
     async def ssh_run(alias: str, command: str, options: list[str] | None = None) -> str:
         if " squeue " in command:
-            return ""
+            return clocked("")
         if slurm.HISTORY_MARKER in command:
             history_calls.append(command)
             if len(history_calls) == 2:
@@ -1043,7 +1118,7 @@ def queue_cluster(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     async def run(destination: str, command: str, options: list[str] | None = None) -> str:
         state["commands"].append(command)
         if " squeue " in command:
-            return state["jobs"]
+            return clocked(state["jobs"], state.get("clock", "+0400"))
         if command == "scontrol show config":
             value = state["config"]
         elif command.startswith("squeue -h"):
@@ -1073,6 +1148,8 @@ async def test_queue_collection_keeps_only_counts_and_own_ids(
     assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
     assert batch.jobs[0]["fairshare"] == 0.12
     assert batch.jobs[0]["queue_unknown"] is None
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert not batch.warnings
     assert "queue_position" not in batch.capabilities
     assert not any(check.warning == "queue_unavailable" for check in slurm.SlurmDriver.info.checks)
@@ -1101,12 +1178,19 @@ async def test_queue_collection_keeps_only_counts_and_own_ids(
 
 @pytest.mark.parametrize("private", ["jobs", "accounts,jobs", "ALL"])
 async def test_private_queue_is_unknown_without_a_query_or_warning(queue_cluster, private) -> None:
+    import json
+
     queue_cluster["config"] = QUEUE_CONFIG.replace("none", private)
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert batch.jobs[0]["queue"] is None
     assert batch.jobs[0]["queue_unknown"] == "private_data"
     assert batch.jobs[0]["fairshare"] == 0.12
+    # The user's own StartTime stays. Only the queue count is hidden.
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
+    assert "2026-01-05T08:00:00+04:00" in json.dumps(batch.jobs)
     assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+    assert not any("--start" in c.split() for c in queue_cluster["commands"] if "squeue" in c)
     assert not batch.warnings
 
 
@@ -1128,6 +1212,8 @@ async def test_fairshare_requires_a_known_active_weight(queue_cluster, config) -
     assert batch.jobs[0]["fairshare"] is None
     assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
     assert batch.jobs[0]["queue_unknown"] is None
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert not batch.warnings
 
 
@@ -1153,6 +1239,9 @@ async def test_optional_queue_failures_are_generic_and_do_not_fail_collection(
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert batch.jobs[0]["queue"] is None
     assert batch.jobs[0]["queue_unknown"] == "failed"
+    # The own-job StartTime does not depend on the queue query.
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert batch.warnings == [{"code": "queue_unavailable"}]
     assert "jobs" in batch.capabilities
     assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
@@ -1188,9 +1277,103 @@ async def test_queue_steps_are_skipped_without_eligible_waits(queue_cluster, sta
     queue_cluster["jobs"] = job_line(State=state, Reason=reason)
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert "queue" not in batch.jobs[0]
+    if state == "PENDING":
+        assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+        assert batch.jobs[0]["started_at"] is None
+    else:
+        assert "expected_start_at" not in batch.jobs[0]
+        assert batch.jobs[0]["started_at"] == "2026-01-05T08:00:00+04:00"
     assert "scontrol show config" not in queue_cluster["commands"]
     assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
     assert not batch.warnings
+
+
+async def test_private_data_keeps_own_start_estimates_and_actual_starts(queue_cluster) -> None:
+    queue_cluster["config"] = QUEUE_CONFIG.replace("none", "jobs")
+    queue_cluster["jobs"] = "\n".join(
+        [
+            job_line(State="PENDING", Reason="Priority", StartTime="2026-01-05T12:00:00+0000"),
+            job_line(
+                JobID="43",
+                State="PENDING",
+                Reason="Dependency",
+                StartTime="2026-01-05T13:00:00+0000",
+            ),
+            job_line(JobID="44", State="RUNNING", StartTime="2026-01-05T09:00:00+0000"),
+        ]
+    )
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    batch.validate_rows()
+    by_id = {job["id"]: job for job in batch.jobs or []}
+    assert by_id["cluster-a:42"]["expected_start_at"] == "2026-01-05T12:00:00+00:00"
+    assert by_id["cluster-a:42"]["started_at"] is None
+    assert by_id["cluster-a:42"]["queue_unknown"] == "private_data"
+    assert by_id["cluster-a:43"]["expected_start_at"] == "2026-01-05T13:00:00+00:00"
+    assert by_id["cluster-a:43"]["started_at"] is None
+    assert "queue" not in by_id["cluster-a:43"]
+    assert "expected_start_at" not in by_id["cluster-a:44"]
+    assert by_id["cluster-a:44"]["started_at"] == "2026-01-05T09:00:00+00:00"
+
+
+async def test_offset_free_squeue_times_use_the_login_node_offset(queue_cluster) -> None:
+    queue_cluster["clock"] = "+0800"
+    queue_cluster["jobs"] = "\n".join(
+        [
+            job_line(
+                State="PENDING",
+                Reason="Priority",
+                SubmitTime="2026-11-03T08:00:00",
+                StartTime="2026-11-03T09:26:00",
+            ),
+            job_line(
+                JobID="44",
+                State="RUNNING",
+                SubmitTime="2026-11-03T06:00:00",
+                StartTime="2026-11-04T07:34:49",
+            ),
+        ]
+    )
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    batch.validate_rows()
+    by_id = {job["id"]: job for job in batch.jobs or []}
+    assert by_id["cluster-a:42"]["expected_start_at"] == "2026-11-03T09:26:00+08:00"
+    assert by_id["cluster-a:42"]["submitted_at"] == "2026-11-03T08:00:00+08:00"
+    assert by_id["cluster-a:42"]["started_at"] is None
+    assert by_id["cluster-a:42"]["queue_unknown"] is None
+    assert by_id["cluster-a:44"]["started_at"] == "2026-11-04T07:34:49+08:00"
+    assert by_id["cluster-a:44"]["submitted_at"] == "2026-11-03T06:00:00+08:00"
+    assert "expected_start_at" not in by_id["cluster-a:44"]
+    squeue = next(command for command in queue_cluster["commands"] if " squeue " in command)
+    assert squeue.startswith(f"date +%z; echo {slurm.CLOCK_MARKER}; ")
+    assert "--start" not in squeue.split()
+
+
+async def test_unreadable_login_offset_keeps_only_offset_bearing_times(queue_cluster) -> None:
+    queue_cluster["clock"] = "date: not found\n+08"
+    queue_cluster["jobs"] = "\n".join(
+        [
+            job_line(
+                State="PENDING",
+                Reason="Priority",
+                SubmitTime="2026-11-03T08:00:00",
+                StartTime="2026-11-03T09:26:00",
+            ),
+            job_line(
+                JobID="44",
+                State="RUNNING",
+                SubmitTime="2026-11-03T06:00:00+0000",
+                StartTime="2026-11-04T07:34:49+0000",
+            ),
+        ]
+    )
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    batch.validate_rows()
+    by_id = {job["id"]: job for job in batch.jobs or []}
+    assert by_id["cluster-a:42"]["expected_start_at"] is None
+    assert by_id["cluster-a:42"]["submitted_at"] is None
+    assert by_id["cluster-a:42"]["started_at"] is None
+    assert by_id["cluster-a:44"]["started_at"] == "2026-11-04T07:34:49+00:00"
+    assert by_id["cluster-a:44"]["submitted_at"] == "2026-11-03T06:00:00+00:00"
 
 
 async def test_resources_and_array_elements_get_queue_facts(queue_cluster) -> None:
@@ -1231,6 +1414,10 @@ async def test_queue_config_cache_expires_and_is_scoped_to_source_and_connection
         {"fairshare": True},
         {"fairshare": 1.2},
         {"fairshare": -0.1},
+        {"expected_start_at": "2026-01-05T08:00:00"},
+        {"expected_start_at": "N/A"},
+        {"expected_start_at": "Unknown"},
+        {"expected_start_at": ""},
     ],
 )
 def test_queue_fields_are_validated_before_storage(fields) -> None:
