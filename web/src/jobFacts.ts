@@ -71,6 +71,41 @@ export function jobTime(value: string | null | undefined) {
   return instant(value) == null ? t('job.schedulerTime', { time: value }) : dateTime(value);
 }
 
+/** Rough distance to Slurm's expected start, rounded down. A past estimate stays in the past. */
+export function relativeStart(value: string, now = Date.now()): string | null {
+  const at = instant(value);
+  if (at == null) return null;
+  const ahead = at >= now;
+  const span = Math.floor(Math.abs(at - now) / 60000);
+  if (span < 1) return t(ahead ? 'job.startEstimate.soon' : 'job.startEstimate.justPassed');
+  if (span < 60)
+    return t(ahead ? 'job.startEstimate.inMinutes' : 'job.startEstimate.minutesAgo', {
+      count: span,
+    });
+  if (span < 1440)
+    return t(ahead ? 'job.startEstimate.inHours' : 'job.startEstimate.hoursAgo', {
+      count: Math.floor(span / 60),
+    });
+  return t(ahead ? 'job.startEstimate.inDays' : 'job.startEstimate.daysAgo', {
+    count: Math.floor(span / 1440),
+  });
+}
+
+/** Slurm's pending start estimate for the waiting-job drawer. Missing means not collected. */
+export function startEstimateLabel(
+  job: Pick<Job, 'expected_start_at' | 'queue_unknown'>,
+  now = Date.now(),
+): string {
+  if (job.expected_start_at === undefined) return t('job.startEstimate.notCollected');
+  if (job.queue_unknown === 'private_data') return t('job.startEstimate.private');
+  if (!job.expected_start_at) return t('job.startEstimate.unknown');
+  const relative = relativeStart(job.expected_start_at, now);
+  return t(relative ? 'job.startEstimate' : 'job.startEstimate.absolute', {
+    time: jobTime(job.expected_start_at),
+    relative,
+  });
+}
+
 /** Bound a pending wait by the last observation, rather than extending stale data to now. */
 export function jobWaiting(job: Job) {
   const start = instant(job.submitted_at);

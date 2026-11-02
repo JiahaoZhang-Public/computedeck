@@ -814,8 +814,8 @@ GPUhub 在此不提供利用率，只能通过按需硬件检查获取单次读�
 ## Slurm queue estimates
 
 For your PENDING jobs waiting on Priority or Resources, the job drawer uses the
-partition queue from normal collection. “About N jobs ahead” is an estimate, not a
-start-time prediction: reservations, preemption and backfill can change the order.
+partition queue from normal collection. “About N jobs ahead” is an estimate of order,
+not itself a start time: reservations, preemption and backfill can change the order.
 Only earlier Priority/Resources rows count; held, dependency and limit waits do not.
 Earlier equal-priority rows form an uncertainty range, shown as N to N+T, and each
 partition is shown separately. Resources waits say they are next in line, waiting
@@ -831,13 +831,22 @@ retained older observations. Hidden queues, unreadable output and jobs missing f
 the listing show “—” with a reason, never an invented zero. Older snapshots without
 queue fields say “Not collected yet”. Fair-share that is missing
 or not used by the policy also shows “—”. Only aggregate queue counts are retained;
-other users' job ids are never stored or logged. See the
-[Slurm driver](drivers/slurm.md#queue-estimates-and-fair-share) for the queries and limits.
+other users' job ids are never stored or logged.
+
+The same drawer lines include Slurm's expected start when the pending job's StartTime
+is known (`expected_start_at`). It is the value `squeue --start` reports, taken from
+the existing own-job query with no extra command. The absolute time uses the viewer's
+timezone, with a rough relative phrase such as “in ~3 h”. The line says it is an
+estimate, not a guarantee. `N/A`, `Unknown`, a missing value and a time without a
+timezone offset stay unknown. Clusters that hide other users' jobs show “—” and say
+so; the time is not kept. Older snapshots without the field say “Not collected yet”.
+The value is never the job's actual start. See the
+[Slurm driver](drivers/slurm.md#job-requests-and-times) for the field and `PrivateData`.
 
 ## Slurm 队列估计
 
 对于因 Priority 或 Resources 等待的 PENDING 作业，作业详情展示正常采集所得的分区队列。
-“前方约有 N 个作业”是估计，不是启动时间预测；资源预留、抢占和回填调度都可能改变顺序。
+“前方约有 N 个作业”是对顺序的估计，本身不是开始时间；资源预留、抢占和回填调度都可能改变顺序。
 只计算前方因 Priority 或 Resources 等待的作业，不计挂起、依赖或配额限制中的作业。
 前方优先级相同的作业单独形成 N 至 N+T 的范围，多分区分别展示。
 Resources 作业仅在该分区的前方作业数和同优先级作业数均为零时，说明已排在队首、等待节点释放资源；
@@ -849,6 +858,13 @@ Resources 作业仅在该分区的前方作业数和同优先级作业数均为�
 保留的旧观测也不会被当作新数据。集群隐藏队列、读取失败或列表中找不到作业时，展示“—”并解释原因，
 不会填成零。没有队列字段的旧快照显示“尚未采集”。因子缺失或调度策略未使用它时也展示“—”。
 只保留队列汇总数量，不保存或记录其他用户的作业 ID。
+
+同一段说明也展示 Slurm 自己的预计开始时间（`expected_start_at`），即 `squeue --start`
+报告的 StartTime，来自现有的本人作业查询，没有额外命令。绝对时间按查看者的时区显示，
+并附上大致相对时间，例如“约 3 小时后”。文案标明这是估计，不是保证。
+`N/A`、`Unknown`、缺失值以及没有时区偏移的时间都保持未知。
+集群隐藏其他用户的作业时显示“—”，并说明原因，不保留该时间。
+没有该字段的旧快照显示“尚未采集”。这个值从不当作作业的实际开始时间。
 
 ## Typical wait from your job history
 

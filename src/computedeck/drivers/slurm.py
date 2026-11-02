@@ -167,14 +167,17 @@ def parse_jobs(
             "node": None if row["NodeList"] in EMPTY | {"None assigned"} else row["NodeList"],
             "elapsed": row["TimeUsed"],
             "submitted_at": job_time(row["SubmitTime"]),
-            # squeue's StartTime for a pending job is an estimate, not an actual start.
-            "started_at": job_time(row["StartTime"]) if row["State"] != "PENDING" else None,
+            # Pending StartTime is the expected start `squeue --start` reports.
+            # It is never an actual start. N/A, Unknown and offset-free values stay unknown.
+            "started_at": None if row["State"] == "PENDING" else job_time(row["StartTime"]),
             "reason": None if row["Reason"] in EMPTY else row["Reason"],
             "gpu_utilization": None,
             "cpu_utilization": None,
             "memory_utilization": None,
             "observed_at": observed_at,
         }
+        if row["State"] == "PENDING":
+            jobs[job_id]["expected_start_at"] = job_time(row["StartTime"])
     return list(jobs.values())
 
 
@@ -437,6 +440,11 @@ async def collect_queue(
         if "jobs" in private or "all" in private:
             for job in jobs:
                 job["queue_unknown"] = "private_data"
+            # The estimate is derived from other users' jobs. Do not keep it when
+            # the cluster hides those jobs.
+            for job in batch.jobs or []:
+                if job.get("state") == "PENDING":
+                    job["expected_start_at"] = None
             return
         partitions = sorted(
             {

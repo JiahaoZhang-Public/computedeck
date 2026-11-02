@@ -116,6 +116,16 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
         "submitted_at": (started - timedelta(hours=2)).isoformat(),
         "started_at": started.isoformat() if state == "RUNNING" else None,
         "reason": "Priority" if state == "PENDING" else None,
+        # Slurm's expected start for a pending job. Not the actual started_at.
+        **(
+            {
+                "expected_start_at": (
+                    datetime.fromisoformat(observed) + timedelta(hours=3, minutes=30)
+                ).isoformat()
+            }
+            if state == "PENDING"
+            else {}
+        ),
         "gpu_utilization": gpu,
         "cpu_utilization": cpu,
         "memory_utilization": 58 if gpu is not None else None,

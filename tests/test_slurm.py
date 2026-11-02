@@ -774,10 +774,23 @@ def test_job_timestamps_keep_offsets_and_do_not_treat_estimated_starts_as_actual
     running = slurm.parse_jobs(job_line(), SOURCE)[0]
     assert running["submitted_at"] == "2026-01-05T07:00:00+04:00"
     assert running["started_at"] == "2026-01-05T08:00:00+04:00"
+    assert "expected_start_at" not in running
     pending = slurm.parse_jobs(job_line(State="PENDING"), SOURCE)[0]
     assert pending["started_at"] is None
+    assert pending["expected_start_at"] == "2026-01-05T08:00:00+04:00"
     unknown = slurm.parse_jobs(job_line(SubmitTime="Unknown", StartTime="N/A"), SOURCE)[0]
     assert unknown["submitted_at"] is None and unknown["started_at"] is None
+    assert "expected_start_at" not in unknown
+
+
+@pytest.mark.parametrize(
+    "start",
+    ["N/A", "Unknown", "UNKNOWN", "None", "NONE", "", "2026-01-05T08:00:00", "not-a-time"],
+)
+def test_pending_start_estimate_treats_missing_values_as_unknown(start: str) -> None:
+    job = slurm.parse_jobs(job_line(State="PENDING", StartTime=start), SOURCE)[0]
+    assert job["expected_start_at"] is None
+    assert job["started_at"] is None
 
 
 def test_terminal_history_has_offsets_and_keeps_failure_end_unchanged() -> None:
@@ -1073,6 +1086,8 @@ async def test_queue_collection_keeps_only_counts_and_own_ids(
     assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
     assert batch.jobs[0]["fairshare"] == 0.12
     assert batch.jobs[0]["queue_unknown"] is None
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert not batch.warnings
     assert "queue_position" not in batch.capabilities
     assert not any(check.warning == "queue_unavailable" for check in slurm.SlurmDriver.info.checks)
@@ -1101,12 +1116,18 @@ async def test_queue_collection_keeps_only_counts_and_own_ids(
 
 @pytest.mark.parametrize("private", ["jobs", "accounts,jobs", "ALL"])
 async def test_private_queue_is_unknown_without_a_query_or_warning(queue_cluster, private) -> None:
+    import json
+
     queue_cluster["config"] = QUEUE_CONFIG.replace("none", private)
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert batch.jobs[0]["queue"] is None
     assert batch.jobs[0]["queue_unknown"] == "private_data"
     assert batch.jobs[0]["fairshare"] == 0.12
+    assert batch.jobs[0]["expected_start_at"] is None
+    assert batch.jobs[0]["started_at"] is None
+    assert "2026-01-05T08:00:00" not in json.dumps(batch.jobs)
     assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
+    assert not any("--start" in c.split() for c in queue_cluster["commands"] if "squeue" in c)
     assert not batch.warnings
 
 
@@ -1128,6 +1149,8 @@ async def test_fairshare_requires_a_known_active_weight(queue_cluster, config) -
     assert batch.jobs[0]["fairshare"] is None
     assert batch.jobs[0]["queue"] == [{"partition": "gpu", "ahead": 1, "ties": 0}]
     assert batch.jobs[0]["queue_unknown"] is None
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert not batch.warnings
 
 
@@ -1153,6 +1176,9 @@ async def test_optional_queue_failures_are_generic_and_do_not_fail_collection(
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert batch.jobs[0]["queue"] is None
     assert batch.jobs[0]["queue_unknown"] == "failed"
+    # The own-job StartTime does not depend on the queue query.
+    assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+    assert batch.jobs[0]["started_at"] is None
     assert batch.warnings == [{"code": "queue_unavailable"}]
     assert "jobs" in batch.capabilities
     assert "900001" not in json.dumps(batch.model_dump()) + caplog.text
@@ -1188,9 +1214,49 @@ async def test_queue_steps_are_skipped_without_eligible_waits(queue_cluster, sta
     queue_cluster["jobs"] = job_line(State=state, Reason=reason)
     batch = await slurm.SlurmDriver().collect(SOURCE)
     assert "queue" not in batch.jobs[0]
+    if state == "PENDING":
+        assert batch.jobs[0]["expected_start_at"] == "2026-01-05T08:00:00+04:00"
+        assert batch.jobs[0]["started_at"] is None
+    else:
+        assert "expected_start_at" not in batch.jobs[0]
+        assert batch.jobs[0]["started_at"] == "2026-01-05T08:00:00+04:00"
     assert "scontrol show config" not in queue_cluster["commands"]
     assert not any(c.startswith("squeue -h") for c in queue_cluster["commands"])
     assert not batch.warnings
+
+
+async def test_private_data_drops_every_pending_estimate_and_keeps_actual_starts(
+    queue_cluster,
+) -> None:
+    import json
+
+    queue_cluster["config"] = QUEUE_CONFIG.replace("none", "jobs")
+    queue_cluster["jobs"] = "\n".join(
+        [
+            job_line(State="PENDING", Reason="Priority", StartTime="2026-01-05T12:00:00+0000"),
+            job_line(
+                JobID="43",
+                State="PENDING",
+                Reason="Dependency",
+                StartTime="2026-01-05T13:00:00+0000",
+            ),
+            job_line(JobID="44", State="RUNNING", StartTime="2026-01-05T09:00:00+0000"),
+        ]
+    )
+    batch = await slurm.SlurmDriver().collect(SOURCE)
+    batch.validate_rows()
+    by_id = {job["id"]: job for job in batch.jobs or []}
+    assert by_id["cluster-a:42"]["expected_start_at"] is None
+    assert by_id["cluster-a:42"]["started_at"] is None
+    assert by_id["cluster-a:42"]["queue_unknown"] == "private_data"
+    assert by_id["cluster-a:43"]["expected_start_at"] is None
+    assert by_id["cluster-a:43"]["started_at"] is None
+    assert "queue" not in by_id["cluster-a:43"]
+    assert "expected_start_at" not in by_id["cluster-a:44"]
+    assert by_id["cluster-a:44"]["started_at"] == "2026-01-05T09:00:00+00:00"
+    stored = json.dumps(batch.jobs)
+    assert "2026-01-05T12:00:00" not in stored
+    assert "2026-01-05T13:00:00" not in stored
 
 
 async def test_resources_and_array_elements_get_queue_facts(queue_cluster) -> None:
@@ -1231,6 +1297,10 @@ async def test_queue_config_cache_expires_and_is_scoped_to_source_and_connection
         {"fairshare": True},
         {"fairshare": 1.2},
         {"fairshare": -0.1},
+        {"expected_start_at": "2026-01-05T08:00:00"},
+        {"expected_start_at": "N/A"},
+        {"expected_start_at": "Unknown"},
+        {"expected_start_at": ""},
     ],
 )
 def test_queue_fields_are_validated_before_storage(fields) -> None:

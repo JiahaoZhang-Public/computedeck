@@ -546,6 +546,21 @@ const en = {
   'job.queue.notCollected': 'Queue estimate: — · Not collected yet.',
   'job.queue.fairshareUnknown':
     'Fair-share: — · Not available, or not used by this scheduler’s priority policy.',
+  'job.startEstimate':
+    "Slurm's expected start: {time} ({relative}). An estimate, not a guarantee; reservations, preemption and backfill can change it.",
+  'job.startEstimate.absolute':
+    "Slurm's expected start: {time}. An estimate, not a guarantee; reservations, preemption and backfill can change it.",
+  'job.startEstimate.soon': 'in less than a minute',
+  'job.startEstimate.justPassed': 'expected less than a minute ago',
+  'job.startEstimate.inMinutes': 'in ~{count} min',
+  'job.startEstimate.inHours': 'in ~{count} h',
+  'job.startEstimate.inDays': 'in ~{count} d',
+  'job.startEstimate.minutesAgo': 'expected ~{count} min ago',
+  'job.startEstimate.hoursAgo': 'expected ~{count} h ago',
+  'job.startEstimate.daysAgo': 'expected ~{count} d ago',
+  'job.startEstimate.unknown': "Slurm's expected start: — · Not available.",
+  'job.startEstimate.private': "Slurm's expected start: — · The cluster hides other users’ jobs.",
+  'job.startEstimate.notCollected': "Slurm's expected start: — · Not collected yet.",
 
   // Clusters
   'clusters.empty': 'No clusters',

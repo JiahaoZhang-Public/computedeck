@@ -31,6 +31,10 @@ require `>=0.7,<0.8` or handle their absence on older cores; the same rule appli
 to 0.6 fields with a minimum of 0.6. An existing `<0.7` bound excludes 0.7 even
 though its API version is unchanged.
 
+Pending Slurm jobs may include optional `expected_start_at`, Slurm's expected start
+rather than the actual `started_at`. A missing field means an older row. This does
+not change the plugin API version.
+
 The 0.7 additions are optional per-GPU readings, run-start and spend fields,
 [usage rollups](#observed-usage-rollups-07),
 [low-use hints and settings](#low-gpu-use-additions-07), Slurm queue estimates,
@@ -408,7 +412,12 @@ Rules that keep the numbers honest:
   timestamps identify an instant; scheduler timestamps without an offset remain text
   and must not be interpreted in the viewer's timezone. Missing fields on older rows
   mean unknown. A pending Slurm `StartTime` is an estimate, not an actual start, and is
-  not stored as `started_at`.
+  not stored as `started_at`. Slurm pending jobs may add `expected_start_at`: an
+  offset-bearing timestamp, or `None` when the value is `N/A`, `Unknown`, missing or
+  without an offset. `PrivateData` that includes `jobs` or `all` forces `None`.
+  A missing field means the row was collected before this value existed. It is never
+  copied into `started_at` or used as a lifecycle start. No capability, event, schema
+  version or plugin API version changes. The drawer shows it only for Slurm jobs.
 - Slurm pending jobs with Priority or Resources reasons may add `queue` (a list of
   `{partition, ahead, ties}`, or `None`), `fairshare` (a number from 0 to 1, or `None`),
   and `queue_unknown` (`private_data`, `failed`, or `None`). `ahead` and `ties` are

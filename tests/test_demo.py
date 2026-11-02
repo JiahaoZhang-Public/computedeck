@@ -645,6 +645,8 @@ def test_demo_shows_queue_estimates_and_explicit_unknowns() -> None:
     assert any(job["reason"] == "Resources" and job["queue"] for job in waiting)
     assert any(job["fairshare"] == 0.12 for job in waiting)
     assert {job["queue_unknown"] for job in waiting} == {None, "failed"}
+    assert all(job.get("started_at") is None for job in waiting)
+    assert all(job.get("expected_start_at") for job in waiting)
     assert all("queue" not in job for job in jobs if job not in waiting)
 
 

@@ -2,7 +2,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { groupsOf } from './groups';
+import { jobTime, relativeStart, startEstimateLabel } from './jobFacts';
 import { formatMessage, setLocale, t } from './i18n';
+import type { MessageKey } from './i18n';
 import { JobDetail } from './pages/Details';
 import type { Ctx } from './pages/shared';
 import { serverDemo } from './test-server';
@@ -37,6 +39,12 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     expect(callout.textContent).toContain(
       t('job.queue.fairshare', { account: job.account, factor: '0.12' }),
     );
+    expect(callout.textContent).toContain(startEstimateLabel(job));
+    expect(callout.textContent).toContain(t('job.startEstimate.inHours', { count: 3 }));
+    const started = [...view.querySelectorAll('dt')].find(
+      (row) => row.textContent === t('job.started'),
+    );
+    expect(started?.nextElementSibling?.textContent).toBe('—');
     expect(view.textContent).toContain(t('common.sampledAt'));
     expect(callout.textContent).toContain(t('job.nextStep'));
   });
@@ -109,17 +117,66 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
     delete job.queue;
     delete job.queue_unknown;
     delete job.fairshare;
+    delete job.expected_start_at;
     const text = drawer().textContent;
     expect(text).toContain(t('job.queue.notCollected'));
     expect(text).not.toContain(t('job.queue.failed'));
     expect(text).toContain(t('job.queue.fairshareNotCollected'));
+    expect(text).toContain(t('job.startEstimate.notCollected'));
     expect(formatMessage({ code: 'queue_unavailable' })).toBe(t('msg.queue_unavailable'));
+  });
+  it('shows Slurm’s expected start in the viewer’s timezone with a rough relative time', () => {
+    const at = new Date(Date.now() + (3 * 60 + 20) * 60000).toISOString();
+    job.expected_start_at = at;
+    const text = drawer().textContent ?? '';
+    const relative = relativeStart(at);
+    expect(text).toContain(t('job.startEstimate', { time: jobTime(at), relative }));
+    expect(text).toContain(t('job.startEstimate.inHours', { count: 3 }));
+    expect(relative).toBe(t('job.startEstimate.inHours', { count: 3 }));
+    expect(text).not.toContain(t('job.schedulerTime', { time: at }));
+  });
+  it.each<[number, MessageKey, number | undefined]>([
+    [20 * 1000, 'job.startEstimate.soon', undefined],
+    [-20 * 1000, 'job.startEstimate.justPassed', undefined],
+    [45 * 60000, 'job.startEstimate.inMinutes', 45],
+    [-45 * 60000, 'job.startEstimate.minutesAgo', 45],
+    [(3 * 60 + 20) * 60000, 'job.startEstimate.inHours', 3],
+    [-(3 * 60 + 20) * 60000, 'job.startEstimate.hoursAgo', 3],
+    [(2 * 1440 + 30) * 60000, 'job.startEstimate.inDays', 2],
+    [-(2 * 1440 + 30) * 60000, 'job.startEstimate.daysAgo', 2],
+  ])('phrases a start %i ms away as %s', (offset, key, count) => {
+    job.expected_start_at = new Date(Date.now() + offset).toISOString();
+    const text = drawer().textContent ?? '';
+    const relative = t(key, count === undefined ? undefined : { count });
+    expect(text).toContain(relative);
+    expect(text).toContain(
+      t('job.startEstimate', { time: jobTime(job.expected_start_at), relative }),
+    );
+  });
+  it('leaves an unavailable or hidden start unknown and does not show it as started', () => {
+    job.expected_start_at = null;
+    let text = drawer().textContent ?? '';
+    expect(text).toContain(t('job.startEstimate.unknown'));
+    expect(text).not.toContain(t('job.startEstimate.notCollected'));
+    job.expected_start_at = new Date(Date.now() + 3 * 3600000).toISOString();
+    job.queue_unknown = 'private_data';
+    job.queue = null;
+    text = drawer().textContent ?? '';
+    expect(text).toContain(t('job.startEstimate.private'));
+    expect(text).not.toContain(jobTime(job.expected_start_at));
+    job.expected_start_at = '2026-01-05T08:00:00';
+    job.queue_unknown = null;
+    text = drawer().textContent ?? '';
+    expect(text).toContain(t('job.schedulerTime', { time: '2026-01-05T08:00:00' }));
+    expect(text).toContain(
+      t('job.startEstimate.absolute', { time: jobTime(job.expected_start_at) }),
+    );
   });
   it.each(['pbs', 'lsf', 'kubernetes'])('adds no Slurm facts to %s jobs', (driver) => {
     ctx.data.sources.find((source) => source.id === job.source_id)!.driver = driver;
-    expect(drawer().textContent).not.toContain(
-      t('job.queue.fairshare', { account: job.account, factor: '0.12' }),
-    );
+    const text = drawer().textContent ?? '';
+    expect(text).not.toContain(t('job.queue.fairshare', { account: job.account, factor: '0.12' }));
+    expect(text).not.toContain(startEstimateLabel(job));
   });
   it.each([
     ['PENDING', 'Dependency'],
@@ -128,8 +185,8 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
   ])('hides queue facts when the job is %s / %s', (state, reason) => {
     job.state = state;
     job.reason = reason;
-    expect(drawer().textContent).not.toContain(
-      t('job.queue.upTo', { partition: 'gpu', count: 0, max: 20 }),
-    );
+    const text = drawer().textContent ?? '';
+    expect(text).not.toContain(t('job.queue.upTo', { partition: 'gpu', count: 0, max: 20 }));
+    expect(text).not.toContain(t('job.startEstimate.inHours', { count: 3 }));
   });
 });

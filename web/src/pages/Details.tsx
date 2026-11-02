@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
 import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
-import { jobReason, jobTime, jobWaiting } from '../jobFacts';
+import { jobReason, jobTime, jobWaiting, startEstimateLabel } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
@@ -305,6 +305,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                           : 'job.queue.fairshareUnknown',
                     )}
               </p>
+              <p>{startEstimateLabel(job)}</p>
             </>
           )}
           <strong>{t('job.nextStep')}</strong>

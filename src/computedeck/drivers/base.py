@@ -95,6 +95,7 @@ TEXT_FIELDS = (
     "array_index",
     "submitted_at",
     "started_at",
+    "expected_start_at",
     "seen_running_since",
     "last_probe_attempt",
 )
@@ -200,6 +201,14 @@ def validate_row(row: dict[str, Any], *, complete: bool = False, instance: bool 
                 # API-1 plugins may supply arbitrary start text. Keep the instance,
                 # but never use an ambiguous time to calculate its running cost.
                 row[key] = None
+    if "expected_start_at" in row and row["expected_start_at"] is not None:
+        # Slurm's pending start estimate. Offset-free text is not a local instant.
+        try:
+            timestamp = datetime.fromisoformat(row["expected_start_at"])
+        except (TypeError, ValueError):
+            raise ValueError("Invalid collection expected_start_at") from None
+        if timestamp.tzinfo is None:
+            raise ValueError("Collection timestamp needs a timezone")
 
 
 def node_health(

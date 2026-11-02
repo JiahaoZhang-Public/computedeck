@@ -1,5 +1,13 @@
 import { afterEach, expect, it } from 'vitest';
-import { jobReason, jobTime, jobWaiting, reasonCode, reasonKind } from './jobFacts';
+import {
+  jobReason,
+  jobTime,
+  jobWaiting,
+  reasonCode,
+  reasonKind,
+  relativeStart,
+  startEstimateLabel,
+} from './jobFacts';
 import { setLocale, t } from './i18n';
 import type { Job } from './types';
 
@@ -36,6 +44,30 @@ it.each(['OUT_OF_MEMORY', 'TIMEOUT', 'NODE_FAIL', 'FAILED', 'PREEMPTED'])(
     expect(jobReason({ state, reason: null }, '')?.next).toBeTruthy();
   },
 );
+it('rounds an expected start down and keeps a past estimate in the past', () => {
+  const now = Date.parse('2026-01-05T12:00:00Z');
+  expect(relativeStart('2026-01-05T15:20:00Z', now)).toBe(
+    t('job.startEstimate.inHours', { count: 3 }),
+  );
+  expect(relativeStart('2026-01-05T12:00:30Z', now)).toBe(t('job.startEstimate.soon'));
+  expect(relativeStart('2026-01-05T11:59:20Z', now)).toBe(t('job.startEstimate.justPassed'));
+  expect(relativeStart('2026-01-05T08:40:00Z', now)).toBe(
+    t('job.startEstimate.hoursAgo', { count: 3 }),
+  );
+  expect(relativeStart('2026-01-05T12:00:00', now)).toBeNull();
+  expect(startEstimateLabel({ expected_start_at: null, queue_unknown: null }, now)).toBe(
+    t('job.startEstimate.unknown'),
+  );
+  expect(startEstimateLabel({ queue_unknown: 'private_data' }, now)).toBe(
+    t('job.startEstimate.notCollected'),
+  );
+  expect(
+    startEstimateLabel(
+      { expected_start_at: '2026-01-05T15:20:00Z', queue_unknown: 'private_data' },
+      now,
+    ),
+  ).toBe(t('job.startEstimate.private'));
+});
 it('does not interpret scheduler-local text in the browser timezone', () => {
   expect(jobTime('Jan 5 10:00')).toBe(t('job.schedulerTime', { time: 'Jan 5 10:00' }));
   expect(jobTime(null)).toBe('—');
