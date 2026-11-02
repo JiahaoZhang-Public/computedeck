@@ -559,7 +559,6 @@ const en = {
   'job.startEstimate.hoursAgo': 'expected ~{count} h ago',
   'job.startEstimate.daysAgo': 'expected ~{count} d ago',
   'job.startEstimate.unknown': "Slurm's expected start: — · Not available.",
-  'job.startEstimate.private': "Slurm's expected start: — · The cluster hides other users’ jobs.",
   'job.startEstimate.notCollected': "Slurm's expected start: — · Not collected yet.",
 
   // Clusters

@@ -413,8 +413,10 @@ Rules that keep the numbers honest:
   and must not be interpreted in the viewer's timezone. Missing fields on older rows
   mean unknown. A pending Slurm `StartTime` is an estimate, not an actual start, and is
   not stored as `started_at`. Slurm pending jobs may add `expected_start_at`: an
-  offset-bearing timestamp, or `None` when the value is `N/A`, `Unknown`, missing or
-  without an offset. `PrivateData` that includes `jobs` or `all` forces `None`.
+  offset-bearing timestamp, or `None` when the value is `N/A`, `Unknown`, missing, or
+  cluster-local and the login-node offset (`date +%z` in the same SSH call) could not
+  be read. `PrivateData` that includes `jobs` or `all` hides other users' jobs and
+  leaves queue counts unknown; it does not clear the user's own expected start.
   A missing field means the row was collected before this value existed. It is never
   copied into `started_at` or used as a lifecycle start. No capability, event, schema
   version or plugin API version changes. The drawer shows it only for Slurm jobs.

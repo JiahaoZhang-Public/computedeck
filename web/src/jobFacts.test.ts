@@ -61,12 +61,15 @@ it('rounds an expected start down and keeps a past estimate in the past', () => 
   expect(startEstimateLabel({ queue_unknown: 'private_data' }, now)).toBe(
     t('job.startEstimate.notCollected'),
   );
+  const hidden = '2026-01-05T15:20:00Z';
   expect(
-    startEstimateLabel(
-      { expected_start_at: '2026-01-05T15:20:00Z', queue_unknown: 'private_data' },
-      now,
-    ),
-  ).toBe(t('job.startEstimate.private'));
+    startEstimateLabel({ expected_start_at: hidden, queue_unknown: 'private_data' }, now),
+  ).toBe(
+    t('job.startEstimate', {
+      time: jobTime(hidden),
+      relative: t('job.startEstimate.inHours', { count: 3 }),
+    }),
+  );
 });
 it('does not interpret scheduler-local text in the browser timezone', () => {
   expect(jobTime('Jan 5 10:00')).toBe(t('job.schedulerTime', { time: 'Jan 5 10:00' }));

@@ -835,13 +835,15 @@ other users' job ids are never stored or logged.
 
 The same drawer lines include Slurm's expected start when the pending job's StartTime
 is known (`expected_start_at`). It is the value `squeue --start` reports, taken from
-the existing own-job query with no extra command. The absolute time uses the viewer's
-timezone, with a rough relative phrase such as “in ~3 h”. The line says it is an
-estimate, not a guarantee. `N/A`, `Unknown`, a missing value and a time without a
-timezone offset stay unknown. Clusters that hide other users' jobs show “—” and say
-so; the time is not kept. Older snapshots without the field say “Not collected yet”.
+the existing own-job query. The same SSH call reads the login node's current offset
+with `date +%z` and uses it for a time Slurm printed without one. The absolute time
+uses the viewer's timezone, with a rough relative phrase such as “in ~3 h”. The line
+says it is an estimate, not a guarantee. `N/A`, `Unknown`, a missing value and a
+cluster-local time whose offset could not be read stay unknown. Hiding other users'
+jobs leaves the queue count unknown and still shows this start time when Slurm
+reported one for your job. Older snapshots without the field say “Not collected yet”.
 The value is never the job's actual start. See the
-[Slurm driver](drivers/slurm.md#job-requests-and-times) for the field and `PrivateData`.
+[Slurm driver](drivers/slurm.md#job-requests-and-times) for the field, the offset and `PrivateData`.
 
 ## Slurm 队列估计
 
@@ -860,10 +862,11 @@ Resources 作业仅在该分区的前方作业数和同优先级作业数均为�
 只保留队列汇总数量，不保存或记录其他用户的作业 ID。
 
 同一段说明也展示 Slurm 自己的预计开始时间（`expected_start_at`），即 `squeue --start`
-报告的 StartTime，来自现有的本人作业查询，没有额外命令。绝对时间按查看者的时区显示，
+报告的 StartTime，来自现有的本人作业查询。同一次 SSH 调用用 `date +%z` 读取登录节点
+当前时区偏移，并把它用在 Slurm 打印出来、但没有偏移的时间上。绝对时间按查看者的时区显示，
 并附上大致相对时间，例如“约 3 小时后”。文案标明这是估计，不是保证。
-`N/A`、`Unknown`、缺失值以及没有时区偏移的时间都保持未知。
-集群隐藏其他用户的作业时显示“—”，并说明原因，不保留该时间。
+`N/A`、`Unknown`、缺失值，以及读不到登录节点偏移的集群本地时间，都保持未知。
+集群隐藏其他用户的作业时，队列数量保持未知，但只要 Slurm 给出了你自己作业的开始时间，这里仍会显示。
 没有该字段的旧快照显示“尚未采集”。这个值从不当作作业的实际开始时间。
 
 ## Typical wait from your job history
