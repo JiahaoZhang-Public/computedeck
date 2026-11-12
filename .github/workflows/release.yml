@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
       - name: Require a commit on main
         run: git merge-base --is-ancestor HEAD origin/main
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
