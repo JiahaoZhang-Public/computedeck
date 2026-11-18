@@ -946,9 +946,47 @@ def old_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[st
     return calls
 
 
-def imported(tmp_path: Path, *arguments: str) -> tuple[int, Store]:
-    code = cli.main(["--data-dir", str(tmp_path / "data"), "import", *arguments])
+def imported(tmp_path: Path, *arguments: str, yes: bool = True) -> tuple[int, Store]:
+    accept = ["--yes"] if yes and "--from" in arguments else []
+    code = cli.main(["--data-dir", str(tmp_path / "data"), "import", *arguments, *accept])
     return code, Store(tmp_path / "data" / "computedeck.sqlite")
+
+
+@pytest.mark.parametrize(
+    ("route", "local_credential"), [("collect", False), ("jump", True), ("direct", True)]
+)
+def test_another_servers_export_is_shown_and_needs_consent(
+    tmp_path: Path,
+    old_server: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    route: str,
+    local_credential: bool,
+) -> None:
+    # The export decides which local secret a source collected here would read and send to
+    # its provider, so nothing is applied before the list has been seen and accepted.
+    code, store = imported(tmp_path, "--from", "old-server", "--route", route, yes=False)
+    output = capsys.readouterr()
+    assert code == 1 and "run again with --yes" in output.err
+    assert store.sources() == [] and store.nodes() == []
+    store.db.close()
+    assert "old-server exports 3 sources:" in output.out
+    assert ("reads this computer's env:RUNPOD_API_KEY" in output.out) is local_credential
+    assert "Cluster A: slurm, cluster-a" in output.out
+
+    answers = iter(["n", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    code, store = imported(tmp_path, "--from", "old-server", "--route", route, yes=False)
+    assert code == 1 and store.sources() == []
+    store.db.close()
+    code, store = imported(tmp_path, "--from", "old-server", "--route", route, yes=False)
+    assert code == 0 and len(store.sources()) == 3
+    store.db.close()
+    capsys.readouterr()
+    # A second run names what it would overwrite.
+    assert imported(tmp_path, "--from", "old-server", "--route", route)[0] == 0
+    assert capsys.readouterr().out.count("replaces the existing source") == 3
 
 
 @pytest.mark.parametrize(

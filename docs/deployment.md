@@ -181,7 +181,11 @@ computedeck import --from my-server
 ```
 
 This runs `computedeck export` on `my-server` over SSH (non-interactive, with strict host
-key checking) and imports its sources. `--route` decides how the laptop reaches them:
+key checking), lists the sources it would create and asks before importing them. The list
+names each source's SSH alias, where it would be collected, any credential on this computer
+it would read, and any existing source it would replace; read it, because the other server
+chooses those values. `--yes` imports without asking (scripts must pass it). `--route`
+decides how the laptop reaches the sources:
 
 | `--route` | What happens |
 |---|---|

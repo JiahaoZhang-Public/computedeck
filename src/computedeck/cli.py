@@ -128,6 +128,40 @@ def _remote_export(alias: str, command: str) -> str:
     return output[start:] if start > 0 else output
 
 
+def _confirm_adoption(store: Any, parsed: dict[str, Any], alias: str, assume_yes: bool) -> bool:
+    """Show what another server's export would create here, and ask before applying it.
+
+    The export is that server's word. It names the SSH aliases this computer would open and,
+    for sources collected here, the local credential each one would read and send to its
+    provider, and it can replace a source that already exists. Nothing is applied until the
+    list has been shown and accepted.
+    """
+    from .records import source_record
+
+    kinds = {node["id"]: node["mode"] for node in parsed["nodes"]}
+    print(f"{alias} exports {len(parsed['sources'])} sources:")
+    for body in parsed["sources"]:
+        kind = kinds.get(body.node or "")
+        where = {"collect": f"collected on {alias}", "jump": f"through {alias}"}.get(
+            kind or "", "from this computer"
+        )
+        facts = [body.driver, body.ssh_alias or "", where]
+        if body.credential and kind != "collect":
+            facts.append(f"reads this computer's {body.credential}")
+        if store.source(source_record(body)["id"]):
+            facts.append("replaces the existing source")
+        print(f"  {body.name}: " + ", ".join(fact for fact in facts if fact))
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print("Nothing was imported. Review the list, then run again with --yes.", file=sys.stderr)
+        return False
+    if input("Import these sources? [y/N] ").strip().lower() in ("y", "yes"):
+        return True
+    print("Nothing was imported.", file=sys.stderr)
+    return False
+
+
 def import_config(args: argparse.Namespace) -> int:
     _with_data_dir(args)
     from .config import ConfigError, apply, apply_parsed, migrated
@@ -158,6 +192,8 @@ def import_config(args: argparse.Namespace) -> int:
             counts = apply(store, Path(args.file).read_text(encoding="utf-8"))
         else:
             parsed = migrated(text, alias, args.route, args.remote_command)
+            if not _confirm_adoption(store, parsed, alias, args.yes):
+                return 1
             counts = apply_parsed(store, parsed)
             routed = sum(1 for body in parsed["sources"] if body.node)
     except (ConfigError, OSError, UnicodeError) as error:
@@ -347,6 +383,11 @@ def parser() -> argparse.ArgumentParser:
         dest="remote_command",
         default="computedeck",
         help="with --from: how to run ComputeDeck there (default: %(default)s)",
+    )
+    load.add_argument(
+        "--yes",
+        action="store_true",
+        help="with --from: import after showing the list, without asking",
     )
     load.set_defaults(handler=import_config)
 
