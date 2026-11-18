@@ -138,6 +138,10 @@ def _confirm_adoption(store: Any, parsed: dict[str, Any], alias: str, assume_yes
     """
     from .records import source_record
 
+    def plain(value: Any) -> str:
+        # The other server wrote these: no escape sequence may redraw or hide the list.
+        return "".join(ch if ch.isprintable() else "\ufffd" for ch in str(value or ""))
+
     kinds = {node["id"]: node["mode"] for node in parsed["nodes"]}
     print(f"{alias} exports {len(parsed['sources'])} sources:")
     for body in parsed["sources"]:
@@ -145,12 +149,12 @@ def _confirm_adoption(store: Any, parsed: dict[str, Any], alias: str, assume_yes
         where = {"collect": f"collected on {alias}", "jump": f"through {alias}"}.get(
             kind or "", "from this computer"
         )
-        facts = [body.driver, body.ssh_alias or "", where]
+        facts = [plain(body.driver), plain(body.ssh_alias), where]
         if body.credential and kind != "collect":
-            facts.append(f"reads this computer's {body.credential}")
+            facts.append(f"reads this computer's {plain(body.credential)}")
         if store.source(source_record(body)["id"]):
             facts.append("replaces the existing source")
-        print(f"  {body.name}: " + ", ".join(fact for fact in facts if fact))
+        print(f"  {plain(body.name)}: " + ", ".join(fact for fact in facts if fact))
     if assume_yes:
         return True
     if not sys.stdin.isatty():

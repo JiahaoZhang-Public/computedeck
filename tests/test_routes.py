@@ -1024,6 +1024,26 @@ def test_another_servers_sources_are_reached_through_it(
     store.db.close()
 
 
+def test_the_consent_list_cannot_be_redrawn_by_the_other_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hostile = (
+        '[[cloud]]\nid = "runpod"\nlabel = "RunPod\\u001b[2K\\u001b[1A harmless"\n'
+        'driver = "runpod"\ncredential = "env:RUNPOD_API_KEY"\n'
+    )
+
+    async def ssh_command(destination: str, command: str, *args: Any, **kwargs: Any) -> str:
+        return hostile
+
+    monkeypatch.setattr(ssh, "ssh_command", ssh_command)
+    code, store = imported(tmp_path, "--from", "old-server", "--route", "direct", yes=False)
+    store.db.close()
+    shown = capsys.readouterr().out
+    assert code == 1
+    assert "\x1b" not in shown and "RunPod\ufffd[2K\ufffd[1A harmless" in shown
+    assert "reads this computer's env:RUNPOD_API_KEY" in shown
+
+
 def test_moving_again_updates_and_a_different_route_is_refused(
     tmp_path: Path, old_server: list[Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
