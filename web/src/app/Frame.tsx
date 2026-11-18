@@ -194,7 +194,11 @@ export function Frame({
             Compute<b>Deck</b>
           </strong>
           {/* Only a remote service needs naming; local is the default. */}
-          {remote && <span className="brand-mode">{serverName}</span>}
+          {remote && (
+            <span className="brand-mode" title={serverName}>
+              {serverName}
+            </span>
+          )}
         </div>
         <nav aria-label={t('nav.main')}>
           {navGroups.map((navGroup, index) => (
