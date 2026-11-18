@@ -48,7 +48,9 @@ export interface Source {
   /** What a cloud provider reported about the account, such as its balance. */
   account?: { balance: number | null; currency: string; observed_at?: string };
 }
-/** Another machine that collects sources for this service over SSH. */
+/** How a route's machine helps: it forwards SSH, or it runs ComputeDeck and collects itself. */
+export type RouteMode = 'collect' | 'jump';
+/** Another machine a source is reached through: a jump host or a collection machine. */
 export interface CollectionNode {
   /** Content revision on polled responses; absent on older services and writes. */
   rev?: string;
@@ -56,6 +58,8 @@ export interface CollectionNode {
   name: string;
   ssh_alias: string;
   command: string;
+  /** Absent on services older than 0.8, which only know collection machines. */
+  mode?: RouteMode;
   status: 'unchecked' | 'ok' | 'error';
   version: string | null;
   drivers: string[];

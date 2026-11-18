@@ -61,18 +61,38 @@ function drawer(item = workstation()) {
   );
   return element;
 }
+/** In the Cloud table, low use is a warning shape in the Utilization cell, named by duration. */
+function lowUseFlags() {
+  return [...host.querySelectorAll('.util-cell [role="img"]')].map((shape) =>
+    shape.getAttribute('aria-label'),
+  );
+}
+const lowUseFlag = (duration: string) =>
+  `${t('display.warnPrefix')} ${t('lowUse.short', { duration })}`;
 
 describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) => {
   beforeEach(() => setLocale(language));
-  it('shows the server readings without repeating the drawer name, with optional cost', () => {
+  it('keeps the server readings and optional cost in the drawer, not the title', () => {
     const item = workstation();
     const hint = ctx.data.attention!.find((a) => a.kind === 'instance_low_use')!;
     const sentence = lowUseText(item);
     expect(drawer().textContent).toContain(sentence);
     expect(sentence).not.toContain(item.name);
-    expect(formatMessage(hint.message)).toBe(
-      `${item.name}${language === 'en' ? ': ' : '：'}${sentence}`,
+    // The Overview title names the machine and the state; readings, duration and cost are details.
+    const title = formatMessage(hint.message);
+    expect(title).toBe(
+      language === 'en' ? `${item.name}: low GPU use` : `${item.name}：GPU 使用率低`,
     );
+    expect(title).toBe(t('msg.attention_instance_low_use', { name: item.name }));
+    expect(title).not.toContain(lowUseDuration(60));
+    expect(title).not.toContain('≈');
+    // The attention item and the drawer describe the same readings.
+    expect(hint.message).toMatchObject({
+      name: item.name,
+      minutes: item.low_use!.covered_minutes,
+      samples: item.low_use!.samples,
+      origin: item.low_use!.origin,
+    });
     expect(drawer().textContent).toContain(lowUseDuration(60));
     expect(drawer().textContent).toContain(
       language === 'en' ? 'estimate, not a bill' : '估算值，非账单',
@@ -93,19 +113,23 @@ describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) =>
       expect(lowUseDuration(minutes)).toBe(duration);
       workstation().low_use!.covered_minutes = minutes;
       await act(async () => root.render(<CloudPage ctx={ctx} />));
-      expect(host.textContent).toContain(t('lowUse.short', { duration }));
+      expect(lowUseFlags()).toEqual([lowUseFlag(duration)]);
       expect(lowUseText(workstation())).toContain(duration);
+      expect(drawer().textContent).toContain(lowUseText(workstation()));
+      // The attention title stays short at any duration; the drawer carries the duration.
       const hint = ctx.data.attention!.find((a) => a.kind === 'instance_low_use')!;
-      expect(formatMessage({ ...hint.message, minutes })).toContain(duration);
+      expect(formatMessage({ ...hint.message, minutes })).toBe(
+        t('msg.attention_instance_low_use', { name: workstation().name }),
+      );
       if (language === 'zh-CN') {
         expect(lowUseText(workstation())).toContain(`${duration}内`);
-        expect(formatMessage({ ...hint.message, minutes })).toContain(`${duration}内`);
+        expect(drawer().textContent).toContain(`${duration}内`);
       }
     },
   );
   it('filters Cloud through the URL and updates when a new server result clears the hint', async () => {
     await act(async () => root.render(<CloudPage ctx={ctx} />));
-    expect(host.textContent).toContain(t('lowUse.short', { duration: lowUseDuration(60) }));
+    expect(lowUseFlags()).toEqual([lowUseFlag(lowUseDuration(60))]);
     const tabs = host.querySelectorAll<HTMLButtonElement>(
       '[aria-label="' + t('lowUse.title') + '"] button',
     );
@@ -119,7 +143,7 @@ describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) =>
     expect(host.querySelectorAll('tbody tr')).toHaveLength(0);
     await act(async () => setRouteParams({ use: 'unknown' }));
     expect(host.querySelector('tbody')!.textContent).toContain('dev-box');
-    expect(host.textContent).not.toContain(t('lowUse.short', { duration: lowUseDuration(60) }));
+    expect(lowUseFlags()).toEqual([]);
     expect(drawer().textContent).toContain(t('lowUse.stale'));
   });
   it('keeps the filters in the selected group and search scope', async () => {

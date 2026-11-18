@@ -1,11 +1,11 @@
 import { useClock } from '../ui/clock';
 import { ClockText } from '../data/ClockText';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useId, useState } from 'react';
+import type { ReactNode } from 'react';
 import { setRouteParams, useRouteParam } from '../useRouteParam';
-import { canCopySubmit, jobPlanRequest, jobWaitsHere, planPresets, submitFlags } from '../submit';
+import { jobPlanRequest, jobWaitsHere, planPresets, submitFlags } from '../submit';
 import type { SubmitFormat } from '../submit';
-import { Clock3, Copy, Plus, X } from 'lucide-react';
-import { findGroup } from '../groups';
+import { ChevronDown, Clock3, X } from 'lucide-react';
 import { locale, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { dateTime, relativeTime, sourceHasData, uniqueNodes } from '../domain';
@@ -13,7 +13,8 @@ import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES, type PlanFactor } from '../planExplanation';
 import { gpuModels, lowUseInstances, machineOptions, machineSamples, planOptions } from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
-import { Chips, Empty, GroupMark, Panel } from '../ui';
+import { Empty, Panel } from '../ui';
+import { LazyMenuButton } from './LazyMenu';
 import type { Ctx } from './shared';
 import type { Job, NodeSummary } from '../types';
 import { WaitHistory, WaitHistoryNote } from '../WaitHistory';
@@ -31,8 +32,14 @@ const TONES: Record<Verdict, string> = {
   denied: 'gray',
 };
 
+/** Access not checked means the estimate is not known either; the explanation says why. */
+function shownVerdict(option: PlanOption): Verdict {
+  return option.access === 'unknown' ? 'unknown' : option.verdict;
+}
+
 function verdictLabel(option: PlanOption, request: PlanRequest) {
-  if (option.verdict !== 'none') return t(`plan.verdict.${option.verdict}`);
+  const verdict = shownVerdict(option);
+  if (verdict !== 'none') return t(`plan.verdict.${verdict}`);
   return request.gpuType
     ? t('plan.verdict.none', { model: request.gpuType })
     : t('plan.verdict.noGpus');
@@ -185,18 +192,16 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
       ),
     ]),
   );
+  const copyFormat = { value: format, change: changeFormat };
   const visible = options.filter((option) => option.access !== 'not_associated');
   const denied = options.filter((option) => option.access === 'not_associated');
-  const unchecked = [
-    ...new Map(
-      visible
-        .filter((option) => option.access === 'unknown')
-        .map((option) => [option.source.id, option.source]),
-    ).values(),
-  ];
+  // Options that cannot run as asked stay listed, with reasons, behind one disclosure.
+  const unfitVerdicts: Verdict[] = ['none', 'unavailable', 'wall', 'limit'];
+  const fitting = visible.filter((option) => !unfitVerdicts.includes(option.verdict));
+  const unfit = visible.filter((option) => unfitVerdicts.includes(option.verdict));
   const first = visible[0];
-  const best = first && ['likely', 'possible'].includes(first.verdict) ? first : null;
-  const machines = machineOptions(data, request);
+  const best = first && ['likely', 'possible'].includes(shownVerdict(first)) ? first : null;
+  const machines = machineOptions(data, request, undefined, ctx.nodes);
   const { staleCount } = machineSamples(data);
   const visibleMachines = machines.filter(
     (option) => !request.gpuType || option.total > 0 || option.unknown > 0,
@@ -235,7 +240,6 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         )}
         {presets.length > 0 && (
           <div className="plan-presets" role="group" aria-label={t('plan.presets')}>
-            <span className="muted">{t('plan.presets')}</span>
             {presets.map((job) => {
               const next = jobPlanRequest(job, data.nodes);
               return (
@@ -303,20 +307,6 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           </label>
         </form>
       </Panel>
-      {options.some(canCopySubmit) && (
-        <div className="plan-copy-format">
-          <span>{t('plan.submit.format')}</span>
-          <Chips<SubmitFormat>
-            label={t('plan.submit.format')}
-            value={format}
-            onChange={changeFormat}
-            options={[
-              { value: 'line', label: t('plan.submit.line') },
-              { value: 'header', label: t('plan.submit.header') },
-            ]}
-          />
-        </div>
-      )}
       {best && (
         <Panel title={t('plan.best')}>
           <div className="plan-best">
@@ -328,61 +318,84 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               <i />
               {verdictLabel(best, request)}
             </span>
-            {best.access === 'unknown' && <span className="tag">{t('plan.accessUnchecked')}</span>}
-            <span>
-              {t('plan.best.free', {
-                count: freeGpuCount(best, request.gpus),
-              })}
-            </span>
-            <span>
-              {t('plan.best.room', {
-                count:
-                  best.headroomAfterQueue == null
+            <dl className="figures">
+              <div>
+                <dt>{t('plan.tile.free')}</dt>
+                <dd>{freeGpuCount(best, request.gpus)}</dd>
+              </div>
+              <div>
+                <dt>{t('plan.tile.room')}</dt>
+                <dd>
+                  {best.headroomAfterQueue == null
                     ? '—'
                     : best.headroomAfterQueue === Infinity
                       ? t('plan.noLimit')
-                      : Math.max(0, best.headroomAfterQueue),
-              })}
-            </span>
-            {best.largestNodeFree != null && best.largestNodeFree >= request.gpus && (
-              <span>{t('plan.best.oneNode')}</span>
-            )}
-            {best.nodesObservedAt && (
-              <span className="muted">
-                <ClockText>
-                  {() => t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
-                </ClockText>
-              </span>
-            )}
-            <SubmitCopy result={submissions.get(best.key)!} ctx={ctx} option={best} />
-            {visible[1] && (
-              <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
-            )}
-            <WaitHistory
-              compact
-              history={data.wait_history?.[best.source.id]}
-              qos={best.qos}
-              gpus={request.gpus}
+                      : Math.max(0, best.headroomAfterQueue)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t('plan.tile.node')}</dt>
+                <dd>{best.largestNodeFree ?? '—'}</dd>
+              </div>
+            </dl>
+            <SubmitCopy
+              result={submissions.get(best.key)!}
+              ctx={ctx}
+              option={best}
+              format={copyFormat}
             />
-            <WaitHistoryNote histories={[data.wait_history?.[best.source.id]]} relative />
+            <details className="plan-details">
+              <summary>{t('plan.details')}</summary>
+              <SubmitNotes result={submissions.get(best.key)} />
+              {visible[1] && (
+                <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
+              )}
+              {best.nodesObservedAt && (
+                <p className="sub">
+                  <ClockText>
+                    {() => t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
+                  </ClockText>
+                </p>
+              )}
+              <WaitHistory
+                compact
+                history={data.wait_history?.[best.source.id]}
+                qos={best.qos}
+                gpus={request.gpus}
+              />
+              <WaitHistoryNote histories={[data.wait_history?.[best.source.id]]} relative />
+            </details>
           </div>
         </Panel>
       )}
       {(hasClusters || !hasMachines) && (
-        <Panel title={t('plan.options')} count={visible.length}>
-          {unchecked.map((source) => (
-            <p className="panel-note" key={source.id}>
-              {t('plan.accessNote', { source: `${source.name} · ${source.username}` })}
-            </p>
-          ))}
+        <Panel title={t('plan.options')}>
           {visible.length ? (
-            <OptionsTable
-              options={visible}
-              request={request}
-              ctx={ctx}
-              submissions={submissions}
-              fromJob={fromJob}
-            />
+            <>
+              {fitting.length > 0 && (
+                <OptionsTable
+                  options={fitting}
+                  request={request}
+                  ctx={ctx}
+                  submissions={submissions}
+                  format={copyFormat}
+                  fromJob={fromJob}
+                />
+              )}
+              {unfit.length > 0 && (
+                <details className="plan-unfit" open={!fitting.length || undefined}>
+                  <summary>{t('plan.unfit', { count: unfit.length })}</summary>
+                  <OptionsTable
+                    options={unfit}
+                    request={request}
+                    ctx={ctx}
+                    submissions={submissions}
+                    format={copyFormat}
+                    fromJob={fromJob}
+                  />
+                </details>
+              )}
+            </>
           ) : (
             <Empty
               title={t(denied.length ? 'plan.noAccess' : 'plan.empty')}
@@ -399,21 +412,22 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                     className="button primary"
                     onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
                   >
-                    <Plus size={14} /> {t('clusters.add')}
+                    {t('clusters.add')}
                   </button>
                 )
               }
             />
           )}
           {visible.length > 0 && (
-            <div className="panel-note">
+            <details className="panel-note plan-details">
+              <summary>{t('plan.about')}</summary>
+              <p>{t('plan.note')}</p>
               <WaitHistoryNote
                 histories={visible.map((o) => data.wait_history?.[o.source.id])}
                 relative
               />
-            </div>
+            </details>
           )}
-          <p className="panel-note">{t('plan.note')}</p>
         </Panel>
       )}
       {denied.length > 0 && (
@@ -424,19 +438,13 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             request={request}
             ctx={ctx}
             submissions={submissions}
+            format={copyFormat}
             fromJob={fromJob}
           />
-          <div className="panel-note">
-            <WaitHistoryNote
-              histories={denied.map((o) => data.wait_history?.[o.source.id])}
-              relative
-            />
-          </div>
         </details>
       )}
-      {hasMachines && (
-        <Panel title={t('plan.machines')} count={visibleMachines.length}>
-          <p className="panel-note">{t('plan.machinesNote')}</p>
+      {hasMachines && visibleMachines.length > 0 && (
+        <Panel title={t('plan.machines')}>
           {unmatchedMachines > 0 && (
             <p className="panel-note">{t('plan.machinesNoMatch', { count: unmatchedMachines })}</p>
           )}
@@ -445,20 +453,17 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               {visibleMachines.map(({ instance, free, total, unknown, command }) => (
                 <li key={instance.id} className={free < request.gpus ? 'muted' : undefined}>
                   <div className="grow">
-                    <strong>
-                      {instance.platform} · {instance.name}
-                    </strong>
+                    <button className="link" onClick={() => ctx.openInstance(instance)}>
+                      <strong>
+                        {instance.platform} · {instance.name}
+                      </strong>
+                    </button>
                     <span className="sub">
                       {t('plan.machineFree', { free: unknown ? `≥ ${free}` : free, total })}
                     </span>
                     {unknown > 0 && (
                       <span className="sub">{t('plan.machineUnknown', { count: unknown })}</span>
                     )}
-                    <span className="sub" title={dateTime(instance.gpus_observed_at)}>
-                      <ClockText>
-                        {() => t('gpu.sampled', { time: relativeTime(instance.gpus_observed_at) })}
-                      </ClockText>
-                    </span>
                     {command && (
                       <pre
                         className="machine-command"
@@ -474,17 +479,18 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                       <button
                         className="button small"
                         aria-label={t('plan.machineCopyFor', { name: instance.name })}
-                        onClick={() => void ctx.copy(command)}
+                        onClick={() =>
+                          void ctx.copy(command, {
+                            kind: 'command',
+                            message: t('plan.machineCopied'),
+                          })
+                        }
                       >
-                        <Copy size={14} />
                         {free < request.gpus
                           ? t('plan.machineCopyPartial', { count: free, requested: request.gpus })
                           : t('plan.machineCopy')}
                       </button>
                     )}
-                    <button className="button small" onClick={() => ctx.openInstance(instance)}>
-                      {t('plan.open')}
-                    </button>
                   </div>
                 </li>
               ))}
@@ -494,10 +500,6 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
           ) : null}
           {staleCount > 0 && (
             <p className="panel-note">{t('plan.machinesStale', { count: staleCount })}</p>
-          )}
-          <p className="panel-note">{t('plan.machineFreshness')}</p>
-          {machines.some((option) => option.command) && (
-            <p className="panel-note">{t('plan.machineCopyNote')}</p>
           )}
         </Panel>
       )}
@@ -515,25 +517,37 @@ function OptionsTable({
   request,
   ctx,
   submissions,
+  format,
   fromJob,
 }: {
   submissions: Map<string, ReturnType<typeof submitFlags>>;
+  format: CopyFormat;
   fromJob?: Job;
   options: PlanOption[];
   request: PlanRequest;
   ctx: Ctx;
 }) {
-  const { groups } = ctx;
+  // A chevron at the row's end, or the row itself, opens its explanation; no repeated text line.
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const tableId = useId();
+  const toggle = (key: string) =>
+    setExpanded((keys) =>
+      keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key],
+    );
   return (
     <div className="table-wrap plan-options">
       <table className="table plan-table">
         <thead>
           <tr>
-            <th>{t('plan.col.where')}</th>
+            <th>{t('job.cluster')}</th>
+            <th className="col-high">{t('sources.col.login')}</th>
+            <th>{t('job.qos')}</th>
             <th className="num">{t('plan.col.free')}</th>
+            <th className="num col-low">{t('plan.col.perNode')}</th>
             <th className="num">{t('plan.col.limit')}</th>
+            <th className="num col-mid">{t('plan.col.inUse')}</th>
             <th className="num">{t('plan.col.queued')}</th>
-            <th className="num">{t('plan.col.wall')}</th>
+            <th className="num col-mid">{t('plan.col.wall')}</th>
             <th>{t('plan.col.verdict')}</th>
           </tr>
         </thead>
@@ -544,85 +558,110 @@ function OptionsTable({
             const explanation = reason
               ? jobReason({ state: 'PENDING', reason }, option.source.driver)
               : null;
+            const verdict = shownVerdict(option);
             return (
               <Fragment key={option.key}>
-                <tr className="plan-option-row">
+                <tr className="plan-option-row clickable" onClick={() => toggle(option.key)}>
                   <td>
                     <span className="with-mark">
-                      <GroupMark group={findGroup(groups, option.source.cluster_id)} />
-                      <span>
-                        <strong>
-                          {option.source.name}
-                          {jobWaitsHere(fromJob, option) && (
-                            <span className="tag plan-qos">{t('plan.waitsHere')}</span>
-                          )}
-                          {option.qos && <span className="tag plan-qos">{option.qos}</span>}
-                          {option.access === 'unknown' && (
-                            <span className="tag plan-qos">{t('plan.accessUnchecked')}</span>
-                          )}
-                        </strong>
-                        <span className="sub">
-                          {option.source.username}
-                          <ClockText>
-                            {() =>
-                              option.nodesObservedAt &&
-                              ` · ${t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}`
-                            }
-                          </ClockText>
-                        </span>
-                      </span>
+                      <strong>{option.source.name}</strong>
+                      {jobWaitsHere(fromJob, option) && (
+                        <span className="tag plan-qos">{t('plan.waitsHere')}</span>
+                      )}
                     </span>
                   </td>
-                  <td className="num" data-label={t('plan.col.free')}>
+                  <td className="mono col-high" data-label={t('sources.col.login')}>
+                    {option.source.username || '—'}
+                  </td>
+                  <td data-label={t('job.qos')}>{option.qos || '—'}</td>
+                  <td className="num key" data-label={t('plan.col.free')}>
                     {freeGpuCount(option)}
-                    {option.largestNodeFree != null && (
-                      <span className="sub">
-                        {t('plan.largestNode', { count: option.largestNodeFree })}
-                      </span>
-                    )}
+                  </td>
+                  <td className="num col-low" data-label={t('plan.col.perNode')}>
+                    {option.largestNodeFree ?? '—'}
                   </td>
                   <td className="num" data-label={t('plan.col.limit')}>
                     {option.limit === Infinity ? t('plan.noLimit') : (option.limit ?? '—')}
-                    {option.used != null && option.limit != null && (
-                      <span className="sub">{t('plan.inUse', { count: option.used })}</span>
-                    )}
+                  </td>
+                  <td className="num col-mid" data-label={t('plan.col.inUse')}>
+                    {option.used ?? '—'}
                   </td>
                   <td className="num" data-label={t('plan.col.queued')}>
                     {option.queued ?? '—'}
-                    <span className="sub">
-                      {option.queuedForRoom == null
-                        ? t('plan.queueRoomUnknown')
-                        : t('plan.queuedGpus', { count: option.queuedForRoom })}
-                    </span>
-                    {reason && (
-                      <span className="sub" title={reason}>
-                        {explanation && explanation.kind !== 'unknown'
-                          ? t(`plan.queueReason.${explanation.kind}` as MessageKey)
-                          : reason}
-                      </span>
-                    )}
                   </td>
-                  <td className="num" data-label={t('plan.col.wall')}>
+                  <td className="num col-mid" data-label={t('plan.col.wall')}>
                     {option.maxWallHours == null ? '—' : duration(option.maxWallHours)}
                   </td>
                   <td className="plan-verdict">
-                    <span className={`status ${TONES[option.verdict]}`}>
-                      {option.verdict === 'behind' ? <Clock3 size={13} /> : <i />}
+                    <span className={`status ${TONES[verdict]}`}>
+                      {verdict === 'behind' ? <Clock3 size={13} /> : <i />}
                       {verdictLabel(option, request)}
                     </span>
-                    {why && <span className="sub plan-why">{why}</span>}
-                    <WaitHistory
-                      compact
-                      history={ctx.data.wait_history?.[option.source.id]}
-                      qos={option.qos}
-                      gpus={request.gpus}
+                    <SubmitCopy
+                      result={submissions.get(option.key)!}
+                      ctx={ctx}
+                      option={option}
+                      format={format}
                     />
-                    <SubmitCopy result={submissions.get(option.key)!} ctx={ctx} option={option} />
+                    <button
+                      type="button"
+                      className="icon-button plan-expand"
+                      aria-expanded={expanded.includes(option.key)}
+                      aria-controls={`${tableId}-${option.key}`}
+                      aria-label={t('plan.explanationFor', { name: optionName(option) })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggle(option.key);
+                      }}
+                    >
+                      <ChevronDown size={16} />
+                    </button>
                   </td>
                 </tr>
-                <tr className="plan-explanation-row">
-                  <td colSpan={6}>
-                    <PlanExplanation option={option} request={request} />
+                <tr
+                  className="plan-explanation-row"
+                  id={`${tableId}-${option.key}`}
+                  hidden={!expanded.includes(option.key)}
+                >
+                  <td colSpan={10}>
+                    <PlanExplanation option={option} request={request}>
+                      {why && <p>{why}</p>}
+                      {option.access === 'unknown' && (
+                        <p>
+                          {t('plan.accessNote', {
+                            source: `${option.source.name} · ${option.source.username}`,
+                          })}
+                        </p>
+                      )}
+                      {reason && (
+                        <p title={reason}>
+                          {explanation && explanation.kind !== 'unknown'
+                            ? t(`plan.queueReason.${explanation.kind}` as MessageKey)
+                            : reason}
+                        </p>
+                      )}
+                      {option.queuedForRoom != null ? (
+                        <p>{t('plan.queuedGpus', { count: option.queuedForRoom })}</p>
+                      ) : (
+                        <p>{t('plan.queueRoomUnknown')}</p>
+                      )}
+                      <SubmitNotes result={submissions.get(option.key)} />
+                      <WaitHistory
+                        compact
+                        history={ctx.data.wait_history?.[option.source.id]}
+                        qos={option.qos}
+                        gpus={request.gpus}
+                      />
+                      <ClockText>
+                        {() =>
+                          option.nodesObservedAt && (
+                            <p className="sub">
+                              {t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}
+                            </p>
+                          )
+                        }
+                      </ClockText>
+                    </PlanExplanation>
                   </td>
                 </tr>
               </Fragment>
@@ -634,12 +673,18 @@ function OptionsTable({
   );
 }
 
-function PlanExplanation({ option, request }: { option: PlanOption; request: PlanRequest }) {
+function PlanExplanation({
+  option,
+  request,
+  children,
+}: {
+  option: PlanOption;
+  request: PlanRequest;
+  children?: ReactNode;
+}) {
   return (
-    <details className="plan-explanation">
-      <summary aria-label={t('plan.explanationFor', { name: optionName(option) })}>
-        {t('plan.explanation')}
-      </summary>
+    <div className="plan-explanation">
+      {children}
       <p className="sub">{t('plan.factor.note')}</p>
       <dl className="plan-factors">
         {planFactors(option, request).map((factor) => (
@@ -653,7 +698,7 @@ function PlanExplanation({ option, request }: { option: PlanOption; request: Pla
           </div>
         ))}
       </dl>
-    </details>
+    </div>
   );
 }
 
@@ -703,30 +748,54 @@ function FactorSources({ factor }: { factor: PlanFactor }) {
   );
 }
 
+type CopyFormat = { value: SubmitFormat; change: (value: SubmitFormat) => void };
+
+/** Copy, with the flag format one menu away on the same control. */
 function SubmitCopy({
   result,
   ctx,
   option,
+  format,
 }: {
   result: ReturnType<typeof submitFlags>;
   ctx: Ctx;
   option: PlanOption;
+  format: CopyFormat;
 }) {
   if (!result) return null;
   return (
-    <div className="plan-submit">
+    <div className="plan-submit split-button">
       <button
         className="button small"
         aria-label={t('plan.submit.copyFor', { name: optionName(option) })}
-        onClick={() => void ctx.copy(result.text, t('plan.submit.copied'))}
+        onClick={(event) => {
+          // A copy inside an option row must not also toggle the row's explanation.
+          event.stopPropagation();
+          void ctx.copy(result.text, { kind: 'command', message: t('plan.submit.copied') });
+        }}
       >
-        <Copy size={14} /> {t('plan.submit.copy')}
+        {t('plan.submit.copy')}
       </button>
-      {result.notes.map((note) => (
-        <span className="sub" key={note}>
-          {note}
-        </span>
-      ))}
+      <span onClick={(event) => event.stopPropagation()}>
+        <LazyMenuButton
+          className="button small"
+          aria-label={t('plan.submit.formatFor', { name: optionName(option) })}
+          items={(['line', 'header'] as const).map((value) => ({
+            id: value,
+            label: t(`plan.submit.${value}`),
+            role: 'menuitemradio' as const,
+            checked: format.value === value,
+            action: () => format.change(value),
+          }))}
+        >
+          <ChevronDown size={14} />
+        </LazyMenuButton>
+      </span>
     </div>
   );
+}
+
+/** Flags the copied command could not confirm; read before pasting, so kept with the details. */
+function SubmitNotes({ result }: { result: ReturnType<typeof submitFlags> | undefined }) {
+  return result?.notes.map((note) => <p key={note}>{note}</p>);
 }

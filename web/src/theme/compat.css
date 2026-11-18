@@ -43,16 +43,15 @@
   justify-content: center;
   gap: 6px;
   height: var(--control-h);
-  padding: 0 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-block);
   background: var(--surface);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
   font-weight: 600;
   white-space: nowrap;
-  box-shadow: var(--shadow);
   transition:
     background var(--dur-fast),
     border-color var(--dur-fast);
@@ -64,9 +63,9 @@
 .primary-button,
 .button.primary,
 .button.primary-button {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--fg-on-ink);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--fg-on-accent);
 }
 .primary-button:hover:not(:disabled),
 .button.primary:hover:not(:disabled),
@@ -93,11 +92,8 @@
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+/* A section is its heading and content on the page itself: no card around it. */
 .panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
   min-width: 0;
 }
 .panel-header {
@@ -105,16 +101,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 46px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  min-height: var(--control-h);
+  padding: 0 16px 8px;
 }
 .panel-header h2,
 .usage-trend h3 {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 15px;
+  gap: 8px;
+  font-size: 16px;
   font-weight: 600;
 }
 .panel-header p {
@@ -125,9 +120,8 @@
 .panel-note {
   padding: 10px 16px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
-  border-top: 1px solid var(--border);
 }
 .panel-header + .panel-note,
 .toolbar + .panel-note {
@@ -146,13 +140,13 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
+/* Header: small muted words, no fill; rows apart by one hairline. */
 .table th {
   text-align: left;
-  font-weight: 600;
+  font-weight: 400;
   font-size: 12px;
   color: var(--text-3);
   padding: 8px 12px;
-  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }

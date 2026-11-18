@@ -28,7 +28,7 @@ export function Popover({
         opener={anchor}
         className="touch-popover"
         initial={
-          menu ? (fromEnd ? '[role="menuitem"]:last-child' : '[role="menuitem"]') : undefined
+          menu ? (fromEnd ? '[role^="menuitem"]:last-child' : '[role^="menuitem"]') : undefined
         }
       >
         {children}
@@ -60,7 +60,7 @@ function Floating({
     close,
     outside: true,
     anchor,
-    initial: menu ? (fromEnd ? '[role="menuitem"]:last-child' : '[role="menuitem"]') : undefined,
+    initial: menu ? (fromEnd ? '[role^="menuitem"]:last-child' : '[role^="menuitem"]') : undefined,
   });
   useLayoutEffect(() => {
     const node = ref.current!;
@@ -97,10 +97,27 @@ function Floating({
 }
 export function MenuButton({
   label,
+  'aria-label': ariaLabel,
+  children,
+  className = 'button',
+  disabled,
+  describedBy,
   items,
 }: {
-  label: string;
-  items: { label: string; action: () => void; disabled?: boolean }[];
+  label?: string;
+  'aria-label'?: string;
+  children?: ReactNode;
+  className?: string;
+  disabled?: boolean;
+  describedBy?: string;
+  items: {
+    id: string;
+    label: string;
+    action: () => void;
+    disabled?: boolean;
+    checked?: boolean;
+    role?: 'menuitemradio' | 'menuitemcheckbox';
+  }[];
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const open = !!anchor;
@@ -114,7 +131,10 @@ export function MenuButton({
     <>
       <button
         type="button"
-        className="button"
+        className={className}
+        aria-label={ariaLabel ?? label}
+        aria-describedby={describedBy}
+        disabled={disabled}
         id={id}
         aria-haspopup={touch ? 'dialog' : 'menu'}
         aria-expanded={open}
@@ -131,7 +151,7 @@ export function MenuButton({
           }
         }}
       >
-        {label}
+        {children ?? label}
       </button>
       {anchor && (
         <Popover anchor={anchor} close={close} labelledBy={id} menu fromEnd={fromEnd}>
@@ -141,7 +161,7 @@ export function MenuButton({
             aria-labelledby={id}
             onKeyDown={(event) => {
               const buttons = [
-                ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+                ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]'),
               ];
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
               let next: number;
@@ -185,10 +205,11 @@ export function MenuButton({
             {items.map((item) => (
               <button
                 type="button"
-                role="menuitem"
+                role={item.checked === undefined ? 'menuitem' : (item.role ?? 'menuitemradio')}
+                aria-checked={item.checked}
                 tabIndex={-1}
                 aria-disabled={item.disabled || undefined}
-                key={item.label}
+                key={item.id}
                 onClick={() => {
                   if (!item.disabled) {
                     close();

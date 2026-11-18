@@ -1,18 +1,17 @@
 import { ClockText } from '../data/ClockText';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 import { useRouteParam } from '../useRouteParam';
-import { Plus } from 'lucide-react';
-import type { Source } from '../types';
+import type { NodeSummary, Source, Summary } from '../types';
 import { findGroup } from '../groups';
-import { formatMessage, t } from '../i18n';
+import { t } from '../i18n';
 import { qosGpuLimit, relativeTime, uniqueNodes, sourceHasData } from '../domain';
 import { partialCount } from '../domain';
 import { nodeTone, sourceState } from '../labels';
-import { Chips, Empty, GroupMark, Meter, Panel, Status } from '../ui';
+import { Chips, Empty, Meter, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
 import { GroupFilter, SearchBox } from './shared';
 import { matches } from './util';
-import { capacityText, groupSummary } from './summary';
+import { allocationText, groupSummary } from './summary';
 
 export function ClustersPage({ ctx }: { ctx: Ctx }) {
   const { data, group, query, groups } = ctx;
@@ -43,14 +42,13 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
       <Panel>
         <Empty
           title={t('clusters.empty')}
-          text={t('clusters.emptyHint')}
           action={
             ctx.demo ? undefined : (
               <button
                 className="button primary"
                 onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
               >
-                <Plus size={14} /> {t('clusters.add')}
+                {t('clusters.add')}
               </button>
             )
           }
@@ -60,41 +58,31 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <div className="toolbar bare">
-        <GroupFilter ctx={ctx} options={clusters} />
+        <GroupFilter ctx={ctx} options={clusters} allLabel={t('jobs.allClusters')} />
       </div>
       <div className="cluster-cards">
         {visible.map((item) => {
           const row = groupSummary(data, item);
-          const capacity = capacityText(row.nodes, row.state);
+          const tone =
+            row.state === 'unavailable' ? 'red-text' : row.state === 'degraded' ? 'amber-text' : '';
+          const mine = row.scoped;
           return (
             <section className="panel cluster-card" key={item.key}>
               <header>
-                <span className="with-mark">
-                  <GroupMark group={item} />
-                  <strong>{item.label}</strong>
-                </span>
+                <strong>{item.label}</strong>
                 <ClockText>{() => <Status state={groupSummary(data, item).state} />}</ClockText>
               </header>
-              <div className="cluster-capacity">
-                {row.nodes.nodes === 0 ? (
-                  <span className="muted">—</span>
-                ) : (
-                  <strong className={capacity.tone}>{capacity.text}</strong>
-                )}
-                {row.nodes.nodes > 0 && !capacity.outage && (
-                  <>
-                    <p className="muted">{capacity.detail}</p>
-                    <Meter value={row.nodes.ratio} text="" />
-                  </>
-                )}
-              </div>
+              <strong className={`cluster-hero ${tone}`}>
+                {row.nodes.nodes ? allocationText(row.nodes) : '—'}
+              </strong>
+              <CapacityBar nodes={row.nodes} />
               <dl className="kv">
                 <div>
                   <dt>{t('clusters.nodes')}</dt>
                   <dd>
                     {row.nodes.nodes || '—'}
                     {row.nodes.abnormal > 0 && (
-                      <span className={capacity.tone}>
+                      <span className={tone || 'amber-text'}>
                         {' · '}
                         {t('clusters.abnormal', { count: row.nodes.abnormal })}
                       </span>
@@ -104,30 +92,11 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 <div>
                   <dt>{t('clusters.mine')}</dt>
                   <dd>
-                    {partialCount(row.scoped.allocated, row.scoped.known_allocated)} /{' '}
-                    {partialCount(row.scoped.requested, row.scoped.known_requested)}
                     <UnmeasuredLinks
-                      items={[
-                        ...row.scoped.unmeasured,
-                        ...row.scoped.queued_unmeasured.filter(
-                          (item) =>
-                            !row.scoped.unmeasured.some(
-                              (other) =>
-                                other.subject.id === item.subject.id &&
-                                other.reason.code === item.reason.code,
-                            ),
-                        ),
-                      ]}
+                      value={`${partialCount(mine.allocated, mine.known_allocated)} / ${partialCount(mine.requested, mine.known_requested)}`}
+                      items={mergeUnmeasured(mine)}
                       ctx={ctx}
                     />
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t('clusters.nodeData')}</dt>
-                  <dd>
-                    <ClockText>
-                      {() => (row.nodes.observed_at ? relativeTime(row.nodes.observed_at) : '—')}
-                    </ClockText>
                   </dd>
                 </div>
               </dl>
@@ -135,43 +104,30 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
           );
         })}
       </div>
-      <p className="page-note">{t('clusters.note')}</p>
       <Panel
         title={t('clusters.accounts')}
-        count={accounts.length}
         actions={
           ctx.demo ? undefined : (
             <button
               className="button small"
               onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
             >
-              <Plus size={13} /> {t('clusters.addAccount')}
+              {t('clusters.addAccount')}
             </button>
           )
         }
       >
         <div className="table-wrap">
           <table className="table stack-on-phone cluster-accounts-table">
-            <colgroup>
-              <col style={{ width: 170 }} />
-              <col style={{ width: 130 }} />
-              <col style={{ width: 110 }} />
-              <col />
-              <col style={{ width: 76 }} />
-              <col style={{ width: 100 }} />
-              <col style={{ width: 104 }} />
-              <col style={{ width: 96 }} />
-            </colgroup>
             <thead>
               <tr>
-                <th>{t('clusters.col.account')}</th>
-                <th>{t('clusters.col.sshHost')}</th>
+                <th>{t('job.cluster')}</th>
+                <th>{t('sources.col.login')}</th>
+                <th className="col-mid">{t('clusters.col.sshHost')}</th>
                 <th className="num">{t('clusters.col.gpus')}</th>
                 <th>{t('clusters.col.qos')}</th>
-                <th className="num">{t('clusters.col.interval')}</th>
-                <th className="num">{t('clusters.col.lastSuccess')}</th>
+                <th className="num col-low">{t('clusters.col.lastSuccess')}</th>
                 <th>{t('clusters.col.state')}</th>
-                <th />
               </tr>
             </thead>
             <tbody>
@@ -181,9 +137,8 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
             </tbody>
           </table>
         </div>
-        <p className="panel-note">{t('clusters.qosNote')}</p>
       </Panel>
-      <Panel title={t('clusters.nodes')} count={nodes.length}>
+      <Panel title={t('clusters.nodes')}>
         <div className="toolbar">
           <Chips
             label={t('clusters.nodeState')}
@@ -210,7 +165,6 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                   <th className="num">{t('clusters.col.cpuAllocated')}</th>
                   <th>{t('clusters.col.partition')}</th>
                   <th>{t('clusters.col.state')}</th>
-                  <th className="num">{t('clusters.col.sampled')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,14 +184,15 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                         text={`${node.gpu_allocated ?? '?'} / ${node.gpu_count ?? '?'}`}
                       />
                     </td>
-                    <td className="num" data-label={t('clusters.col.cpuAllocated')}>
+                    <td className="num phone-hide" data-label={t('clusters.col.cpuAllocated')}>
                       {node.cpu_allocated ?? '?'} / {node.cpu_count ?? '?'}
                     </td>
                     <td className="muted" data-label={t('clusters.col.partition')}>
                       {node.partitions.join(', ') || '—'}
                     </td>
                     <td data-label={t('clusters.col.state')}>
-                      <span className={`tag ${nodeTone(node)}`}>
+                      {/* The scheduler's own word stays one hover away when the tag translates it. */}
+                      <span className={`tag ${nodeTone(node)}`} title={node.state}>
                         {/^FUTURE$/i.test(node.state)
                           ? t('clusters.future')
                           : node.health_reason === 'no_partition'
@@ -246,14 +201,6 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                               ? t('clusters.onDemand')
                               : node.state.replaceAll('+', '+\u200b')}
                       </span>
-                      {(node.health === 'on_demand' ||
-                        node.health_reason === 'no_partition' ||
-                        /^FUTURE$/i.test(node.state)) && (
-                        <small className="sub muted">{node.state.replaceAll('+', '+\u200b')}</small>
-                      )}
-                    </td>
-                    <td className="num muted" data-label={t('clusters.col.sampled')}>
-                      <ClockText>{() => relativeTime(node.observed_at)}</ClockText>
                     </td>
                   </tr>
                 ))}
@@ -263,7 +210,6 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
         ) : (
           <Empty
             title={nodes.length || query ? t('clusters.nodes.noMatch') : t('clusters.nodes.none')}
-            text={nodes.length || query ? undefined : t('clusters.nodes.noneHint')}
           />
         )}
       </Panel>
@@ -271,47 +217,83 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
   );
 }
 
+/** Running and queued gaps, each source and reason listed once. */
+function mergeUnmeasured(summary: Summary) {
+  return [
+    ...summary.unmeasured,
+    ...summary.queued_unmeasured.filter(
+      (item) =>
+        !summary.unmeasured.some(
+          (other) => other.subject.id === item.subject.id && other.reason.code === item.reason.code,
+        ),
+    ),
+  ];
+}
+
+/** Allocated, free, on-demand and unavailable GPUs as one segmented bar; its name has the numbers. */
+function CapacityBar({ nodes }: { nodes: NodeSummary }) {
+  if (!nodes.nodes) return null;
+  const parts = [
+    ['allocated', nodes.allocated, t('clusters.bar.allocated', { count: nodes.allocated ?? '—' })],
+    ['free', nodes.unallocated, t('clusters.bar.free', { count: nodes.unallocated ?? '—' })],
+    ['on-demand', nodes.on_demand, t('summary.onDemand', { count: nodes.on_demand ?? 0 })],
+    [
+      'unavailable',
+      nodes.unavailable,
+      t('clusters.bar.unavailable', { count: nodes.unavailable ?? '—' }),
+    ],
+  ] as const;
+  const label = [
+    ...parts.filter(([kind, count]) => kind !== 'on-demand' || count).map(([, , text]) => text),
+    ...(nodes.unknown ? [t('summary.unknownNodes', { count: nodes.unknown })] : []),
+  ].join(' · ');
+  // An unknown total is a hatched bar, not an empty space; its name says what is unknown.
+  return (
+    <span
+      className={nodes.capacity ? 'capacity-bar' : 'capacity-bar unknown'}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      {parts.map(
+        ([kind, count]) => !!count && <i key={kind} className={kind} style={{ flexGrow: count }} />,
+      )}
+    </span>
+  );
+}
+
 function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
   const summary = ctx.data.summary.sources[source.id];
-  const message = source.error
-    ? formatMessage(source.error)
-    : source.warnings?.map(formatMessage).join('; ');
+  // What and its state; why a login fails is in its pane, which the row opens.
   return (
     <>
-      <tr className={message ? 'has-note' : ''}>
+      <tr
+        className="clickable"
+        tabIndex={0}
+        onClick={() => ctx.diagnose(source)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && event.target === event.currentTarget) ctx.diagnose(source);
+        }}
+      >
         <td>
-          <span className="with-mark">
-            <GroupMark group={findGroup(ctx.groups, source.cluster_id)} />
-            <span>
-              <strong>{source.name}</strong>
-              <span className="sub">{source.username || '—'}</span>
-            </span>
-          </span>
+          <strong>{source.name}</strong>
         </td>
-        <td className="mono" data-label={t('clusters.col.sshHost')}>
+        <td className="mono" data-label={t('sources.col.login')}>
+          {source.username || '—'}
+        </td>
+        <td className="mono col-mid" data-label={t('clusters.col.sshHost')}>
           {source.ssh_alias || <span className="muted">{t('common.notSet')}</span>}
         </td>
         <td className="num" data-label={t('clusters.col.gpus')}>
-          {partialCount(summary.allocated, summary.known_allocated)} /{' '}
-          {partialCount(summary.requested, summary.known_requested)}
           <UnmeasuredLinks
-            items={[
-              ...summary.unmeasured,
-              ...summary.queued_unmeasured.filter(
-                (item) =>
-                  !summary.unmeasured.some(
-                    (other) =>
-                      other.subject.id === item.subject.id &&
-                      other.reason.code === item.reason.code,
-                  ),
-              ),
-            ]}
+            value={`${partialCount(summary.allocated, summary.known_allocated)} / ${partialCount(summary.requested, summary.known_requested)}`}
+            items={mergeUnmeasured(summary)}
             ctx={ctx}
           />
         </td>
         <td data-label={t('clusters.col.qos')}>
           {source.qos.length ? (
-            <details className="account-qos">
+            <details className="account-qos" onClick={(event) => event.stopPropagation()}>
               <summary>{t('clusters.qosEntries', { count: source.qos.length })}</summary>
               <span className="tags">
                 {source.qos.map((qos) => {
@@ -339,30 +321,13 @@ function AccountRow({ source, ctx }: { source: Source; ctx: Ctx }) {
             <span className="muted">—</span>
           )}
         </td>
-        <td className="num" data-label={t('clusters.col.interval')}>
-          {t('common.minutes', { count: source.interval_minutes })}
-        </td>
-        <td className="num" data-label={t('clusters.col.lastSuccess')}>
+        <td className="num col-low" data-label={t('clusters.col.lastSuccess')}>
           <ClockText>{() => relativeTime(source.last_success)}</ClockText>
         </td>
         <td data-label={t('clusters.col.state')}>
           <Status state={sourceState(source)} />
         </td>
-        <td className="num">
-          {!ctx.demo && (
-            <button className="button small" onClick={() => ctx.configure(source)}>
-              {t('common.configure')}
-            </button>
-          )}
-        </td>
       </tr>
-      {message && (
-        <tr className="note-row">
-          <td colSpan={8}>
-            <span className={source.error ? 'red-text' : 'amber-text'}>{message}</span>
-          </td>
-        </tr>
-      )}
     </>
   );
 }

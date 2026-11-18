@@ -40,7 +40,14 @@ export function number(value: number, options: Intl.NumberFormatOptions = {}) {
 }
 export function relativeTime(value: string | null | undefined, now = Date.now()) {
   if (!value) return t('time.never');
-  const minutes = Math.max(0, Math.floor((now - Date.parse(value)) / 60000));
+  const delta = Date.parse(value) - now;
+  if (delta > 0) {
+    const minutes = Math.max(1, Math.floor(delta / 60000));
+    if (minutes < 60) return t('time.inMinutes', { count: minutes });
+    if (minutes < 1440) return t('time.inHours', { count: Math.floor(minutes / 60) });
+    return t('time.inDays', { count: Math.floor(minutes / 1440) });
+  }
+  const minutes = Math.max(0, Math.floor(-delta / 60000));
   if (!Number.isFinite(minutes)) return t('time.unknown');
   if (minutes < 1) return t('time.justNow');
   if (minutes < 60) return t('time.minutesAgo', { count: minutes });
@@ -97,7 +104,14 @@ export function duration(seconds: number, style: 'table' | 'prose' = 'prose') {
   const minutes = Math.floor(whole / 60) % 60;
   if (style === 'table')
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
-  if (whole < 60) return t('cost.duration.minutes', { count: 0 });
+  if (whole < 60) return t('cost.duration.seconds', { count: whole });
+  if (whole >= 86400)
+    return [
+      t('cost.duration.days', { count: Math.floor(whole / 86400) }),
+      hours % 24 ? t('cost.duration.hours', { count: hours % 24 }) : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   return [
     hours ? t('cost.duration.hours', { count: hours }) : '',
     minutes || !hours ? t('cost.duration.minutes', { count: minutes }) : '',

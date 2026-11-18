@@ -3,7 +3,7 @@ import { ContextPanel, FocusView } from '../layers/Surface';
 import { openLayer, closeLayer } from '../layers/routes';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowRight, ExternalLink, Puzzle, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import type { Tool } from '../types';
 import { ApiError, errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -13,7 +13,6 @@ import { readSettings } from '../settingValues';
 import type { Values } from '../settingValues';
 import { SettingInput } from '../SettingInput';
 import { TIER_LABELS, TIER_TONES } from '../tiers';
-import { toolIcons } from '../toolIcons';
 import { Chips, Empty, Panel, Switch } from '../ui';
 import { MarketplaceTab } from './Marketplace';
 import type { Ctx } from './shared';
@@ -58,18 +57,15 @@ function settingError(tool: Tool, reason: unknown) {
 
 function ToolTile({
   tool,
-  page,
   ctx,
   onOpen,
   onToggle,
 }: {
   tool: Tool;
-  page?: string;
   ctx: Ctx;
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const status = tool.rejected
     ? formatMessage(tool.rejected)
     : tool.enabled
@@ -77,6 +73,8 @@ function ToolTile({
       : missing(tool).length
         ? t('toolbox.needsSetup')
         : '';
+  // One short line at most: the tool's state when it has one; what it does is in the drawer.
+  const line = status;
   return (
     <article className={`tool-tile ${tool.enabled ? 'on' : ''} ${tool.rejected ? 'broken' : ''}`}>
       <button
@@ -85,33 +83,18 @@ function ToolTile({
         onClick={onOpen}
         aria-label={t('toolbox.details', { name: localized(tool.name) })}
       >
-        <span className="tool-icon">
-          <Icon size={18} />
-        </span>
         <span className="tool-tile-text">
-          <strong>
-            {localized(tool.name)} <OriginTag tool={tool} />
-          </strong>
-          <span className="tool-tile-description">{localized(tool.description)}</span>
+          <strong>{localized(tool.name)}</strong>
+          {line && <span className={`tool-status ${tool.rejected ? 'red-text' : ''}`}>{line}</span>}
         </span>
       </button>
-      <footer>
-        <span className={`tool-status ${tool.rejected ? 'red-text' : tool.enabled ? '' : 'muted'}`}>
-          {status}
-        </span>
-        {tool.enabled && page && (
-          <a className="button small" href={routeHash(page)}>
-            {t('toolbox.openShort')} <ArrowRight size={12} />
-          </a>
-        )}
-        <Switch
-          checked={tool.enabled}
-          name={localized(tool.name)}
-          disabled={ctx.demo || !!tool.rejected}
-          label={tool.enabled ? t('toolbox.on') : t('toolbox.off')}
-          onChange={onToggle}
-        />
-      </footer>
+      <Switch
+        checked={tool.enabled}
+        name={localized(tool.name)}
+        disabled={ctx.demo || !!tool.rejected}
+        label=""
+        onChange={onToggle}
+      />
     </article>
   );
 }
@@ -133,7 +116,6 @@ function ToolDrawer({
   const closeEdit = () => closeLayer(['edit', 'step']);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const failures = Object.values(tool.errors);
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -162,9 +144,6 @@ function ToolDrawer({
       >
         <header className="drawer-header">
           <div className="tool-drawer-title">
-            <span className="tool-icon large">
-              <Icon size={20} />
-            </span>
             <div>
               <h2 id="tool-title">{localized(tool.name)}</h2>
               <span className="tool-meta">
@@ -194,12 +173,12 @@ function ToolDrawer({
             )}
             {tool.enabled && page && (
               <a className="button" href={routeHash(page)} onClick={onClose}>
-                {t('toolbox.open', { name: localized(tool.name) })} <ArrowRight size={13} />
+                {t('toolbox.open', { name: localized(tool.name) })}
               </a>
             )}
             {tool.homepage && /^https:\/\//.test(tool.homepage) && (
               <a className="link" href={tool.homepage} target="_blank" rel="noreferrer">
-                {t('toolbox.homepage')} <ExternalLink size={12} />
+                {t('toolbox.homepage')}
               </a>
             )}
           </div>
@@ -294,7 +273,6 @@ function ConfirmEnable({
     };
   }, [onCancel]);
   const needed = missing(tool);
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   return (
     <FocusView
       labelledBy="confirm-title"
@@ -303,9 +281,6 @@ function ConfirmEnable({
       returnFocusId={`tool-details-${tool.id}`}
     >
       <header className="modal-header tool-confirm-header">
-        <span className="tool-icon">
-          <Icon size={18} />
-        </span>
         <h2 id="confirm-title">{t('toolbox.confirmTitle', { name: localized(tool.name) })}</h2>
       </header>
       <div className="tool-confirm-body">
@@ -407,28 +382,32 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
   }
 
   const bar = (
-    <div className="toolbox-bar">
-      <Chips
-        label={t('nav.toolbox')}
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: 'installed', label: t('toolbox.installed'), count: ctx.tools.length },
-          { value: 'market', label: t('toolbox.market') },
-        ]}
-      />
+    <>
+      <div className="page-tabs">
+        <Chips
+          label={t('nav.toolbox')}
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'installed', label: t('toolbox.installed'), count: ctx.tools.length },
+            { value: 'market', label: t('toolbox.market') },
+          ]}
+        />
+      </div>
       {tab === 'installed' && ctx.tools.length > 3 && (
-        <label className="search">
-          <Search size={14} />
-          <input
-            value={query}
-            placeholder={t('toolbox.search')}
-            aria-label={t('toolbox.search')}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <div className="toolbar bare">
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              placeholder={t('toolbox.search')}
+              aria-label={t('toolbox.search')}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+        </div>
       )}
-    </div>
+    </>
   );
 
   if (tab === 'market')
@@ -448,15 +427,12 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
       ) : (
         SECTIONS.filter((section) => groups[section.key].length).map((section) => (
           <section key={section.key} className="tool-section">
-            <h2>
-              {t(section.title)} <span className="count">{groups[section.key].length}</span>
-            </h2>
+            <h2>{t(section.title)}</h2>
             <div className="tool-tiles">
               {groups[section.key].map((tool) => (
                 <ToolTile
                   key={tool.id}
                   tool={tool}
-                  page={pageOf(tool)}
                   ctx={ctx}
                   onOpen={() => setOpenId(tool.id)}
                   onToggle={(enabled) => toggle(tool, enabled)}
@@ -467,7 +443,6 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
         ))
       )}
       {query && !visible.length && <p className="page-note">{t('market.noMatch')}</p>}
-      <p className="page-note">{t('toolbox.intro')}</p>
       {openId && !opened && (
         <ContextPanel labelledBy="tool-title" close={() => setOpenId(null)}>
           <h2 id="tool-title">{t('drawer.unavailable')}</h2>

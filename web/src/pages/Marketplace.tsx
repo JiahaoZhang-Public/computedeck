@@ -3,7 +3,7 @@ import { ContextPanel } from '../layers/Surface';
 import { openLayer, closeLayer } from '../layers/routes';
 import { useEffect, useState } from 'react';
 import { useRouteParam } from '../useRouteParam';
-import { Copy, Puzzle, X } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 import type { MarketPlugin, Marketplaces } from '../types';
 import { api } from '../api';
 import { errorText, localized, t } from '../i18n';
@@ -27,7 +27,7 @@ function Command({ text, ctx }: { text: string; ctx: Ctx }) {
       <button
         className="icon-button"
         aria-label={t('common.copy')}
-        onClick={() => void ctx.copy(text)}
+        onClick={() => void ctx.copy(text, { kind: 'command' })}
       >
         <Copy size={13} />
       </button>
@@ -71,9 +71,6 @@ function PluginDrawer({
     <ContextPanel labelledBy="plugin-title" close={onClose} className="tool-drawer">
       <header className="drawer-header">
         <div className="tool-drawer-title">
-          <span className="tool-icon large">
-            <Puzzle size={20} />
-          </span>
           <div>
             <h2 id="plugin-title">{localized(plugin.display_name ?? {}) || plugin.name}</h2>
             <span className="tool-meta">
@@ -221,9 +218,6 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
           return (
             <article key={`${plugin.name}@${plugin.marketplace}`} className="tool-tile">
               <button className="tool-tile-main" onClick={() => setOpen(plugin)}>
-                <span className="tool-icon">
-                  <Puzzle size={18} />
-                </span>
                 <span className="tool-tile-text">
                   <strong>
                     {localized(plugin.display_name ?? {}) || plugin.name}{' '}

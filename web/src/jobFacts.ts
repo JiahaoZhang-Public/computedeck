@@ -53,8 +53,12 @@ export function jobReason(job: Pick<Job, 'state' | 'reason'>, driver: string) {
     ? reasonKind(reasonCode(job.reason), driver)
     : FAILURE_REASONS[state];
   if (!kind) return null;
+  // An unknown reason is labelled by the scheduler's own short code, never the sentence.
+  const code = reasonCode(job.reason);
   return {
     kind,
+    label:
+      kind === 'unknown' ? code || t('job.short.waiting') : t(`job.short.${kind}` as MessageKey),
     summary: t(`job.explain.${kind}` as MessageKey),
     next: t(`job.next.${kind}` as MessageKey),
   };

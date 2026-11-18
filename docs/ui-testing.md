@@ -182,7 +182,9 @@ ceiling; 160,000 target). It reports and gates both the larger single-locale sta
 (first visit or a changed server default). Shared imports count once in each total. It also
 requires all F3 routes, forms, Gallery and both locale entries to exist as dynamic entries
 outside the initial static import graph. Each non-initial chunk is checked (30,000;
-palette 15,000), as is all CSS (16,000). `check.sh` runs this after the build.
+palette 15,000), as is all CSS (17,500; raised from 16,000 in 0.8 because the accent
+tokens add four entries to every generated theme block, now with ink values, and the drawer
+tabs, key figures and list cards add their own rules). `check.sh` runs this after the build.
 Runtime performance budgets, including LCP, remain Q2 work.
 
 F3 follow-up for F4, F5, F8 and U1: with Clusters eager, the reviewed build measures
@@ -757,3 +759,87 @@ Other baselines stay unchanged. Linux baselines still come only from CI.
 因实时“现在”刻度、现在虚线、带日期的边缘刻度、紧凑的 24 小时读数、粗指针下隐藏
 键位提示、示例覆盖数及采集周期而变化，覆盖既有 375、900、1280 像素及语言/主题矩阵。
 其余基线保持不变，Linux 基线仅来自 CI。
+
+### Foundation checkpoint corrections
+
+The checkpoint adds literal 0.7 (`eace2d4`) DOM assertions for all eight exported
+WEB_API 1 components, including both Switch modes and unknown Meter. The scaffold's
+spinner is its own 16 px SVG; its motion-enabled browser test bounds every sampled box.
+The frozen `.spin` rule and `ui.tsx` component DOM remain unchanged.
+
+Core pages use `StatusLabel` with `statusKind` / `statusKindLabel`; the legacy `Status`
+export remains for plugins until each page migrates. `computeHealth.level` uses the
+same six kinds, and the health pill draws the corresponding SVG. Group `slot` is
+one-based, while legacy `color` remains zero-based. Identity marks accept a group;
+name-adjacent monograms use `decorative`.
+
+`Value`'s inline estimate word is opt-in (`label`); scope lines can carry the word once.
+Both Value and ScopeLine forward `descriptionId` to a non-interactive Time in row links.
+ScopeLine accepts a time label and trailing content, CoverageLine names exceptions,
+and quiet/first DataState accept page-specific title, text and actions. Future times
+say “in …”; prose durations include seconds and days. Fractional bounds round down.
+
+`ctx.copy(text, {kind: 'command' | 'link' | 'text', message?})` and CopyButton use one
+service and the existing toast announcement. Only command copies in example mode
+append `# example data`; text and links remain exact. CopyButton reads the service from
+context, with no per-call example flag or second live region. Success feedback now uses
+the shared toast lifetime instead of the former button-local two-second status.
+
+`ctx.actions` and the corresponding top-level handlers keep stable identities while
+reading current committed data. Memoized rows can take a row plus actions. Source Test and
+Collect share operation state; collection stays in flight until an accepted
+poll shows completion. Pause in the diagnosis offers Undo, including while a read-only check is running. U2 can use these same handlers;
+server-side draft checks and authentication cooldown remain P8 (0.8.x).
+
+Detail keys are centralized in `layers/routes.ts`. Steppable containers declare
+`data-detail-list`, so separate lists never merge. Only `section=ssh` is an overlay;
+Settings sections survive form operations. Menu triggers accept children/className and
+an accessible label; stable item ids and radio/checkbox checked states are supported.
+
+Toast tests cover Undo, Dismiss, Meta-Z and Escape focus return, plus error-row removal.
+On-ink focus and hover colours and chart hatch edges use contrast-gated colours.
+All axe runs share the complete WCAG 2.2 AA tag set, including `wcag21a`. Service 5xx
+responses fail the fixture; fulfilled failure fixtures remain usable. Failed UI runs
+print and retain the service log in `web/test-results/service.log`. CI allows 60 minutes
+and four workers. The Jobs guard is named `@reason-visible`; P2 must preserve it.
+
+Local UI verification and screenshot updates remain required outside the socket-restricted
+sandbox. Expected visual changes include the scaffold spinner, health shape, time/duration
+labels, copy feedback and toast focus/hover. No baselines were regenerated in the sandbox.
+U1 still owns migrating the legacy frame CSS bands to `breakpoints.ts`; P1–P6/Q1 own
+replacing remaining legacy core Status/GroupMark usages. P4 owns selecting five groups
+plus Other and rendering the new usage series. The existing compact runDuration API is
+kept for existing callers; its removal is deferred rather than changing their rounding.
+
+## Quiet interface
+
+A row is one line and a cell holds one value. A fact that matters in a list has its own column,
+named by its header; anything else is in the detail drawer. A number's meaning comes from its
+tile label or column header. A secondary line stays only where it shows an exception the user
+must act on, such as a collection error under a Clusters account. When reviewing a screenshot
+diff, check that:
+
+- A partial total keeps `≥`, and the number itself is the trigger: “≥ 27” has a dotted
+  underline and the accessible name “≥ 27, 6 not counted”. It opens a list of each
+  unmeasured source or machine with its reason; each entry opens its diagnosis or machine. No
+  “not counted”, “unpriced” or “jobs unknown” text appears beside numbers. Unknown stays `—`.
+  Vitest covers this in `quiet-markers.test.tsx`.
+- A main page shows what and its state, never why; the reason is one click away in a detail
+  pane, and no row text is truncated. Attention rows: dot, short title, age, one dismiss (×)
+  button; snoozing is in the item's detail pane; example data dismisses on the page only.
+  Activity rows: dot, what happened in a few words, source, time; the full sentence, changed
+  fields and notification results are in the event's details.
+- Job rows read Job, User, Cluster, Queue, GPUs (“8 × H100”), State, Node or reason (the node,
+  or a short reason label such as “User limit”), Time. The reason sentence and the raw
+  scheduler code are in the job drawer; a stale row is dimmed with one mark in its
+  State cell. Columns leave lowest priority first as the table narrows (container queries), so
+  no row wraps at 1280 px; beside an open drawer the reason column stays fully readable.
+- On a phone a list row is a card: name and state on the first line, one meta line under it.
+- The phone top bar and the example-data banner each fit on one line; filter chips scroll
+  sideways in one row.
+
+中文：一行只有一行，一个单元格只放一个值。列表里重要的事实有自己的列，由列头说明；其余放在
+详情抽屉。部分合计保留 `≥`，数字本身就是按钮（虚线下划线，读屏名称如“≥ 27，6 项未计入”），
+点开列出每个未计入的来源或机器及原因；数字旁不再有“未计入”“未定价”等文字，未知仍显示
+`—`。待处理和活动各占一行；作业表列为作业、用户、集群、队列、GPU、状态、节点或原因、时间，
+窄时先隐藏优先级低的列。手机上每行是卡片：第一行名称和状态，下面一行信息。

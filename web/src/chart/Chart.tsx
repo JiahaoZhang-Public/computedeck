@@ -11,6 +11,8 @@ import {
   intervalEnd,
   reading,
   seriesLabel,
+  seriesFormat,
+  seriesScope,
   statistics,
   summaryText,
 } from './labels';
@@ -22,11 +24,17 @@ export function Chart({
   onRange,
   onPage,
   controls,
+  title = t('chart.scope'),
+  scope,
+  sharedScale = false,
 }: {
   data: ChartData;
   onRange?: (range: string) => void;
   onPage?: (direction: -1 | 1) => void;
   controls?: ReactNode;
+  title?: string;
+  scope?: string;
+  sharedScale?: boolean;
 }) {
   const id = useId();
   const pointer = useRef({ x: 0, y: 0, moved: false });
@@ -56,7 +64,7 @@ export function Chart({
   const x = (i: number) => (edgeX(buckets[i].start) + edgeX(buckets[i].end)) / 2;
   const isPinned = pinned && selectedIndex >= 0;
   const styles = seriesStyles(data.series);
-  const title = t('chart.scope');
+
   const summary = data.series
     .map((series) => `${seriesLabel(series)}: ${summaryText(series)}`)
     .join(' ');
@@ -67,7 +75,7 @@ export function Chart({
     setActiveSeries(series);
     setPinned(pin);
     setAnnouncement(
-      `${absoluteTime(buckets[i].start)} · ${seriesLabel(data.series[series])} · ${reading(data.series[series].buckets[i], data.series[series].id)}`,
+      `${absoluteTime(buckets[i].start)} · ${seriesLabel(data.series[series])} · ${reading(data.series[series].buckets[i], data.series[series])}`,
     );
   }
   function key(event: KeyboardEvent<HTMLDivElement>) {
@@ -150,9 +158,11 @@ export function Chart({
   return (
     <section className="chart-kit" aria-label={title}>
       <p>
-        {title} · {compactRange(data.start, data.end)}
+        {title}
+        {scope && <> · {scope}</>} · {compactRange(data.start, data.end)}
       </p>
-      <p id={`${id}-summary`} className="sub">
+      {/* The plot's text alternative; sighted readers get the same numbers from Table view. */}
+      <p id={`${id}-summary`} className="sr-only">
         {summary}
       </p>
       <div className="chart-tools">
@@ -187,12 +197,11 @@ export function Chart({
             </ClockText>
             {data.series.map((series, i) => (
               <div key={series.id} data-active={i === activeSeries}>
-                {seriesLabel(series)} ·{' '}
-                {t(series.id === 'utilization' ? 'chart.measuredScope' : 'chart.mineScope')} ·{' '}
-                {reading(series.buckets[index], series.id)}
+                {seriesLabel(series)} · {seriesScope(series)} ·{' '}
+                {reading(series.buckets[index], series)}
                 {series.buckets[index].value !== null &&
                   (data.bucket_seconds > 300 || series.buckets[index].samples > 1) && (
-                    <span> · {statistics(series.buckets[index], series.id)}</span>
+                    <span> · {statistics(series.buckets[index], series)}</span>
                   )}
               </div>
             ))}
@@ -232,8 +241,8 @@ export function Chart({
                       const b = series.buckets[page * 24 + offset];
                       return (
                         <td key={series.id}>
-                          {reading(b, series.id)}
-                          <span className="sub">{statistics(b, series.id)}</span>
+                          {reading(b, series)}
+                          <span className="sub">{statistics(b, series)}</span>
                         </td>
                       );
                     })}
@@ -266,9 +275,6 @@ export function Chart({
         </>
       ) : (
         <>
-          <p id={`${id}-keys`} className="sub chart-keys">
-            {t('chart.keys')}
-          </p>
           <div
             ref={plot}
             className="chart-plot"
@@ -289,13 +295,25 @@ export function Chart({
           >
             {data.series.map((series, n) => {
               const max =
-                series.id === 'utilization'
+                seriesFormat(series).kind === 'percent'
                   ? 100
-                  : Math.max(1, ...series.buckets.map((b) => b.max ?? 0));
+                  : Math.max(
+                      1,
+                      ...(sharedScale
+                        ? data.series
+                            .filter((other) => {
+                              const a = seriesFormat(series),
+                                b = seriesFormat(other);
+                              return a.kind === b.kind && a.currency === b.currency;
+                            })
+                            .flatMap((other) => other.buckets)
+                        : series.buckets
+                      ).map((b) => b.max ?? 0),
+                    );
               return (
                 <div key={series.id} className="chart-multiple" style={{ color: styles[n].color }}>
                   <div>
-                    {series.id === 'utilization'
+                    {seriesFormat(series).kind === 'percent'
                       ? t('chart.percentLabel', { label: seriesLabel(series) })
                       : seriesLabel(series)}
                   </div>
@@ -510,6 +528,10 @@ export function Chart({
               ))}
             </div>
           </div>
+          {/* Below the plot, so showing it on focus never moves the plot. */}
+          <p id={`${id}-keys`} className="sub chart-keys">
+            {t('chart.keys')}
+          </p>
         </>
       )}
       <p className="sub">{t('chart.legend')}</p>

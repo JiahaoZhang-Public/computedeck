@@ -9,7 +9,7 @@ const examples: Record<string, string[]> = {
   'app/Frame.tsx': ['Compute', 'Deck'],
   'TokenGate.tsx': ['computedeck token'],
   'forms.tsx': ['gpu-box-01', 'gpu-box', '~/.ssh/id_ed25519', 'RTX 4090'],
-  'pages/Nodes.tsx': ['lab-gateway', '~/.local/bin/computedeck'],
+  'pages/RoutesPanel.tsx': ['lab-gateway', '~/.local/bin/computedeck'],
   'pages/Notify.tsx': ['alice, bob', 'llm-*'],
   'pages/Marketplace.tsx': ['· ComputeDeck'],
 };

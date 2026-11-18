@@ -7,9 +7,9 @@
   --surface: var(--bg-surface);
   --surface-2: var(--bg-sunken);
   --border: var(--border-muted);
-  --accent: var(--ink);
-  --accent-soft: var(--bg-selected);
-  --accent-text: var(--fg-default);
+  --accent: var(--accent-fill);
+  --accent-soft: var(--accent-bg);
+  --accent-text: var(--accent-fg);
   --gray-soft: var(--status-unknown-bg);
   --green: var(--status-ok-fg);
   --green-soft: var(--status-ok-bg);
@@ -19,6 +19,12 @@
   --radius: var(--r-block);
   --radius-sm: var(--r-control);
   --mono: var(--font-mono);
-  --accent-hover: color-mix(in oklch, var(--ink) 88%, var(--bg-canvas));
+  --accent-hover: var(--accent-fill);
   --text-muted: var(--fg-muted);
+}
+
+@supports (color: color-mix(in oklch, red, red)) {
+  :root {
+    --accent-hover: color-mix(in oklch, var(--accent-fill) 88%, black);
+  }
 }

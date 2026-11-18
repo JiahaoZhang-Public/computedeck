@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { activePlugins, pagesOf, registerWebPlugin } from './plugins';
 import type { WebPlugin } from './plugins';
 import type { Tool } from './types';
@@ -21,4 +21,25 @@ describe('web plugins', () => {
     registerWebPlugin(null as unknown as WebPlugin);
     expect(pagesOf([{ id: 'demo', pages: [page] } as unknown as WebPlugin])).toEqual([page]);
   });
+});
+
+it('rejects reserved core and alias page ids and identifies the plugin', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const pages = ['clusters', 'nodes', 'marketplace', 'jobs', 'example-page'].map((id) => ({
+      id,
+      label: id,
+      icon: () => null,
+      render: () => null,
+    }));
+    expect(pagesOf([{ id: 'example', pages } as unknown as WebPlugin]).map((p) => p.id)).toEqual([
+      'example-page',
+    ]);
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(
+      warn.mock.calls.every(([message]) => message.includes('Plugin example: reserved page id')),
+    ).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
 });

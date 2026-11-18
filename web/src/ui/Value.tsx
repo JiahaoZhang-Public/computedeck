@@ -17,10 +17,14 @@ export function Value({
   unit,
   currency,
   stale = false,
+  label = false,
+  descriptionId,
 }: Figure & {
   unit?: string;
   currency?: string;
   stale?: boolean;
+  label?: boolean;
+  descriptionId?: string;
 }) {
   const unknown =
     value == null || !Number.isFinite(value) || (stale && kind !== 'lower' && kind !== 'lastKnown');
@@ -37,13 +41,17 @@ export function Value({
               : kind === 'lastKnown'
                 ? `${t('display.lastKnown')} `
                 : ''}
-          {currency ? money(value, currency, kind === 'lower') : number(value)}
+          {currency
+            ? money(value, currency, kind === 'lower')
+            : number(kind === 'lower' ? Math.floor(value * 1000) / 1000 : value)}
           {unit && <span className="value-unit"> {unit}</span>}
-          {kind === 'estimate' && <span className="value-unit"> · {t('display.estimate')}</span>}
+          {kind === 'estimate' && label && (
+            <span className="value-unit"> · {t('display.estimate')}</span>
+          )}
           {kind === 'lastKnown' && (
             <>
               {' '}
-              · <Time value={at} />
+              · <Time value={at} descriptionId={descriptionId} />
             </>
           )}
         </>
@@ -51,7 +59,7 @@ export function Value({
       {(reason || unknown) && (
         <span className="value-unit">
           {' '}
-          · {reason || t(stale ? 'display.stale' : 'time.unknown')}
+          · {reason || t(stale ? 'display.stale' : 'display.status.unknown')}
         </span>
       )}
     </span>

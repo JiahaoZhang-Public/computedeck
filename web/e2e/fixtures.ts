@@ -1,5 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
 
+export const wcagTags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+
 const configuredDemoNow = process.env.COMPUTEDECK_DEMO_NOW;
 if (!configuredDemoNow)
   throw new Error('COMPUTEDECK_DEMO_NOW is required; run bash scripts/check-ui.sh');
@@ -10,6 +12,17 @@ async function setupPage(page: Page, baseURL: string | undefined, locale: string
   const origin = new URL(baseURL).origin;
   const blocked: string[] = [];
   const errors: string[] = [];
+  const serverErrors: string[] = [];
+  const responses: Promise<void>[] = [];
+  page.on('response', (response) => {
+    if (new URL(response.url()).origin !== origin || response.status() < 500) return;
+    responses.push(
+      response.serverAddr().then((address) => {
+        // route.fulfill fixtures have no service connection.
+        if (address) serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+      }),
+    );
+  });
   page.on('pageerror', (error) => errors.push(error.message));
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -22,6 +35,10 @@ async function setupPage(page: Page, baseURL: string | undefined, locale: string
     // startup time out of public screenshots; all metrics still come from the real API.
     if (url.pathname === '/api/health') {
       const response = await route.fetch();
+      if (response.status() >= 500) {
+        serverErrors.push(`${response.status()} /api/health`);
+        return route.fulfill({ response });
+      }
       const health = await response.json();
       if (health.unchanged === true) return route.fulfill({ response });
       return route.fulfill({
@@ -40,7 +57,9 @@ async function setupPage(page: Page, baseURL: string | undefined, locale: string
   await page.addInitScript((language) => {
     localStorage.setItem('computedeck.locale', language);
   }, locale ?? 'en');
-  return () => {
+  return async () => {
+    await Promise.all(responses);
+    expect(serverErrors, 'Service 5xx responses').toEqual([]);
     expect(blocked, 'Unexpected non-local requests (aborted)').toEqual([]);
     expect(errors, 'Browser runtime errors').toEqual([]);
   };
@@ -53,7 +72,7 @@ export const test = base.extend<{ freshPage: Page }>({
       await run(page);
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
-      check();
+      await check();
     }
   },
   freshPage: async (
@@ -90,7 +109,7 @@ export const test = base.extend<{ freshPage: Page }>({
         await run(page);
       } finally {
         await page.unrouteAll({ behavior: 'ignoreErrors' });
-        check();
+        await check();
       }
     } finally {
       await context.close();

@@ -207,9 +207,9 @@ it('menu arrows, Home/End, typeahead and disabled items follow the APG contract'
     <MenuButton
       label="Actions"
       items={[
-        { label: 'Alpha', action },
-        { label: 'Beta', action, disabled: true },
-        { label: 'Charlie', action },
+        { id: 'Alpha', label: 'Alpha', action },
+        { id: 'Beta', label: 'Beta', action, disabled: true },
+        { id: 'Charlie', label: 'Charlie', action },
       ]}
     />,
   );
@@ -377,7 +377,7 @@ it.each([false, true])(
 it('returns focus after React restores an outside selection on closing a layer', async () => {
   await render(
     <>
-      <MenuButton label="Open menu" items={[{ label: 'Item', action: () => {} }]} />
+      <MenuButton label="Open menu" items={[{ id: 'Item', label: 'Item', action: () => {} }]} />
       <button id="outside">Outside</button>
     </>,
   );
@@ -523,7 +523,7 @@ it.each(['blank', 'input', 'label'] as const)(
     const clicked = vi.fn();
     await render(
       <>
-        <MenuButton label="Open menu" items={[{ label: 'Item', action: () => {} }]} />
+        <MenuButton label="Open menu" items={[{ id: 'Item', label: 'Item', action: () => {} }]} />
         <p onClick={clicked}>
           <span id="blank">Selectable text</span>
         </p>
@@ -832,3 +832,135 @@ it.each(['plain', 'hover', 'focus'])(
     expect(dismiss).toHaveBeenCalledExactlyOnceWith(1);
   },
 );
+
+it.each(['undo', 'dismiss', 'shortcut', 'escape'])(
+  'restores focus before toast removal by %s',
+  async (path) => {
+    const undo = vi.fn();
+    function Example() {
+      const [items, setItems] = useState<Toast[]>([
+        { id: 1, text: 'Saved', tone: 'ok', action: { label: 'Undo', undo: true, run: undo } },
+      ]);
+      return (
+        <>
+          <main>
+            <h1>Jobs</h1>
+            <button id="origin">Origin</button>
+          </main>
+          <Toasts
+            items={items}
+            dismiss={(id) =>
+              setItems((rows) => (id === undefined ? [] : rows.filter((r) => r.id !== id)))
+            }
+          />
+        </>
+      );
+    }
+    await render(<Example />);
+    const origin = container.querySelector<HTMLButtonElement>('#origin')!;
+    origin.focus();
+    const buttons = container.querySelectorAll<HTMLButtonElement>('.toast button');
+    await act(async () => buttons[path === 'dismiss' ? 1 : 0].focus());
+    if (path === 'undo' || path === 'dismiss')
+      await act(async () => buttons[path === 'dismiss' ? 1 : 0].click());
+    else await key(path === 'escape' ? 'Escape' : 'z', { metaKey: path === 'shortcut' });
+    expect(container.querySelector('.toast')).toBeNull();
+    expect(document.activeElement).toBe(origin);
+    expect(undo).toHaveBeenCalledTimes(path === 'undo' || path === 'shortcut' ? 1 : 0);
+  },
+);
+it('returns to the next error control, then the page heading, when dismissing error rows', async () => {
+  const { dismissErrorRow } = await import('./focus');
+  function Example() {
+    const [ids, setIds] = useState([1, 2]);
+    return (
+      <main>
+        <h1>Jobs</h1>
+        <section className="layer-errors">
+          {ids.map((id) => (
+            <div key={id}>
+              <button
+                onClick={(e) =>
+                  dismissErrorRow(e.currentTarget, () =>
+                    setIds((rows) => rows.filter((r) => r !== id)),
+                  )
+                }
+              >
+                Dismiss {id}
+              </button>
+            </div>
+          ))}
+        </section>
+      </main>
+    );
+  }
+  await render(<Example />);
+  const buttons = [...container.querySelectorAll<HTMLButtonElement>('button')];
+  buttons[0].focus();
+  await act(async () => buttons[0].click());
+  expect(document.activeElement).toBe(buttons[1]);
+  await act(async () => buttons[1].click());
+  expect(document.activeElement).toBe(container.querySelector('h1'));
+});
+it('supports named icon triggers and checked menu items in keyboard order', async () => {
+  await render(
+    <MenuButton
+      label="Cluster filter"
+      className="icon-button"
+      items={[
+        { id: 'all', label: 'All', checked: true, action: () => {} },
+        { id: 'a', label: 'Cluster A', checked: false, action: () => {} },
+      ]}
+    >
+      <span aria-hidden="true">⋯</span>
+    </MenuButton>,
+  );
+  expect(container.querySelector('button')?.getAttribute('aria-label')).toBe('Cluster filter');
+  await click('button');
+  const items = container.querySelectorAll('[role=menuitemradio]');
+  expect(items[0].getAttribute('aria-checked')).toBe('true');
+  expect(items[1].getAttribute('aria-checked')).toBe('false');
+  expect(document.activeElement).toBe(items[0]);
+});
+it('steps only within an explicit detail list and clears every competing panel key', async () => {
+  const { stepVisibleDetail, detailKeys } = await import('./routes');
+  await render(
+    <main>
+      <ul data-detail-list>
+        <li data-detail-key="job" data-detail-id="a" />
+        <li data-detail-key="job" data-detail-id="b" />
+      </ul>
+      <ul data-detail-list>
+        <li data-detail-key="instance" data-detail-id="c" />
+      </ul>
+    </main>,
+  );
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  history.replaceState(null, '', '#/overview?job=a&node=x');
+  stepVisibleDetail(1);
+  expect(window.location.hash).toBe('#/overview?job=b');
+  stepVisibleDetail(1);
+  expect(window.location.hash).toBe('#/overview?job=b');
+  expect(detailKeys).toContain('source');
+});
+
+it('preserves Settings sections while closing an SSH overlay alias or form', async () => {
+  const { formKeys } = await import('./routes');
+  history.replaceState(null, '', '#/settings?section=keyboard&add=ssh&step=2');
+  closeLayer(formKeys());
+  expect(window.location.hash).toBe('#/settings?section=keyboard');
+  history.replaceState(null, '', '#/settings?section=ssh');
+  closeLayer(formKeys());
+  expect(window.location.hash).toBe('#/settings');
+});
+it('uses an explicit aria-label for a children-only menu trigger', async () => {
+  await render(
+    <MenuButton aria-label="More actions for Cluster A" items={[]}>
+      <span aria-hidden="true">⋯</span>
+    </MenuButton>,
+  );
+  expect(container.querySelector('button')?.getAttribute('aria-label')).toBe(
+    'More actions for Cluster A',
+  );
+});

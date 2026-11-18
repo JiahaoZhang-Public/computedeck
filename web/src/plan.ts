@@ -1,5 +1,13 @@
-import type { ComputeNode, Dashboard, Instance, Job, QosLimit, Source } from './types';
-import { directSSHCommand } from './connections';
+import type {
+  CollectionNode,
+  ComputeNode,
+  Dashboard,
+  Instance,
+  Job,
+  QosLimit,
+  Source,
+} from './types';
+import { directSSHCommand, routeJump } from './connections';
 import { reasonCode, reasonKind } from './jobFacts';
 import {
   freeGpuIndexes,
@@ -689,6 +697,7 @@ export function machineOptions(
   data: Pick<Dashboard, 'sources' | 'instances'>,
   request: PlanRequest,
   now = Date.now(),
+  nodes: Pick<CollectionNode, 'id' | 'mode' | 'ssh_alias'>[] = [],
 ) {
   return machineSamples(data, now)
     .current.map(({ instance, source }) => {
@@ -701,7 +710,7 @@ export function machineOptions(
       const indexes = freeGpuIndexes(instance, request.gpuType)
         .sort((a, b) => a - b)
         .slice(0, request.gpus);
-      const ssh = directSSHCommand(instance);
+      const ssh = directSSHCommand(instance, routeJump(source, nodes));
       // Only the NVIDIA query provides gpu_processes; GPU names can also start with Tesla.
       const nvidia = indexes.length > 0 && source.capabilities.includes('gpu_processes');
       return {

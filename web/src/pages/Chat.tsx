@@ -3,7 +3,7 @@ import { useConfirm } from '../layers/useConfirm';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Copy, Download, Paperclip, Send, Trash2, X } from 'lucide-react';
+import { Copy, Trash2, X } from 'lucide-react';
 import { api, download, upload } from '../api';
 import { errorText, t } from '../i18n';
 import { dateTime, relativeTime } from '../domain';
@@ -255,8 +255,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
                 {item.body && <p>{item.body}</p>}
                 {item.attachment && (
                   <button className="chat-file" onClick={() => void save(item.attachment!)}>
-                    <Download size={13} /> {item.attachment.name}{' '}
-                    <small>{size(item.attachment.size)}</small>
+                    {item.attachment.name} <small>{size(item.attachment.size)}</small>
                   </button>
                 )}
               </article>
@@ -300,7 +299,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
               }}
             />
             <button type="button" className="button small" onClick={() => fileRef.current?.click()}>
-              <Paperclip size={13} /> {t('chat.attach')}
+              {t('chat.attach')}
             </button>
             {file && (
               <span className="chat-chosen">
@@ -322,7 +321,7 @@ function ChatContent({ ctx }: { ctx: Ctx }) {
               className="button primary small"
               disabled={busy || !name.trim() || (!draft.trim() && !file)}
             >
-              <Send size={13} /> {t('chat.send')}
+              {t('chat.send')}
             </button>
           </div>
           <small className="chat-note">{t('chat.note')}</small>

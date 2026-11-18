@@ -60,6 +60,8 @@ for (const [key, chunk] of Object.entries(manifest)) {
 check(
   'CSS',
   [...css].reduce((sum, file) => sum + size(file), 0),
-  16_000,
+  // 16,000 until 0.8: the brand accent's tokens appear in every generated theme block,
+  // and the RunPod-style drawers, tabs and list cards add their own rules.
+  17_500,
 );
 if (failed) process.exitCode = 1;

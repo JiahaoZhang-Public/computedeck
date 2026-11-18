@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { DiagnosticRows } from './ConnectionChecks';
 import { sourceState } from './labels';
 import { PlanPage } from './pages/Plan';
-import { setLocale } from './i18n';
+import { setLocale, t } from './i18n';
 import { groupsOf } from './groups';
 import type { Source, Dashboard } from './types';
 import type { Ctx } from './pages/shared';
@@ -124,10 +124,17 @@ it('shows unknown access inline and keeps only unassociated options in a closed 
   expect(disclosures[0].textContent).toContain('Not associated (2)');
   expect(disclosures[0].textContent).toContain('denied');
   expect(disclosures[0].textContent).toContain('restricted');
-  expect(disclosures[0].querySelectorAll('details.plan-explanation')).toHaveLength(2);
+  expect(disclosures[0].querySelectorAll('.plan-explanation')).toHaveLength(2);
   expect(disclosures[0].textContent).not.toContain('unverified');
   disclosures[0].remove();
-  expect(root.textContent).toContain('unverified');
-  expect(root.textContent).toContain('Access not checked');
   expect(root.textContent).toContain('allowed');
+  // Unchecked access stays inline: its estimate reads Unknown and its disclosure says why.
+  const unverified = [...root.querySelectorAll('.plan-table tbody tr.plan-option-row')].find(
+    (row) => row.querySelector(`td[data-label="${t('job.qos')}"]`)?.textContent === 'unverified',
+  )!;
+  expect(unverified).toBeTruthy();
+  expect(unverified.querySelector('.plan-verdict .status')!.textContent).toBe('Unknown');
+  expect(unverified.nextElementSibling!.textContent).toContain(
+    t('plan.accessNote', { source: 'Example cluster · alice' }),
+  );
 });

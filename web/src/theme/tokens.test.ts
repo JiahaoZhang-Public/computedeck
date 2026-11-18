@@ -93,3 +93,12 @@ it('keeps frozen class variables independent of legacy page styles', () => {
   for (const [, name] of compat.matchAll(/var\((--[\w-]+)/g))
     expect(defined.has(name), `Undefined compatibility variable: ${name}`).toBe(true);
 });
+
+it('keeps primary hover opaque when color-mix is unavailable', () => {
+  const css = readFileSync(new URL('./tokens-compat.css', import.meta.url), 'utf8');
+  expect(css.slice(0, css.indexOf('@supports'))).toContain('--accent-hover: var(--accent-fill)');
+  expect(css).toMatch(/@supports \(color: color-mix\(in oklch, red, red\)\)/);
+  expect(css.slice(css.indexOf('@supports'))).toContain(
+    '--accent-hover: color-mix(in oklch, var(--accent-fill) 88%, black)',
+  );
+});

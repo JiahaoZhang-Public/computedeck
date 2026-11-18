@@ -1,4 +1,4 @@
-import { calendarDate, clockTime, dateTime, duration, number } from '../format';
+import { calendarDate, clockTime, dateTime, duration, number, money } from '../format';
 import { formatMessage, t } from '../i18n';
 import type { Bucket, ChartSeries } from './types';
 
@@ -20,12 +20,30 @@ export function compactRange(start: string, end: string, now = Date.now()) {
 export function seriesLabel(series: ChartSeries) {
   return series.label ?? t(series.id === 'utilization' ? 'chart.utilization' : 'chart.allocated');
 }
-function figure(value: number | null, lower: boolean, id: string) {
+export function seriesFormat(series: ChartSeries | string): NonNullable<ChartSeries['format']> {
+  return typeof series === 'string'
+    ? { kind: series === 'utilization' ? ('percent' as const) : ('gpu' as const) }
+    : (series.format ?? seriesFormat(series.id));
+}
+export function seriesScope(series: ChartSeries) {
+  return (
+    series.scope ??
+    t(seriesFormat(series).kind === 'percent' ? 'chart.measuredScope' : 'chart.mineScope')
+  );
+}
+function figure(value: number | null, lower: boolean, series: ChartSeries | string) {
   if (value === null) return '—';
   // Round bounds down explicitly, including on older WebKit without roundingMode.
-  return `${lower ? '≥ ' : ''}${number(lower ? Math.floor(value * 10) / 10 : value, { maximumFractionDigits: 1 })} ${id === 'utilization' ? '%' : t('chart.gpuUnit')}`;
+  const format = seriesFormat(series);
+  if (format.kind === 'money')
+    return `${lower ? '≥ ' : ''}${money(value, format.currency ?? 'XXX', lower)}`;
+  const unit =
+    format.kind === 'percent'
+      ? '%'
+      : t(format.kind === 'gpu_hours' ? 'chart.gpuHoursUnit' : 'chart.gpuUnit');
+  return `${lower ? '≥ ' : ''}${number(lower ? Math.floor(value * 10) / 10 : value, { maximumFractionDigits: 1 })} ${unit}`;
 }
-export function statistics(bucket: Bucket, id: string) {
+export function statistics(bucket: Bucket, id: ChartSeries | string) {
   return t('chart.statistics', {
     min: figure(bucket.min, bucket.lower_bound, id),
     mean: figure(bucket.value, bucket.lower_bound, id),
@@ -34,7 +52,7 @@ export function statistics(bucket: Bucket, id: string) {
     expected: bucket.expected_samples ?? '—',
   });
 }
-export function reading(bucket: Bucket, id: string) {
+export function reading(bucket: Bucket, id: ChartSeries | string) {
   const value =
     bucket.value === null
       ? `— ${formatMessage(bucket.gap_reason)}`
@@ -65,7 +83,7 @@ export function summaryText(series: ChartSeries) {
         figure(
           typeof summary[key] === 'number' ? summary[key] : null,
           summary.lower_bound === true,
-          series.id,
+          series,
         ),
       ]),
     ),

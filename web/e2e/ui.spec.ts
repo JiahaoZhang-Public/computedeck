@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, ready, fontGuard } from './fixtures';
+import { wcagTags, test, expect, ready, fontGuard } from './fixtures';
 import { checkLayout, checkFocus } from './checks';
 import { domFingerprints } from './dom-findings';
 import { withScreenshotViewport, settledScreenshot } from './screenshots';
@@ -37,9 +37,7 @@ for (const [name, route] of pages) {
     await withScreenshotViewport(page, testInfo, (options) =>
       expect.soft(page).toHaveScreenshot(`${name}.png`, options),
     );
-    const axe = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-      .analyze();
+    const axe = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
     await testInfo.attach('axe', {
       body: JSON.stringify(axe.violations, null, 2),
       contentType: 'application/json',
@@ -77,14 +75,15 @@ for (const [name, route] of pages) {
   });
 }
 
-test('jobs reason at 1280 zh with panel open @known-clip', async ({ page }, testInfo) => {
+test('jobs reason at 1280 zh with panel open @reason-visible', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-1280-zh-CN-dark', '1280 zh regression case');
   await page.goto('/?demo=true#/jobs?state=pending&job=example%3Acluster-a%3A48214');
   await ready(page);
   await expect(
     page.getByRole('complementary').filter({ has: page.locator('#detail-title') }),
   ).toBeVisible();
-  const reasons = page.locator('.jobs-table tbody .clamp[title]');
+  // A queued job's short reason label is visible beside the open pane, never clipped.
+  const reasons = page.locator('.jobs-table tbody td.reason .clamp');
   await expect(reasons.first()).toBeVisible();
   const clipped = await reasons.evaluateAll((nodes) =>
     nodes

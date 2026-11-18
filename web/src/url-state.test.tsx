@@ -9,6 +9,7 @@ import { registerWebPlugin } from './plugins';
 import { api } from './api';
 import { setLocale, t } from './i18n';
 import { jobReason, jobWaiting } from './jobFacts';
+import { failureExplanation } from './failures';
 import { relativeTime } from './domain';
 import { serverDashboard, serverDemo } from './test-server';
 import { routeParams, setRouteParams } from './useRouteParam';
@@ -150,9 +151,35 @@ it('links to a failed attempt separately from the current job list', async () =>
   const failed = data.recent_failures![0];
   await render(`/?demo=true#/jobs?state=failed&failure=${encodeURIComponent(failed.id)}`);
   expect(container.querySelector('#detail-title')?.textContent).toBe(failed.name);
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.failureReason'));
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.nextStep'));
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(failed.exit_code!);
+  // What happened leads the failure callout and the next step follows as a plain sentence,
+  // without headings of their own.
+  const dialog = container.querySelector('[role="dialog"]')!;
+  const driver = data.sources.find((source) => source.id === failed.source_id)!.driver;
+  const callout = dialog.querySelector('.failure-explanation')!;
+  expect(callout.querySelector('p.lead')?.textContent).toBe(
+    failureExplanation(failed, driver)!.summary,
+  );
+  expect(callout.querySelector('p:last-child')?.textContent).toBe(jobReason(failed, driver)!.next);
+  expect(dialog.textContent).not.toContain('What happened');
+  expect(dialog.textContent).not.toContain('Next step');
+  expect(dialog.textContent).toContain(failed.exit_code!);
+  // A scheduler code, when reported, sits beside the state in the header, not in the body.
+  expect(dialog.querySelector('.drawer-code')?.textContent ?? null).toBe(failed.reason || null);
+});
+
+it('shows a queued job reason as lead text with its code in the header', async () => {
+  const job = data.jobs.find((item) => item.state === 'PENDING' && item.reason)!;
+  await render(`/?demo=true#/jobs?job=${encodeURIComponent(job.id)}`);
+  const dialog = container.querySelector('[role="dialog"]')!;
+  const driver = data.sources.find((source) => source.id === job.source_id)!.driver;
+  expect(dialog.querySelector('.callout p.lead')?.textContent).toBe(
+    jobReason(job, driver)!.summary,
+  );
+  expect(dialog.querySelector('.drawer-header .drawer-chips code.drawer-code')?.textContent).toBe(
+    job.reason,
+  );
+  expect(dialog.querySelector('.drawer-body code')?.textContent).not.toBe(job.reason);
+  expect(dialog.textContent).not.toContain('Pending reason');
 });
 
 it('uses the same deduplicated job record in the list and detail', async () => {
@@ -190,14 +217,15 @@ it.each(['en', 'zh-CN'] as const)(
     expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
     expect(routeParams().get('job')).toBeNull();
     expect(push).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    // The id chip names an array; the breadcrumb always leads back to Jobs.
+    expect(container.querySelector('.drawer-id')?.textContent).toContain(t('drawer.array'));
     expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(50);
     const table = container.querySelector<HTMLTableElement>('.drawer .array-elements-table')!;
     expect(table.classList.contains('stack-on-phone')).toBe(true);
     expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual([
       t('jobs.array.element'),
-      t('jobs.col.state'),
       'GPU',
+      t('jobs.col.state'),
       t('jobs.col.nodeReason'),
       t('jobs.col.timing'),
     ]);
@@ -209,10 +237,10 @@ it.each(['en', 'zh-CN'] as const)(
       expect(row.textContent).not.toContain(example.name);
       expect(row.textContent).not.toContain(example.gpu_type);
     }
+    // One value per cell: the element index alone; the row still identifies its job.
+    expect(table.tBodies[0].rows[0].cells[0].textContent).toBe('0');
     expect(table.tBodies[0].rows[0].cells[0].querySelector('strong')?.textContent).toBe('0');
-    expect(table.tBodies[0].rows[0].cells[0].querySelector('.sub.mono')?.textContent).toBe(
-      data.jobs[0].id,
-    );
+    expect(table.tBodies[0].rows[0].dataset.detailId).toBe(data.jobs[0].id);
     const facts = [...container.querySelectorAll('.drawer .kv dd')].map((cell) => cell.textContent);
     expect(facts).toEqual(['Cluster A', example.user, example.qos, example.partition]);
 
@@ -231,13 +259,15 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => container.querySelector<HTMLElement>('.drawer .clickable')!.click());
     expect(routeParams().get('job')).toBe(data.jobs[0].id);
     expect(routeParams().get('array')).toBeNull();
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.job'));
+    expect(container.querySelector('.drawer-kind')?.textContent).toBe(`${t('nav.jobs')} ›`);
+    expect(container.querySelector('.drawer-id')?.textContent).not.toContain(t('drawer.array'));
     await act(async () => {
       window.history.back();
       await vi.advanceTimersByTimeAsync(100);
     });
     expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    // The id chip names an array; the breadcrumb always leads back to Jobs.
+    expect(container.querySelector('.drawer-id')?.textContent).toContain(t('drawer.array'));
     await act(async () =>
       container
         .querySelector('.drawer .clickable')!
@@ -266,8 +296,15 @@ it.each([
     })),
   });
   await render('/?demo=true#/jobs');
-  expect(container.querySelector('.array-row .sub.mono')?.textContent).toBe(
-    `${label} · ${t('jobs.array.count', { count: 2 })}`,
+  // The row names the array only; its scheduler label is the name's tooltip, and the element
+  // count is the State cell's value.
+  const name = container.querySelector('.array-row td:first-child strong')!;
+  expect(name.textContent).toBe(example.name);
+  expect(name.getAttribute('title')).toBe(`${example.name} ${label}`);
+  expect(container.querySelector('.array-row .sub')).toBeNull();
+  expect(example.state).toBe('RUNNING');
+  expect(container.querySelector('.array-row .array-states')?.textContent).toBe(
+    t('jobs.array.summary', { count: 2, running: 2 }),
   );
   await act(async () => container.querySelector<HTMLElement>('.array-row')!.click());
   expect(routeParams().get('array')).toBe(`${example.cluster_id}:${id}`);
@@ -308,7 +345,11 @@ it('keeps tab and navigation counts in elements when the Jobs table groups array
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
     `${t('status.PENDING')}1`,
   );
-  expect(container.querySelector('a[href="#/jobs"] .badge')?.textContent).toBe('3');
+  // The navigation carries no job count; the result count names the current view's elements.
+  expect(container.querySelector('a[href="#/jobs"] .badge')).toBeNull();
+  expect(container.querySelector('.result-count')?.textContent).toBe(
+    t('jobs.resultCount.one', { count: 1 }),
+  );
   await act(async () => setRouteParams({ state: 'running' }));
   expect(container.querySelectorAll('.jobs-table .array-row')).toHaveLength(1);
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
@@ -352,17 +393,30 @@ it('keeps compact element resources, waiting reasons and stale tags', async () =
     ...container.querySelectorAll<HTMLTableRowElement>('.drawer .array-elements-table tbody tr'),
   ];
   expect(rows).toHaveLength(2);
-  expect(rows[0].cells[2].textContent).toBe(String(example.gpu_count));
+  // Compact columns: Element, GPU, State, Node or reason, Time; one value per cell.
+  expect(rows[0].cells[1].textContent).toBe(String(example.gpu_count));
   expect(rows[0].cells[3].textContent).toBe(example.node);
+  const stale = t('cloud.staleSince', { time: relativeTime(example.observed_at) });
   expect(rows[0].cells[4].textContent).toBe(example.elapsed);
-  expect(rows[1].cells[2].textContent).toBe(t('jobs.requested', { count: '?' }));
-  expect(rows[1].cells[3].textContent).toBe(jobReason(pending, 'slurm')!.summary);
+  // A queued element's request is muted, without a "requests" word; unknown stays a dash.
+  expect(rows[1].cells[1].querySelector('.requested')?.textContent).toBe('—');
+  expect(rows[1].cells[1].textContent).not.toContain('requests');
+  // A queued element shows the short reason label only: no raw code, no sentence, no tooltip.
+  const reason = jobReason(pending, 'slurm')!;
+  expect(reason.label).toBe(t('job.short.resources'));
+  expect(rows[1].cells[3].textContent).toBe(reason.label);
+  expect(rows[1].cells[3].textContent).not.toContain(reason.summary);
+  expect(rows[1].cells[3].querySelector('.clamp')).not.toBeNull();
+  expect(rows[1].cells[3].querySelector('.clamp')!.hasAttribute('title')).toBe(false);
   expect(rows[1].cells[4].textContent).toBe(jobWaiting(pending));
   for (const row of rows) {
     expect(row.classList.contains('stale-row')).toBe(true);
-    expect(row.cells[0].textContent).toContain(
-      t('cloud.staleSince', { time: relativeTime(example.observed_at) }),
-    );
+    // The one exception a row flags sits with its state, not under its name.
+    const mark = row.cells[2].querySelector('.stale-mark')!;
+    expect(mark.getAttribute('title')).toBe(stale);
+    expect(mark.querySelector('.sr-only')!.textContent).toBe(stale);
+    expect(row.cells[0].textContent).not.toContain(stale);
+    expect(row.cells[4].textContent).not.toContain(stale);
   }
 });
 
@@ -428,8 +482,9 @@ it('opens failure rows with no end time and only copies the inspection command',
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
   );
   expect(routeParams().get('failure')).toBe(failure.id);
-  const button = [...container.querySelectorAll<HTMLButtonElement>('.drawer button')].find((item) =>
-    item.textContent?.includes(t('failure.copyInspection')),
+  // The command is shown as a row; its copy action sits at the row's end.
+  const button = container.querySelector<HTMLButtonElement>(
+    `.drawer .command-row button[aria-label="${t('failure.copyInspection')}"]`,
   )!;
   await act(async () => button.click());
   expect(writeText).toHaveBeenCalledOnce();
@@ -539,7 +594,7 @@ const urlFixtures: [string, () => string, string, () => void][] = [
     () => `jobs?group=${data.jobs[0].cluster_id}`,
     'jobs',
     () =>
-      expect(container.querySelector<HTMLSelectElement>('main select.select')?.value).toBe(
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
         data.jobs[0].cluster_id,
       ),
   ],
@@ -548,7 +603,7 @@ const urlFixtures: [string, () => string, string, () => void][] = [
     () => `jobs?provider=${data.jobs[0].cluster_id}`,
     'jobs',
     () =>
-      expect(container.querySelector<HTMLSelectElement>('main select.select')?.value).toBe(
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
         data.jobs[0].cluster_id,
       ),
   ],
@@ -701,7 +756,10 @@ const urlFixtures: [string, () => string, string, () => void][] = [
     'resources',
     () => {
       expect(routeParams().get('tab')).toBe('nodes');
-      selected('Cluster A');
+      // The cluster is a filter chip; node states are tabs.
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
+        data.jobs[0].cluster_id,
+      );
       selected(t('clusters.abnormalTab'));
       expect(container.querySelectorAll('.cluster-card')).toHaveLength(1);
     },

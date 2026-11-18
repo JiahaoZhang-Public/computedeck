@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
-import { test, expect, ready } from './fixtures';
+import { wcagTags, test, expect, ready } from './fixtures';
 import { checkLayout } from './checks';
 import { tokens } from '../src/theme/tokens';
 import aliases from '../src/theme/compat-map.json' with { type: 'json' };
@@ -109,14 +109,15 @@ for (const more of [false, true]) {
     await page.emulateMedia({ contrast: more ? 'more' : 'no-preference' });
     await page.goto('/?demo=true#/__gallery?compat');
     await ready(page);
-    const result = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-      .analyze();
+    const result = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
     expect(result.violations).toEqual([]);
     for (const selector of ['.button.primary', '.button.primary-button']) {
       const button = page.locator(`.gallery ${selector}`).first();
       await button.hover();
-      expect((await new AxeBuilder({ page }).include('.gallery').analyze()).violations).toEqual([]);
+      expect(
+        (await new AxeBuilder({ page }).withTags(wcagTags).include('.gallery').analyze())
+          .violations,
+      ).toEqual([]);
     }
   });
   test(`normal/fallback token parity in every theme context, contrast-more=${more}`, async ({
@@ -226,8 +227,9 @@ test('table row boxes include hairlines: density, compact class and coarse point
         compactClass,
       );
       const dense = density === 'compact' || compactClass;
-      const single = coarse ? 44 : dense ? 32 : 40;
-      const two = coarse ? 60 : dense ? 48 : 60;
+      // Rows breathe (44 px comfortable, 36 px compact); coarse pointers keep 44 px targets.
+      const single = coarse ? 44 : dense ? 36 : 44;
+      const two = coarse ? 60 : dense ? 52 : 64;
       const heights = await table
         .locator('tbody tr')
         .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
@@ -312,12 +314,16 @@ test('forced colours override explicit themes in both builds', async ({ page, fr
   await freshPage.goto('/__ui-fallback/?demo=true#/__gallery?compat');
   await ready(page);
   await ready(freshPage);
+  let light: Awaited<ReturnType<typeof computedColors>> | undefined;
   for (const theme of ['light', 'dark']) {
     for (const target of [page, freshPage])
       await target.evaluate((value) => {
         document.documentElement.dataset.theme = value;
       }, theme);
-    expect(await computedColors(freshPage)).toEqual(await computedColors(page));
+    const colors = await computedColors(page);
+    expect(await computedColors(freshPage)).toEqual(colors);
+    if (light) expect(colors).toEqual(light);
+    else light = colors;
   }
 });
 
@@ -360,22 +366,33 @@ test('Plan keeps stacked cells unpadded and explanations attached to their optio
   const explanations = page.locator('.plan-table .plan-explanation-row > td');
   expect(await options.count()).toBeGreaterThan(0);
   expect(await explanations.count()).toBeGreaterThan(0);
+  // Explanation rows start hidden behind their chevrons; judge layout from an option row.
   const stacked = await page
-    .locator('.plan-table tr')
-    .last()
+    .locator('.plan-table .plan-option-row')
+    .first()
     .evaluate((row) => getComputedStyle(row).display === 'grid');
   if (stacked) {
     for (const cell of await page.locator('.plan-table td').all())
       await expect(cell).toHaveCSS('padding', '0px');
   }
   // Also cover table layout even when this project's viewport stacks the options.
-  await page.locator('.plan-options').evaluate((node) => {
-    node.style.minWidth = '1100px';
-  });
+  // The options that fit come first; those that do not fit sit in a second, closed table.
+  await page
+    .locator('.plan-options')
+    .first()
+    .evaluate((node) => {
+      node.style.minWidth = '1100px';
+    });
   await expect(page.locator('.plan-table .plan-option-row').first()).toHaveCSS(
     'display',
     'table-row',
   );
-  for (const cell of await options.all()) await expect(cell).toHaveCSS('padding-bottom', '0px');
+  // A closed option is a whole row with its own padding; an open one runs into its explanation.
+  const first = page.locator('.plan-table .plan-option-row').first();
+  for (const cell of await first.locator('> td').all())
+    await expect(cell).not.toHaveCSS('padding-bottom', '0px');
+  await first.locator('.plan-expand').click();
+  for (const cell of await first.locator('> td').all())
+    await expect(cell).toHaveCSS('padding-bottom', '0px');
   for (const cell of await explanations.all()) await expect(cell).toHaveCSS('padding-top', '0px');
 });

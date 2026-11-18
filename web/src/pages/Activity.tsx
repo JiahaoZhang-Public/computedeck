@@ -79,7 +79,6 @@ export function ActivityPanel({
   return (
     <Panel
       title={t('activity.title')}
-      count={events?.length}
       actions={
         <a className="link" href={routeHash('activity')}>
           {t('activity.all')}
@@ -128,13 +127,6 @@ function ActivityRow({
       ? sources.find((source) => source.id === event.data.subject_id)
       : undefined;
   const sourceLine = [event.data.source_name, event.data.username].filter(Boolean).join(' · ');
-  const fields = ['change.source', 'change.node', 'change.instance'].includes(event.type)
-    ? (event.data.fields ?? []).filter(
-        (field) =>
-          event.data.action === 'edited' ||
-          (['enabled', 'disabled'].includes(event.data.action ?? '') && field !== 'enabled'),
-      )
-    : [];
   const content = (
     <>
       <span className={`dot ${eventTone(event)}`} />
@@ -142,24 +134,13 @@ function ActivityRow({
         {eventText(
           tool ? { ...event, data: { ...event.data, name: localized(tool.name) } } : event,
         )}
-        {sourceLine && <small>{sourceLine}</small>}
-        {Boolean(event.delivery?.length) && (
-          <small>
-            {t('activity.delivery', {
-              statuses: event
-                .delivery!.map((status) => t(`notify.status.${status}`))
-                .join(t('common.listSeparator')),
-            })}
-          </small>
-        )}
-        {fields.length > 0 && (
-          <small>
-            {t('event.change.fields', {
-              fields: fields.map(changeFieldLabel).join(t('common.listSeparator')),
-            })}
-          </small>
-        )}
       </span>
+      {/* One line: what happened, where, when. Outcomes and changed fields are in the details. */}
+      {sourceLine && (
+        <span className="activity-source" title={sourceLine}>
+          {sourceLine}
+        </span>
+      )}
       <time dateTime={event.at} title={eventTimeTitle(event)}>
         <ClockText>{() => eventTimeText(event) ?? relativeTime(event.at)}</ClockText>
       </time>
@@ -225,6 +206,17 @@ function ActivityError({ retry }: { retry: () => void }) {
   );
 }
 
+/** Fields an edit changed; enabling or disabling alone is already the event's text. */
+function changedFields(event: DeckEvent) {
+  return ['change.source', 'change.node', 'change.instance'].includes(event.type)
+    ? (event.data.fields ?? []).filter(
+        (field) =>
+          event.data.action === 'edited' ||
+          (['enabled', 'disabled'].includes(event.data.action ?? '') && field !== 'enabled'),
+      )
+    : [];
+}
+
 function EventDetails({ event, ctx }: { event: DeckEvent; ctx: Ctx }) {
   const data = event.data;
   const job = eventJob(event);
@@ -243,9 +235,22 @@ function EventDetails({ event, ctx }: { event: DeckEvent; ctx: Ctx }) {
     ['jobs.col.ended', ended ? jobTime(ended) : null],
     ['event.observedAt', dateTime(data.observed_at ?? event.at)],
     ['activity.errorDetail', data.error ? formatMessage(data.error) : null],
+    [
+      'event.changedLabel',
+      changedFields(event).map(changeFieldLabel).join(t('common.listSeparator')) || null,
+    ],
+    [
+      'activity.notified',
+      (event.delivery ?? [])
+        .map((status) => t(`notify.status.${status}`))
+        .join(t('common.listSeparator')) || null,
+    ],
   ];
+  // The row says what happened; the full sentence (period, error, exit code) is here.
+  const full = eventText(event, true);
   return (
     <div className="activity-details">
+      {full !== eventText(event) && <p className="activity-detail-text">{full}</p>}
       <dl className="kv">
         {facts
           .filter(([, value]) => value != null && value !== '')
@@ -346,43 +351,50 @@ export function ActivityPage({ ctx }: { ctx: Ctx }) {
     });
   return (
     <>
+      {/* Event kinds are views (page tabs); time, source and search are filters. */}
+      <div className="page-tabs">
+        <Chips
+          label={t('activity.eventType')}
+          value={category}
+          onChange={setCategory}
+          options={[
+            { value: '', label: t('filter.all') },
+            ...categories.map((value) => ({ value, label: t(`activity.filter.${value}`) })),
+          ]}
+        />
+      </div>
       <Panel>
         <div className="toolbar activity-filters">
-          <Chips
-            label={t('activity.eventType')}
-            value={category}
-            onChange={setCategory}
-            options={[
-              { value: '', label: t('filter.all') },
-              ...categories.map((value) => ({ value, label: t(`activity.filter.${value}`) })),
-            ]}
-          />
-          <Chips
-            label={t('activity.range')}
-            value={windowed ? '' : range}
-            onChange={(range) =>
-              setRouteParams({ range: range === '24h' ? null : range, from: null, to: null })
-            }
-            options={['24h', '7d', '30d'].map((value) => ({
-              value,
-              label: t(`activity.range.${value}` as MessageKey),
-            }))}
-          />
-          <label>
-            {t('filter.byGroup')}{' '}
-            <select value={ctx.group} onChange={(event) => ctx.setGroup(event.target.value)}>
-              <option value="all">{t('filter.all')}</option>
-              {ctx.groups.map((group) => (
-                <option key={group.key} value={group.key}>
-                  {group.label}
-                </option>
-              ))}
-              {ctx.group !== 'all' && !ctx.groups.some((group) => group.key === ctx.group) && (
-                <option value={ctx.group}>{ctx.group}</option>
-              )}
-            </select>
-          </label>
           <SearchBox ctx={ctx} placeholder={t('activity.search')} maxLength={64} />
+          <select
+            className="chip"
+            aria-label={t('filter.byGroup')}
+            value={ctx.group}
+            onChange={(event) => ctx.setGroup(event.target.value)}
+          >
+            <option value="all">{t('activity.allGroups')}</option>
+            {ctx.groups.map((group) => (
+              <option key={group.key} value={group.key}>
+                {group.label}
+              </option>
+            ))}
+            {ctx.group !== 'all' && !ctx.groups.some((group) => group.key === ctx.group) && (
+              <option value={ctx.group}>{ctx.group}</option>
+            )}
+          </select>
+          <div className="segmented">
+            <Chips
+              label={t('activity.range')}
+              value={windowed ? '' : range}
+              onChange={(range) =>
+                setRouteParams({ range: range === '24h' ? null : range, from: null, to: null })
+              }
+              options={['24h', '7d', '30d'].map((value) => ({
+                value,
+                label: t(`activity.range.${value}` as MessageKey),
+              }))}
+            />
+          </div>
           {windowed && (
             <p>
               {dateTime(from)} – {dateTime(to)}
@@ -661,7 +673,6 @@ export function ActivityTeaser({ ctx }: { ctx: Ctx }) {
       }
     >
       {error && <ActivityError retry={load} />}
-      {ctx.demo && <p className="panel-note">{t('toast.demoReadOnly')}</p>}
       {shown.length ? (
         <ul className="activity">
           {shown.map((event) => (

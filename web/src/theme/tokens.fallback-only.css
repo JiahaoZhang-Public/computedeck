@@ -3,34 +3,34 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 :root {
-  --p-bg-canvas-light: oklch(0.982 0.002 260);
-  --p-bg-canvas-dark: oklch(0.165 0.004 260);
+  --p-bg-canvas-light: oklch(1 0 0);
+  --p-bg-canvas-dark: oklch(0.17 0.003 260);
   --p-bg-surface-light: oklch(1 0 0);
-  --p-bg-surface-dark: oklch(0.195 0.005 260);
-  --p-bg-sunken-light: oklch(0.967 0.003 260);
-  --p-bg-sunken-dark: oklch(0.148 0.004 260);
+  --p-bg-surface-dark: oklch(0.17 0.003 260);
+  --p-bg-sunken-light: oklch(0.965 0 0);
+  --p-bg-sunken-dark: oklch(0.2 0.003 260);
   --p-bg-raised-light: oklch(1 0 0);
-  --p-bg-raised-dark: oklch(0.225 0.005 260);
+  --p-bg-raised-dark: oklch(0.205 0.004 260);
   --p-bg-overlay-light: oklch(1 0 0);
-  --p-bg-overlay-dark: oklch(0.245 0.006 260);
-  --p-bg-hover-light: oklch(0.955 0.004 260);
-  --p-bg-hover-dark: oklch(0.235 0.006 260);
-  --p-bg-selected-light: oklch(0.937 0.005 260);
-  --p-bg-selected-dark: oklch(0.27 0.007 260);
-  --p-fg-default-light: oklch(0.215 0.01 260);
-  --p-fg-default-dark: oklch(0.955 0.003 260);
-  --p-fg-muted-light: oklch(0.45 0.012 260);
-  --p-fg-muted-dark: oklch(0.82 0.008 260);
-  --p-fg-subtle-light: oklch(0.51 0.01 260);
-  --p-fg-subtle-dark: oklch(0.74 0.008 260);
-  --p-fg-on-ink-light: oklch(0.99 0 0);
-  --p-fg-on-ink-dark: oklch(0.18 0.005 260);
-  --p-ink-light: oklch(0.215 0.01 260);
-  --p-ink-dark: oklch(0.955 0.003 260);
-  --p-border-muted-light: oklch(0.922 0.004 260);
-  --p-border-muted-dark: oklch(0.255 0.006 260);
-  --p-border-default-light: oklch(0.885 0.005 260);
-  --p-border-default-dark: oklch(0.305 0.006 260);
+  --p-bg-overlay-dark: oklch(0.215 0.004 260);
+  --p-bg-hover-light: oklch(0.97 0.001 260);
+  --p-bg-hover-dark: oklch(0.215 0.004 260);
+  --p-bg-selected-light: oklch(0.94 0.002 260);
+  --p-bg-selected-dark: oklch(0.255 0.004 260);
+  --p-fg-default-light: oklch(0.2 0.004 260);
+  --p-fg-default-dark: oklch(0.955 0.002 260);
+  --p-fg-muted-light: oklch(0.47 0.006 260);
+  --p-fg-muted-dark: oklch(0.78 0.004 260);
+  --p-fg-subtle-light: oklch(0.5 0.006 260);
+  --p-fg-subtle-dark: oklch(0.74 0.004 260);
+  --p-fg-on-ink-light: oklch(1 0 0);
+  --p-fg-on-ink-dark: oklch(0.17 0.003 260);
+  --p-ink-light: oklch(0.2 0.004 260);
+  --p-ink-dark: oklch(0.955 0.002 260);
+  --p-border-muted-light: oklch(0.93 0.002 260);
+  --p-border-muted-dark: oklch(0.255 0.004 260);
+  --p-border-default-light: oklch(0.9 0.003 260);
+  --p-border-default-dark: oklch(0.3 0.004 260);
   --p-border-strong-light: oklch(0.62 0.008 260);
   --p-border-strong-dark: oklch(0.56 0.008 260);
   --p-status-ok-fg-light: oklch(0.5 0.13 150);
@@ -105,8 +105,16 @@
   --p-status-off-bg-dark: oklch(0.24 0.005 260);
   --p-status-off-shape-light: oklch(0.5 0.01 260);
   --p-status-off-shape-dark: oklch(0.74 0.01 260);
-  --p-focus-ring-light: oklch(0.215 0.01 260);
-  --p-focus-ring-dark: oklch(0.955 0.003 260);
+  --p-focus-ring-light: oklch(0.2 0.004 260);
+  --p-focus-ring-dark: oklch(0.955 0.002 260);
+  --p-accent-fill-light: oklch(0.2 0.004 260);
+  --p-accent-fill-dark: oklch(0.955 0.002 260);
+  --p-fg-on-accent-light: oklch(1 0 0);
+  --p-fg-on-accent-dark: oklch(0.17 0.003 260);
+  --p-accent-fg-light: oklch(0.2 0.004 260);
+  --p-accent-fg-dark: oklch(0.955 0.002 260);
+  --p-accent-bg-light: oklch(0.94 0.002 260);
+  --p-accent-bg-dark: oklch(0.255 0.004 260);
   --p-chart-line-light: oklch(0.215 0.01 260);
   --p-chart-line-dark: oklch(0.955 0.003 260);
   --p-chart-grid-light: oklch(0.922 0.004 260);
@@ -173,6 +181,10 @@
   --status-off-bg: unsupported-light-dark(var(--p-status-off-bg-light), var(--p-status-off-bg-dark));
   --status-off-shape: unsupported-light-dark(var(--p-status-off-shape-light), var(--p-status-off-shape-dark));
   --focus-ring: unsupported-light-dark(var(--p-focus-ring-light), var(--p-focus-ring-dark));
+  --accent-fill: unsupported-light-dark(var(--p-accent-fill-light), var(--p-accent-fill-dark));
+  --fg-on-accent: unsupported-light-dark(var(--p-fg-on-accent-light), var(--p-fg-on-accent-dark));
+  --accent-fg: unsupported-light-dark(var(--p-accent-fg-light), var(--p-accent-fg-dark));
+  --accent-bg: unsupported-light-dark(var(--p-accent-bg-light), var(--p-accent-bg-dark));
   --chart-line: unsupported-light-dark(var(--p-chart-line-light), var(--p-chart-line-dark));
   --chart-grid: unsupported-light-dark(var(--p-chart-grid-light), var(--p-chart-grid-dark));
   --hatch-edge: unsupported-light-dark(var(--p-hatch-edge-light), var(--p-hatch-edge-dark));
@@ -234,6 +246,10 @@
   --status-off-bg: unsupported-light-dark(var(--p-status-off-bg-light), var(--p-status-off-bg-dark));
   --status-off-shape: unsupported-light-dark(var(--p-status-off-shape-light), var(--p-status-off-shape-dark));
   --focus-ring: unsupported-light-dark(var(--p-focus-ring-light), var(--p-focus-ring-dark));
+  --accent-fill: unsupported-light-dark(var(--p-accent-fill-light), var(--p-accent-fill-dark));
+  --fg-on-accent: unsupported-light-dark(var(--p-fg-on-accent-light), var(--p-fg-on-accent-dark));
+  --accent-fg: unsupported-light-dark(var(--p-accent-fg-light), var(--p-accent-fg-dark));
+  --accent-bg: unsupported-light-dark(var(--p-accent-bg-light), var(--p-accent-bg-dark));
   --chart-line: unsupported-light-dark(var(--p-chart-line-light), var(--p-chart-line-dark));
   --chart-grid: unsupported-light-dark(var(--p-border-strong-light), var(--p-border-strong-dark));
   --hatch-edge: unsupported-light-dark(var(--p-hatch-edge-light), var(--p-hatch-edge-dark));
@@ -296,6 +312,10 @@
   --status-off-bg: var(--p-status-off-bg-light);
   --status-off-shape: var(--p-status-off-shape-light);
   --focus-ring: var(--p-focus-ring-light);
+  --accent-fill: var(--p-accent-fill-light);
+  --fg-on-accent: var(--p-fg-on-accent-light);
+  --accent-fg: var(--p-accent-fg-light);
+  --accent-bg: var(--p-accent-bg-light);
   --chart-line: var(--p-chart-line-light);
   --chart-grid: var(--p-chart-grid-light);
   --hatch-edge: var(--p-hatch-edge-light);
@@ -357,6 +377,10 @@
   --status-off-bg: var(--p-status-off-bg-dark);
   --status-off-shape: var(--p-status-off-shape-dark);
   --focus-ring: var(--p-focus-ring-dark);
+  --accent-fill: var(--p-accent-fill-dark);
+  --fg-on-accent: var(--p-fg-on-accent-dark);
+  --accent-fg: var(--p-accent-fg-dark);
+  --accent-bg: var(--p-accent-bg-dark);
   --chart-line: var(--p-chart-line-dark);
   --chart-grid: var(--p-chart-grid-dark);
   --hatch-edge: var(--p-hatch-edge-dark);
@@ -418,6 +442,10 @@
   --status-off-bg: var(--p-status-off-bg-light);
   --status-off-shape: var(--p-status-off-shape-light);
   --focus-ring: var(--p-focus-ring-light);
+  --accent-fill: var(--p-accent-fill-light);
+  --fg-on-accent: var(--p-fg-on-accent-light);
+  --accent-fg: var(--p-accent-fg-light);
+  --accent-bg: var(--p-accent-bg-light);
   --chart-line: var(--p-chart-line-light);
   --chart-grid: var(--p-chart-grid-light);
   --hatch-edge: var(--p-hatch-edge-light);
@@ -478,6 +506,10 @@
   --status-off-bg: var(--p-status-off-bg-dark);
   --status-off-shape: var(--p-status-off-shape-dark);
   --focus-ring: var(--p-focus-ring-dark);
+  --accent-fill: var(--p-accent-fill-dark);
+  --fg-on-accent: var(--p-fg-on-accent-dark);
+  --accent-fg: var(--p-accent-fg-dark);
+  --accent-bg: var(--p-accent-bg-dark);
   --chart-line: var(--p-chart-line-dark);
   --chart-grid: var(--p-chart-grid-dark);
   --hatch-edge: var(--p-hatch-edge-dark);
@@ -539,6 +571,10 @@
   --status-off-bg: var(--p-status-off-bg-light);
   --status-off-shape: var(--p-status-off-shape-light);
   --focus-ring: var(--p-focus-ring-light);
+  --accent-fill: var(--p-accent-fill-light);
+  --fg-on-accent: var(--p-fg-on-accent-light);
+  --accent-fg: var(--p-accent-fg-light);
+  --accent-bg: var(--p-accent-bg-light);
   --chart-line: var(--p-chart-line-light);
   --chart-grid: var(--p-border-strong-light);
   --hatch-edge: var(--p-hatch-edge-light);
@@ -600,6 +636,10 @@
   --status-off-bg: var(--p-status-off-bg-dark);
   --status-off-shape: var(--p-status-off-shape-dark);
   --focus-ring: var(--p-focus-ring-dark);
+  --accent-fill: var(--p-accent-fill-dark);
+  --fg-on-accent: var(--p-fg-on-accent-dark);
+  --accent-fg: var(--p-accent-fg-dark);
+  --accent-bg: var(--p-accent-bg-dark);
   --chart-line: var(--p-chart-line-dark);
   --chart-grid: var(--p-border-strong-dark);
   --hatch-edge: var(--p-hatch-edge-dark);
@@ -661,6 +701,10 @@
   --status-off-bg: var(--p-status-off-bg-light);
   --status-off-shape: var(--p-status-off-shape-light);
   --focus-ring: var(--p-focus-ring-light);
+  --accent-fill: var(--p-accent-fill-light);
+  --fg-on-accent: var(--p-fg-on-accent-light);
+  --accent-fg: var(--p-accent-fg-light);
+  --accent-bg: var(--p-accent-bg-light);
   --chart-line: var(--p-chart-line-light);
   --chart-grid: var(--p-border-strong-light);
   --hatch-edge: var(--p-hatch-edge-light);
@@ -721,6 +765,10 @@
   --status-off-bg: var(--p-status-off-bg-dark);
   --status-off-shape: var(--p-status-off-shape-dark);
   --focus-ring: var(--p-focus-ring-dark);
+  --accent-fill: var(--p-accent-fill-dark);
+  --fg-on-accent: var(--p-fg-on-accent-dark);
+  --accent-fg: var(--p-accent-fg-dark);
+  --accent-bg: var(--p-accent-bg-dark);
   --chart-line: var(--p-chart-line-dark);
   --chart-grid: var(--p-border-strong-dark);
   --hatch-edge: var(--p-hatch-edge-dark);
@@ -732,6 +780,7 @@
 }
 @media (forced-colors: active) {
 :root, :root:not([data-theme="light"]), :root[data-theme="light"], :root[data-theme="dark"] {
+  color-scheme: light dark;
   --bg-canvas: Canvas;
   --bg-surface: Canvas;
   --bg-sunken: Canvas;
@@ -784,6 +833,10 @@
   --status-off-bg: Canvas;
   --status-off-shape: CanvasText;
   --focus-ring: CanvasText;
+  --accent-fill: CanvasText;
+  --fg-on-accent: Canvas;
+  --accent-fg: CanvasText;
+  --accent-bg: Canvas;
   --chart-line: CanvasText;
   --chart-grid: CanvasText;
   --hatch-edge: CanvasText;

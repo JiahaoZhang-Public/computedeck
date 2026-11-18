@@ -1,3 +1,4 @@
+import { desktopMedia } from '../breakpoints';
 import { useLayoutEffect, useState } from 'react';
 import type { ReactNode, Ref } from 'react';
 import { useLayer, useMedia, fieldKey, captureOpener } from './stack';
@@ -83,7 +84,7 @@ export function ContextPanel({
   onStep,
   ...props
 }: Props & { onStep?: (direction: number) => void }) {
-  const wide = useMedia('(min-width: 1200px)');
+  const wide = useMedia(desktopMedia);
   const [opener] = useState(captureOpener);
   return wide ? (
     <Beside {...props} opener={opener} onStep={onStep} />

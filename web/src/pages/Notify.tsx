@@ -2,7 +2,7 @@ import { ClockText } from '../data/ClockText';
 import { useConfirm } from '../layers/useConfirm';
 import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Pencil, Plus, Send, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { errorText, formatMessage, localized, t } from '../i18n';
@@ -458,17 +458,15 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       {confirmation}
-      <p className="page-note">{t('notify.intro')}</p>
       <Panel
         title={t('notify.rules')}
-        count={state.rules.length}
         actions={
           <button
             className="button small"
             disabled={!state.channels.length || ctx.demo}
             onClick={() => setEditing({ kind: 'rule' })}
           >
-            <Plus size={13} /> {t('notify.addRule')}
+            {t('notify.addRule')}
           </button>
         }
       >
@@ -534,14 +532,13 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
       </Panel>
       <Panel
         title={t('notify.channels')}
-        count={state.channels.length}
         actions={
           <button
             className="button small"
             disabled={ctx.demo}
             onClick={() => setEditing({ kind: 'channel' })}
           >
-            <Plus size={13} /> {t('notify.addChannel')}
+            {t('notify.addChannel')}
           </button>
         }
       >
@@ -560,7 +557,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                   </span>
                 </div>
                 <button className="button small" onClick={() => void test(channel)}>
-                  <Send size={13} /> {t('notify.test')}
+                  {t('notify.test')}
                 </button>
                 <button
                   className="icon-button"
@@ -585,7 +582,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
           editing?.kind !== 'channel' && <p className="panel-note">{t('notify.noChannels')}</p>
         )}
       </Panel>
-      <Panel title={t('notify.log')} count={state.log.length}>
+      <Panel title={t('notify.log')}>
         {state.log.length ? (
           <div className="table-wrap">
             <table className="table">

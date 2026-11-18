@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { formatMessage, t } from '../i18n';
 import type { DisplayExample } from '../types';
 import { Panel } from '../ui';
-import { Status, StatusShape } from './Status';
+import { StatusLabel, StatusShape } from './Status';
 import { shapes } from './shapes';
 import type { StatusKind } from './shapes';
 import { Time, Duration, Age } from './Time';
@@ -41,7 +41,7 @@ export function DisplayGallery({ example }: { example?: DisplayExample }) {
         </div>
         <div className="gallery-row">
           {kinds.map((kind) => (
-            <Status kind={kind} key={kind} />
+            <StatusLabel kind={kind} key={kind} />
           ))}
         </div>
       </Panel>
@@ -67,7 +67,7 @@ export function DisplayGallery({ example }: { example?: DisplayExample }) {
             <div className="gallery-row">
               <Value value={example.known} unit="GPU" />
               <Value value={example.known} unit="GPU" kind="lower" reason={missing} />
-              <Value value={example.estimate} kind="estimate" currency="USD" />
+              <Value value={example.estimate} kind="estimate" currency="USD" label />
               <Value value={null} reason={missing} />
               <Value
                 value={example.last_known}
@@ -87,7 +87,7 @@ export function DisplayGallery({ example }: { example?: DisplayExample }) {
             </div>
             <HowWorkedOut trace={example.trace} />
             <div className="gallery-row">
-              <CopyButton text={command} example />
+              <CopyButton text={command} />
             </div>
           </div>
           <div className="table-wrap">

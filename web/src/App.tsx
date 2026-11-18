@@ -1,3 +1,13 @@
+import { useStableActions } from './useStableActions';
+import {
+  collectSource,
+  finishCollections,
+  testSource,
+  setSourcePaused,
+  useSourceInFlight,
+} from './sourceActions';
+import { dismissErrorRow } from './layers/focus';
+import { CopyContext, createCopy } from './copy';
 import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
 import { useVisibleInterval } from './useVisibleInterval';
@@ -10,12 +20,18 @@ import { transitions } from './data/transitions';
 import { LocaleGate } from './app/LocaleGate';
 import { Frame } from './app/Frame';
 import { lazyView } from './app/lazyView';
-import { Status } from './ui/Status';
+import { StatusLabel } from './ui/Status';
 import { Time } from './ui/Time';
 import { Toasts } from './layers/Toasts';
 import type { Toast, ToastAction } from './layers/Toasts';
 import { hasModalLayer } from './layers/stack';
-import { openLayer, closeLayer } from './layers/routes';
+import {
+  openLayer,
+  closeLayer,
+  detailKeys,
+  detailValues,
+  formKeys as getFormKeys,
+} from './layers/routes';
 import type { Modal, Detail } from './app/Layers';
 import { Routes } from './app/Routes';
 import { Loading } from './app/LoadState';
@@ -90,8 +106,34 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     () => new URLSearchParams(window.location.search).get('demo') === 'true',
   );
   const [live] = useState(createLiveStore);
-  const { data, health, tools, nodes, error, needsToken, loading, announcement } =
-    useSyncExternalStore(live.subscribe, live.getSnapshot);
+  const {
+    data: served,
+    health,
+    tools,
+    nodes,
+    error,
+    needsToken,
+    loading,
+    announcement,
+  } = useSyncExternalStore(live.subscribe, live.getSnapshot);
+  // Example mode keeps dismissals on the page: nothing is sent, and a reload or leaving example
+  // mode resets them (they are kept only for the mode they were made in).
+  const [local, setLocal] = useState<{
+    demo: boolean;
+    muted: Record<string, Attention['muted']>;
+  }>({ demo, muted: {} });
+  const localMuted = useMemo(() => (local.demo === demo ? local.muted : {}), [local, demo]);
+  const data = useMemo(() => {
+    if (!served || !demo || !Object.keys(localMuted).length) return served;
+    const attention = (served.attention ?? []).map((item) =>
+      item.key in localMuted ? { ...item, muted: localMuted[item.key] } : item,
+    );
+    return {
+      ...served,
+      attention,
+      attention_count: attention.filter((item) => !item.muted).length,
+    };
+  }, [served, demo, localMuted]);
   const cadence = usePollCadence();
   const publish = useCallback(
     (patch: Partial<LiveSnapshot>) => {
@@ -109,7 +151,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const [sshData, setSSHData] = useState<SSHConfig | null>(null);
   const [sourcePreset, setSourcePreset] = useState<SourcePreset | undefined>();
   const params = routeParams(hash);
-  const formKeys = ['add', 'edit', 'repair', 'step', 'section', 'source'];
+  const formKeys = getFormKeys(params);
   const sourceId = params.get('repair') || params.get('source');
   const editId = hash.split('?')[0] === '#/toolbox' ? null : params.get('edit');
   const add = params.get('add');
@@ -135,7 +177,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
                 : null;
   const setModal = (next: Modal) => {
     if (!next) {
-      closeLayer(formKeys);
+      closeLayer([...formKeys, ...(params.has('source') ? ['source'] : [])]);
       return;
     }
     if (next.kind === 'ssh') setSSHData(next.data);
@@ -154,9 +196,15 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
             : next.kind === 'source'
               ? (next.source?.id ?? null)
               : null,
-        repair: next.kind === 'diagnosis' ? next.sourceId : null,
-        source: null,
-        section: next.kind === 'ssh' ? 'ssh' : null,
+        ...detailValues(),
+        repair: next.kind === 'diagnosis' && !next.reading ? next.sourceId : null,
+        source: next.kind === 'diagnosis' && next.reading ? next.sourceId : null,
+        section:
+          next.kind === 'ssh'
+            ? 'ssh'
+            : params.get('section') === 'ssh'
+              ? null
+              : params.get('section'),
         step:
           next.kind === 'source'
             ? next.source || next.preset?.driver
@@ -205,11 +253,10 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const detailId =
     hash.split('?')[0] === '#/__gallery'
       ? null
-      : params.get('job') ||
-        params.get('failure') ||
-        params.get('instance') ||
-        params.get('array') ||
-        eventId;
+      : (detailKeys
+          .filter((key) => key !== 'source')
+          .map((key) => params.get(key))
+          .find(Boolean) ?? null);
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -248,7 +295,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
         (!!next.item.end || data?.recent_failures?.some((item) => item === next.item));
       openLayer(
         {
-          event: null,
+          ...detailValues(),
           job: next?.kind === 'job' && !failure ? next.item.id : null,
           failure: next?.kind === 'job' && failure ? next.item.id : null,
           instance: next?.kind === 'instance' ? next.item.id : null,
@@ -260,7 +307,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     [data?.recent_failures],
   );
   const closeDetail = useCallback(() => {
-    closeLayer(['event', 'job', 'failure', 'instance', 'array']);
+    closeLayer([...detailKeys]);
   }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [noticeErrors, setNoticeErrors] = useState<(Toast & { at: string })[]>([]);
@@ -449,6 +496,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
           if (changed(next)) {
             dashboardToken.current = next.token;
             latestCollecting.current = next.collecting ?? [];
+            finishCollections(latestCollecting.current);
             patch.data = next;
           }
           if (!dashboardOnly) {
@@ -598,9 +646,33 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const configure = (source?: Source, preset?: SourcePreset) => {
     if (!blockedInDemo()) setModal({ kind: 'source', source, preset });
   };
+  const sourceInFlight = useSourceInFlight();
+  async function pauseSource(source: Source) {
+    if (blockedInDemo()) return;
+    try {
+      await setSourcePaused(source, source.enabled);
+      await load();
+      notify(t(source.enabled ? 'sources.paused' : 'sources.resumed'), 'ok', {
+        label: t('layer.undo'),
+        undo: true,
+        run: () => {
+          void setSourcePaused(source, !source.enabled)
+            .then(() => load())
+            .catch((reason) => notify(errorText(reason, 'error.service'), 'error'));
+        },
+      });
+    } catch (reason) {
+      notify(errorText(reason, 'error.service'), 'error');
+    }
+  }
   async function collect(source: Source) {
     try {
-      await api('/refresh', { source_id: source.id });
+      if (
+        blockedInDemo() ||
+        data?.collecting?.includes(source.id) ||
+        !(await collectSource(source))
+      )
+        return;
       followCollection([source.id]);
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
@@ -612,14 +684,10 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const addInstance = () => {
     if (!blockedInDemo()) setModal({ kind: 'instance' });
   };
-  const copy = async (text: string, message?: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      notify(message ?? t('toast.copied'));
-    } catch {
-      notify(t('toast.clipboard'), 'error');
-    }
-  };
+  const copy = useCallback<import('./copy').Copy>(
+    (text, options) => createCopy(demo, notify)(text, options),
+    [demo, notify],
+  );
   async function backup() {
     try {
       const result = await mutate<{ path: string }>('/backup', {});
@@ -641,6 +709,8 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
       announcement: { id: 0, text: '' },
     });
     const next = !demo;
+    // Leaving or entering example mode forgets dismissals made on the page.
+    setLocal({ demo: next, muted: {} });
     const url = new URL(window.location.href);
     if (next) url.searchParams.set('demo', 'true');
     else url.searchParams.delete('demo');
@@ -649,11 +719,7 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     setSSHData(null);
     setToasts([]);
     setNoticeErrors([]);
-    setRouteParams(
-      Object.fromEntries(
-        [...formKeys, 'event', 'job', 'failure', 'instance', 'array'].map((key) => [key, null]),
-      ),
-    );
+    setRouteParams(Object.fromEntries([...formKeys, ...detailKeys].map((key) => [key, null])));
     setHealthOpen(false);
     setRouteParams({ group: null, provider: null, q: null });
   };
@@ -664,7 +730,9 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     [data],
   );
   const attention = data?.attention ?? [];
-  const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
+  // A source opens as the pane beside the list (a sheet on phones), like a job.
+  const diagnose = (source: Source) =>
+    setModal({ kind: 'diagnosis', sourceId: source.id, reading: true });
   const openAttention = (item: Attention) => {
     if (item.action === 'diagnose') {
       const source = data?.sources.find((source) => source.id === item.subject.id);
@@ -676,44 +744,71 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     else if (item.action === 'toolbox') navigate('toolbox');
     else setHealthOpen(true);
   };
+  /** Dismiss (until it changes), snooze or restore an attention item. */
+  const muteAttention = async (
+    item: Attention,
+    action: 'acknowledge' | 'snooze' | 'clear',
+    until?: '1h' | 'tomorrow',
+  ) => {
+    if (demo) {
+      const at = new Date();
+      const end = new Date(at);
+      if (until === '1h') end.setHours(end.getHours() + 1);
+      else end.setHours(24, 0, 0, 0);
+      setLocal((current) => ({
+        demo: true,
+        muted: {
+          ...(current.demo ? current.muted : {}),
+          [item.key]:
+            action === 'clear'
+              ? null
+              : {
+                  state: action === 'snooze' ? 'snoozed' : 'acknowledged',
+                  at: at.toISOString(),
+                  until: action === 'snooze' ? end.toISOString() : null,
+                },
+        },
+      }));
+      return;
+    }
+    try {
+      await api(
+        `/attention/${encodeURIComponent(item.key)}`,
+        { action, until, ...(action === 'clear' ? {} : { fingerprint: item.fingerprint }) },
+        'PUT',
+      );
+    } finally {
+      await load();
+    }
+  };
   const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
 
-  const context: Omit<Ctx, 'data'> = {
-    groups,
-    demo,
-    remote,
-    serverName,
-    busy,
-    group,
+  const actions = useStableActions<import('./pages/shared').CtxActions>({
     setGroup,
-    query,
     setQuery,
-    searchRef,
-    attention,
     openAttention,
+    muteAttention,
     diagnose,
-    health,
-    locale,
-    pendingLocale,
     changeLocale,
-    plugin,
     navigate,
-    webPlugins: plugins,
-    drivers,
-    nodes,
     reload: load,
-    tools,
     updateTool,
     configure,
     collect,
+    collectSource: collect,
+    testSource: (source) => {
+      if (blockedInDemo() || data?.collecting?.includes(source.id)) return Promise.resolve();
+      return testSource(source.id);
+    },
+    pauseSource,
     addInstance,
     showSSH,
     openJob: (item) => setDetail({ kind: 'job', item }),
     openEvent: (event) => {
       setSelectedEvent({ demo, event });
-      openLayer({ event: String(event.id), job: null, failure: null, instance: null, array: null });
+      openLayer(detailValues({ event: String(event.id) }));
     },
     openArray: (item) => setDetail({ kind: 'array', item }),
     openInstance: (item) => setDetail({ kind: 'instance', item }),
@@ -721,89 +816,115 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     notify,
     backup,
     toggleDemo,
+  });
+  const context: Omit<Ctx, 'data'> = {
+    ...actions,
+    actions,
+    groups,
+    demo,
+    remote,
+    serverName,
+    busy,
+    group,
+    query,
+    searchRef,
+    attention,
+    health,
+    locale,
+    pendingLocale,
+    plugin,
+    webPlugins: plugins,
+    drivers,
+    nodes,
+    tools,
+    sourceInFlight,
   };
   const ctx: Ctx | null = data ? { ...context, data } : null;
 
   return (
-    <div className="app-shell">
-      <Frame
-        ctx={context}
-        data={data}
-        page={page}
-        sidebarOpen={sidebarOpen}
-        setSidebarOpen={setSidebarOpen}
-        healthOpen={healthOpen}
-        setHealthOpen={setHealthOpen}
-        healthState={healthState}
-        error={error}
-        needsToken={needsToken}
-        refreshing={refreshing}
-        refresh={refresh}
-      >
-        <main className={`content page-${page}`} aria-busy={loading || refreshing}>
-          {noticeErrors.length > 0 && (
-            <section className="layer-errors" aria-label={t('layer.errors')}>
-              {noticeErrors.map((item) => (
-                <div key={item.id}>
-                  <Status kind="error" label={item.text} />
-                  <Time value={item.at} />
-                  <button
-                    className="button"
-                    onClick={() =>
-                      setNoticeErrors((items) => items.filter((row) => row.id !== item.id))
-                    }
-                  >
-                    {t('common.dismiss')}
-                  </button>
-                </div>
-              ))}
-            </section>
-          )}
-          <PageBoundary page={page}>
-            {needsToken ? (
-              <TokenGate
-                where={where({ remote, serverName })}
-                rejected={sessionRejected()}
-                onSave={async (value) => {
-                  const session = await api<{ token: string }>('/session', { token: value });
-                  setToken(session.token);
-                  live.update({ loading: true });
-                  await load();
-                }}
-              />
-            ) : activePluginPage ? (
-              activePluginPage.render(plugin)
-            ) : !ctx ? (
-              loading && <Loading />
-            ) : (
-              <Routes page={page} ctx={ctx} compat={params.has('compat')} />
+    <CopyContext value={copy}>
+      <div className="app-shell">
+        <Frame
+          ctx={context}
+          data={data}
+          page={page}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          healthOpen={healthOpen}
+          setHealthOpen={setHealthOpen}
+          healthState={healthState}
+          error={error}
+          needsToken={needsToken}
+          refreshing={refreshing}
+          refresh={refresh}
+        >
+          <main className={`content page-${page}`} aria-busy={loading || refreshing}>
+            {noticeErrors.length > 0 && (
+              <section className="layer-errors" aria-label={t('layer.errors')}>
+                {noticeErrors.map((item) => (
+                  <div key={item.id}>
+                    <StatusLabel kind="error" label={item.text} />
+                    <Time value={item.at} />
+                    <button
+                      className="button"
+                      onClick={(event) =>
+                        dismissErrorRow(event.currentTarget, () =>
+                          setNoticeErrors((items) => items.filter((row) => row.id !== item.id)),
+                        )
+                      }
+                    >
+                      {t('common.dismiss')}
+                    </button>
+                  </div>
+                ))}
+              </section>
             )}
-          </PageBoundary>
-        </main>
-      </Frame>
-      <Toasts items={toasts} dismiss={dismissToast} announcement={announcement} />
-      {(modal || detailId || healthOpen) && (
-        <Suspense fallback={null}>
-          <Layers
-            ctx={{ ...context, data }}
-            modal={modal}
-            setModal={setModal}
-            detail={detail}
-            detailId={detailId}
-            closeDetail={closeDetail}
-            eventId={eventId}
-            eventLoad={eventLoad}
-            healthOpen={healthOpen}
-            setHealthOpen={setHealthOpen}
-            healthState={healthState}
-            needsToken={needsToken}
-            refreshing={refreshing}
-            refresh={refresh}
-            mutate={mutate}
-            followCollection={followCollection}
-          />
-        </Suspense>
-      )}
-    </div>
+            <PageBoundary page={page}>
+              {needsToken ? (
+                <TokenGate
+                  where={where({ remote, serverName })}
+                  rejected={sessionRejected()}
+                  onSave={async (value) => {
+                    const session = await api<{ token: string }>('/session', { token: value });
+                    setToken(session.token);
+                    live.update({ loading: true });
+                    await load();
+                  }}
+                />
+              ) : activePluginPage ? (
+                activePluginPage.render(plugin)
+              ) : !ctx ? (
+                loading && <Loading />
+              ) : (
+                <Routes page={page} ctx={ctx} compat={params.has('compat')} />
+              )}
+            </PageBoundary>
+          </main>
+        </Frame>
+        <Toasts items={toasts} dismiss={dismissToast} announcement={announcement} />
+        {(modal || detailId || healthOpen) && (
+          <Suspense fallback={null}>
+            <Layers
+              ctx={{ ...context, data }}
+              modal={modal}
+              setModal={setModal}
+              detail={detail}
+              detailId={detailId}
+              closeDetail={closeDetail}
+              eventId={eventId}
+              eventLoad={eventLoad}
+              healthOpen={healthOpen}
+              setHealthOpen={setHealthOpen}
+              healthState={healthState}
+              needsToken={needsToken}
+              refreshing={refreshing}
+              refresh={refresh}
+              mutate={mutate}
+              followCollection={followCollection}
+            />
+          </Suspense>
+        )}
+      </div>
+    </CopyContext>
   );
 }

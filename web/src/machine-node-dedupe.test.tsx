@@ -40,7 +40,7 @@ function element(html: string) {
 }
 
 describe.each(['en', 'zh-CN'] as const)('machine/node identity in %s', (locale) => {
-  it('explains the scheduler count on the machine row and keeps hardware checks enabled', () => {
+  it('keeps the scheduler-node note in the drawer, not the machine row, and hardware checks enabled', () => {
     setLocale(locale);
     const { item, ctx } = fixture();
     const note = t('instance.sameNode', { node: 'a-gpu-01', cluster: 'Cluster A' });
@@ -48,7 +48,11 @@ describe.each(['en', 'zh-CN'] as const)('machine/node identity in %s', (locale) 
     const row = [...page.querySelectorAll('tbody tr')].find((r) =>
       r.textContent?.includes(item.name),
     )!;
-    expect(row.textContent).toContain(note);
+    // The row stays one line and opens the drawer, which gives the full explanation.
+    expect(row.getAttribute('data-detail-key')).toBe('instance');
+    expect(row.getAttribute('data-detail-id')).toBe(item.id);
+    expect(row.textContent).not.toContain('On cluster node a-gpu-01');
+    expect(row.textContent).not.toContain(note);
     const detail = element(
       renderToStaticMarkup(
         <InstanceDetail
@@ -75,6 +79,11 @@ describe.each(['en', 'zh-CN'] as const)('machine/node identity in %s', (locale) 
     expect(machineOptions(data, { gpus: 1, gpuType: '', hours: null })).toHaveLength(1);
     machine.ssh_endpoint = { host: '192.0.2.31', port: 22 };
     machine.host_name = 'a-gpu-01';
+    // Addresses only match within one route: through the campus jump host, the same IP may
+    // be a different machine, so no link forms while the Lab server keeps its route.
+    const routed = serverDashboard(data);
+    expect(routed.instances.find((i) => i.id === machine.id)!.same_node).toBeUndefined();
+    data.sources.find((s) => s.id === machine.source_id)!.node = '';
     const linked = serverDashboard(data);
     const item = linked.instances.find((i) => i.id === machine.id)!;
     expect(item.same_node?.name).toBe('a-gpu-01');

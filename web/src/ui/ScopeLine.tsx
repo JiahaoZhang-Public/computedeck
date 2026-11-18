@@ -1,4 +1,7 @@
 import { formatMessage, t, type Message } from '../i18n';
+import type { ReactNode } from 'react';
+import { StatusLabel } from './Status';
+import type { StatusKind } from './shapes';
 import { Time } from './Time';
 import './display.css';
 
@@ -13,16 +16,30 @@ export function ScopeLine({
   groups,
   asOf,
   estimate = false,
+  descriptionId,
+  timeLabel = t('display.asOf'),
+  children,
 }: {
   scope: string;
-  groups: string;
-  asOf: string | null;
+  groups?: string;
+  asOf?: string | null;
   estimate?: boolean;
+  descriptionId?: string;
+  timeLabel?: string;
+  children?: ReactNode;
 }) {
   return (
     <p className="scope-line">
-      <strong>{scope}</strong> · {groups} · {t('display.asOf')} <Time value={asOf} />
+      <strong>{scope}</strong>
+      {groups && <> · {groups}</>}
+      {asOf !== undefined && (
+        <>
+          {' '}
+          · {timeLabel} <Time value={asOf} descriptionId={descriptionId} />
+        </>
+      )}
       {estimate && <> · {t('display.estimate')}</>}
+      {children && <> · {children}</>}
     </p>
   );
 }
@@ -54,5 +71,22 @@ export function HowWorkedOut({ trace }: { trace: RuleTrace }) {
         </dd>
       </dl>
     </details>
+  );
+}
+
+export function CoverageLine({
+  excluded,
+}: {
+  excluded: { name: string; kind: StatusKind; reason: string }[];
+}) {
+  if (!excluded.length) return null;
+  return (
+    <ul className="scope-line">
+      {excluded.map(({ name, kind, reason }) => (
+        <li key={name}>
+          <StatusLabel kind={kind} label={name} reason={reason} />
+        </li>
+      ))}
+    </ul>
   );
 }

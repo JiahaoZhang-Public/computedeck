@@ -48,7 +48,7 @@ const system = Object.fromEntries(
     name,
     name.startsWith('bg-') || name.endsWith('-bg') || name.startsWith('id-tint-')
       ? 'Canvas'
-      : name === 'fg-on-ink'
+      : name === 'fg-on-ink' || name === 'fg-on-accent'
         ? 'Canvas'
         : name === 'grid-others'
           ? 'GrayText'
@@ -57,9 +57,14 @@ const system = Object.fromEntries(
             : 'CanvasText',
   ]),
 );
+// The user's system palette decides under forced colours, not the app's theme choice;
+// otherwise engines that resolve system colours per color-scheme flip them with the theme.
 css += `@media (forced-colors: active) {\n${block(
   ':root, :root:not([data-theme="light"]), :root[data-theme="light"], :root[data-theme="dark"]',
-  Object.entries(system).map(([name, value]) => `  --${name}: ${value};`),
+  [
+    '  color-scheme: light dark;',
+    ...Object.entries(system).map(([name, value]) => `  --${name}: ${value};`),
+  ],
 )}}\n`;
 // Renaming both the declaration function and the feature query exercises the real fallback.
 const fallback = css.replaceAll('light-dark(', 'unsupported-light-dark(');

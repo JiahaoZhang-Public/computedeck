@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect, ready, demoNow, fontGuard } from './fixtures';
+import { wcagTags, test, expect, ready, demoNow, fontGuard } from './fixtures';
 import { checkFocus, focusObstructions } from './checks';
 import en from '../src/locales/en';
 import zh from '../src/locales/zh-CN';
@@ -38,7 +38,7 @@ async function audit(page: Page, layer: Locator) {
   await layer.evaluate((node) => node.setAttribute('data-layer-audit', ''));
   const result = await new AxeBuilder({ page })
     .include('[data-layer-audit]')
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+    .withTags(wcagTags)
     .analyze();
   expect(result.violations).toEqual([]);
   await layer.evaluate((node) => node.removeAttribute('data-layer-audit'));
@@ -241,17 +241,30 @@ test('C18 three toasts: modal host, Undo pause, persistent error and Escape with
     animations: 'disabled',
   });
   const undo = stack.getByRole('button', { name: w.undo, exact: true });
+  const safe = form.getByRole('button', { name: w.cancel, exact: true });
+  await safe.focus();
   await undo.focus();
+  expect(
+    await undo.evaluate(
+      (node) =>
+        getComputedStyle(node).outlineColor !==
+        getComputedStyle(node.closest('.toast')!).backgroundColor,
+    ),
+  ).toBe(true);
+  await undo.hover();
   await page.clock.runFor(11000);
   await expect(undo).toBeVisible();
   await expect(stack.locator('.toast.error')).toHaveCount(1);
+  // axe waits on timers, so it runs once the clock resumes; the pointer still hovers Undo.
   await page.clock.resume();
   await audit(page, stack);
 
+  // audit() walks focus through every control; return to Undo, entered from Cancel.
+  await safe.focus();
+  await undo.focus();
   await page.keyboard.press('Meta+z');
   await expect(undo).toHaveCount(0);
-  const safe = form.getByRole('button', { name: w.cancel, exact: true });
-  await safe.focus();
+  await expect(safe).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(stack.locator('.toast')).toHaveCount(0);
   await expect(safe).toBeFocused();
@@ -290,7 +303,8 @@ for (const address of addresses) {
   test(`documented layer address: ${address.route}`, async ({ page, locale, viewport }) => {
     const labels = locale === 'zh-CN' ? zh : en;
     const headings = {
-      diagnosis: labels['attention.diagnosis'].replace('{name}', 'Cluster A'),
+      // A source's pane is titled by the source's own name.
+      diagnosis: 'Cluster A',
       addSource: labels['source.add'],
       sshForm: locale === 'zh-CN' ? 'GPU 机器（SSH）' : 'GPU machine (SSH)',
       addInstance: labels['instance.form.add'],

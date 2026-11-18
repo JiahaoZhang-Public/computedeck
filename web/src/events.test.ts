@@ -26,16 +26,29 @@ describe('event wording', () => {
     expect(eventText(event('job.started', { job: { name: 'train', node: 'g1' } }))).toBe(
       'train started on g1',
     );
-    expect(
-      eventText(
-        event('job.failed', { job: { name: 'train', state: 'OUT_OF_MEMORY', exit_code: '0:125' } }),
-      ),
-    ).toBe(`train failed (${t('status.OUT_OF_MEMORY')}, exit code 0:125)`);
-    expect(eventText(event('source.failed', { error: { code: 'timeout' } }))).toContain(
-      'Cluster A',
+    // A row names what happened; the scheduler state with exit code is in the event's pane.
+    const failed = event('job.failed', {
+      job: { name: 'train', state: 'OUT_OF_MEMORY', exit_code: '0:125' },
+    });
+    expect(eventText(failed)).toBe(`train: ${t('status.OUT_OF_MEMORY')}`);
+    expect(eventText(failed)).not.toContain('0:125');
+    expect(eventText(failed, true)).toBe(
+      `train failed (${t('status.OUT_OF_MEMORY')}, exit code 0:125)`,
     );
+    // The collection error stays out of the row and is spelled out in the pane.
+    const sourceFailed = event('source.failed', { error: { code: 'timeout' } });
+    expect(eventText(sourceFailed)).toBe('Cluster A: collection failed');
+    expect(eventText(sourceFailed)).not.toContain(t('msg.timeout'));
+    expect(eventText(sourceFailed, true)).toBe(
+      `Cluster A could not be collected: ${t('msg.timeout')}`,
+    );
+    expect(eventText(event('source.recovered', {}))).toBe('Cluster A: collected again');
+    expect(eventText(event('source.recovered', {}), true)).toBe('Cluster A: collected again');
     setLocale('zh-CN');
-    expect(eventText(event('source.recovered', {}))).toBe('Cluster A 已恢复采集');
+    expect(eventText(sourceFailed)).toBe('Cluster A：采集失败');
+    expect(eventText(sourceFailed, true)).toBe('Cluster A 采集失败：超时');
+    expect(eventText(failed)).toBe(`train：${t('status.OUT_OF_MEMORY')}`);
+    expect(eventText(event('source.recovered', {}))).toBe('Cluster A：已恢复采集');
   });
   it('colours failures red and starts green', () => {
     expect(eventTone(event('job.failed', {}))).toBe('red');
@@ -60,14 +73,26 @@ describe('reconciled job endings', () => {
             : 'red',
       );
     }
-    expect(
-      eventText(
-        event('job.finished', { outcome: 'unknown', outcome_reason: 'outcomes_unavailable' }),
-      ),
-    ).toContain(t('event.outcomesUnavailable'));
-    expect(eventText(event('job.finished', { outcome: 'unknown' }))).toContain(
-      t('event.outcomeNotReported'),
+    // Why the outcome is unknown is a detail: the row ends at the outcome, the pane explains.
+    const unavailable = event('job.finished', {
+      outcome: 'unknown',
+      outcome_reason: 'outcomes_unavailable',
+      job: { name: 'train' },
+    });
+    expect(eventText(unavailable)).toBe(
+      t('event.jobFinished', { job: 'train', outcome: t('event.outcome.unknown') }),
     );
+    expect(eventText(unavailable, true)).toBe(
+      `${eventText(unavailable)} · ${t('event.outcomesUnavailable')}`,
+    );
+    const notReported = event('job.finished', { outcome: 'unknown', job: { name: 'train' } });
+    expect(eventText(notReported)).not.toContain(t('event.outcomeNotReported'));
+    expect(eventText(notReported, true)).toBe(
+      `${eventText(notReported)} · ${t('event.outcomeNotReported')}`,
+    );
+    // A known outcome reads the same in the row and the pane.
+    const done = event('job.finished', { outcome: 'completed', job: { name: 'train' } });
+    expect(eventText(done, true)).toBe(eventText(done));
   });
   it.each(['en', 'zh-CN'] as const)(
     'labels unknown start times as observations in %s',
@@ -368,8 +393,10 @@ describe('observation gaps', () => {
       unobserved_to: to,
       failures_checked_from: checked,
     });
-    const text = eventText(gap);
-    expect(text).toBe(
+    // The row says what happened; the period and the unchecked window are in the pane.
+    const short = language === 'en' ? 'Cluster A: not observed' : 'Cluster A：未被观测';
+    expect(eventText(gap)).toBe(short);
+    expect(eventText(gap, true)).toBe(
       language === 'en'
         ? `Cluster A was not observed from ${dateTime(from)} to ${dateTime(to)}. Failures before ${dateTime(checked)} could not be checked.`
         : `Cluster A 在 ${dateTime(from)} 至 ${dateTime(to)} 期间未被观测。无法检查 ${dateTime(checked)} 之前的失败记录。`,
@@ -378,7 +405,8 @@ describe('observation gaps', () => {
     // Unknown history, or a warning shortly before the history window is exceeded.
     for (const bound of [null, from, '2026-01-01T09:20:00Z']) {
       const row = { ...gap, data: { ...gap.data, failures_checked_from: bound } };
-      expect(eventText(row)).toBe(
+      expect(eventText(row)).toBe(short);
+      expect(eventText(row, true)).toBe(
         language === 'en'
           ? `Cluster A was not observed from ${dateTime(from)} to ${dateTime(to)}.`
           : `Cluster A 在 ${dateTime(from)} 至 ${dateTime(to)} 期间未被观测。`,
@@ -386,6 +414,9 @@ describe('observation gaps', () => {
     }
     const service = event('service.gap', { from, to });
     expect(eventText(service)).toBe(
+      language === 'en' ? 'ComputeDeck: not running' : 'ComputeDeck：未运行',
+    );
+    expect(eventText(service, true)).toBe(
       language === 'en'
         ? `ComputeDeck was not running or the computer was asleep from ${dateTime(from)} to ${dateTime(to)}.`
         : `在 ${dateTime(from)} 至 ${dateTime(to)} 期间，ComputeDeck 未运行或电脑处于睡眠状态。`,
@@ -443,9 +474,12 @@ it.each(['en', 'zh-CN'] as const)(
       const row = event(type, {});
       expect(eventTimeText(row)).toBe(t('event.observedShort', { time: dateTime(row.at) }));
     }
-    expect(
-      eventText(event('job.finished', { outcome: 'unknown', outcome_reason: 'outside_lookback' })),
-    ).toContain(t('event.outsideLookback'));
+    const outside = event('job.finished', {
+      outcome: 'unknown',
+      outcome_reason: 'outside_lookback',
+    });
+    expect(eventText(outside)).not.toContain(t('event.outsideLookback'));
+    expect(eventText(outside, true)).toContain(t('event.outsideLookback'));
     setLocale('en');
   },
 );

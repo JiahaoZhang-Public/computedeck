@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, ready } from './fixtures';
+import { wcagTags, test, expect, ready } from './fixtures';
 import { withScreenshotViewport, settledScreenshot } from './screenshots';
 
 const contexts = [
@@ -32,9 +32,7 @@ for (const route of ['__gallery', 'overview']) {
       const normal = await settledScreenshot(freshPage, testInfo, 'normal');
       expect(actual.equals(normal), 'Fallback and normal builds must look identical').toBe(true);
       const fingerprints = async (target: typeof page) => {
-        const axe = await new AxeBuilder({ page: target })
-          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-          .analyze();
+        const axe = await new AxeBuilder({ page: target }).withTags(wcagTags).analyze();
         return axe.violations
           .flatMap((item) => item.nodes.map((node) => ({ rule: item.id, target: node.target })))
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));

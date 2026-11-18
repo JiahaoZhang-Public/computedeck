@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, ready } from './fixtures';
+import { wcagTags, test, expect, ready } from './fixtures';
 import { withScreenshotViewport } from './screenshots';
 
 for (const forcedColors of ['none', 'active'] as const) {
@@ -63,8 +63,11 @@ for (const forcedColors of ['none', 'active'] as const) {
     await expect(chart.locator('[data-lower-bound=false][stroke-dasharray]')).toHaveCount(0);
     expect(await chart.locator('.bucket-gap').count()).toBeGreaterThan(0);
     expect(await chart.locator('[data-lower-bound=true]').count()).toBeGreaterThan(0);
+    // The key list is invisible until the plot has keyboard focus; it always describes it.
+    if (!hasTouch) await expect(chart.locator('.chart-keys')).toHaveCSS('opacity', '0');
     await plot.focus();
     await plot.press('Home');
+    if (!hasTouch) await expect(chart.locator('.chart-keys')).toHaveCSS('opacity', '1');
     await plot.press('Shift+ArrowRight');
     await plot.press('Enter');
     await expect(chart.locator('.chart-readout')).toHaveAttribute('data-pinned', 'true');
@@ -82,10 +85,7 @@ for (const forcedColors of ['none', 'active'] as const) {
     await withScreenshotViewport(page, testInfo, (options) =>
       expect(page).toHaveScreenshot(`chart-${forcedColors}.png`, options),
     );
-    const audit = await new AxeBuilder({ page })
-      .include('.chart-kit')
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-      .analyze();
+    const audit = await new AxeBuilder({ page }).include('.chart-kit').withTags(wcagTags).analyze();
     expect(audit.violations).toEqual([]);
     await chart.getByRole('button', { name: locale === 'en' ? 'Table view' : '表格视图' }).click();
     await expect(chart.locator('tbody tr')).toHaveCount(24);
@@ -95,7 +95,7 @@ for (const forcedColors of ['none', 'active'] as const) {
     await expect(chart.locator('.chart-pages')).toContainText('2 /');
     const tableAudit = await new AxeBuilder({ page })
       .include('.chart-kit')
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .withTags(wcagTags)
       .analyze();
     expect(tableAudit.violations).toEqual([]);
   });

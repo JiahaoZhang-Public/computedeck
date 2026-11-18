@@ -1,5 +1,4 @@
 import { setLocale, t } from './i18n';
-import { capacityText } from './pages/summary';
 import { ClustersPage } from './pages/Clusters';
 import { PlanPage } from './pages/Plan';
 import { UsagePage } from './pages/Usage';
@@ -89,11 +88,26 @@ const ctx = (input: Dashboard) =>
     openJob: () => {},
     configure: () => {},
   }) as unknown as Ctx;
+/** The cluster card's hero figure: allocated over usable GPUs, in the card's tone. */
+const hero = (allocated: number | string, usable: number | string, tone = '') =>
+  `<strong class="cluster-hero ${tone}">${allocated} / ${usable}</strong>`;
+/** The accessible name of the first cluster card's capacity bar, which holds its breakdown. */
+const capacityBar = (html: string) =>
+  html.match(/class="capacity-bar(?: unknown)?" role="img" aria-label="([^"]*)"/)?.[1] ?? '';
+/** Markup without names and tooltips: what a sighted reader sees without hovering. */
+const visible = (html: string) => html.replace(/\s(?:aria-label|title)="[^"]*"/g, '');
+/** The Overview row's allocation meter text ("allocated / usable"). */
+const meterText = (text: string) => `<span class="meter-text">${text}</span>`;
 /** "Label=count" for each job state tab. */
 const tabs = (html: string) =>
   [...html.matchAll(/role="tab"[^>]*>([^<]*)<span>([^<]*)<\/span>/g)].map(
     (match) => `${match[1]}=${match[2]}`,
   );
+/** The Jobs page's result count ("≥ 36 jobs"), as read; "All" has no tab count of its own. */
+const result = (html: string) =>
+  /<span class="result-count">(.*?)<\/span>(?=<div class="toolbar-end"|<\/div>)/
+    .exec(html)?.[1]
+    .replace(/<[^>]+>/g, '');
 
 function overviewGroupsTable(html: string) {
   const heading = `<h2>${t('overview.sources').replaceAll('&', '&amp;')}</h2>`;
@@ -121,12 +135,16 @@ describe('jobs of a cluster whose collection is not current', () => {
       jobs: [job('1'), job('2'), job('3', { state: 'PENDING' })],
     });
     const html = renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
-    expect(tabs(html).slice(0, 3)).toEqual(['All=—', 'Running=—', 'Queued=—']);
+    expect(tabs(html).slice(0, 2)).toEqual(['Running=—', 'Queued=—']);
+    expect(result(html)).toBe('— jobs');
+    // The partial count is its own trigger, not a separate icon.
+    expect(html).toMatch(/<span class="result-count"><button[^>]*class="partial"[^>]*>—<\/button>/);
     expect(html).not.toMatch(/No jobs/);
     expect(html.match(/class="clickable stale-row"/g)).toHaveLength(3);
     expect(html).toContain('last updated 1 h ago');
-    expect(html).toContain('No current job list from A · alice; their jobs are unknown, not zero.');
-    expect(html).toContain('Jobs tagged &quot;last updated&quot;');
+    // One marker says the jobs are unknown; its list names the login (see quiet-markers.test).
+    expect(html).toContain(t('jobs.missing.count', { count: 1 }));
+    expect(html).toContain('aria-haspopup="dialog"');
   });
 
   it('says the jobs were not collected instead of "No jobs"', () => {
@@ -147,7 +165,8 @@ describe('jobs of a cluster whose collection is not current', () => {
       ],
     });
     const html = renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
-    expect(tabs(html).slice(0, 3)).toEqual(['All=≥ 2', 'Running=≥ 2', 'Queued=—']);
+    expect(tabs(html).slice(0, 2)).toEqual(['Running=≥ 2', 'Queued=—']);
+    expect(result(html)).toBe('≥ 2 jobs');
     // The current jobs come first; the stale one last.
     expect(html.indexOf('train-b1')).toBeLessThan(html.indexOf('train-1'));
     expect(html.match(/stale-row/g)).toHaveLength(1);
@@ -157,14 +176,18 @@ describe('jobs of a cluster whose collection is not current', () => {
     const html = renderToStaticMarkup(
       <JobsPage ctx={ctx(dash({ jobs: [job('1'), job('2', { state: 'PENDING' })] }))} />,
     );
-    expect(tabs(html).slice(0, 3)).toEqual(['All=2', 'Running=1', 'Queued=1']);
+    expect(tabs(html).slice(0, 2)).toEqual(['Running=1', 'Queued=1']);
+    // An exact count is plain text.
+    expect(result(html)).toBe('2 jobs');
+    expect(html).not.toMatch(/<span class="result-count"><button/);
     expect(html).not.toContain('stale-row');
     expect(html).not.toContain('No current job list');
   });
 
   it('does not tell a collected cluster without jobs to connect a cluster', () => {
     const html = renderToStaticMarkup(<JobsPage ctx={ctx(dash({}))} />);
-    expect(tabs(html).slice(0, 3)).toEqual(['All=0', 'Running=0', 'Queued=0']);
+    expect(tabs(html).slice(0, 2)).toEqual(['Running=0', 'Queued=0']);
+    expect(result(html)).toBe('0 jobs');
     expect(html).toContain('No jobs');
     expect(html).not.toContain('Connect a cluster');
   });
@@ -186,9 +209,12 @@ describe('jobs of a cluster whose collection is not current', () => {
     const html = renderToStaticMarkup(
       <OverviewPage ctx={ctx(dash({ sources: [failing], jobs: [job('1')] }))} />,
     );
-    expect(html).toMatch(/Current jobs<span class="count">—<\/span>/);
+    // The panel's partial count is the trigger for whose jobs are missing.
+    expect(html).toMatch(
+      /Current jobs<span class="count"><button[^>]*class="partial"[^>]*>—<\/button><\/span>/,
+    );
     expect(html).toContain('stale-row');
-    expect(html).toContain('No current job list from A · alice');
+    expect(html).toContain(t('jobs.missing.count', { count: 1 }));
   });
 });
 
@@ -271,7 +297,9 @@ describe('the last SSH check of a machine', () => {
     const page = renderToStaticMarkup(
       <CloudPage ctx={ctx(dash({ sources: [], instances: [machine] }))} />,
     );
-    expect(page).toContain('checked 2 min ago');
+    // The row keeps the status; when it was checked lives in the drawer.
+    expect(page).toContain('Reachable');
+    expect(page).not.toContain('checked 2 min ago');
   });
 
   it('says why the GPUs in use are unknown instead of showing 0', () => {
@@ -292,13 +320,15 @@ describe('the last SSH check of a machine', () => {
 
 afterEach(() => setLocale('en'));
 describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
-  it('keeps the empty attention panel immediately before current jobs', () => {
+  it('keeps the quiet attention line immediately before current jobs', () => {
     setLocale(locale);
     const html = renderToStaticMarkup(<OverviewPage ctx={ctx(dash({ jobs: [job('1')] }))} />);
     expect(html).toContain('id="attention"');
+    // Nothing active: one sentence, no heading of its own, then the jobs panel.
     expect(html).toContain(
-      `<p class="panel-note">${t('overview.attention.none')}</p></section><section class="panel "><header class="panel-header"><h2>${t('overview.jobs')}`,
+      `<section class="attention-quiet" id="attention" tabindex="-1"><p>${t('overview.attention.none')}</p></section><section class="panel "><header class="panel-header"><h2>${t('overview.jobs')}`,
     );
+    expect(html).not.toContain(`<h2>${t('overview.attention')}`);
   });
 
   it.each([false, true])('puts current information before history (example mode: %s)', (demo) => {
@@ -341,19 +371,22 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
   it('shows a healthy resting cluster without an outage or double-counted GPUs', () => {
     setLocale(locale);
     const context = ctx(clusterData(['IDLE+CLOUD+POWERED_DOWN', 'IDLE+POWERING_UP']));
-    const capacity = capacityText(context.data.summary.nodes, 'available');
-    expect(capacity.outage).toBe(false);
-    expect(capacity.tone).toBe('');
-    expect(capacity.detail).toBe(
-      `${t('summary.onDemand', { count: 16 })} · ${t('summary.capacityTotal', { total: 16 })}`,
-    );
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={context} />),
-      renderToStaticMarkup(<ClustersPage ctx={context} />),
-      renderToStaticMarkup(<PlanPage ctx={context} />),
-    ]) {
-      expect(html).toContain(t('summary.onDemand', { count: 16 }));
-      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 16, total: 16 }));
+    // The capacity bar names on-demand GPUs apart from free and unavailable ones.
+    const bar = renderToStaticMarkup(<ClustersPage ctx={context} />).match(
+      /class="capacity-bar" role="img" aria-label="([^"]*)"/,
+    )?.[1];
+    expect(bar).toContain(t('summary.onDemand', { count: 16 }));
+    expect(bar).toContain(t('clusters.bar.unavailable', { count: 0 }));
+    // Overview shows the allocation only; the breakdown is on the cluster card and the plan.
+    const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+    expect(overview).not.toContain('16 unavailable · 16 total');
+    expect(overview).not.toContain(t('plan.verdict.unavailable'));
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
+    expect(clusters).toContain(t('summary.onDemand', { count: 16 }));
+    expect(plan).toContain(t('plan.why.onDemand', { count: 16 }));
+    for (const html of [clusters, plan]) {
+      expect(html).not.toContain('16 unavailable · 16 total');
       expect(html).not.toContain(t('plan.verdict.unavailable'));
     }
   });
@@ -361,18 +394,24 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
   it('labels on-demand GPUs separately from free capacity', () => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', 'IDLE+CLOUD+POWERED_DOWN', 'FUTURE', 'ERROR']));
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={context} />),
-      renderToStaticMarkup(<ClustersPage ctx={context} />),
-      renderToStaticMarkup(<PlanPage ctx={context} />),
-    ]) {
-      expect(html).toContain(t('summary.onDemand', { count: 8 }));
+    expect(renderToStaticMarkup(<OverviewPage ctx={context} />)).not.toContain(
+      t('summary.unknownNodes', { count: 2 }),
+    );
+    const clustersHtml = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
+    expect(clustersHtml).toContain(t('summary.onDemand', { count: 8 }));
+    expect(plan).toContain(t('plan.why.onDemand', { count: 8 }));
+    for (const html of [clustersHtml, plan])
       expect(html).not.toContain(t('summary.unknownNodes', { count: 2 }));
-    }
     const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
-    expect(clusters).toContain(t('clusters.onDemand'));
-    expect(clusters).toContain('IDLE+\u200bCLOUD+\u200bPOWERED_DOWN');
-    expect(clusters).toContain(t('summary.allocation', { allocated: 2, usable: 8 }));
+    // The tag translates the node state; the scheduler's own word stays one hover away.
+    expect(clusters).toContain(`title="IDLE+CLOUD+POWERED_DOWN">${t('clusters.onDemand')}</span>`);
+    expect(clusters).toContain(hero(2, 8));
+    // The bar's name counts allocated, free and on-demand GPUs apart.
+    const bar = capacityBar(clusters);
+    expect(bar).toContain(t('clusters.bar.allocated', { count: 2 }));
+    expect(bar).toContain(t('clusters.bar.free', { count: 6 }));
+    expect(bar).toContain(t('summary.onDemand', { count: 8 }));
   });
 
   it.each(['ALLOCATED+CLOUD+POWERING_UP', 'MIXED+POWER_DOWN'])(
@@ -385,12 +424,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
       expect(html).not.toContain(t('clusters.onDemand'));
       expect(html).toContain(state.replaceAll('+', '+\u200b'));
-      expect(html).toContain(
-        t('summary.allocation', {
-          allocated: data.nodes[0].gpu_allocated + 2,
-          usable: 16,
-        }),
-      );
+      expect(html).toContain(hero(data.nodes[0].gpu_allocated! + 2, 16));
     },
   );
 
@@ -398,8 +432,9 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     setLocale(locale);
     const data = clusterData(['FUTURE']);
     const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
-    expect(html).toContain(`<span class="tag gray">${t('clusters.future')}</span>`);
-    expect(html).toContain('<small class="sub muted">FUTURE</small>');
+    // The raw scheduler state is the tag's tooltip, not a second line.
+    expect(html).toContain(`<span class="tag gray" title="FUTURE">${t('clusters.future')}</span>`);
+    expect(html).not.toContain('<small class="sub muted">');
   });
 
   it('explains why an idle Slurm node without a partition is unavailable', () => {
@@ -407,8 +442,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     const data = clusterData(['IDLE']);
     data.nodes[0].partitions = [];
     const html = renderToStaticMarkup(<ClustersPage ctx={ctx(data)} />);
-    expect(html).toContain(t('clusters.noPartition'));
-    expect(html).toContain('<small class="sub muted">IDLE</small>');
+    expect(html).toContain(`title="IDLE">${t('clusters.noPartition')}</span>`);
   });
 
   it('names the unmeasured machine and uses singular wording for one excluded machine', () => {
@@ -421,9 +455,13 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     );
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
     expect(overview).toContain('≥ 27');
-    expect(overview).toContain('build-box');
-    expect(overview).toContain(t('msg.summary_not_probed_yet'));
-    expect(overview).toContain(t('summary.unmonitored.one'));
+    // One marker counts the unmeasured machine and the unmonitored one; its list names them.
+    expect(overview).toContain(
+      t('unmeasured.count', {
+        count: context.data.summary.unmeasured.length + context.data.summary.unmonitored,
+      }),
+    );
+    expect(overview).not.toContain(t('msg.summary_not_probed_yet'));
     expect(t('summary.unmonitored', { count: 1 })).toBe(t('summary.unmonitored.one'));
     expect(t('summary.unmonitored', { count: 2 })).not.toBe(t('summary.unmonitored.one'));
     if (locale === 'en') expect(overview).not.toContain('1 machines');
@@ -431,20 +469,21 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
   it('shows the same all-down capacity on Overview, Clusters and Where to run', () => {
     setLocale(locale);
     const context = ctx(clusterData(Array(70).fill('down+not_responding'), 'unavailable'));
-    const text = t('summary.capacity', { usable: 0, unavailable: 560 });
     const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
     const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
     const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
-    for (const html of [overview, clusters, plan]) {
-      expect(html).toContain(text);
-      expect(html).not.toContain('0 / 560');
-    }
-    expect(overview).toContain(`<span class="red-text">${text}</span>`);
-    expect(clusters).toContain(`<strong class="red-text">${text}</strong>`);
+    // No page reads the outage as 0 of 560 usable GPUs.
+    for (const html of [overview, clusters, plan]) expect(html).not.toContain('0 / 560');
+    // All three agree: no usable GPUs, in the outage tone; 560 are unavailable.
     const groups = overviewGroupsTable(overview);
     expect(groups).toContain('<strong>A</strong>');
-    expect(groups).not.toContain('meter-track');
+    expect(groups).toContain(meterText('0 / 0'));
+    expect(groups).toContain('<span class="status red">');
+    expect(clusters).toContain(hero(0, 0, 'red-text'));
+    expect(capacityBar(clusters)).toContain(t('clusters.bar.unavailable', { count: 560 }));
+    expect(capacityBar(clusters)).toContain(t('clusters.bar.free', { count: 0 }));
     expect(clusters.split('</section>')[0]).not.toContain('meter-track');
+    expect(plan).toContain(t('summary.capacity', { usable: 0, unavailable: 560 }));
     expect(plan).toContain(t('plan.verdict.unavailable'));
   });
 
@@ -463,13 +502,14 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
         }),
       );
       const context = ctx(data);
-      for (const html of [
-        renderToStaticMarkup(<OverviewPage ctx={context} />),
-        renderToStaticMarkup(<ClustersPage ctx={context} />),
-      ]) {
-        expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: 8 }));
-        expect(html).not.toContain(t('summary.allocation', { allocated: 0, usable: 0 }));
-      }
+      // The other login's state leads the status, but the outage still shows: no usable
+      // GPUs on the row and the card, and the card's bar names the unavailable ones.
+      const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+      const card = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
+      expect(overview).toContain(meterText('0 / 0'));
+      expect(card).toMatch(/<strong class="cluster-hero [^"]*">0 \/ 0<\/strong>/);
+      expect(capacityBar(card)).toContain(t('clusters.bar.unavailable', { count: 8 }));
+      for (const html of [overview, card]) expect(html).not.toContain('0 / 8');
     },
   );
 
@@ -486,11 +526,14 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       expect(overview).toContain('<strong>A</strong>');
       const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
       expect(context.data.summary.nodes.nodes).toBe(0);
+      // One dash in each place, not "— / —" and not an empty meter or bar.
+      expect(overview).toContain(
+        `<td data-label="${t('overview.col.capacity')}"><span class="muted">—</span></td>`,
+      );
+      expect(clusters).toMatch(/<strong class="cluster-hero [^"]*">—<\/strong>/);
       for (const html of [overview, clusters]) {
-        expect(html).toContain('<span class="muted">—</span>');
-        expect(html).not.toContain(t('summary.allocation', { allocated: '—', usable: '—' }));
-        expect(html).not.toContain(t('summary.capacityTotal', { total: '—' }));
         expect(html).not.toContain('meter-track');
+        expect(html).not.toContain('class="capacity-bar"');
       }
     },
   );
@@ -498,14 +541,11 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
   it.each(['new_scheduler_state'])('keeps the usable subtotal when a node is %s', (state) => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', state], 'unknown'));
-    const text = t('summary.allocation', { allocated: '—', usable: '≥ 8' });
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={context} />),
-      renderToStaticMarkup(<ClustersPage ctx={context} />),
-    ]) {
-      expect(html).toContain(text);
-      expect(html).toContain('≥ 8');
-    }
+    const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(overview).toContain(meterText('— / ≥ 8'));
+    expect(clusters).toContain(hero('—', '≥ 8'));
+    expect(capacityBar(clusters)).toContain(t('summary.unknownNodes', { count: 1 }));
   });
 
   it.each([
@@ -516,30 +556,29 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     (state, states, tone, usable, allocated) => {
       setLocale(locale);
       const context = ctx(clusterData([...states], state));
-      const text = t('summary.allocation', { allocated, usable });
-      const overview = renderToStaticMarkup(<OverviewPage ctx={context} />);
+      const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
       const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
-      expect(overview).toContain(`<span class="${tone}">${text}</span>`);
-      expect(clusters).toContain(`<strong class="${tone}">${text}</strong>`);
-      const detail = t('summary.capacityDetail', {
-        unavailable: states.length * 8 - usable,
-        total: states.length * 8,
-      });
-      expect(overview).toContain(detail);
-      expect(clusters).toContain(detail);
+      expect(overview).toContain(meterText(`${allocated} / ${usable}`));
+      // Drained nodes lower the usable count; the cluster keeps its own tone, never red.
+      expect(overview).toContain(`<span class="status ${tone ? 'amber' : 'green'}">`);
+      expect(clusters).toContain(hero(allocated, usable, tone));
+      const unavailable = t('clusters.bar.unavailable', { count: states.length * 8 - usable });
+      // The unavailable breakdown is in the card's bar; the overview row stays one value per cell.
+      expect(overview).not.toContain(unavailable);
+      expect(capacityBar(clusters)).toContain(unavailable);
     },
   );
 
   it('shows allocation over usable GPUs without a zero-unavailable line for a healthy cluster', () => {
     setLocale(locale);
     const context = ctx(clusterData(['mixed', 'mixed']));
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={context} />),
-      renderToStaticMarkup(<ClustersPage ctx={context} />),
-    ]) {
-      expect(html).toContain(t('summary.allocation', { allocated: 4, usable: 16 }));
-      expect(html).not.toContain(t('summary.capacityDetail', { unavailable: 0, total: 16 }));
-    }
+    const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+    const clusters = renderToStaticMarkup(<ClustersPage ctx={context} />);
+    expect(overview).toContain(meterText('4 / 16'));
+    expect(clusters).toContain(hero(4, 16));
+    // "0 unavailable" may name the bar, but is never a visible line.
+    const zero = t('clusters.bar.unavailable', { count: 0 });
+    for (const html of [overview, clusters]) expect(visible(html)).not.toContain(zero);
   });
 
   it('renders server figures without deriving them again from rows', () => {
@@ -551,7 +590,9 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
     expect(renderToStaticMarkup(<OverviewPage ctx={context} />)).toContain('>123<');
     const usage = renderToStaticMarkup(<UsagePage ctx={context} />);
     expect(usage).toContain('>87<');
-    expect(usage).toContain(t('usage.gpuHint', { count: 42 }));
+    // How many GPUs the average covers is the figure's tooltip, never a caption.
+    expect(usage).toContain(`title="${t('usage.gpuHint', { count: 42 })}">87<`);
+    expect(visible(usage)).not.toContain(t('usage.gpuHint', { count: 42 }));
   });
 });
 
@@ -631,7 +672,8 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
     setLocale(locale);
     const data = serverDemo();
     const groups = groupsOf(data);
-    const label = locale === 'en' ? 'Cluster / queue or QoS' : '集群 / 队列或 QoS';
+    // The queue has its own column; its header's tooltip names each scheduler's term.
+    const label = locale === 'en' ? 'Queue' : '队列';
     const hint =
       locale === 'en'
         ? 'Slurm QoS, PBS or LSF queue, Kubernetes priority class'
@@ -640,7 +682,9 @@ describe.each(['en', 'zh-CN'] as const)('scheduler field names in %s', (locale) 
       <JobsTable jobs={[job('terms')]} groups={groups} onOpen={() => {}} empty={null} />,
       <FailuresTable jobs={data.recent_failures ?? []} groups={groups} />,
     ]) {
-      expect(renderToStaticMarkup(table)).toContain(`<th title="${hint}">${label}</th>`);
+      expect(renderToStaticMarkup(table)).toMatch(
+        new RegExp(`<th class="(?:panel-hide )?col-low" title="${hint}">${label}</th>`),
+      );
     }
   });
 });
@@ -652,19 +696,26 @@ it.each(['en', 'zh-CN'] as const)(
     const data = clusterData(['down', 'drained'], 'unavailable');
     data.nodes[1].gpu_count = null;
     const context = ctx(data);
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={context} />),
-      renderToStaticMarkup(<ClustersPage ctx={context} />),
-      renderToStaticMarkup(<PlanPage ctx={context} />),
-    ]) {
-      expect(html).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
-    }
+    const overview = overviewGroupsTable(renderToStaticMarkup(<OverviewPage ctx={context} />));
+    const card = renderToStaticMarkup(<ClustersPage ctx={context} />).split('</section>')[0];
+    const plan = renderToStaticMarkup(<PlanPage ctx={context} />);
+    // Where to run says the unavailable total is unknown rather than summing known nodes.
+    expect(plan).toContain(t('summary.capacity', { usable: 0, unavailable: '—' }));
+    // Overview and the card show no usable GPUs in the outage tone.
+    expect(overview).toContain(meterText('0 / 0'));
+    expect(overview).toContain('<span class="status red">');
+    expect(card).toContain(hero(0, 0, 'red-text'));
+    // Nowhere is the one known node's 8 GPUs passed off as the unavailable total.
+    for (const html of [overview, card, plan])
+      expect(html).not.toContain(t('clusters.bar.unavailable', { count: 8 }));
+    // The card's bar is hatched as unknown and says the unavailable total is not known.
+    expect(card).toContain('class="capacity-bar unknown"');
+    expect(capacityBar(card)).toContain(t('clusters.bar.unavailable', { count: '—' }));
     const unknown = ctx(clusterData(['mixed', 'new_scheduler_state'], 'unknown'));
-    for (const html of [
-      renderToStaticMarkup(<OverviewPage ctx={unknown} />),
-      renderToStaticMarkup(<ClustersPage ctx={unknown} />),
-    ])
-      expect(html).toContain(t('summary.unknownNodes', { count: 1 }));
+    // The card's bar names the unknown node; the overview row keeps its lower bound only.
+    expect(capacityBar(renderToStaticMarkup(<ClustersPage ctx={unknown} />))).toContain(
+      t('summary.unknownNodes', { count: 1 }),
+    );
   },
 );
 
@@ -678,7 +729,9 @@ it.each(['disabled', 'failed', 'stale', 'unsupported'])(
     if (condition === 'unsupported') data.sources[0].capabilities = ['jobs'];
     const context = ctx(data);
     const html = renderToStaticMarkup(<ClustersPage ctx={context} />);
-    expect(html).toContain(`<h2>${t('clusters.nodes')}<span class="count">0</span>`);
+    // The heading carries no count; the empty list says there are no nodes.
+    expect(html).toContain(`<h2>${t('clusters.nodes')}</h2>`);
+    expect(html).toContain(t('clusters.nodes.none'));
     expect(html).not.toContain(`<td class="mono">${data.nodes[0].name}</td>`);
   },
 );
@@ -689,9 +742,17 @@ it('names the missing login when current pending GPU counts are unknown and no j
     jobs: [job('queued', { state: 'PENDING', gpu_count: null })],
   });
   const html = renderToStaticMarkup(<OverviewPage ctx={ctx(data)} />);
-  const running = html.split(t('overview.running'))[1].split('</article>')[0];
-  expect(running).not.toContain(t('overview.running.none'));
-  expect(running).toContain('A · bob');
+  const running = html
+    .split(`<span class="stat-label">${t('overview.running')}</span>`)[1]
+    .split('</div>')[0];
+  expect(running).not.toContain('No clusters');
+  // An unknown value, not a zero, that opens what it does not count: its list names A · bob
+  // (see quiet-markers.test).
+  expect(running).toContain(
+    `class="partial" aria-label="—, ${t('unmeasured.count', { count: 1 })}"`,
+  );
+  expect(running).toContain('aria-haspopup="dialog"');
+  expect(running).not.toMatch(/>0</);
 });
 
 it('counts hand-added machines by normalized manual group and names secondary cloud logins', async () => {
@@ -732,20 +793,45 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
   );
 
   it.each(['RUNNING', 'PENDING', 'SUSPENDED'])(
-    'shows only nonzero array state tags for %s elements',
+    'summarizes %s elements in one state cell and counts each state in the array pane',
     (state) => {
       setLocale(locale);
-      const jobs = [0, 1].map((index) => job(String(index), { array_id: '1234', state }));
-      const html = renderToStaticMarkup(<JobsPage ctx={ctx(dash({ jobs }))} />);
-      const key =
-        state === 'RUNNING'
-          ? 'jobs.array.running'
-          : state === 'PENDING'
-            ? 'jobs.array.pending'
-            : 'jobs.array.other';
-      expect(html).toContain(`<span class="tag">${t(key, { count: 2 })}</span>`);
-      for (const key of ['jobs.array.running', 'jobs.array.pending', 'jobs.array.other'] as const)
-        expect(html).not.toContain(t(key, { count: 0 }));
+      const jobs = [0, 1].map((index) =>
+        job(String(index), {
+          array_id: '1234',
+          state,
+          reason: state === 'PENDING' ? 'Resources' : null,
+        }),
+      );
+      const context = ctx(dash({ jobs }));
+      const html = renderToStaticMarkup(<JobsPage ctx={context} />);
+      const row = html.match(/<tr class="clickable array-row\b[^>]*>.*?<\/tr>/)?.[0] ?? '';
+      expect(row).not.toBe('');
+      // One summary in the row: how many, and how many run (or wait when nothing runs).
+      const summary =
+        state === 'PENDING'
+          ? t('jobs.array.summaryQueued', { count: 2, pending: 2 })
+          : state === 'RUNNING'
+            ? t('jobs.array.summary', { count: 2, running: 2 })
+            : // Nothing runs or waits: just how many, never "0 running".
+              t('jobs.array.total', { count: 2 });
+      expect(row.match(/<span class="array-states">(.*?)<\/span>/)?.[1]).toBe(summary);
+      expect(row).not.toContain(t('jobs.array.other', { count: 2 }));
+      // The reason cell is the short label of the pending reason, never the sentence.
+      const reason = row.match(
+        new RegExp(`data-label="${t('jobs.col.nodeReason')}"><span class="clamp">(.*?)</span>`),
+      )?.[1];
+      expect(reason).toBe(state === 'PENDING' ? t('job.short.resources') : '—');
+      expect(row).not.toContain(t('job.explain.resources'));
+      // The array pane still counts every state.
+      const pane = renderToStaticMarkup(<ArrayDetail jobs={jobs} ctx={context} />);
+      expect(pane).toContain(
+        `<p>${[
+          t('jobs.array.running', { count: state === 'RUNNING' ? 2 : 0 }),
+          t('jobs.array.pending', { count: state === 'PENDING' ? 2 : 0 }),
+          t('jobs.array.other', { count: state === 'SUSPENDED' ? 2 : 0 }),
+        ].join(t('common.listSeparator'))}</p>`,
+      );
     },
   );
 
@@ -763,29 +849,33 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
     );
     const data = dash({ jobs: elements });
     const context = ctx(data);
+    // The row summarizes its elements in one cell: how many, and how many run.
+    const states = (count: number, running: number) =>
+      `<span class="array-states">${t('jobs.array.summary', { count, running })}</span>`;
+    const all = states(3, 2);
     let html = renderToStaticMarkup(<JobsPage ctx={context} />);
-    expect(tabs(html)).toContain(`${t('filter.all')}=3`);
+    expect(result(html)).toBe(t('jobs.resultCount', { count: 3 }));
     expect(tabs(html)).toContain(`${t('status.RUNNING')}=2`);
     expect(html.match(/class="clickable array-row/g)).toHaveLength(1);
-    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    expect(html).toContain(all);
     expect(html).toContain(t('jobs.array.mixed'));
     expect(html).toContain('≥ 2');
     expect(html).toContain(t('jobs.array.unknownGpus', { count: 1 }));
     context.query = '1234'; // Matches array_id even though the element ids differ.
     html = renderToStaticMarkup(<JobsPage ctx={context} />);
-    expect(html).toContain(t('jobs.array.count', { count: 3 }));
+    expect(html).toContain(all);
     context.query = 'selected';
     html = renderToStaticMarkup(<JobsPage ctx={context} />);
-    expect(html).toContain(t('jobs.array.count', { count: 2 }));
+    expect(html).toContain(states(2, 2));
     expect(html).not.toContain('excluded');
-    expect(tabs(html)).toContain(`${t('filter.all')}=2`);
+    expect(result(html)).toBe(t('jobs.resultCount', { count: 2 }));
     context.query = 'excluded';
     html = renderToStaticMarkup(<JobsPage ctx={context} />);
     expect(html).not.toContain('array-row');
     expect(html).toContain('a:2');
   });
 
-  it('shows unknown fields honestly and omits a duplicate partition line', () => {
+  it('shows unknown fields honestly and keeps the partition in the array drawer', () => {
     setLocale(locale);
     const cases = [
       { id: '1234', qos: null, partitions: [null, null] },
@@ -806,31 +896,41 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
         ),
       ),
     });
-    const html = renderToStaticMarkup(<JobsPage ctx={ctx(data)} />);
+    const context = ctx(data);
+    const html = renderToStaticMarkup(<JobsPage ctx={context} />);
     const rows = [...html.matchAll(/<tr class="clickable array-row\b[^>]*>.*?<\/tr>/g)].map(
       (match) => match[0],
     );
     expect(rows).toHaveLength(cases.length);
     const row = (id: string) => {
-      // Match the exact array label, regardless of the page's row ordering.
-      const matches = rows.filter((html) => html.includes(`<span class="sub mono">[${id}] ·`));
+      // Match the exact array label in the name's tooltip, regardless of the row ordering.
+      const matches = rows.filter((html) => html.includes(` [${id}]"`));
       expect(matches).toHaveLength(1);
       for (const other of cases.filter((item) => item.id !== id))
-        expect(matches[0]).not.toContain(`<span class="sub mono">[${other.id}] ·`);
+        expect(matches[0]).not.toContain(` [${other.id}]"`);
       return matches[0];
     };
-    const unknown = row('1234');
-    expect(unknown).not.toContain(t('jobs.array.mixed'));
-    expect(unknown).toContain('<span class="sub">—</span>');
-    const sameQueue = row('1235');
-    expect(sameQueue).toContain('<span class="sub">long</span>');
-    expect(sameQueue).not.toContain(t('jobs.array.partition', { name: 'long' }));
-    expect(row('1236')).toContain(t('jobs.array.partition', { name: 'gpu' }));
-    expect(row('1237')).toContain(t('jobs.array.partition', { name: t('jobs.array.mixed') }));
-    const unknownPartition = row('1238');
-    expect(unknownPartition).not.toContain(t('jobs.array.mixed'));
-    expect(unknownPartition).toContain('<span class="sub">long</span>');
-    expect(unknownPartition).toContain(t('jobs.array.partition', { name: '—' }));
+    // The row names the queue once, in its column; an unknown one stays a dash, never a guess.
+    const queue = (html: string) =>
+      html.match(
+        new RegExp(`<td class="panel-hide col-low" data-label="${t('job.queue')}">(.*?)</td>`),
+      )?.[1];
+    expect(queue(row('1234'))).toBe('—');
+    for (const id of ['1235', '1236', '1237', '1238']) expect(queue(row(id))).toBe('long');
+    for (const id of ['1234', '1238']) expect(row(id)).not.toContain(t('jobs.array.mixed'));
+    // The partition moved out of the row; the array drawer still states it, mixed or unknown.
+    const partition = (id: string) => {
+      const jobs = data.jobs.filter((item) => item.array_id === id);
+      const drawer = renderToStaticMarkup(<ArrayDetail jobs={jobs} ctx={context} />);
+      const at = drawer.indexOf(`<dt>${t('job.partition')}</dt><dd>`);
+      expect(at).toBeGreaterThan(-1);
+      return drawer.slice(at).match(/<dd>(.*?)<\/dd>/)?.[1];
+    };
+    expect(partition('1234')).toBe('—');
+    expect(partition('1235')).toBe('long');
+    expect(partition('1236')).toBe('gpu');
+    expect(partition('1237')).toBe(t('jobs.array.mixed'));
+    expect(partition('1238')).toBe('—');
   });
 
   it('takes eight rows after grouping and tags an array with any stale element', () => {
@@ -854,10 +954,13 @@ describe.each(['en', 'zh-CN'] as const)('array summaries in %s', (locale) => {
     );
     expect(table.match(/class="clickable/g)).toHaveLength(8);
     expect(table).toContain('array-row stale-row');
-    expect(table).toContain(t('jobs.array.count', { count: 12 }));
+    expect(table).toContain(
+      `<span class="array-states">${t('jobs.array.summary', { count: 12, running: 12 })}</span>`,
+    );
     expect(table).toContain('a:ordinary-6');
     expect(table).not.toContain('a:ordinary-7');
-    expect(html).toContain(t('jobs.lastKnownCount', { count: 1 }));
+    // The uncounted last-known job is listed behind the marker (see quiet-markers.test).
+    expect(html).toContain(t('jobs.missing.count', { count: 1 }));
   });
 });
 
@@ -893,9 +996,11 @@ it.each(['en', 'zh-CN'] as const)(
         ctx={ctx(data)}
       />,
     );
-    expect(reported).toContain(
-      `${locale === 'en' ? 'Scheduler reason:' : '调度器原因：'} <code>TERM_MEMLIMIT: raw scheduler detail</code>`,
-    );
+    // What the scheduler reported leads; its raw code is the chip beside the state in the
+    // drawer header (app/Layers.tsx), so the body carries no "Scheduler reason:" label.
+    const summary = t('failure.reported', { scheduler: 'Slurm', cause: t('failure.memory') });
+    expect(reported).toContain(`<p class="lead">${summary}</p>`);
+    expect(reported).not.toContain(locale === 'en' ? 'Scheduler reason:' : '调度器原因：');
     expect(reported).not.toContain('SIGKILL');
   },
 );
@@ -907,15 +1012,75 @@ it.each(['en', 'zh-CN'] as const)(
     const context = ctx(dash({}));
     for (const state of ['PENDING', 'PD', 'Q', 'PEND', 'QUEUED', 'queued']) {
       const item = job('waiting', { state, reason: 'Priority' });
+      const explanation = jobReason(item, 'slurm')!;
       const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
-      expect(html).toContain(`<strong>${t('job.reason')}</strong>`);
-      expect(html).toContain(jobReason(item, 'slurm')!.summary);
+      // No heading: the summary leads the callout and the next step follows as plain text.
+      expect(html).toContain(`<div class="callout"><p class="lead">${explanation.summary}</p>`);
+      expect(html).toContain(`<p>${explanation.next}</p>`);
+      expect(html).not.toContain('<strong>Pending reason</strong>');
       expect(html).toContain(`<dt>${t('job.requestedGpus')}</dt>`);
       const historical = renderToStaticMarkup(
         <JobDetail job={{ ...item, end: hourAgo }} ctx={context} />,
       );
-      expect(historical).not.toContain(`<strong>${t('job.reason')}</strong>`);
+      expect(historical).not.toContain(explanation.summary);
     }
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'labels a queued row by its short reason and keeps the sentence in the job pane in %s',
+  (locale) => {
+    setLocale(locale);
+    const escape = (text: string) =>
+      text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#x27;');
+    // Known kinds use their label; an unknown code is shown as the scheduler wrote it, without
+    // its detail; no reason at all reads "Waiting".
+    const cases: [string | null, string][] = [
+      ['Resources', t('job.short.resources')],
+      ['QOSMaxGRESPerUser', t('job.short.personalLimit')],
+      ['QOSMaxGRESPerJob', t('job.short.requestLimit')],
+      ['JobHeldUser', t('job.short.hold')],
+      ['ReqNodeNotAvail, UnavailableNodes:g[1-2]', t('job.short.nodes')],
+      ['SiteCustomHold (site detail)', 'SiteCustomHold'],
+      [null, t('job.short.waiting')],
+    ];
+    const jobs = cases.map(([reason], index) =>
+      job(`queued-${index}`, { state: 'PENDING', node: null, reason }),
+    );
+    const context = ctx(dash({ jobs }));
+    const html = renderToStaticMarkup(
+      <JobsTable jobs={jobs} groups={context.groups} onOpen={() => {}} empty={null} />,
+    );
+    const cell = `data-label="${t('jobs.col.nodeReason')}"><span class="clamp">(.*?)</span>`;
+    const cells = [...html.matchAll(new RegExp(cell, 'g'))].map((match) => match[1]);
+    expect(cells).toEqual(cases.map(([, label]) => escape(label)));
+    // No tooltip, raw detail or sentence in the row.
+    expect(html).not.toContain('<span class="clamp" title=');
+    expect(html).not.toContain('UnavailableNodes');
+    expect(html).not.toContain('site detail');
+    for (const item of jobs) {
+      const explanation = jobReason(item, 'slurm')!;
+      expect(html).not.toContain(escape(explanation.summary));
+      // The pane leads with the sentence and ends with the next step.
+      const pane = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
+      expect(pane).toContain(`<p class="lead">${escape(explanation.summary)}</p>`);
+      expect(pane).toContain(`<p>${escape(explanation.next)}</p>`);
+    }
+    expect(jobReason(jobs[5], 'slurm')!.summary).toBe(t('job.explain.unknown'));
+    expect(jobReason(jobs[6], 'slurm')!.summary).toBe(t('job.explain.unknown'));
+    // Schedulers' short queued states get the same label as PENDING.
+    const short = [job('pd', { state: 'PD', node: null, reason: 'Priority' })];
+    const pd = renderToStaticMarkup(
+      <JobsTable jobs={short} groups={context.groups} onOpen={() => {}} empty={null} />,
+    );
+    expect([...pd.matchAll(new RegExp(cell, 'g'))].map((match) => match[1])).toEqual([
+      escape(t('job.short.priority')),
+    ]);
   },
 );
 
@@ -954,20 +1119,25 @@ it.each(['en', 'zh-CN'] as const)(
     ]) {
       const item = job('failure', { state, end: null, exit_code: '1:0', elapsed: '' });
       const html = renderToStaticMarkup(<JobDetail job={item} ctx={context} />);
-      expect(html).toContain(t('job.failureReason'));
-      expect(html).toContain(t('job.nextStep'));
-      expect(html).toContain(jobReason(item, 'slurm')!.next);
+      // The next step stays in the failure callout, without "What happened" / "Next step" headings.
+      const start = html.indexOf('<div class="callout red failure-explanation">');
+      expect(start).toBeGreaterThan(-1);
+      expect(html.slice(start, html.indexOf('</div>', start))).toContain(
+        `<p>${jobReason(item, 'slurm')!.next}</p>`,
+      );
+      expect(html).not.toContain('What happened');
+      expect(html).not.toContain('Next step');
       const table = renderToStaticMarkup(
         <FailuresTable jobs={[{ ...item, end: null, exit_code: '1:0' }]} groups={context.groups} />,
       );
-      expect(table).not.toContain(t('failure.ran', { elapsed: '—' }));
+      expect(table).not.toContain('ran —');
     }
     for (const state of ['COMPLETED', 'CANCELLED', 'UNKNOWN']) {
-      expect(
-        renderToStaticMarkup(
-          <JobDetail job={job('ended', { state, end: hourAgo })} ctx={context} />,
-        ),
-      ).not.toContain(t('job.nextStep'));
+      const ended = job('ended', { state, end: hourAgo });
+      const html = renderToStaticMarkup(<JobDetail job={ended} ctx={context} />);
+      expect(html).not.toContain('failure-explanation');
+      const next = jobReason(ended, 'slurm')?.next;
+      if (next) expect(html).not.toContain(next);
     }
   },
 );
@@ -1002,7 +1172,7 @@ it.each(['en', 'zh-CN'] as const)(
       );
       expect(html.includes(t('failure.copyInspection'))).toBe(reason !== 'outcomes_unavailable');
       expect(html.includes('sacct -j')).toBe(reason !== 'outcomes_unavailable');
-      expect(html).not.toContain(t('job.nextStep'));
+      expect(html).not.toContain('Next step');
       expect(html).toContain(t('event.lastSeenEnded', { time: relativeTime(hourAgo) }));
       expect(html).toContain(`<dt>${t('event.observedAt')}</dt>`);
       expect(html).toContain(`>${relativeTime(now)}</dd>`);

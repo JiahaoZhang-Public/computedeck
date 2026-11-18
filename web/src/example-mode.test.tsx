@@ -241,15 +241,26 @@ it('preserves other query parameters and the route when toggling and reloading',
 it.each(['en', 'zh-CN'] as const)(
   'omits the example source count from Settings in %s',
   async (locale) => {
+    // The service reports its own configured sources, which differ from the example ones.
+    const configured = data.sources.length + 2;
+    const reads = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (path: string, init?: RequestInit) =>
+      path === '/api/health'
+        ? new Response(JSON.stringify({ polling: true, plugins: {}, source_count: configured }))
+        : reads(path, init),
+    );
+    const sources = () =>
+      [...container.querySelectorAll('.settings dl.kv > div')]
+        .find((row) => row.querySelector('dt')?.textContent === t('settings.service.sources'))
+        ?.querySelector('dd')?.textContent;
     await open('settings', locale);
-    expect(container.textContent).toContain(t('settings.sourcesMovedExample'));
-    expect(container.textContent).not.toContain(
-      t('settings.sourcesMoved', { count: data.sources.length }),
-    );
+    // Settings has no Data sources panel; the only count is the service's own, never the
+    // example data's.
+    expect(sources()).toBe(String(configured));
+    expect(container.textContent).not.toContain('Managed on the Sources page');
+    expect(container.textContent).not.toContain(`${data.sources.length} configured`);
     await click(button(t('banner.demoOff')));
-    expect(container.textContent).toContain(
-      t('settings.sourcesMoved', { count: data.sources.length }),
-    );
+    expect(sources()).toBe(String(configured));
   },
 );
 
@@ -316,9 +327,12 @@ it.each(['en', 'zh-CN'] as const)(
     expect(container.querySelector('.token-gate')).toBeNull();
     expect(container.querySelector('.demo-banner')).not.toBeNull();
     expect(window.location.search).toContain('demo=true');
-    expect(container.querySelector('.health-age')?.textContent).toBe(
-      t('time.hoursAgo', { count: 2 }),
+    // The pill shows the example data: its open attention count, with its age in the label.
+    const pill = container.querySelector('.health-pill')!;
+    expect(pill.querySelector('.health-count')?.textContent).toBe(
+      String(data.attention!.filter((item) => !item.muted).length),
     );
+    expect(pill.getAttribute('aria-label')).toContain(t('time.hoursAgo', { count: 2 }));
     await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET');
     expect(writes).toHaveLength(1);

@@ -69,6 +69,11 @@ function renderPlan(login: Source, jobs: Job[] = []) {
 
 afterEach(() => setLocale('en'));
 
+/** An option's row and the explanation row under it, where its reasons are kept. */
+function optionText(row: Element) {
+  return `${row.textContent}${row.nextElementSibling?.textContent ?? ''}`;
+}
+
 describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) => {
   it('shows a complete on-demand sentence after the reason, only for the selected model', async () => {
     setLocale(locale);
@@ -84,7 +89,7 @@ describe.each(['en', 'zh-CN'] as const)('planner explanations in %s', (locale) =
       await act(async () => root.render(<PlanPage ctx={context} />));
       const sentence = t('plan.why.onDemand', { count: 4 });
       const row = container.querySelector('.plan-table tbody tr')!;
-      expect(row.textContent).toContain(
+      expect(optionText(row)).toContain(
         `${t('plan.why.busy', { free: 0 })}${locale === 'zh-CN' ? '' : ' '}${sentence}`,
       );
       expect(sentence).toMatch(/[.。]$/);
@@ -167,11 +172,19 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(
         t('plan.verdict.possible'),
       );
-      expect(row.textContent).toContain(t('plan.why.contradiction', { job: 'train', reason }));
+      const why = t('plan.why.contradiction', { job: 'train', reason });
+      // The verdict stays in the row; its reason is one click away, in the row's disclosure.
+      expect(row.textContent).not.toContain(why);
+      const explanation = row.nextElementSibling!.querySelector('.plan-explanation')!;
+      expect(explanation.textContent).toContain(why);
+      // The Queued cell holds one value, the count; the translated class lives in the
+      // disclosure, with the raw scheduler code on hover.
       const queue = row.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
-      expect(queue.querySelector('[title]')!.getAttribute('title')).toBe(reason);
-      expect(queue.textContent).toContain(t('plan.queueReason.personalLimit'));
-      expect(queue.textContent).not.toContain(reason);
+      expect(queue.textContent).toBe('1');
+      expect(row.textContent).not.toContain(reason);
+      const label = explanation.querySelector('p[title]')!;
+      expect(label.getAttribute('title')).toBe(reason);
+      expect(label.textContent).toBe(t('plan.queueReason.personalLimit'));
       expect(root.querySelector('.plan-best')!.textContent).toContain(t('plan.verdict.possible'));
     },
   );
@@ -193,10 +206,10 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     );
     const row = root.querySelector('.plan-table tbody tr')!;
     expect(row.querySelector('.plan-verdict .status')!.textContent).toBe(t('plan.verdict.limit'));
-    expect(row.textContent).toContain(
+    expect(optionText(row)).toContain(
       t(`plan.why.${kind}`, { limit: 1, used: kind === 'jobs' ? 1 : 2 }),
     );
-    expect(row.textContent).not.toContain(t('plan.why.contradiction', { job: 'train', reason }));
+    expect(optionText(row)).not.toContain(t('plan.why.contradiction', { job: 'train', reason }));
   });
 
   it.each([
@@ -208,16 +221,19 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     (driver, reason, key) => {
       setLocale(locale);
       const root = page(renderPlan({ ...source, driver }, [pending({ gpu_count: 1, reason })]));
-      const queue = root.querySelector(`[data-label="${t('plan.col.queued')}"]`)!;
-      const label = queue.querySelector('[title]')!;
+      // The reason sits in the option's disclosure; the raw code stays reachable on hover.
+      const row = root.querySelector('.plan-table tbody tr.plan-option-row')!;
+      const explanation = row.nextElementSibling!.querySelector('.plan-explanation')!;
+      const label = explanation.querySelector('p[title]')!;
       expect(label.getAttribute('title')).toBe(reason);
       expect(label.textContent).toBe(key ? t(key) : reason);
-      expect(queue.textContent).not.toContain(t('job.explain.unknown'));
-      if (key && t(key) !== reason) expect(queue.textContent).not.toContain(reason);
+      expect(explanation.textContent).not.toContain(t('job.explain.unknown'));
+      expect(row.textContent).not.toContain(reason);
+      if (key && t(key) !== reason) expect(explanation.textContent).not.toContain(reason);
     },
   );
 
-  it('shows unknown access inline, with one note per source and a tagged best estimate', () => {
+  it('shows unknown access inline, explains it in each option disclosure and recommends none', () => {
     setLocale(locale);
     const root = page(
       renderPlan({
@@ -234,16 +250,21 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       2,
     );
     const note = t('plan.accessNote', { source: 'Cluster A · alice' });
+    // No panel-wide note: each unchecked option reads Unknown and explains in its disclosure.
     expect(
-      [...root.querySelectorAll('.panel-note')].filter((el) => el.textContent === note),
-    ).toHaveLength(1);
-    const best = root.querySelector('.plan-best')!;
-    expect(best.textContent).toContain(t('plan.accessUnchecked'));
-    expect(best.textContent).toContain(t('plan.verdict.possible'));
-    const first = root.querySelector('.plan-table tbody tr')!;
-    expect(best.querySelector('strong')!.textContent).toContain(
-      first.querySelector('.plan-qos')!.textContent,
-    );
+      [...root.querySelectorAll('.panel-note')].some((el) => el.textContent?.includes(note)),
+    ).toBe(false);
+    for (const row of root.querySelectorAll('.plan-table tbody tr:not(.plan-explanation-row)')) {
+      const status = row.querySelector('.plan-verdict .status')!;
+      expect(status.textContent).toBe(t('plan.verdict.unknown'));
+      expect(status.classList.contains('gray')).toBe(true);
+      expect(row.textContent).not.toContain(t('plan.verdict.possible'));
+      expect(row.nextElementSibling!.querySelector('.plan-explanation')!.textContent).toContain(
+        note,
+      );
+    }
+    // An unchecked option is not offered as the best estimate.
+    expect(root.querySelector('.plan-best')).toBeNull();
   });
 
   it('uses a wait tone and no best card when the queue consumes the room', () => {
@@ -277,13 +298,12 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     expect(root.textContent).not.toContain('— GPUs');
     expect(root.textContent).toContain(t('plan.why.queueUnknown'));
     expect(root.textContent).not.toContain(t('plan.verdict.likely'));
-    expect(root.querySelector('.plan-best')!.textContent).toContain(
-      t('plan.best.room', { count: '—' }),
-    );
+    // The room tile stays unknown rather than inventing a number.
+    expect(root.querySelectorAll('.plan-best .figures dd')[1].textContent).toBe('—');
     const stale = page(renderPlan({ ...source, stale: true }, [pending()]));
-    expect(stale.querySelector('[data-label="' + t('plan.col.queued') + '"]')!.textContent).toBe(
-      '—' + t('plan.queueRoomUnknown'),
-    );
+    const staleRow = stale.querySelector('.plan-table tbody tr.plan-option-row')!;
+    expect(staleRow.querySelector(`[data-label="${t('plan.col.queued')}"]`)!.textContent).toBe('—');
+    expect(staleRow.nextElementSibling!.textContent).toContain(t('plan.queueRoomUnknown'));
     expect(stale.textContent).not.toContain('Priority');
     expect(stale.textContent).not.toContain(t('plan.why.queueUnknown'));
   });
@@ -315,9 +335,9 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
       });
       const row = container.querySelector('.plan-table tbody tr')!;
       expect(row.textContent).toContain(t('plan.verdict.behind'));
-      expect(row.textContent).toContain(t('plan.why.behind', { queued: 2, left: 2 }));
-      expect(row.textContent).toContain(t('plan.queuedGpus', { count: 2 }));
-      expect(row.textContent).not.toContain(t('plan.queuedGpus', { count: 10 }));
+      expect(optionText(row)).toContain(t('plan.why.behind', { queued: 2, left: 2 }));
+      expect(optionText(row)).toContain(t('plan.queuedGpus', { count: 2 }));
+      expect(optionText(row)).not.toContain(t('plan.queuedGpus', { count: 10 }));
     } finally {
       await act(async () => root.unmount());
     }
@@ -383,7 +403,13 @@ describe.each(['en', 'zh-CN'] as const)('honest planner presentation in %s', (lo
     expect(best.querySelector('strong')!.textContent).toBe(
       `${options[0].source.name} · ${options[0].source.username} · ${options[0].qos}`,
     );
-    expect(root.querySelector('.plan-table tbody tr .plan-qos')!.textContent).toBe(options[0].qos);
+    const first = root.querySelector('.plan-table tbody tr.plan-option-row')!;
+    expect(first.querySelector(`td[data-label="${t('job.qos')}"]`)!.textContent).toBe(
+      options[0].qos,
+    );
+    expect(first.querySelector(`td[data-label="${t('sources.col.login')}"]`)!.textContent).toBe(
+      options[0].source.username,
+    );
   });
 });
 
@@ -409,7 +435,9 @@ it.each(['en', 'zh-CN'] as const)(
     expect(free.textContent).toContain('≥ 4');
     const best = root.querySelector('.plan-best')!;
     expect(best.textContent).toContain(t('plan.verdict.likely'));
-    expect(best.textContent).toContain(t('plan.best.free', { count: '≥ 3' }));
+    // The first tile is free GPUs after this request, still a lower bound.
+    expect(best.querySelector('.figures dt')!.textContent).toBe(t('plan.tile.free'));
+    expect(best.querySelector('.figures dd')!.textContent).toBe('≥ 3');
   },
 );
 
@@ -426,11 +454,15 @@ describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale
     const ctx = planContext(login);
     const root = page(renderToStaticMarkup(<PlanPage ctx={ctx} />));
     const options = planOptions(ctx.data, { gpus: 1, gpuType: '', hours: null });
-    const details = root.querySelectorAll<HTMLDetailsElement>('details.plan-explanation');
+    const details = root.querySelectorAll<HTMLElement>('.plan-explanation');
     expect(details).toHaveLength(options.length);
     for (const panel of details) {
-      expect(panel.open).toBe(false);
-      expect(panel.querySelector('summary')!.textContent).toBe(t('plan.explanation'));
+      // Closed until its row's chevron (or the row) is used; no repeated text line.
+      const row = panel.closest('tr')!;
+      expect(row.hidden).toBe(true);
+      const toggle = root.querySelector(`[aria-controls="${row.id}"]`)!;
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle.getAttribute('aria-label')).toContain(' · ');
       expect(panel.querySelectorAll('dt')).toHaveLength(7);
       for (const field of panel.querySelectorAll('dd')) {
         expect(field.textContent).toContain('Cluster A · alice');
@@ -743,7 +775,7 @@ describe.each(['en', 'zh-CN'] as const)('expandable plan factors in %s', (locale
 });
 
 describe.each(['en', 'zh-CN'] as const)('plan disclosure interaction in %s', (locale) => {
-  it('opens and closes natively, retaining an open panel while polled evidence changes', async () => {
+  it('opens and closes from the row, retaining an open panel while polled evidence changes', async () => {
     setLocale(locale);
     const ctx = planContext(source);
     const container = document.createElement('div');
@@ -751,10 +783,12 @@ describe.each(['en', 'zh-CN'] as const)('plan disclosure interaction in %s', (lo
     const root = createRoot(container);
     try {
       await act(async () => root.render(<PlanPage ctx={ctx} />));
-      const details = container.querySelector<HTMLDetailsElement>('.plan-explanation')!;
-      const summary = details.querySelector('summary')!;
-      summary.click();
-      expect(details.open).toBe(true);
+      const toggle = container.querySelector<HTMLButtonElement>('.plan-expand')!;
+      const details = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+      expect(details.hidden).toBe(true);
+      await act(async () => toggle.click());
+      expect(details.hidden).toBe(false);
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
       expect(details.querySelector('dd')!.textContent).toContain(
         t('plan.factor.freeValue', { count: '4' }),
       );
@@ -763,12 +797,14 @@ describe.each(['en', 'zh-CN'] as const)('plan disclosure interaction in %s', (lo
         data: { ...ctx.data, nodes: ctx.data.nodes.map((node) => ({ ...node, gpu_allocated: 1 })) },
       };
       await act(async () => root.render(<PlanPage ctx={updated} />));
-      expect(details.open).toBe(true);
+      expect(details.hidden).toBe(false);
       expect(details.querySelector('dd')!.textContent).toContain(
         t('plan.factor.freeValue', { count: '3' }),
       );
-      summary.click();
-      expect(details.open).toBe(false);
+      // The whole row toggles too.
+      await act(async () => (details.previousElementSibling as HTMLElement).click());
+      expect(details.hidden).toBe(true);
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
     } finally {
       await act(async () => root.unmount());
       container.remove();

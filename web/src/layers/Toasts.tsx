@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { focusReadingTarget } from './focus';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { t } from '../i18n';
@@ -18,6 +19,34 @@ export function Toasts({
 }) {
   const host = useModalHost();
   const region = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const remember = (event: FocusEvent) => {
+      if (
+        region.current?.contains(event.target as Node) &&
+        event.relatedTarget instanceof HTMLElement &&
+        !region.current.contains(event.relatedTarget)
+      )
+        previousFocus.current = event.relatedTarget;
+    };
+    document.addEventListener('focusin', remember);
+    return () => document.removeEventListener('focusin', remember);
+  }, []);
+  const remove = useCallback(
+    (id?: number) => {
+      const focused = document.activeElement;
+      const toast =
+        focused instanceof Element ? focused.closest<HTMLElement>('[data-toast-id]') : null;
+      if (
+        toast &&
+        region.current?.contains(toast) &&
+        (id === undefined || toast.dataset.toastId === String(id))
+      )
+        focusReadingTarget(previousFocus.current, host);
+      dismiss(id);
+    },
+    [dismiss, host],
+  );
   const home = useRef<HTMLDivElement>(null);
   const [portal] = useState(() => document.createElement('div'));
   useLayoutEffect(() => {
@@ -61,7 +90,7 @@ export function Toasts({
     const unlisten = listenForLayers();
     handleToastKeys((event) => {
       if (event.key === 'Escape' && items.length) {
-        dismiss();
+        remove();
         return true;
       }
       const undo = [...items].reverse().find((item) => item.action?.undo);
@@ -76,7 +105,7 @@ export function Toasts({
         )
       ) {
         undo.action!.run();
-        dismiss(undo.id);
+        remove(undo.id);
         return true;
       }
       return false;
@@ -85,7 +114,7 @@ export function Toasts({
       handleToastKeys();
       unlisten();
     };
-  }, [items, dismiss]);
+  }, [items, remove]);
   const content = (
     <div
       ref={region}
@@ -97,7 +126,7 @@ export function Toasts({
     >
       {announcement?.text && <Announcement key={announcement.id} text={announcement.text} />}
       {items.map((item) => (
-        <ToastItem key={item.id} item={item} dismiss={() => dismiss(item.id)} />
+        <ToastItem key={item.id} item={item} dismiss={() => remove(item.id)} />
       ))}
     </div>
   );
@@ -131,6 +160,7 @@ function ToastItem({ item, dismiss }: { item: Toast; dismiss: () => void }) {
   }, [item.tone, hover, focused, dismiss]);
   return (
     <div
+      data-toast-id={item.id}
       className={`toast ${item.tone}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

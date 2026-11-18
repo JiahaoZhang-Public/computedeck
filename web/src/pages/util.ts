@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from 'react';
 import type { Instance } from '../types';
 import { t } from '../i18n';
 
@@ -16,4 +17,9 @@ export function matches(query: string, ...fields: (string | null | undefined)[])
 /** "this computer" or the remote server's name, for sentences about where things run. */
 export function where(ctx: { remote: boolean; serverName: string }) {
   return ctx.remote ? ctx.serverName : t('where.local');
+}
+
+/** Keep Enter and Space on a control inside a clickable row from also opening the row. */
+export function keepActivation(event: KeyboardEvent) {
+  if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
 }

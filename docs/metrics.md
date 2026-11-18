@@ -5,13 +5,13 @@ or platform, and each source. Overview, Usage, cluster views and new history poi
 read those figures. `—` means unknown or no measurement; `≥ n` is a known subtotal,
 with named missing evidence. Neither means zero.
 
-- **Freshness** in the topbar uses the oldest enabled source’s last successful collection. If any enabled source has never succeeded, it says "Not collected yet". Disabled sources and manual SSH checks do not make the fleet age newer. "Collecting N" keeps that age visible, and Refresh can queue the other sources. Open the health pill on any page for source ages, next attempts, backoff and service faults. The age can look older than in earlier releases because it no longer follows the newest source.
-- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts all users’ GPUs with visible compute processes or an empty process list with known memory and either memory use at least max(1024 MiB, 5% of total GPU memory) or utilization at least 5%. Unavailable process visibility (for example on AMD GPUs), or missing memory without visible processes, remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded, with a note showing how many. Partial totals name each unmeasured machine or login and explain why, with a link. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
+- **Freshness** in the topbar uses the oldest enabled source’s last successful collection. If any enabled source has never succeeded, it says "Not collected yet". Disabled sources and manual SSH checks do not make the fleet age newer. The top bar shows the number of items that still need attention (service faults always show); when none do, it shows only this age, in a neutral colour. A turning Refresh icon means a collection is running, and Refresh can queue the other sources. Open it on any page for source ages, next attempts, backoff and service faults. The age can look older than in earlier releases because it no longer follows the newest source.
+- **GPUs in use** counts GPUs allocated to your running jobs and running cloud instances. For SSH GPU machines it counts all users’ GPUs with visible compute processes or an empty process list with known memory and either memory use at least max(1024 MiB, 5% of total GPU memory) or utilization at least 5%. Unavailable process visibility (for example on AMD GPUs), or missing memory without visible processes, remains unknown. A monitored machine added by hand counts while its last SSH check, less than 20 minutes old, reached it; otherwise its use is unknown. Machines with monitoring off are excluded and included in the tile's count of what is not counted. A partial total is its own trigger: the number (“≥ 27”, accessible name “≥ 27, 5 not counted”) opens a list that names each unmeasured machine or login, explains why and links to it. Checking a cloud instance over SSH never changes the GPUs its provider lists. When a source has not been collected recently, the number is a subtotal and is labeled as such.
 - **Provider-reported running** instances (for example RunPod) count their listed GPUs as held, with the label "Running (reported by provider)". This is an allocation report, not a readiness check. `desired_running` remains unknown because it can mean provisioning. Stopped, terminated, deleted, desired-stopped and desired-terminated instances hold no GPUs. A missing GPU count or a stale source still makes the total partial. The same lifecycle table drives the headline, history and low-use suggestions.
 - **SSH checks** of a cloud instance are kept across provider listings while its host, port and user stay the same, so a failed connection stays failed until it is checked again. A listing that reports the instance no longer holds GPUs clears the old check, even if it retains an endpoint. The check shows its own age next to the listing's; counting a provider's allocation never makes an old utilization reading fresh.
 - **Usable capacity** includes only healthy nodes from enabled, current sources. Down, drained, reserved, UNKNOWN, FUTURE, ERROR and nonresponsive (`*`) nodes are unavailable. Slurm nodes must belong to a partition. Power-saving nodes with idle, free or empty base states, and PBS provisioning, sleep and wait-provisioning nodes, cannot contribute current usable or free GPUs. Nodes with assigned work remain usable and retain their allocations even with power flags. DYNAMIC_FUTURE is not the FUTURE state and does not exclude an idle node. Non-faulty resting Slurm power-saving nodes (with or without CLOUD) and PBS sleep/provisioning nodes are labelled **available on demand**, never free now. They remain healthy for cluster status and do not count as unhealthy nodes. Usable, unavailable and on-demand GPU counts are separate parts of the total inventory; GPUs on unknown-state nodes remain unknown. An outage reads "0 usable · N unavailable", alongside the total inventory. **Unallocated** GPUs are usable capacity minus the allocations on those usable nodes. QoS limits and your access still constrain where you can run.
 - **QoS limits** are what the scheduler shows for your login. Limits alone do not prove access. The planner shows verified and unknown-access options together, with one access note per login. Only options without an association are collapsed. Limits of different QoS do not add up.
-- **Where to run** estimates account for this login's eligible queued jobs in the same QoS. Held, dependency, begin-time and array-task-limit jobs are excluded. Eligible jobs are considered in listed order, subtracting each only if it fits the room left after previously counted jobs. A larger job is skipped because it cannot start first. If the remaining queued GPUs starting first would leave insufficient headroom for the request, the option reads "Likely to wait for your queue". This is an estimate, not FIFO or a promise of scheduling order. Unknown queued GPU counts that could consume remaining room, or a job list that is no longer current, prevent a "Likely" estimate. An unlimited room is unaffected by queued demand, even when its GPU count is unknown. Model-specific limits count the matching queued GPUs; generic limits count all models. "Room used by queue" shows the reduction in available headroom across these limits, rather than the total GPUs requested by all queued jobs. Kubernetes resource-quota usage already includes admitted pending pods, so those queues are not subtracted again. The best-estimate card is the first table row, and appears only for likely or possible options. Within a verdict, options sort by fitting on one node, room after the queue, free GPUs, then verified access.
+- **Where to run** estimates account for this login's eligible queued jobs in the same QoS. Held, dependency, begin-time and array-task-limit jobs are excluded. Eligible jobs are considered in listed order, subtracting each only if it fits the room left after previously counted jobs. A larger job is skipped because it cannot start first. If the remaining queued GPUs starting first would leave insufficient headroom for the request, the option reads "Likely to wait for your queue". This is an estimate, not FIFO or a promise of scheduling order. Unknown queued GPU counts that could consume remaining room, or a job list that is no longer current, prevent a "Likely" estimate. An unlimited room is unaffected by queued demand, even when its GPU count is unknown. Model-specific limits count the matching queued GPUs; generic limits count all models. "Room used by queue", in each option's details, shows the reduction in available headroom across these limits, rather than the total GPUs requested by all queued jobs. Kubernetes resource-quota usage already includes admitted pending pods, so those queues are not subtracted again. An option whose access could not be verified shows the estimate **Unknown**, with the reason in its details. The best-estimate card is the first table row, and appears only when that row's estimate is likely or possible. Within a verdict, options sort by fitting on one node, room after the queue, free GPUs, then verified access.
   If an eligible pending job waits on a personal-limit reason even though its known GPU request fits the collected headroom, a "Likely" estimate becomes "Possible". The explanation names the job and scheduler code: the scheduler may count differently or enforce limits that were not collected. This does not assert that the new request will wait. Larger limit-held jobs do not trigger this cap; stale jobs, unknown relevant counts or models, and Kubernetes resource quotas do not supply contradiction evidence. If any finite per-model GPU cap exists, GPU-limit evidence must name exactly the requested model. Job-count and submit-count waits (`QOSMaxJobsPerUserLimit`, `QOSMaxSubmitJobPerUserLimit`, `AssocMaxJobsLimit`, `AssocMaxSubmitJobLimit`) still cap the estimate when QoS count limits are missing or unlimited. Association limits are separate from QoS limits and are not collected; a wait can also reflect an uncollected partition QoS limit. Any collected jobs or submit rule already at its limit prevents contradiction evidence. Zero-GPU GRES waits and CPU-limit waits are not used because their resource headroom is not evaluated. CPU-only running jobs consume no model-specific GPU headroom. The queue column uses short translated reason-class labels and keeps the raw code on hover; unrecognised reasons remain visible as reported.
   Sources with the same cluster and username share one option per QoS, preferring current QoS-limit data, then current job data, then the latest successful collection. Jobs attributed to either current twin are counted once, using their newest observation, even when the retained QoS source's job list is not current; an empty twin QoS list adds no extra row; different usernames remain separate options.
 
@@ -149,29 +149,31 @@ observed a source condition, the latest failed attempt for a source that never
 succeeded, an SSH check, or a background error report. Repeated observations do not
 imply a new incident onset. Unreadable rows and plugin health errors have neither time.
 Attention is derived on every dashboard read without an additional collection request.
-Acknowledge keeps an item quiet until its cause or severity changes. Snooze keeps it
-quiet for one hour or until the next midnight in the service host's timezone; a changed
+Dismiss (the row's × button) keeps an item quiet until its cause or severity changes. Snooze,
+in the item's detail pane, keeps it quiet for one hour or until the next midnight in the
+service host's timezone; a changed
 cause or severity also ends a snooze early. Names, observation times and free-text error
 output do not reopen items. A resolved item loses its saved acknowledgement after the
 next collection, machine check, attention action, source or machine edit/removal, or
 tool update. Unreadable acknowledgement rows are discarded during the same cleanup;
 dashboard reads never delete saved state.
 
-The tile, badge and panel count only unmuted items. Muted items remain in the collapsed
-"Acknowledged (N)" group with Unmute and their snooze expiry, when applicable. This
-state is saved on the service and shared by all viewers. The health pill still reports
-source health. Background-task faults and unreadable rows cannot be muted. Example data
-shows acknowledged and snoozed items, but its controls cannot change saved state.
+The tile, badge, health pill and list count only items that are not dismissed or snoozed.
+Those remain in the collapsed "Dismissed (N)" group with Restore and their snooze expiry,
+when applicable. This state is saved on the service and shared by all viewers. Background-task
+faults and unreadable rows cannot be dismissed. In example data, dismissing and restoring change
+only the open page: nothing is sent, and a reload resets them. Rows name what and its state
+only; the cause, readings, cost and times are in the detail each row opens.
 
-确认会让待处理项保持静默，直到原因或严重程度发生变化。暂缓可持续一小时，或持续到服务主机
+忽略（行末 × 按钮）会让待处理项保持静默，直到原因或严重程度发生变化。暂缓位于该项的详情中，可持续一小时，或持续到服务主机
 时区的次日零点；原因或严重程度变化也会提前结束暂缓。名称、观测时间和错误输出文本变化
 不会重新提醒。问题解决后，下次采集、机器检查、待处理项操作、数据源或机器的编辑/删除，
 或工具更新会清除其已保存的确认状态。无法读取的确认记录也会在清理时删除；读取概览不会删除保存的状态。
 
-概览卡片、导航徽标和面板只统计未静默的项目。静默项目保留在默认折叠的“已确认（N）”中，
-可恢复提醒，并显示暂缓截止时间。状态保存在服务端，所有查看者共享。健康状态标记仍反映
-数据源健康状况。后台任务故障和无法读取的数据行不能静默。示例数据包含已确认和暂缓项目，
-但其中的控件不能修改保存的状态。
+概览卡片、导航徽标、健康状态标记和列表只统计未忽略、未暂缓的项目。这些项目保留在默认折叠的
+“已忽略（N）”中，可点“恢复”，并显示暂缓截止时间。状态保存在服务端，所有查看者共享。后台任务
+故障和无法读取的数据行不能忽略。示例数据中，忽略和恢复只改变当前页面：不发送任何请求，刷新后复原。
+每行只写“是什么”和状态；原因、读数、费用和时间在该行打开的详情中。
 
 Follow-up: classify `gpu_count_unknown`, `partitions_unavailable` and
 `instances_skipped` as driver capability checks or coverage-only conditions.
@@ -361,13 +363,15 @@ the matching elements; a single matching element remains an ordinary job row. Se
 matches the array id as well as element ids. Overview takes its first eight rows after grouping.
 Tiles, navigation badges, tabs and panel counts still count elements using the server summary.
 
-The array row shows nonzero running (including configuring and completing), pending and other
-counts, queue or QoS and partition (`mixed` when they differ), and the most common reported pending
-reason plus the number of other reported reasons. Missing reasons are not counted. GPUs held sum
+The array row shows one summary ("30 jobs · 4 running", or "· N queued" when nothing runs),
+queue or QoS (`mixed` when they differ), and a short label for the most common reported pending
+reason. The per-state counts (running includes configuring and completing), the partition, the
+reason sentence and every element's own reason are in the array drawer.
+Missing reasons are not counted. GPUs held sum
 only elements holding an allocation: a missing GPU count makes the result `≥ N`, or `—` if no
 positive subtotal is known. Pending requests are not
-held GPUs. Any stale element marks the array as last-known, and the row shows its oldest
-observation time. CPU and elapsed totals are not inferred; inspect the individual elements.
+held GPUs. Any stale element marks the array as last-known: the row is dimmed and one mark in
+its State cell gives its oldest observation time. CPU and elapsed totals are not inferred; inspect the individual elements.
 
 Click or press Enter on an array row to open its `?array=<cluster>:<array_id>` drawer.
 It lists all currently listed members of that array, independently of the page filters,
@@ -616,9 +620,11 @@ neither counted nor listed. The built-in `ssh` driver's rows and sources are out
 including failed or stale SSH sources. Disabled sources are excluded.
 
 For cloud API sources, missing prices or currencies, uncertain lifecycles and unavailable
-listings are still named with links and reasons. Known totals read **≥** when that coverage
-is incomplete; unknown totals show **—**. If nothing priced is running and no cost is
-unknown, the note says **No priced instance running**. The note is hidden in scopes with
+listings are named behind the figure itself: the **Running now** tile's “≥ $1.04/h” opens a list
+(accessible name “≥ $1.04/h, 2 unpriced”) with links and reasons. Known totals read **≥** when
+that coverage is incomplete; unknown totals show **—**. Each currency has its own tile. If
+nothing priced is running and no cost is unknown, Cloud shows no running-cost tile and Usage &
+cost says **No priced instance running**. The tiles are hidden in scopes with
 neither an enabled cloud API source nor a hand-added machine with a typed price.
 The server supplies this visibility decision as `summary.spend.applies`. Each currency has
 its own hourly total. A supplied zero price remains a known zero.
@@ -692,10 +698,12 @@ links to it. **Now** uses `summary.groups` for your GPUs in use and `summary.spe
 for hourly rates by group, with currencies kept separate. The top eight groups are
 shown separately; Other retains any unknown members as a lower bound. Unknown values
 use an empty hatched track. Missing prices, uncertain lifecycle states and unavailable
-cloud connections remain named below the current figures. The daily-rate line is a
-projection, not a bill. Priced running instances open their drawers by keyboard or
-pointer and show the same per-run estimates as Cloud; no run detail is shown when
-the start is unknown. Disabled connections are excluded.
+cloud connections remain named behind the figures themselves: each partial figure opens the
+list. The spend panel is tagged Estimate and the **Per day at this rate** tile is a projection
+at the current rate, not a bill. Priced running instances are a table (Instance, Rate,
+Running for, Cost so far) whose rows open their drawers by keyboard or pointer; a run only
+seen running, not reported by the provider, reads as a lower bound. No run detail is shown
+when the start is unknown. Disabled connections are excluded.
 
 **Over range** keeps `24h`, `7d` or `30d` in the URL; legacy `24` maps to 24h,
 while `72`, `3d` and `168` map to 7d so an offered chip is always selected. New history
@@ -710,8 +718,8 @@ the response time. Daily bars use the viewer's local calendar days;
 boundary hourly buckets are prorated, including timezone offsets and DST boundaries.
 Days cut off by the range show the local start or end time they cover.
 
-Partial days show observation coverage; uncertain quantities show lower bounds or
-unknown. Before-upgrade days and days without collection read **Not recorded**, not
+Partial days show observation coverage (on hover in the daily tables, as a mark on the
+period tiles); uncertain quantities show lower bounds or unknown. Before-upgrade days and days without collection read **Not recorded**, not
 zero. GPU-hours rows use the time that the group's allocation or lower bound was known;
 a collected but entirely unknown group reads **Not measured**. Groups without an enabled
 source are omitted from new samples even when cloud instances are retained, so paused
@@ -719,7 +727,7 @@ groups leave missing time. Hand-added platform groups remain included.
 Spend coverage still means collection time, not proof that every price was known.
 Values following ≥ are rounded down to the displayed precision. Historical groups
 no longer configured carry a “removed” label.
-Daily spend and the Today / Last 7 days totals are **estimated from hourly prices
+Daily spend and the **Spend today** / **Spend, last 7 days** tiles are **estimated from hourly prices
 observed while ComputeDeck was collecting, not a bill**. The two headline totals use
 the last seven days, independent of the selected range. They exclude collection
 gaps and do not reconstruct provider billing, storage charges or prices before
@@ -852,8 +860,8 @@ Resources 作业仅在该分区的前方作业数和同优先级作业数均为�
 
 ## Typical wait from your job history
 
-Where to run and a waiting job's drawer show “Typical wait for your jobs”, explicitly
-labelled “Not a prediction”. The range is the 25th–75th percentile of submit-to-start
+Where to run (in each estimate's details) and a waiting job's drawer show “Typical wait
+for your jobs”, explicitly labelled “Not a prediction”. The range is the 25th–75th percentile of submit-to-start
 seconds from this login's own finished accounting records ending in the last 30 days
 (a rolling 30 × 24 hours, selected by job end time).
 This includes time held for dependencies, scheduled begin times, user holds or array
@@ -1118,3 +1126,23 @@ is a cadence estimate, not a maximum.
 统计值；利用率摘要不标下界。界面每个数值紧跟单位，将间隙 `minutes` 转为文字时长。
 实时和示例模式中，超出 UTC 日期范围的 `end` 转换或窗口返回 422 / `chart_end_invalid`。
 样本数包含恰好位于最终终点的观测；预计样本数为频率估算，不是上限。
+
+### Chart formats and usage integrals
+
+`chart.series` now includes additive `format` metadata (`percent` or `gpu`) without
+changing the existing utilization/allocation buckets. `chart.usage_series` adds
+`gpu_hours:<group-key>` and `money:<currency>` series with the same bucket edges and
+null/gap/partial/lower-bound fields. Money series never combine currencies. Each has
+format metadata (`gpu_hours`, or `money` plus `currency`), a label and a numeric summary;
+group series also expose `group_key` for the UI's group label and identity lookup.
+
+These are observed integrals from recorded `by_group` history, using the existing
+30-minute maximum hold. Missing history stays null, and partial coverage is a lower
+bound. `samples` counts recorded observations; source coverage remains unknown because
+historic group rollups do not record per-source counts. Integrals use `min`/`max` equal
+to the bucket total (they are not instantaneous-rate extrema). Summaries describe the
+bucket totals, not forecasts. Original hourly rollups keep their interval and meaning.
+
+The client chart accepts per-series format/scope, a chart title/scope and `sharedScale`.
+Shared scales compare series of the same unit and currency only. P4 chooses the visible
+groups (five plus Other) and labels them; the server retains all groups without truncation.

@@ -6,9 +6,9 @@
   "--surface": "--bg-surface",
   "--surface-2": "--bg-sunken",
   "--border": "--border-muted",
-  "--accent": "--ink",
-  "--accent-soft": "--bg-selected",
-  "--accent-text": "--fg-default",
+  "--accent": "--accent-fill",
+  "--accent-soft": "--accent-bg",
+  "--accent-text": "--accent-fg",
   "--gray-soft": "--status-unknown-bg",
   "--green": "--status-ok-fg",
   "--green-soft": "--status-ok-bg",
@@ -18,6 +18,6 @@
   "--radius": "--r-block",
   "--radius-sm": "--r-control",
   "--mono": "--font-mono",
-  "--accent-hover": "color-mix(in oklch, var(--ink) 88%, var(--bg-canvas))",
+  "--accent-hover": "--accent-fill",
   "--text-muted": "--fg-muted"
 }

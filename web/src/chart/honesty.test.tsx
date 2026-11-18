@@ -262,3 +262,44 @@ describe.each(['en', 'zh-CN'] as const)('chart units and bounds %s', (locale) =>
     ).toBeTruthy();
   });
 });
+
+it('formats GPU-hours and currencies independently of series ids', () => {
+  const data = chartFixture([point(12.3456)]);
+  const base = data.series[1];
+  const gpu = {
+    ...base,
+    id: 'cluster-a',
+    label: 'Cluster A',
+    format: { kind: 'gpu_hours' as const },
+    scope: 'Mine · Cluster A',
+  };
+  const usd = { ...base, id: 'cost-usd', format: { kind: 'money' as const, currency: 'USD' } };
+  const eur = { ...base, id: 'cost-eur', format: { kind: 'money' as const, currency: 'EUR' } };
+  expect(reading({ ...base.buckets[0], lower_bound: true }, gpu)).toContain('≥ 12.3 GPU h');
+  expect(reading({ ...base.buckets[0], lower_bound: true }, usd)).toContain('≥ $12.34');
+  expect(reading(base.buckets[0], eur)).toContain('€12.35');
+  const node = document.createElement('div');
+  node.innerHTML = renderToStaticMarkup(
+    <Chart
+      data={{
+        ...data,
+        series: [
+          gpu,
+          {
+            ...gpu,
+            id: 'cluster-b',
+            buckets: gpu.buckets.map((b) => ({ ...b, value: 2, min: 2, max: 2 })),
+          },
+        ],
+      }}
+      title="GPU-hours by cluster"
+      scope="Mine"
+      sharedScale
+    />,
+  );
+  expect(node.querySelector('section')?.getAttribute('aria-label')).toBe('GPU-hours by cluster');
+  const axes = [...node.querySelectorAll('.chart-multiple')].map((multiple) =>
+    [...multiple.querySelectorAll('.bucket-axis')].map((axis) => axis.textContent),
+  );
+  expect(axes[0]).toEqual(axes[1]);
+});

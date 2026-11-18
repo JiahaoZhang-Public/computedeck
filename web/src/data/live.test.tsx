@@ -151,6 +151,32 @@ describe.each(['en', 'zh-CN'] as const)('transition announcements in %s', (langu
     expect(transitions(failed, { ...failed }, true)).toBe('');
     expect(transitions(failed, before, true)).not.toBe('');
   });
+  it('announces an attention count once and never the age of a calm pill', () => {
+    setLocale(language);
+    const before = snapshot();
+    const items = before.data!.attention ?? [];
+    expect(items.length).toBeGreaterThan(1);
+    // One item dismissed: one message about the count, no second "Health: …" line.
+    const fewer = structuredClone(before);
+    fewer.data!.attention = items.map((item, index) =>
+      index ? item : { ...item, muted: { state: 'acknowledged', at: 'x', until: null } },
+    );
+    fewer.data!.attention_count = items.filter((item) => !item.muted).length - 1;
+    expect(transitions(before, fewer, true)).toBe(
+      t('live.attention', { count: fewer.data!.attention_count }),
+    );
+    // Calm: a newer collection only changes the age, which is never announced.
+    const calm = structuredClone(before);
+    calm.data!.attention = [];
+    calm.data!.attention_count = 0;
+    const later = structuredClone(calm);
+    later.data!.as_of = new Date(Date.parse(calm.data!.as_of!) + 60_000).toISOString();
+    expect(transitions(calm, later, true)).toBe('');
+    // Leaving a service fault says what it settled to, not an age.
+    expect(transitions({ ...calm, error: 'unreachable' }, calm, true)).toBe(
+      t('live.health', { status: t('overview.attention.none') }),
+    );
+  });
   it('gives health context when authentication makes the status unknown', () => {
     setLocale(language);
     const before = { ...snapshot(), error: 'unreachable' };
@@ -297,7 +323,7 @@ it('keeps overdue diagnosis text and running-cost estimates advancing without a 
   await act(async () =>
     root.render(
       <>
-        <SourceDiagnosis source={source} demo drivers={[]} />
+        <SourceDiagnosis source={source} demo drivers={[]} close={() => {}} />
         <InstanceRunCost item={instance} source={cloud} />
       </>,
     ),

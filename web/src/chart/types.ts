@@ -19,7 +19,10 @@ export interface Bucket {
 export interface ChartSeries {
   id: string;
   label?: string;
+  group_key?: string | null;
   slot?: number;
+  format?: { kind: 'gpu' | 'gpu_hours' | 'percent' | 'money'; currency?: string };
+  scope?: string;
   buckets: Bucket[];
   summary: Message;
 }
@@ -30,4 +33,5 @@ export interface ChartData {
   bucket_seconds: number;
   last_sample: string | null;
   series: ChartSeries[];
+  usage_series?: ChartSeries[];
 }

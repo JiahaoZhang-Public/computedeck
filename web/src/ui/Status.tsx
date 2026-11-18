@@ -33,8 +33,8 @@ export function StatusShape({
   );
 }
 
-/** Core display component. ui.tsx retains the frozen plugin Status DOM. */
-export function Status({
+/** Core display component. ui.tsx retains the frozen plugin StatusLabel DOM. */
+export function StatusLabel({
   kind,
   label,
   reason,

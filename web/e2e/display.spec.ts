@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, ready, demoNow } from './fixtures';
+import { wcagTags, test, expect, ready, demoNow } from './fixtures';
 import { withScreenshotViewport } from './screenshots';
 import { checkLayout } from './checks';
 
@@ -55,10 +55,7 @@ for (const forcedColors of ['none', 'active'] as const) {
     await withScreenshotViewport(page, testInfo, (options) =>
       expect(page).toHaveScreenshot(`display-${forcedColors}.png`, options),
     );
-    const results = await new AxeBuilder({ page })
-      .include('.gallery')
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-      .analyze();
+    const results = await new AxeBuilder({ page }).include('.gallery').withTags(wcagTags).analyze();
     expect(results.violations).toEqual([]);
   });
 }
@@ -203,12 +200,12 @@ test('copy is local, announced, and includes the example marker', async ({ page 
   });
   await expect(page.locator('.display-copy code')).toHaveAttribute('lang', 'en');
   await page.locator('.display-copy button').click();
-  await expect(page.locator('.display-copy [role=status]')).not.toBeEmpty();
+  await expect(page.locator('.toasts [data-toast-id]')).not.toBeEmpty();
   await expect(page.locator('body')).toHaveAttribute(
     'data-copied',
     'squeue --me --start -j 48213\n# example data',
   );
-  await expect(page.locator('.display-copy [role=status]')).toBeEmpty({ timeout: 4000 });
+  await expect(page.locator('.toasts [data-toast-id]')).toHaveCount(0, { timeout: 6000 });
 });
 
 test('display gallery controls fit the viewport and meet touch targets, collapsed and expanded', async ({
@@ -232,10 +229,7 @@ test('display gallery controls fit the viewport and meet touch targets, collapse
   // Audit the expanded state from the top; axe still checks off-screen targets.
   await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-  const results = await new AxeBuilder({ page })
-    .include('.gallery')
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-    .analyze();
+  const results = await new AxeBuilder({ page }).include('.gallery').withTags(wcagTags).analyze();
   expect(results.violations).toEqual([]);
   if (hasTouch)
     expect(
@@ -281,6 +275,7 @@ for (const contrast of ['no-preference', 'more'] as const) {
         (node as HTMLElement).style.backgroundColor = `var(--bg-${bg})`;
       }, background);
       const result = await new AxeBuilder({ page })
+        .withTags(wcagTags)
         .include('.value-unknown')
         .withRules(['color-contrast'])
         .analyze();

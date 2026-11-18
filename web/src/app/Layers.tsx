@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import type { DeckEvent, Instance, Job, Source, SSHConfig } from '../types';
 import type { SourcePreset } from '../forms';
 import type { Ctx } from '../pages/shared';
+import { snoozeItems } from '../pages/snooze';
 import type { computeHealth } from '../health';
 import { HealthPanel } from '../HealthPanel';
 import { SourceDiagnosis } from '../SourceDiagnosis';
@@ -11,7 +12,7 @@ import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from '../pages/
 import { Status } from '../ui';
 import { ContextPanel, FocusView } from '../layers/Surface';
 import { routeParams } from '../useRouteParam';
-import { replaceLayer, stepVisibleDetail } from '../layers/routes';
+import { replaceLayer, detailValues, stepVisibleDetail } from '../layers/routes';
 import { where } from '../pages/util';
 import { errorText, t } from '../i18n';
 import { api } from '../api';
@@ -141,15 +142,37 @@ export function Layers({
         >
           <header className="drawer-header">
             <div>
+              {/* Breadcrumb: where the item lives; then the name with its state; then its ids. */}
               <span className="drawer-kind">
-                {detail.kind === 'job'
-                  ? t('drawer.job')
-                  : detail.kind === 'array'
-                    ? t('drawer.array')
-                    : t('drawer.instance')}
+                {detail.kind === 'instance' ? t('nav.cloud') : t('nav.jobs')}
+                <span aria-hidden="true"> ›</span>
               </span>
-              <h2 id="detail-title">{detail.item.name}</h2>
-              {detail.kind !== 'array' && <Status state={detail.item.state} />}
+              <div className="drawer-title">
+                <h2 id="detail-title">{detail.item.name}</h2>
+                {detail.kind !== 'array' && <Status state={detail.item.state} />}
+              </div>
+              <div className="drawer-chips">
+                {(() => {
+                  const id =
+                    detail.kind === 'array'
+                      ? `${t('drawer.array')} · ${detail.item.id}`
+                      : detail.item.id;
+                  // Each chip stays on one line; the full value is its tooltip and in Details.
+                  return (
+                    <code className="drawer-id" title={id}>
+                      {id}
+                    </code>
+                  );
+                })()}
+                {/* The scheduler's own code, beside the id it belongs to. */}
+                {detail.kind === 'job' &&
+                  detail.item.reason &&
+                  !/^none$/i.test(detail.item.reason) && (
+                    <code className="drawer-code" title={detail.item.reason}>
+                      {detail.item.reason}
+                    </code>
+                  )}
+              </div>
             </div>
             <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
               <X size={16} />
@@ -195,13 +218,16 @@ export function Layers({
           close={() => setModal(null)}
           initial={ModalHost === FocusView ? '.modal-close' : undefined}
         >
-          <button
-            className="icon-button modal-close"
-            aria-label={t('common.close')}
-            onClick={() => setModal(null)}
-          >
-            <X size={16} />
-          </button>
+          {/* A source's detail draws its own header, close button included. */}
+          {!(modal.kind === 'diagnosis' && diagnosisSource) && (
+            <button
+              className="icon-button modal-close"
+              aria-label={t('common.close')}
+              onClick={() => setModal(null)}
+            >
+              <X size={16} />
+            </button>
+          )}
           {modal.kind === 'missing' && <h2 id="modal-title">{t('drawer.unavailable')}</h2>}
           {modal.kind === 'diagnosis' &&
             (diagnosisSource ? (
@@ -210,6 +236,10 @@ export function Layers({
                 source={diagnosisSource}
                 configure={() => configure(diagnosisSource)}
                 collect={() => collect(diagnosisSource)}
+                pause={() => ctx.pauseSource(diagnosisSource)}
+                snooze={snoozeItems(ctx, diagnosisSource.id)}
+                nodes={ctx.nodes}
+                close={() => setModal(null)}
                 collecting={data?.collecting?.includes(diagnosisSource.id)}
                 demo={demo}
                 drivers={drivers}
@@ -240,6 +270,7 @@ export function Layers({
                       modal.item ? 'PUT' : 'POST',
                     );
                     replaceLayer({
+                      ...detailValues(),
                       add: null,
                       edit: null,
                       repair: null,
@@ -260,6 +291,7 @@ export function Layers({
                   preset={modal.preset}
                   drivers={drivers}
                   nodes={nodes}
+                  demo={demo}
                   sources={data?.sources ?? []}
                   groups={groups}
                   where={where({ remote, serverName })}

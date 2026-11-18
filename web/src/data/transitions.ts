@@ -22,8 +22,21 @@ export function transitions(before: LiveSnapshot, after: LiveSnapshot, demo: boo
       snapshot.needsToken,
       demo,
       snapshot.nodes,
-    ).label;
-  if (health(before) !== health(after)) messages.push(t('live.health', { status: health(after) }));
+    );
+  // The pill follows the attention count (announced once, below) or, when calm, shows only an
+  // age; neither is a health transition. Service states (faults, unreachable, polling off) are.
+  const key = (state: ReturnType<typeof health>) =>
+    state.count > 0 ? 'attention' : state.quiet ? 'quiet' : state.label;
+  const was = health(before);
+  const now = health(after);
+  const service = (state: ReturnType<typeof health>) => state.count === 0 && !state.quiet;
+  if (key(was) !== key(now) && (service(now) || service(was)))
+    messages.push(
+      t('live.health', {
+        // Leaving a fault: say what it settled to, never an age.
+        status: now.quiet ? t('overview.attention.none') : now.label,
+      }),
+    );
   // Dashboard jobs are deduplicated by id; twin logins may alternate as their source.
   const previous = new Map(before.data.jobs.map((job) => [job.id, job.state]));
   const current = new Map(after.data.jobs.map((job) => [job.id, job.state]));

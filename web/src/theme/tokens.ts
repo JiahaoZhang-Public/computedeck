@@ -1,60 +1,60 @@
 // Source of truth for generated CSS. Values are [L, C, h, optional alpha].
 export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   'bg-canvas': {
-    light: [0.982, 0.002, 260.0],
-    dark: [0.165, 0.004, 260.0],
+    light: [1.0, 0.0, 0.0],
+    dark: [0.17, 0.003, 260.0],
   },
   'bg-surface': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.195, 0.005, 260.0],
+    dark: [0.17, 0.003, 260.0],
   },
   'bg-sunken': {
-    light: [0.967, 0.003, 260.0],
-    dark: [0.148, 0.004, 260.0],
+    light: [0.965, 0.0, 0.0],
+    dark: [0.2, 0.003, 260.0],
   },
   'bg-raised': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.225, 0.005, 260.0],
+    dark: [0.205, 0.004, 260.0],
   },
   'bg-overlay': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.245, 0.006, 260.0],
+    dark: [0.215, 0.004, 260.0],
   },
   'bg-hover': {
-    light: [0.955, 0.004, 260.0],
-    dark: [0.235, 0.006, 260.0],
+    light: [0.97, 0.001, 260.0],
+    dark: [0.215, 0.004, 260.0],
   },
   'bg-selected': {
-    light: [0.937, 0.005, 260.0],
-    dark: [0.27, 0.007, 260.0],
+    light: [0.94, 0.002, 260.0],
+    dark: [0.255, 0.004, 260.0],
   },
   'fg-default': {
-    light: [0.215, 0.01, 260.0],
-    dark: [0.955, 0.003, 260.0],
+    light: [0.2, 0.004, 260.0],
+    dark: [0.955, 0.002, 260.0],
   },
   'fg-muted': {
-    light: [0.45, 0.012, 260.0],
-    dark: [0.82, 0.008, 260.0],
+    light: [0.47, 0.006, 260.0],
+    dark: [0.78, 0.004, 260.0],
   },
   'fg-subtle': {
-    light: [0.51, 0.01, 260.0],
-    dark: [0.74, 0.008, 260.0],
+    light: [0.5, 0.006, 260.0],
+    dark: [0.74, 0.004, 260.0],
   },
   'fg-on-ink': {
-    light: [0.99, 0.0, 0.0],
-    dark: [0.18, 0.005, 260.0],
+    light: [1.0, 0.0, 0.0],
+    dark: [0.17, 0.003, 260.0],
   },
   ink: {
-    light: [0.215, 0.01, 260.0],
-    dark: [0.955, 0.003, 260.0],
+    light: [0.2, 0.004, 260.0],
+    dark: [0.955, 0.002, 260.0],
   },
   'border-muted': {
-    light: [0.922, 0.004, 260.0],
-    dark: [0.255, 0.006, 260.0],
+    light: [0.93, 0.002, 260.0],
+    dark: [0.255, 0.004, 260.0],
   },
   'border-default': {
-    light: [0.885, 0.005, 260.0],
-    dark: [0.305, 0.006, 260.0],
+    light: [0.9, 0.003, 260.0],
+    dark: [0.3, 0.004, 260.0],
   },
   'border-strong': {
     light: [0.62, 0.008, 260.0],
@@ -206,8 +206,25 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
     dark: [0.74, 0.01, 260.0],
   },
   'focus-ring': {
-    light: [0.215, 0.01, 260.0],
-    dark: [0.955, 0.003, 260.0],
+    light: [0.2, 0.004, 260.0],
+    dark: [0.955, 0.002, 260.0],
+  },
+  // Monochrome: the accent names stay for plugins, with ink and neutral values.
+  'accent-fill': {
+    light: [0.2, 0.004, 260.0],
+    dark: [0.955, 0.002, 260.0],
+  },
+  'fg-on-accent': {
+    light: [1.0, 0.0, 0.0],
+    dark: [0.17, 0.003, 260.0],
+  },
+  'accent-fg': {
+    light: [0.2, 0.004, 260.0],
+    dark: [0.955, 0.002, 260.0],
+  },
+  'accent-bg': {
+    light: [0.94, 0.002, 260.0],
+    dark: [0.255, 0.004, 260.0],
   },
   'chart-line': {
     light: [0.215, 0.01, 260.0],

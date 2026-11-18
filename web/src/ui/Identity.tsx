@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import './display.css';
+import type { Group } from '../groups';
 import { initials } from '../groups';
 
 function identityStyle(slot?: number): CSSProperties {
@@ -9,21 +10,37 @@ function identityStyle(slot?: number): CSSProperties {
   } as CSSProperties;
 }
 /** Decorative next to an already visible group name. */
-export function Swatch({ slot }: { slot?: number }) {
-  return <span className="identity-swatch" style={identityStyle(slot)} aria-hidden="true" />;
+export function Swatch({ slot, group }: { slot?: number; group?: Group }) {
+  return (
+    <span
+      className="identity-swatch"
+      style={identityStyle(group?.slot ?? slot)}
+      aria-hidden="true"
+    />
+  );
 }
 /** Use where the full name is not adjacent; it remains the accessible name. */
 export function Monogram({
   slot,
-  label,
+  group,
+  label = group?.label ?? '',
+  decorative = false,
   initial = initials(label),
 }: {
   slot?: number;
-  label: string;
+  group?: Group;
+  label?: string;
+  decorative?: boolean;
   initial?: string;
 }) {
   return (
-    <span className="identity-monogram" style={identityStyle(slot)} role="img" aria-label={label}>
+    <span
+      className="identity-monogram"
+      style={identityStyle(group?.slot ?? slot)}
+      role={decorative ? undefined : 'img'}
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : label}
+    >
       {initial}
     </span>
   );

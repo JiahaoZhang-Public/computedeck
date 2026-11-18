@@ -1,3 +1,4 @@
+/* C4 bands: web/src/breakpoints.ts (600 / 1200). */
 .layer-sheet {
   position: fixed;
   inset: 0;
@@ -48,8 +49,8 @@ dialog.confirm-dialog {
   margin: 20px -20px -20px;
 }
 .drawer.context-panel {
-  /* U1 will align the legacy 52px top bar with --topbar-h. */
-  top: 52px;
+  /* A pane beside the list: below the title bar, a hairline edge, no shadow. */
+  top: var(--topbar-h);
   bottom: max(var(--tabbar-space), var(--hint-h));
   width: var(--panel-w);
   z-index: 20;
@@ -77,7 +78,7 @@ dialog.confirm-dialog {
 :is(.layer-popover, .touch-popover) [role='menu'] {
   min-width: 200px;
 }
-:is(.layer-popover, .touch-popover) [role='menuitem'] {
+:is(.layer-popover, .touch-popover) [role^='menuitem'] {
   display: block;
   width: 100%;
   text-align: start;
@@ -86,11 +87,11 @@ dialog.confirm-dialog {
   border-radius: 0;
   background: transparent;
 }
-:is(.layer-popover, .touch-popover) [role='menuitem']:focus {
+:is(.layer-popover, .touch-popover) [role^='menuitem']:focus {
   background: var(--bg-hover);
   outline-offset: -2px;
 }
-:is(.layer-popover, .touch-popover) [role='menuitem'][aria-disabled='true'] {
+:is(.layer-popover, .touch-popover) [role^='menuitem'][aria-disabled='true'] {
   color: var(--fg-subtle);
 }
 .touch-popover {
@@ -127,6 +128,13 @@ dialog.confirm-dialog {
 .toast .status-shape {
   color: inherit;
   flex: none;
+}
+.toast:not(.error) :focus-visible {
+  outline-color: var(--fg-on-ink);
+}
+.toast:not(.error) .button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg-default);
 }
 .toast .button,
 .toast .icon-button {

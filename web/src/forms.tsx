@@ -4,14 +4,14 @@ import { useConfirm } from './layers/useConfirm';
 import { ConnectionChecks } from './ConnectionChecks';
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { CheckCircle2, Cloud, Loader2, MinusCircle, Server, Terminal, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, MinusCircle, XCircle } from 'lucide-react';
 import type { CollectionNode, DriverField, DriverInfo, Instance, Kind, Source } from './types';
 import type { Group } from './groups';
 import { errorText, localized, t } from './i18n';
 import type { MessageKey } from './i18n';
-import { GroupMark } from './ui';
 import { checkFinished, checklist } from './sourceCheck';
 import { driverInfo, fieldValue, isCommonField, sortDrivers } from './drivers';
+import { sshHostHint, useSshHosts } from './sshHosts';
 
 function FormFooter({
   busy,
@@ -251,15 +251,13 @@ type Step = 'type' | 'details' | 'check';
 export type SourcePreset = { driver?: string; clusterName?: string; kind?: Kind };
 
 function TypeCard({ info, onChoose }: { info: DriverInfo; onChoose: () => void }) {
-  const Icon = info.name === 'ssh' ? Terminal : info.kind === 'cluster' ? Server : Cloud;
   return (
-    <button className="type-card" onClick={onChoose}>
-      <Icon size={18} />
+    // Name and a beta tag; what it reads is one hover away and on the next step.
+    <button className="type-card" onClick={onChoose} title={localized(info.description)}>
       <strong>
         {localized(info.label)}
         {info.beta && <span className="tag beta">{t('source.type.beta')}</span>}
       </strong>
-      <span>{localized(info.description)}</span>
     </button>
   );
 }
@@ -269,11 +267,14 @@ function FieldInput({
   value,
   where,
   half,
+  list,
 }: {
   field: DriverField;
   value: string;
   where: string;
   half: boolean;
+  /** A datalist of suggestions for this input. */
+  list?: string;
 }) {
   const name = `field:${field.key}`;
   return (
@@ -294,6 +295,7 @@ function FieldInput({
       ) : (
         <input
           name={name}
+          list={list}
           defaultValue={value}
           placeholder={field.placeholder}
           pattern={field.pattern ?? undefined}
@@ -311,6 +313,7 @@ export function SourceForm({
   preset = {},
   drivers,
   nodes = [],
+  demo = false,
   sources,
   groups,
   where,
@@ -324,8 +327,9 @@ export function SourceForm({
   preset?: SourcePreset;
   /** Descriptions of the installed drivers, from `/api/drivers`. */
   drivers: DriverInfo[];
-  /** Machines that can collect the source instead of this one. */
+  /** Machines the source can be reached through: jump hosts and collection machines. */
   nodes?: CollectionNode[];
+  demo?: boolean;
   /** Current sources, used to follow the first collection of a new source. */
   sources: Source[];
   groups: Group[];
@@ -364,8 +368,13 @@ export function SourceForm({
   const [checkStarted, setCheckStarted] = useState(false);
   const [previousAttempt, setPreviousAttempt] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [route, setRoute] = useState(source?.node ?? '');
+  const hosts = useSshHosts(demo);
   const info = driverInfo(drivers, selected);
   const cluster = info.kind === 'cluster';
+  const usesSsh = info.fields.some((field) => field.key === 'ssh_alias');
+  const routeNode = nodes.find((node) => node.id === route);
+  const routeKind = !routeNode ? 'direct' : routeNode.mode === 'jump' ? 'jump' : 'collect';
   // A cluster joins an existing group only when the driver matches.
   const clusters = groups.filter(
     (group) => group.kind === 'cluster' && group.sources.some((item) => item.driver === selected),
@@ -437,7 +446,6 @@ export function SourceForm({
       <>
         <header className="modal-header">
           <h2 id="modal-title">{t('source.add')}</h2>
-          <p>{t('source.type.intro')}</p>
         </header>
         {shown.map((section) => (
           <section key={section.kind} className="type-section">
@@ -456,10 +464,12 @@ export function SourceForm({
                   />
                 ))}
               {section.kind === 'cloud' && (
-                <button className="type-card" onClick={onManual}>
-                  <Terminal size={18} />
+                <button
+                  className="type-card"
+                  onClick={onManual}
+                  title={t('source.type.manualHint')}
+                >
                   <strong>{t('source.type.manual')}</strong>
-                  <span>{t('source.type.manualHint')}</span>
                 </button>
               )}
             </div>
@@ -553,13 +563,15 @@ export function SourceForm({
       {confirmation}
       <header className="modal-header">
         <h2 id="modal-title">{editing ? editing.name : localized(info.label)}</h2>
-        <p>{localized(info.details, { where })}</p>
+        <details className="form-about">
+          <summary>{t('source.form.about')}</summary>
+          <p>{localized(info.details, { where })}</p>
+        </details>
       </header>
       <form onSubmit={(event) => void submit(event)}>
         <div className="form-grid">
           {editing ? (
             <div className="source-identity span-two">
-              <GroupMark group={groups.find((group) => group.key === editing.cluster_id)} />
               <div>
                 <strong>{editing.name}</strong>
                 <span>{(identity && fieldValue(editing, identity.key)) || editing.driver}</span>
@@ -593,22 +605,35 @@ export function SourceForm({
               where={where}
               half={cluster && field.identity}
               value={editing ? fieldValue(editing, field.key) : field.default}
+              // A collection machine resolves the alias with its own SSH configuration.
+              list={field.key === 'ssh_alias' && routeKind !== 'collect' ? 'ssh-hosts' : undefined}
             />
           ))}
-          {(nodes.length > 0 || !!editing?.node) && (
+          <datalist id="ssh-hosts">
+            {hosts.map((host) => (
+              <option key={host.alias} value={host.alias}>
+                {sshHostHint(host)}
+              </option>
+            ))}
+          </datalist>
+          {(nodes.length > 0 || route) && (
             <label className="span-two">
-              {t('source.form.node')}
-              <select name="node" defaultValue={editing?.node ?? ''}>
-                <option value="">
-                  {where === t('where.local') ? where : t('source.form.nodeHere', { where })}
-                </option>
+              {t('source.form.route')}
+              <select name="node" value={route} onChange={(event) => setRoute(event.target.value)}>
+                <option value="">{t('source.form.routeDirect', { where })}</option>
                 {nodes.map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {node.name}
+                  <option
+                    key={node.id}
+                    value={node.id}
+                    // A jump host only forwards SSH; a cloud API is not called through it.
+                    disabled={node.mode === 'jump' && !usesSsh && node.id !== route}
+                  >
+                    {t(`source.form.routeVia.${node.mode === 'jump' ? 'jump' : 'collect'}`, {
+                      name: node.name,
+                    })}
                   </option>
                 ))}
               </select>
-              <small>{t('source.form.nodeHint', { where })}</small>
             </label>
           )}
           <label className="span-two">

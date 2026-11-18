@@ -157,7 +157,9 @@ export function formatMessage(value: Message | string | null | undefined): strin
       params.cost_note = t('lowUse.cost', { cost });
     }
   }
-  const text = hasKey(key) ? t(key, params) : value.code;
+  let text = hasKey(key) ? t(key, params) : value.code;
+  // A failure beyond a jump host names the hop, so the right machine gets checked.
+  if (typeof value.via === 'string' && value.via) text += t('msg.via', { name: value.via });
   return value.detail && !text.includes(value.detail) ? `${text}: ${value.detail}` : text;
 }
 

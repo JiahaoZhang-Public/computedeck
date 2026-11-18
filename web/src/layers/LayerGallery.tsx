@@ -41,14 +41,15 @@ export function LayerGallery({ names, notify }: { names: string[]; notify: Ctx['
       <MenuButton
         label={t('layer.menu')}
         items={[
-          { label: t('layer.toast'), action: toast },
+          { id: 'layer.toast', label: t('layer.toast'), action: toast },
           {
+            id: 'layer.confirm',
             label: t('layer.confirm'),
             action: () => {
               void confirm(t('layer.confirmQuestion'), t('layer.confirm'));
             },
           },
-          { label: t('layer.keep'), action: () => {}, disabled: true },
+          { id: 'layer.keep', label: t('layer.keep'), action: () => {}, disabled: true },
         ]}
       />
       <button className="button" onClick={toast}>

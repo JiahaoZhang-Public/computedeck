@@ -1,3 +1,4 @@
+import { StatusShape } from '../ui/Status';
 import type { ReactNode } from 'react';
 import {
   Activity,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useClock } from '../ui/clock';
 import { relativeTime } from '../format';
-import { dateTime, partialCount } from '../domain';
+import { dateTime } from '../domain';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { routeHash } from '../routes';
@@ -30,8 +31,8 @@ import type { Ctx } from '../pages/shared';
 import type { Dashboard } from '../types';
 import type { computeHealth } from '../health';
 
+// Groups are separated by space, not labelled; each item is a line icon and its label.
 const navGroups: {
-  label?: MessageKey;
   items: { id: CorePage; label: MessageKey; icon: typeof Server }[];
 }[] = [
   {
@@ -41,7 +42,6 @@ const navGroups: {
     ],
   },
   {
-    label: 'nav.resources',
     items: [
       { id: 'jobs', label: 'nav.jobs', icon: Activity },
       { id: 'activity', label: 'nav.activity', icon: History },
@@ -51,7 +51,6 @@ const navGroups: {
     ],
   },
   {
-    label: 'nav.setup',
     items: [
       { id: 'sources', label: 'nav.sources', icon: Cable },
       { id: 'toolbox', label: 'nav.toolbox', icon: Puzzle },
@@ -130,8 +129,19 @@ export function Frame({
   const activePluginPage = pluginPages.find((item) => item.id === page);
   const toolNav = enabledToolPages(tools);
   const problems = data?.attention_count ?? data?.attention?.length ?? 0;
-  const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
   const isDataPage = dataPages.includes(page);
+  const collecting = !!data?.collecting?.length && !needsToken;
+  const serviceText = needsToken
+    ? t('token.title')
+    : error
+      ? remote
+        ? t('service.remoteDown', { server: serverName })
+        : t('service.localDown')
+      : data
+        ? remote
+          ? t('service.remoteUp', { server: serverName })
+          : t('service.localUp')
+        : t('service.connecting');
   const pageActions: Partial<Record<Page, ReactNode>> = {
     sources: (
       <button className="button primary" aria-label={t('source.add')} onClick={() => configure()}>
@@ -183,12 +193,12 @@ export function Frame({
           <strong className="brand-name">
             Compute<b>Deck</b>
           </strong>
-          <span className="brand-mode">{remote ? t('mode.remote') : t('mode.local')}</span>
+          {/* Only a remote service needs naming; local is the default. */}
+          {remote && <span className="brand-mode">{serverName}</span>}
         </div>
         <nav aria-label={t('nav.main')}>
           {navGroups.map((navGroup, index) => (
             <div className="nav-group" key={index}>
-              {navGroup.label && <div className="nav-label">{t(navGroup.label)}</div>}
               {navGroup.items.map(({ id, label, icon: Icon }) => (
                 <a
                   key={id}
@@ -197,21 +207,19 @@ export function Frame({
                   aria-current={page === id ? 'page' : undefined}
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <Icon size={16} />
+                  <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
                   <span>{t(label)}</span>
                   {id === 'overview' && problems > 0 && (
-                    <b className="badge warn" title={t('nav.problems', { count: problems })}>
+                    <b className="badge" title={t('nav.problems', { count: problems })}>
                       {problems}
                     </b>
                   )}
-                  {id === 'jobs' && jobCount !== 0 && <b className="badge">{jobCount}</b>}
                 </a>
               ))}
             </div>
           ))}
           {toolNav.length + pluginPages.length > 0 && (
             <div className="nav-group">
-              <div className="nav-label">{t('nav.tools')}</div>
               {toolNav.map(({ id, label, icon: Icon }) => (
                 <a
                   key={id}
@@ -220,7 +228,7 @@ export function Frame({
                   aria-current={page === id ? 'page' : undefined}
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <Icon size={16} />
+                  <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
                   <span>{t(label)}</span>
                 </a>
               ))}
@@ -232,7 +240,7 @@ export function Frame({
                   aria-current={page === id ? 'page' : undefined}
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <Icon size={16} />
+                  <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
                   <span>{labelText(label, locale)}</span>
                 </a>
               ))}
@@ -246,7 +254,7 @@ export function Frame({
             aria-current={page === 'settings' ? 'page' : undefined}
             onClick={() => setSidebarOpen(false)}
           >
-            <Settings2 size={16} />
+            <Settings2 size={18} strokeWidth={1.75} aria-hidden="true" />
             <span>{t('nav.settings')}</span>
           </a>
           <label className="demo-toggle">
@@ -255,18 +263,14 @@ export function Frame({
             <i aria-hidden="true" />
           </label>
           <div className="service-state">
-            <span className={`dot ${error ? 'red' : data ? 'green' : ''}`} />
-            {needsToken
-              ? t('token.title')
-              : error
-                ? remote
-                  ? t('service.remoteDown', { server: serverName })
-                  : t('service.localDown')
-                : data
-                  ? remote
-                    ? t('service.remoteUp', { server: serverName })
-                    : t('service.localUp')
-                  : t('service.connecting')}
+            {/* A running service is a dot; words appear only when it needs attention. */}
+            <span
+              className={`dot ${error ? 'red' : data ? 'green' : ''}`}
+              role="img"
+              aria-label={serviceText}
+              title={serviceText}
+            />
+            {(needsToken || error) && serviceText}
           </div>
         </div>
       </aside>
@@ -290,11 +294,6 @@ export function Frame({
                 setHealthOpen={setHealthOpen}
               />
             </div>
-            {!!data?.collecting?.length && !needsToken && (
-              <span className="collecting-count">
-                {t('health.collecting', { count: data.collecting.length })}
-              </span>
-            )}
             {!demo && pageActions[page]}
             {isDataPage && (
               <>
@@ -302,10 +301,19 @@ export function Frame({
                   className="button"
                   onClick={() => void refresh()}
                   disabled={refreshing || needsToken}
-                  title={t('topbar.refreshHint')}
+                  title={
+                    collecting
+                      ? t('health.collecting', { count: data!.collecting!.length })
+                      : t('topbar.refreshHint')
+                  }
                   aria-label={t('topbar.refresh')}
                 >
-                  <RefreshCw size={14} className={refreshing || data?.refreshing ? 'spin' : ''} />
+                  {/* Collection in progress is the button's own busy state: a turning icon and
+                      its title. Not aria-busy, which marks a region whose content is changing. */}
+                  <RefreshCw
+                    size={14}
+                    className={refreshing || data?.refreshing || collecting ? 'spin' : ''}
+                  />
                   <span className="label">{t('topbar.refresh')}</span>
                 </button>
               </>
@@ -380,7 +388,7 @@ function HealthPill({
       : t('health.withAge', { label: healthState.label, age });
   return (
     <button
-      className={`health-pill health-${healthState.level}`}
+      className={`health-pill health-${healthState.quiet ? 'quiet' : healthState.level}`}
       onClick={() => setHealthOpen(true)}
       aria-label={t('health.accessible', {
         title: t('health.title'),
@@ -394,13 +402,23 @@ function HealthPill({
           : healthDescription
       }
     >
-      <span aria-hidden="true">
-        {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
-      </span>
-      <span className="health-label">{healthDescription}</span>
-      <span className="health-age" aria-hidden="true">
-        {age}
-      </span>
+      {/* Items needing attention: a status mark and their number. None: only the freshness. */}
+      {healthState.quiet ? (
+        <span className="health-fresh">{age}</span>
+      ) : healthState.count > 0 ? (
+        <>
+          <StatusShape kind={healthState.level} />
+          <span className="health-count">{healthState.count}</span>
+        </>
+      ) : (
+        <>
+          <StatusShape kind={healthState.level} />
+          <span className="health-label">{healthDescription}</span>
+          <span className="health-age" aria-hidden="true">
+            {age}
+          </span>
+        </>
+      )}
     </button>
   );
 }

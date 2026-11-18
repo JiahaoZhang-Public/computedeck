@@ -44,7 +44,7 @@ describe.each(['en', 'zh-CN'] as const)('formatting %s', (language) => {
     const now = Date.parse('2026-01-15T14:00:00Z');
     expect(relativeTime(null, now)).toBe(t('time.never'));
     expect(relativeTime('invalid', now)).toBe(t('time.unknown'));
-    expect(relativeTime('2026-01-16T14:00:00Z', now)).toBe(t('time.justNow'));
+    expect(relativeTime('2026-01-16T14:00:00Z', now)).toBe(t('time.inDays', { count: 1 }));
     expect(relativeTime('2026-01-15T13:59:00Z', now)).toBe(t('time.minutesAgo', { count: 1 }));
     expect(relativeTime('2026-01-15T13:00:00Z', now)).toBe(t('time.hoursAgo', { count: 1 }));
     expect(relativeTime('2026-01-14T14:00:00Z', now)).toBe(t('time.daysAgo', { count: 1 }));
@@ -59,7 +59,7 @@ describe.each(['en', 'zh-CN'] as const)('formatting %s', (language) => {
     expect(duration(11400)).toBe(
       `${t('cost.duration.hours', { count: 3 })} ${t('cost.duration.minutes', { count: 10 })}`,
     );
-    expect(duration(0)).toBe(t('cost.duration.minutes', { count: 0 }));
+    expect(duration(0)).toBe(t('cost.duration.seconds', { count: 0 }));
     expect(duration(-1)).toBe('—');
     expect(duration(NaN)).toBe('—');
   });
@@ -101,10 +101,22 @@ describe.each(['en', 'zh-CN'] as const)('duration boundaries in %s', (language) 
       );
       expect([0, 59, 60, 11520].map((seconds) => duration(seconds))).toEqual(
         language === 'en'
-          ? ['0 min', '0 min', '1 min', '3 h 12 min']
-          : ['0 分钟', '0 分钟', '1 分钟', '3 小时 12 分钟'],
+          ? ['0 s', '59 s', '1 min', '3 h 12 min']
+          : ['0 秒', '59 秒', '1 分钟', '3 小时 12 分钟'],
       );
       expect(Constructor).not.toHaveBeenCalled();
     },
   );
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'formats future retries and short/long ages in %s',
+  (language) => {
+    setLocale(language);
+    const now = Date.parse('2026-01-15T14:00:00Z');
+    expect(relativeTime('2026-01-15T14:15:00Z', now)).toBe(t('time.inMinutes', { count: 15 }));
+    expect(relativeTime('2026-01-15T16:00:00Z', now)).toBe(t('time.inHours', { count: 2 }));
+    expect(duration(40)).toBe(t('cost.duration.seconds', { count: 40 }));
+    expect(duration(3 * 86400)).toBe(t('cost.duration.days', { count: 3 }));
+  },
+);

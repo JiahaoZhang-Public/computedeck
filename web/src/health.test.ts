@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { attentionText, computeHealth } from './health';
-import { groupsOf, sourceLabel } from './groups';
+import { groupsOf } from './groups';
 import { groupSummary } from './pages/summary';
-import { serverDemo } from './test-server';
+import { serverDashboard, serverDemo } from './test-server';
 import { setLocale, t } from './i18n';
-import type { Health } from './types';
+import type { Attention, Dashboard, Health } from './types';
 
 const health: Health = {
   status: 'ok',
@@ -19,61 +19,118 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// These unit tests isolate health precedence from the demo's deliberate source faults.
+// These unit tests isolate health precedence from the demo's deliberate source faults and its
+// Needs attention list; each test adds the attention items it needs.
 function healthyDashboard() {
   const data = serverDemo();
   data.sources = data.sources.filter((source) => !source.error && !source.stale);
   data.behind = [];
   data.as_of = data.sources.map((source) => source.last_success!).sort()[0];
+  return withAttention(data, []);
+}
+
+/** Set the list and the served active count the way the server (and App, for local mutes) do. */
+function withAttention(data: Dashboard, items: Attention[]) {
+  data.attention = items;
+  data.attention_count = items.filter((item) => !item.muted).length;
   return data;
 }
 
+// Attention items as the server derives them for the example fleet.
+const demoAttention = serverDemo().attention!;
+const pick = (match: (item: Attention) => boolean) =>
+  demoAttention.filter(match).map((item) => structuredClone(item));
+const activeWarnings = () => pick((item) => item.severity === 'warn' && !item.muted);
+const activeError = () => pick((item) => item.kind === 'source_failed' && !item.muted)[0];
+const mutedErrors = () => pick((item) => item.severity === 'error' && !!item.muted);
+const dismissed = (item: Attention): Attention => ({
+  ...item,
+  muted: { state: 'acknowledged', at: '2026-10-13T12:00:00Z', until: null },
+});
+
 describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
-  it('uses server age and stale flags, excludes disabled failures, and keeps age while collecting', () => {
+  it('is quiet with the server age when nothing needs attention, and keeps age while collecting', () => {
     setLocale(locale);
     const data = healthyDashboard();
     data.sources[0].enabled = false;
     data.sources[0].error = 'offline';
     data.as_of = new Date(Date.now() - 8 * 60000).toISOString();
     const state = computeHealth(data, health, null, false, false);
-    expect(state.level).toBe('ok');
+    expect(state.quiet).toBe(true);
+    expect(state.count).toBe(0);
     expect(state.age).toBe(t('time.minutesAgo', { count: 8 }));
+    expect(state.label).toBe(state.age);
+    expect(['warn', 'error']).not.toContain(state.level);
+    expect(state.faults).toEqual([]);
     expect(state.rows.some((row) => row.collecting)).toBe(true);
+    // Stale and failing sources reach the pill through the attention list, not their own flags.
     data.sources[1].stale = true;
     data.behind = [data.sources[1].id];
-    expect(computeHealth(data, health, null, false, false).level).toBe('warn');
     data.sources[1].error = 'offline';
-    expect(computeHealth(data, health, null, false, false).level).toBe('bad');
+    expect(computeHealth(data, health, null, false, false).quiet).toBe(true);
+    withAttention(data, [{ ...activeError(), severity: 'warn' }]);
+    const warned = computeHealth(data, health, null, false, false);
+    expect(warned.quiet).toBe(false);
+    expect(warned.level).toBe('warn');
+    expect(warned.label).toBe(t('health.attention', { count: 1 }));
+    expect(warned.count).toBe(1);
+    expect(warned.age).toBe(t('time.minutesAgo', { count: 8 }));
+    withAttention(data, [activeError()]);
+    expect(computeHealth(data, health, null, false, false).level).toBe('error');
   });
 
   it('keeps first load, token gate, no sources and missing success honest', () => {
     setLocale(locale);
-    expect(computeHealth(null, null, null, false, false).level).toBe('unknown');
-    const data = healthyDashboard();
-    expect(computeHealth(data, health, 'unauthorized', true, false).level).toBe('unknown');
-    expect(computeHealth(data, health, 'unauthorized', true, false).rows).toEqual([]);
+    const first = computeHealth(null, null, null, false, false);
+    expect(first.level).toBe('unknown');
+    expect(first.label).toBe(t('health.unknown'));
+    expect(first.count).toBe(0);
+    const data = withAttention(healthyDashboard(), [activeError(), ...activeWarnings()]);
+    const gated = computeHealth(data, health, 'unauthorized', true, false);
+    expect(gated.level).toBe('unknown');
+    expect(gated.label).toBe(t('health.unknown'));
+    expect(gated.age).toBe(t('health.unknown'));
+    expect(gated.quiet).toBe(false);
+    // The token gate decides: no count from a list the viewer may not read.
+    expect(gated.count).toBe(0);
+    expect(gated.rows).toEqual([]);
+    withAttention(data, []);
     data.sources[0].last_success = null;
     data.as_of = null;
-    expect(computeHealth(data, health, null, false, false).age).toBe(t('health.notCollected'));
+    const uncollected = computeHealth(data, health, null, false, false);
+    expect(uncollected.age).toBe(t('health.notCollected'));
+    // Quiet still never invents an age.
+    expect(uncollected.quiet).toBe(true);
+    expect(uncollected.label).toBe(t('health.notCollected'));
     data.sources = [];
-    expect(computeHealth(data, health, null, false, false).level).toBe('unknown');
+    const none = computeHealth(data, health, null, false, false);
+    expect(none.level).toBe('unknown');
+    expect(none.label).toBe(t('health.noSourcesConnected'));
+    expect(none.quiet).toBe(false);
   });
 
   it.each([1, 2])(
-    'names a single failing or stale source and counts multiple sources (%s)',
+    'counts active attention items and takes the level from their severity (%s)',
     (count) => {
       setLocale(locale);
       const data = healthyDashboard();
       data.sources = data.sources.slice(0, 2);
       for (const source of data.sources.slice(0, count)) source.stale = true;
-      const name = sourceLabel(groupsOf(data), data.sources[0]);
-      expect(computeHealth(data, health, null, false, false).label).toBe(
-        count === 1 ? t('health.sourceStale', { name }) : t('health.stale', { count }),
-      );
-      for (const source of data.sources.slice(0, count)) source.error = 'offline';
-      expect(computeHealth(data, health, null, false, false).label).toBe(
-        count === 1 ? t('health.sourceFailing', { name }) : t('health.failing', { count }),
-      );
+      expect(computeHealth(data, health, null, false, false).quiet).toBe(true);
+      const warnings = activeWarnings();
+      expect(warnings.length).toBeGreaterThanOrEqual(2);
+      withAttention(data, warnings.slice(0, count));
+      const warned = computeHealth(data, health, null, false, false);
+      expect(warned.level).toBe('warn');
+      expect(warned.label).toBe(t('health.attention', { count }));
+      expect(warned.count).toBe(count);
+      expect(warned.quiet).toBe(false);
+      // One error among the active items makes the pill an error.
+      withAttention(data, [...warnings.slice(0, count), activeError()]);
+      const failed = computeHealth(data, health, null, false, false);
+      expect(failed.level).toBe('error');
+      expect(failed.label).toBe(t('health.attention', { count: count + 1 }));
+      expect(failed.count).toBe(count + 1);
     },
   );
 
@@ -82,31 +139,34 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
     const expected =
       locale === 'en'
         ? {
-            fresh: ['1 source fresh', 'All 2 fresh'],
-            stale: ['1 source stale', '2 sources stale'],
-            behind: ['1 source behind', '2 sources behind'],
             backoff: ['backing off after 1 failure', 'backing off after 2 failures'],
             unreadable: ['1 stored row could not be read', '2 stored rows could not be read'],
+            attention: ['1 needs attention', '2 need attention'],
           }
         : {
-            fresh: ['1 个来源数据有效', '全部 2 个来源数据有效'],
-            stale: ['1 个来源数据已过期', '2 个来源数据已过期'],
-            behind: ['1 个来源未更新', '2 个来源未更新'],
             backoff: ['已失败 1 次，延后重试', '已失败 2 次，延后重试'],
             unreadable: ['无法读取 1 条存储记录', '无法读取 2 条存储记录'],
+            attention: ['1 项需要处理', '2 项需要处理'],
           };
-    for (const key of ['fresh', 'stale', 'behind', 'backoff', 'unreadable'] as const) {
+    for (const key of ['backoff', 'unreadable', 'attention'] as const) {
       expect(t(`health.${key}`, { count })).toBe(expected[key][count - 1]);
     }
     const data = healthyDashboard();
     data.sources = data.sources.slice(0, count);
-    expect(computeHealth(data, health, null, false, false).label).toBe(expected.fresh[count - 1]);
+    // A behind source without an attention item leaves the pill quiet on its age.
     data.behind = data.sources.map((source) => source.id);
-    expect(computeHealth(data, health, null, false, false).label).toBe(expected.behind[count - 1]);
-    const broken = { ...health, unreadable_rows: { snapshots: count } };
-    expect(computeHealth(data, broken, null, false, false).label).toBe(
-      expected.unreadable[count - 1],
+    const quiet = computeHealth(data, health, null, false, false);
+    expect(quiet.quiet).toBe(true);
+    expect(quiet.label).toBe(quiet.age);
+    withAttention(data, activeWarnings().slice(0, count));
+    expect(computeHealth(data, health, null, false, false).label).toBe(
+      expected.attention[count - 1],
     );
+    const broken = { ...health, unreadable_rows: { snapshots: count } };
+    const unreadable = computeHealth(data, broken, null, false, false);
+    expect(unreadable.label).toBe(expected.unreadable[count - 1]);
+    expect(unreadable.level).toBe('error');
+    expect(unreadable.count).toBe(0);
   });
 
   it('distinguishes no enabled sources from first load and the token gate', () => {
@@ -120,6 +180,8 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
       expect(state.level).toBe('unknown');
       expect(state.label).toBe(t('health.noSourcesConnected'));
       expect(state.age).toBe(state.label);
+      expect(state.quiet).toBe(false);
+      expect(state.count).toBe(0);
       expect(computeHealth(data, health, null, true, false).label).toBe(t('health.unknown'));
     }
     expect(computeHealth(null, null, null, false, false).label).toBe(t('health.unknown'));
@@ -134,11 +196,16 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
       background_errors: { 'notify:events': { at: '', error: 'delivery failed' } },
     };
     expect(computeHealth(data, broken, null, false, false).faults).toEqual([]);
-    expect(computeHealth(data, { ...broken, plugins: {} }, null, false, false).level).toBe('ok');
+    const removed = computeHealth(data, { ...broken, plugins: {} }, null, false, false);
+    expect(removed.faults).toEqual([]);
+    expect(removed.quiet).toBe(true);
+    // A failing source still shows, through its attention item rather than a plugin fault.
     data.sources[0].error = 'offline';
-    expect(computeHealth(data, broken, null, false, false).label).toBe(
-      t('health.sourceFailing', { name: sourceLabel(groupsOf(data), data.sources[0]) }),
-    );
+    withAttention(data, [activeError()]);
+    const failing = computeHealth(data, broken, null, false, false);
+    expect(failing.faults).toEqual([]);
+    expect(failing.level).toBe('error');
+    expect(failing.label).toBe(t('health.attention', { count: 1 }));
   });
 
   it('reports collection-machine failures', () => {
@@ -156,9 +223,12 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
         error: { code: 'ssh_failed', detail: 'SSH failed' },
       },
     ]);
-    expect(state.level).toBe('bad');
+    expect(state.level).toBe('error');
     expect(state.label).toBe(t('health.nodeFault', { name: 'Relay A' }));
     expect(state.faults[0].page).toBe('sources');
+    // The example list has active items, but the route fault decides, so no count shows.
+    expect(state.count).toBe(0);
+    expect(state.quiet).toBe(false);
   });
 
   it('takes the worst service state and isolates example sources from live service faults', () => {
@@ -173,23 +243,82 @@ describe.each(['en', 'zh-CN'] as const)('freshness in %s', (locale) => {
       unreadable_rows: { snapshots: 2 },
     };
     const state = computeHealth(data, broken, null, false, false);
-    expect(state.level).toBe('bad');
+    expect(state.level).toBe('error');
+    expect(state.label).toBe(t('health.collectorFault'));
     expect(state.collectorFault).toBe(true);
     expect(state.faults.map((fault) => fault.title)).toEqual([
       t('health.collectorFault'),
       t('health.unreadable', { count: 2 }),
     ]);
+    const off = computeHealth(data, { ...health, polling: false }, null, false, false);
+    expect(off.level).toBe('off');
+    expect(off.label).toBe(t('health.pollingOff'));
+    expect(off.quiet).toBe(false);
+    // Items needing attention outrank polling off; a fault or an unreachable service outranks them.
+    withAttention(data, activeWarnings());
     expect(computeHealth(data, { ...health, polling: false }, null, false, false).label).toBe(
-      t('health.pollingOff'),
+      t('health.attention', { count: activeWarnings().length }),
     );
-    expect(computeHealth(data, broken, 'offline', false, false).label).toBe(
-      t('health.unreachable'),
-    );
+    const unreachable = computeHealth(data, broken, 'offline', false, false);
+    expect(unreachable.level).toBe('error');
+    expect(unreachable.label).toBe(t('health.unreachable'));
+    expect(unreachable.count).toBe(0);
+    withAttention(data, []);
     const demo = computeHealth(data, broken, null, false, true);
-    expect(demo.level).toBe('ok');
-    expect(demo.label).toBe(t('health.fresh', { count: data.sources.length }));
-    expect(computeHealth(serverDemo(), broken, null, false, true).level).toBe('bad');
+    expect(demo.quiet).toBe(true);
+    expect(demo.label).toBe(demo.age);
     expect(demo.faults).toEqual([]);
+    expect(demo.collectorFault).toBe(false);
+    const example = serverDemo();
+    const exampleState = computeHealth(example, broken, null, false, true);
+    expect(exampleState.faults).toEqual([]);
+    expect(exampleState.level).toBe('error');
+    expect(exampleState.count).toBe(example.attention!.filter((item) => !item.muted).length);
+    expect(exampleState.label).toBe(t('health.attention', { count: exampleState.count }));
+  });
+
+  it('never counts dismissed or snoozed items, while service faults always show', () => {
+    setLocale(locale);
+    const data = healthyDashboard();
+    const muted = mutedErrors();
+    expect(muted.map((item) => item.muted!.state).sort()).toEqual(['acknowledged', 'snoozed']);
+    // Muted error items leave the pill quiet, with the served count and without it.
+    withAttention(data, muted);
+    expect(data.attention_count).toBe(0);
+    for (const served of [0, undefined]) {
+      data.attention_count = served;
+      const state = computeHealth(data, health, null, false, false);
+      expect(state.quiet).toBe(true);
+      expect(state.count).toBe(0);
+      expect(state.label).toBe(state.age);
+      expect(['warn', 'error']).not.toContain(state.level);
+    }
+    // Dismissing the only error item leaves the warnings, at warning level.
+    withAttention(data, [...muted, dismissed(activeError()), ...activeWarnings()]);
+    const warned = computeHealth(data, health, null, false, false);
+    expect(warned.level).toBe('warn');
+    expect(warned.count).toBe(activeWarnings().length);
+    // Older services send no count: the unmuted items decide.
+    delete data.attention_count;
+    expect(computeHealth(data, health, null, false, false).count).toBe(activeWarnings().length);
+    // A collector fault is never dismissible: it shows while every attention item is muted.
+    const broken = {
+      ...health,
+      background_errors: { collector: { at: '2026-10-13T12:00:00Z', error: 'database is locked' } },
+    };
+    withAttention(data, muted);
+    const fault = computeHealth(data, broken, null, false, false);
+    expect(fault.quiet).toBe(false);
+    expect(fault.level).toBe('error');
+    expect(fault.label).toBe(t('health.collectorFault'));
+    expect(fault.collectorFault).toBe(true);
+    expect(fault.count).toBe(0);
+    // With active items too, the fault decides the label and the count is 0.
+    withAttention(data, [...muted, activeError(), ...activeWarnings()]);
+    const both = computeHealth(data, broken, null, false, false);
+    expect(both.label).toBe(t('health.collectorFault'));
+    expect(both.count).toBe(0);
+    expect(computeHealth(data, health, null, false, false).count).toBe(1 + activeWarnings().length);
   });
 });
 
@@ -278,11 +407,26 @@ it.each([1, 2])('matches attention severity after %s collection failures', (fail
     stale: false,
     failures,
   };
+  // The server derives the source's attention item; the pill takes its severity.
+  const derive = () => {
+    const rest = { ...data };
+    delete rest.attention;
+    delete rest.attention_count;
+    const items = serverDashboard(rest).attention!.filter(
+      (item) => item.subject.id === data.sources[0].id,
+    );
+    expect(items.map((item) => item.kind)).toEqual(['source_failed']);
+    return withAttention(data, items).attention![0].severity;
+  };
+  expect(derive()).toBe(failures === 1 ? 'warn' : 'error');
   expect(computeHealth(data, health, null, false, false).level).toBe(
-    failures === 1 ? 'warn' : 'bad',
+    failures === 1 ? 'warn' : 'error',
   );
   data.sources[0].stale = true;
-  expect(computeHealth(data, health, null, false, false).level).toBe('bad');
+  expect(derive()).toBe('error');
+  expect(computeHealth(data, health, null, false, false).level).toBe('error');
+  withAttention(data, data.attention!.map(dismissed));
+  expect(computeHealth(data, health, null, false, false).quiet).toBe(true);
 });
 
 it.each(['en', 'zh-CN'] as const)(
@@ -304,15 +448,19 @@ it.each(['en', 'zh-CN'] as const)(
 );
 
 it.each(['en', 'zh-CN'] as const)(
-  'retains timeout parameters in notification attention (%s)',
+  'keeps the timeout for the detail and a short, complete notification title (%s)',
   (locale) => {
     setLocale(locale);
     const item = serverDemo().attention!.find((entry) => entry.kind === 'notification_failed')!;
+    // The server keeps the timeout parameters; the title names only the channel, never the why.
+    expect(item.message.error).toEqual({ code: 'send_timeout', seconds: 30 });
+    const title = t('msg.attention_notification_failed', { channel: String(item.message.channel) });
     const text = attentionText(item, []);
-    expect(text).toContain(t('msg.send_timeout', { seconds: 30 }));
+    expect(text).toBe(title);
     expect(text).not.toContain('{');
+    expect(text).not.toContain(t('msg.send_timeout', { seconds: 30 }));
     delete item.message.error;
-    expect(attentionText(item, [])).toContain(t('msg.send_timeout_unknown'));
-    expect(attentionText(item, [])).not.toContain('{');
+    expect(attentionText(item, [])).toBe(title);
+    expect(attentionText(item, [])).not.toContain(t('msg.send_timeout_unknown'));
   },
 );

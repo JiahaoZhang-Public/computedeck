@@ -7,6 +7,7 @@ import { WaitHistory, WaitHistoryNote } from './WaitHistory';
 import { dateTime, relativeTime } from './domain';
 import { groupsOf } from './groups';
 import { lowUseDuration, setLocale, t } from './i18n';
+import { jobReason } from './jobFacts';
 import { JobDetail } from './pages/Details';
 import { PlanPage } from './pages/Plan';
 import type { Ctx } from './pages/shared';
@@ -243,7 +244,10 @@ describe.each(['en', 'zh-CN'] as const)('wait history in %s', (locale) => {
     job = ctx.data.jobs.find((j) => j.reason === 'Resources' && j.queue?.length)!;
     const drawer = markup(<JobDetail job={job} ctx={ctx} />);
     const callout = drawer.querySelector('.callout')!;
-    expect(callout.textContent).toContain(t('job.reason'));
+    // The scheduler's reason leads the callout as a sentence; there is no "Pending reason" heading.
+    const driver = ctx.data.sources.find((source) => source.id === job.source_id)!.driver;
+    expect(callout.querySelector('p.lead')!.textContent).toBe(jobReason(job, driver)!.summary);
+    expect(callout.textContent).not.toContain('Pending reason');
     expect(callout.textContent).toContain(t('job.queue.resources', { partition: 'gpu' }));
     expect(
       callout.compareDocumentPosition(drawer.querySelector('.wait-history')!) &

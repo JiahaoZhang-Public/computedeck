@@ -56,7 +56,7 @@
   stroke-width: 1;
 }
 .bucket-gap {
-  stroke: var(--border-strong);
+  stroke: var(--hatch-edge);
   stroke-dasharray: 3 3;
 }
 .bucket-band {
@@ -127,6 +127,11 @@
   stroke: var(--fg-subtle);
   stroke-width: 1;
   stroke-dasharray: 3 3;
+}
+/* The key list shows while the plot has keyboard focus; it always describes the plot. Its
+   line stays reserved, so focusing or leaving the plot never moves what is around it. */
+.chart-kit:not(:has(.chart-plot:focus-visible)) .chart-keys {
+  opacity: 0;
 }
 @media (pointer: coarse) {
   .chart-kit .chart-keys {

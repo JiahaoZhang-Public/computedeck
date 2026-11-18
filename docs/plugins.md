@@ -394,7 +394,7 @@ torque = "computedeck_torque:TorqueDriver"
 `info` builds the add-source form: `username`, `ssh_alias` and `credential` are common
 fields; any other field key is stored in `source["options"]` (read it with
 `computedeck.sdk.options(source)`). `checks` become the first-collection checklist and
-the capability tags on the Sources page.
+the **Reads** list in the source's details.
 
 Rules that keep the numbers honest:
 
@@ -466,7 +466,7 @@ from computedeck.sdk import CloudDriver, CloudInstance, parse_ssh_command
 class ExampleCloud(CloudDriver):
     name = "example-cloud"
     label = {"en": "Example Cloud", "zh-CN": "示例云"}
-    base_url = "https://api.example-cloud.com"
+    base_url = "https://api.example.com"
     key_env = "EXAMPLE_CLOUD_API_KEY"  # the form suggests env:EXAMPLE_CLOUD_API_KEY
     auth_scheme = "Bearer"  # "" sends the key alone
 
@@ -912,6 +912,12 @@ a strict, non-interactive SSH command; wrap it in `asyncio.timeout` to set your 
 Use `wait=False` to raise `SSHBusyError` when another operation is using that destination.
 The separate `parse_ssh_command` parses a provider's connection string without executing it.
 
+A source can be routed through an SSH jump host (`[[node]]` with `mode = "jump"`). Its
+driver then runs on this machine as usual, and every `ssh_command` (or `computedeck.sdk.ssh`
+call) made during `collect` goes through the jump host, including in tasks the driver starts;
+no signature changes. Do not start `ssh` yourself, which would bypass the route. Only sources
+whose driver declares the `ssh_alias` field, with an alias set, can use a jump host.
+
 ```python
 ctx.set_state("last_refresh", {"at": now()})
 previous = ctx.get_state("last_refresh", {})
@@ -1216,9 +1222,13 @@ for matching limits and outage behaviour.
 ## Styling contract, WEB_API 1
 
 The 0.8 theme keeps the public component DOM and every 0.7 route. `Chips` still uses
-`role="tab"`. Colour is now ink on neutral surfaces; warning and error text retain their
-severity colours. Links are ink and underlined. Primary buttons use ink with contrasting
-text in **both** themes; do not put literal white text on `--accent`.
+`role="tab"` and is drawn as underline tabs. The interface is monochrome: primary buttons,
+links, active navigation and tabs, and the focus ring are ink (near-black in light themes,
+near-white in dark themes); warning and error text retain their severity colours. Links are
+text-coloured and underlined. Primary buttons use `--accent` with `--fg-on-accent` text, which
+flips with the theme; buttons, inputs and selects are 32 px rounded rectangles (8 px radius),
+and only small filter chips are pills. The legacy names below
+still work and resolve to these ink values.
 
 The supported aliases are in `web/src/theme/tokens-compat.css`; the machine-readable
 old-to-new map is `web/src/theme/compat-map.json` (also shipped at `/tokens-compat.json`):
@@ -1231,10 +1241,10 @@ old-to-new map is `web/src/theme/compat-map.json` (also shipped at `/tokens-comp
 | `--surface` | `--bg-surface` |
 | `--surface-2` | `--bg-sunken` |
 | `--border` | `--border-muted` |
-| `--accent` | `--ink` |
-| `--accent-soft` | `--bg-selected` |
-| `--accent-text` | `--fg-default` |
-| `--accent-hover` | `color-mix(in oklch, var(--ink) 88%, var(--bg-canvas))` |
+| `--accent` | `--accent-fill` |
+| `--accent-soft` | `--accent-bg` |
+| `--accent-text` | `--accent-fg` |
+| `--accent-hover` | `color-mix(in oklch, var(--accent-fill) 88%, black)` |
 | `--gray-soft` | `--status-unknown-bg` |
 | `--green`, `--green-soft` | `--status-ok-fg`, `--status-ok-bg` |
 | `--amber`, `--amber-soft` | `--status-warn-fg`, `--status-warn-bg` |
@@ -1265,9 +1275,9 @@ means follow the system; plugins should inherit it. The generated CSS includes a
 WebKit fallback, contrast-more and forced-colours rules. No webfont is loaded. Chinese uses
 the same one-line heights as English, no synthesized weight or tracking, and a 1.7 prose
 line height (English 1.5). New controls are 32 px tall; Compact makes **table** controls
-28 px and rows 32 px, leaving forms alone. Row sizes include the hairline: single/two-line
-text rows are 40/60 px in Comfortable, 32/48 px in Compact, and 44/60 px with a coarse pointer.
-`table.compact` also selects 32/48 px rows in Comfortable; device Compact and coarse-pointer
+30 px and rows 36 px, leaving forms alone. Row sizes include the hairline: single/two-line
+text rows are 44/64 px in Comfortable, 36/52 px in Compact, and 44/60 px with a coarse pointer.
+`table.compact` also selects 36/52 px rows in Comfortable; device Compact and coarse-pointer
 minimums still apply. Tables retain collapsed borders, including plugin borders on rows.
 The final row keeps a transparent 1 px bottom border for consistent collapsed row heights
 in Chromium and WebKit. Table cells inherit the 13 px default but preserve font sizes set
@@ -1291,8 +1301,11 @@ an empty-overview fixture and a page-only fixture. The test-only build flag
 `COMPUTEDECK_TEST_PLUGIN_SLOTS=1` shows slots in example mode; regular builds still hide them.
 
 中文：0.8 保留 WEB_API 1 的组件 DOM、旧路由、上表中的 19 个变量和全部公共类，
-并补齐 `--accent-hover`、`--text-muted`。强调色改为墨色；主按钮使用 `--ink` 和
-`--fg-on-ink`，深色主题下不可硬编码白字。普通链接为墨色并带下划线。
+并补齐 `--accent-hover`、`--text-muted`。界面为单色：主按钮、链接、
+当前导航和标签页以及焦点框均为墨色（浅色主题近黑、深色主题近白）；主按钮使用 `--accent` 与
+`--fg-on-accent`，文字颜色随主题翻转；按钮、输入框和下拉框为 32 px 圆角矩形（圆角 8 px），
+只有小型筛选标签为胶囊形。
+旧变量名仍可用，并解析为这些墨色值。普通链接为文字颜色并带下划线。
 核心 Vite 开发服务器只对 `web/src` 之外的 CSS/TSX/JSX 模块提示旧颜色变量，
 例如通过 `COMPUTEDECK_WEB_PLUGINS` 加载的构建时插件；核心源码不提示。
 使用独立 Vite 配置构建的运行时插件包不会经过该检查，生产构建也不提示。
@@ -1303,9 +1316,9 @@ an empty-overview fixture and a page-only fixture. The test-only build flag
 根元素的 `data-theme="light|dark"` 强制主题，缺省跟随系统。
 兼容 CSS 覆盖旧版 WebKit、增强对比度和强制颜色模式。中文与英文的单行高度相同，
 不合成字重、不增加字距，说明文字行高为 1.7；不下载字体。
-控件默认 32 像素；紧凑模式只把表格行和控件改为 32/28 像素，表单不受影响，
-行高包含分隔线：舒适模式单行/双行为 40/60 像素，紧凑为 32/48 像素，粗指针为
-44/60 像素。`table.compact` 在舒适模式下也使用 32/48 像素，设备紧凑模式和粗指针
+控件默认 32 像素；紧凑模式只把表格行和控件改为 36/30 像素，表单不受影响，
+行高包含分隔线：舒适模式单行/双行为 44/64 像素，紧凑为 36/52 像素，粗指针为
+44/60 像素。`table.compact` 在舒适模式下也使用 36/52 像素，设备紧凑模式和粗指针
 最小尺寸仍然生效。表格保留折叠边框（包括插件的行边框），末行保留透明的 1 像素底边框，
 使 Chromium 和 WebKit 的折叠行高一致。单元格继承 13 像素默认字号，但保留单元格类指定的
 字号，包括 `.mono` 的字体及 12 像素字号；表格中的 `.num` 仍使用等宽数字；
@@ -1378,3 +1391,10 @@ range links retain their meaning.
 （覆盖源数和周期），旧记录缺失部分按未知处理。`/api/events` 新增 `until`（不含），
 与原有 `since`（含）均在分组分页前应用，示例模式相同。动态链接的 `from`/`to` 映射
 到这两个边界；普通范围链接不变。
+
+Checkpoint compatibility checks pin all eight public component trees to 0.7 markup.
+The hello scaffold demonstrates `.spin` on its own fixed-size SVG, as loader icons use
+it; a grid-stretched wrapper should not carry the rotation. `--accent-hover` uses the
+plain accent when `color-mix()` is unavailable and mixes only inside a feature query. Reserved core
+or route-alias page ids are omitted with a console warning naming the plugin; its other
+pages and slots still load.

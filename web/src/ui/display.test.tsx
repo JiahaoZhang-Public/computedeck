@@ -1,3 +1,4 @@
+import { CopyContext, createCopy } from '../copy';
 // @vitest-environment jsdom
 import { act, Profiler, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -5,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale, t } from '../i18n';
 import { serverDemo } from '../test-server';
 import { Status as LegacyStatus } from '../ui';
-import { Status, StatusShape } from './Status';
+import { StatusLabel, StatusShape } from './Status';
 import { shapes } from './shapes';
 import type { StatusKind } from './shapes';
 import { Value } from './Value';
@@ -52,7 +53,7 @@ describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
       root.render(
         <>
           {(Object.keys(shapes) as StatusKind[]).map((kind) => (
-            <Status kind={kind} key={kind} />
+            <StatusLabel kind={kind} key={kind} />
           ))}
           <StatusShape kind="unknown" size={8} />
           <LegacyStatus state="FAILED" />
@@ -164,7 +165,7 @@ describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
     await act(async () =>
       root.render(<Age label={t('clusters.nodes')} value="2026-01-15T13:59:30Z" />),
     );
-    expect(container.textContent).toContain(t('cost.duration.minutes', { count: 0 }));
+    expect(container.textContent).toContain(t('cost.duration.seconds', { count: 30 }));
   });
   it('marks bounds, estimates, unknowns, last-known values and stale exact figures', async () => {
     await act(async () =>
@@ -184,7 +185,7 @@ describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
     );
     expect(values[0]).toBe('≥ 29 GPU');
     expect(values[1]).toContain(language === 'zh-CN' ? '≈ US$41.20' : '≈ $41.20');
-    expect(values[1]).toContain(t('display.estimate'));
+    expect(values[1]).not.toContain(t('display.estimate'));
     expect(values[2]).toBe('— · missing');
     const unknown = container.querySelector('.value-unknown')!;
     expect(unknown.querySelector('.value-unknown-mark')?.textContent).toBe('—');
@@ -336,28 +337,94 @@ it('publishes only minute boundaries and format changes, with one timer under St
   expect(vi.getTimerCount()).toBe(1);
 });
 
-it.each([false, true])(
-  'copies only, including example marker %s, and resets after two seconds',
-  async (example) => {
-    vi.useFakeTimers();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    await act(async () => root.render(<CopyButton text="squeue --me" example={example} />));
-    await act(async () => container.querySelector('button')!.click());
-    expect(writeText).toHaveBeenCalledWith(example ? 'squeue --me\n# example data' : 'squeue --me');
-    expect(container.querySelector('[role=status]')?.textContent).toBe(t('display.copied'));
-    await act(async () => vi.advanceTimersByTime(1999));
-    expect(container.querySelector('[role=status]')?.textContent).toBe(t('display.copied'));
-    await act(async () => vi.advanceTimersByTime(1));
-    expect(container.querySelector('[role=status]')?.textContent).toBe('');
-  },
-);
-it('retains clipboard failure text and never announces success', async () => {
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
-  });
-  await act(async () => root.render(<CopyButton text="squeue --me" />));
+it.each([false, true])('uses the shared copy service in example mode %s', async (example) => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const notify = vi.fn();
+  await act(async () =>
+    root.render(
+      <CopyContext value={createCopy(example, notify)}>
+        <CopyButton text="squeue --me" />
+      </CopyContext>,
+    ),
+  );
   await act(async () => container.querySelector('button')!.click());
-  expect(container.querySelector('[role=status]')?.textContent).toBe(t('toast.clipboard'));
+  expect(writeText).toHaveBeenCalledWith(example ? 'squeue --me\n# example data' : 'squeue --me');
+  expect(notify).toHaveBeenCalledExactlyOnceWith(t('display.copied'));
+  expect(container.querySelector('[role=status]')).toBeNull();
+});
+it('shares link/text semantics and announces clipboard failures once', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const notify = vi.fn();
+  const copy = createCopy(true, notify);
+  await copy('https://example.test', { kind: 'link' });
+  await copy('plain text', { kind: 'text' });
+  expect(writeText.mock.calls).toEqual([['https://example.test'], ['plain text']]);
+  notify.mockClear();
+  writeText.mockRejectedValue(new Error('denied'));
+  await copy('squeue', { kind: 'command' });
+  expect(notify).toHaveBeenCalledExactlyOnceWith(t('toast.clipboard'), 'error');
+});
+
+it('keeps fractional bounds below the actual value and names non-numeric unknowns', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <Value value={28.9996} kind="lower" />
+        <Value value={12.3456} kind="lower" />
+        <Value value={NaN} />
+      </>,
+    ),
+  );
+  expect([...container.querySelectorAll('.display-value')].map((node) => node.textContent)).toEqual(
+    ['≥ 28.999', '≥ 12.345', `— · ${t('display.status.unknown')}`],
+  );
+});
+it('allows row links with last-known figures and scope times without nested buttons', async () => {
+  await act(async () =>
+    root.render(
+      <a href="#/jobs" aria-describedby="last scope">
+        <Value value={2} kind="lastKnown" at={example.at} reason="stale" descriptionId="last" />
+        <ScopeLine scope="Mine" groups="All" asOf={example.at} descriptionId="scope" estimate />
+        <Value value={4} kind="estimate" />
+        <Value value={5} kind="estimate" label />
+      </a>,
+    ),
+  );
+  expect(container.querySelector('a button')).toBeNull();
+  expect(container.querySelectorAll('.sr-only')).toHaveLength(2);
+  expect(container.textContent?.split(t('display.estimate'))).toHaveLength(3);
+});
+it('supports list-specific empty copy and actions', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <DataState
+          state="quiet"
+          title="Jobs"
+          text="No jobs running"
+          action={<button>Reset</button>}
+        />
+        <DataState state="first" title="Nodes" text="Connect a cluster" />
+      </>,
+    ),
+  );
+  expect(container.textContent).toBe('JobsNo jobs runningResetNodesConnect a cluster');
+});
+it('uses the first group slot without losing colour and hides adjacent monograms', async () => {
+  const { groupsOf } = await import('../groups');
+  const group = groupsOf(serverDemo())[0];
+  await act(async () => root.render(<Monogram group={group} decorative />));
+  expect(container.querySelector('span')?.style.getPropertyValue('--identity')).toBe(
+    `var(--id-${group.slot})`,
+  );
+  expect(container.querySelector('span')?.getAttribute('aria-hidden')).toBe('true');
+  expect(container.querySelector('[role=img]')).toBeNull();
+});
+
+it('renders optional scope suffixes without forcing an as-of timestamp', async () => {
+  await act(async () => root.render(<ScopeLine scope="Mine">now</ScopeLine>));
+  expect(container.textContent).toBe('Mine · now');
+  expect(container.querySelector('time')).toBeNull();
 });

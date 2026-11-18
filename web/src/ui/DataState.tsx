@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 import { t } from '../i18n';
 import { Time } from './Time';
-import { Status } from './Status';
+import { StatusLabel } from './Status';
 import './display.css';
 
 type State =
   | { state: 'loading'; rows?: number; rowHeight?: number }
-  | { state: 'first'; action: ReactNode; example: ReactNode }
-  | { state: 'quiet' }
+  | { state: 'first'; title?: string; text?: string; action?: ReactNode; example?: ReactNode }
+  | { state: 'quiet'; title?: string; text?: string; action?: ReactNode }
   | { state: 'filtered'; hidden: number; onClear: () => void }
   | { state: 'error' | 'stale'; reason: string; at: string | null; children?: ReactNode };
 
@@ -29,11 +29,18 @@ export function DataState(props: State) {
         </>
       ) : props.state === 'first' ? (
         <>
-          <p>{t('display.first')}</p>
-          {props.action} {props.example}
+          {props.title && <h2>{props.title}</h2>}
+          <p>{props.text ?? t('display.first')}</p>
+          {props.action}
+          {props.action && props.example ? ' ' : null}
+          {props.example}
         </>
       ) : props.state === 'quiet' ? (
-        <p>{t('display.quiet')}</p>
+        <>
+          {props.title && <h2>{props.title}</h2>}
+          <p>{props.text ?? t('display.quiet')}</p>
+          {props.action}
+        </>
       ) : props.state === 'filtered' ? (
         <p>
           {t('display.hidden', { count: props.hidden })} ·{' '}
@@ -43,7 +50,7 @@ export function DataState(props: State) {
         </p>
       ) : (
         <>
-          <Status
+          <StatusLabel
             kind={props.state === 'error' ? 'error' : 'unknown'}
             label={t(`display.${props.state}`)}
             reason={props.reason}

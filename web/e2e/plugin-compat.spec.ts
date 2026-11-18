@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, ready } from './fixtures';
+import { wcagTags, test, expect, ready } from './fixtures';
 import { withScreenshotViewport, settledScreenshot } from './screenshots';
 
 // Same six projects as core: both locales, both themes and all three widths.
@@ -66,13 +66,7 @@ test('scaffold hello plugin page, public components/classes and all slots', asyn
   await expect(banner).toBeVisible();
   expect(await banner.locator(':scope > *').count()).toBe(1);
   await expect(banner.locator('h2')).toHaveCount(0);
-  expect(
-    (
-      await new AxeBuilder({ page })
-        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-        .analyze()
-    ).violations,
-  ).toEqual([]);
+  expect((await new AxeBuilder({ page }).withTags(wcagTags).analyze()).violations).toEqual([]);
   await settledScreenshot(page, testInfo, 'hello-page');
   await withScreenshotViewport(page, testInfo, async (options) => {
     if (testInfo.project.use.hasTouch)
@@ -108,4 +102,25 @@ test('scaffold hello plugin page, public components/classes and all slots', asyn
   await ready(page);
   await expect(page.locator('main h2')).toHaveText(chinese ? '独立页面' : 'Page only');
   await expect(page.locator('[data-plugin="fixture-page-only"]')).toHaveCount(0);
+});
+
+test('scaffold spinner stays icon-sized with motion enabled', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/__ui-plugins/?demo=true#/hello-example');
+  await ready(page);
+  const spinner = page.locator('main svg.spin');
+  await expect(spinner).toHaveCount(1);
+  const boxes = await spinner.evaluate(async (node) => {
+    const boxes: { width: number; height: number }[] = [];
+    for (let i = 0; i < 20; i++) {
+      await new Promise(requestAnimationFrame);
+      const rect = node.getBoundingClientRect();
+      boxes.push({ width: rect.width, height: rect.height });
+    }
+    return boxes;
+  });
+  for (const box of boxes) {
+    expect(box.width).toBeLessThanOrEqual(23);
+    expect(box.height).toBeLessThanOrEqual(23);
+  }
 });

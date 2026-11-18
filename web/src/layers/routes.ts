@@ -1,6 +1,22 @@
 import { canonicalHash } from '../routes';
 import { routeParams, setRouteParams } from '../useRouteParam';
 
+export const detailKeys = [
+  'job',
+  'failure',
+  'instance',
+  'array',
+  'event',
+  'attention',
+  'node',
+  'source',
+] as const;
+export function detailValues(values: Record<string, string | null> = {}) {
+  return { ...Object.fromEntries(detailKeys.map((key) => [key, null])), ...values };
+}
+export function formKeys(params = routeParams()) {
+  return ['add', 'edit', 'repair', 'step', ...(params.get('section') === 'ssh' ? ['section'] : [])];
+}
 // Only entries opened in this document are backed out of. Cold links close to their list.
 const opened = new Set<string>();
 export function openLayer(values: Record<string, string | null>, replace = false) {
@@ -43,17 +59,16 @@ export function stepVisibleDetail(direction: number) {
   );
   const current = rows.find((row) => params.get(row.dataset.detailKey!) === row.dataset.detailId);
   if (!current) return;
-  const list = rows.filter((row) => row.closest('table') === current.closest('table'));
+  const container = current.closest('[data-detail-list]');
+  if (!container) return;
+  const list = rows.filter((row) => row.closest('[data-detail-list]') === container);
   const next = list[list.indexOf(current) + direction];
   if (next) {
     next.scrollIntoView({ block: 'nearest' });
-    replaceLayer({
-      job: null,
-      failure: null,
-      array: null,
-      instance: null,
-      event: null,
-      [next.dataset.detailKey!]: next.dataset.detailId!,
-    });
+    replaceLayer(
+      detailValues({
+        [next.dataset.detailKey!]: next.dataset.detailId!,
+      }),
+    );
   }
 }

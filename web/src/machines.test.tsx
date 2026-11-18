@@ -245,32 +245,39 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     const root = createRoot(view);
     try {
       await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      // With no machine left to show, the Machines panel goes away with its notes.
       expect(view.querySelector('.machine-options')).toBeNull();
+      expect(view.textContent).not.toContain(t('plan.machinesNoMatch', { count: 1 }));
+      expect(view.textContent).not.toContain(t('plan.machinesEmpty'));
+      expect(
+        [...view.querySelectorAll('select option')].map((option) => option.textContent),
+      ).toContain('NVIDIA L4');
+      const named = item.gpus!;
+      data.instances.push({ ...item, id: 'other', name: 'other', gpus: named });
+      // An unknown model may still match: that machine stays listed, never counted as free.
+      item.gpus = [{ ...named[0], name: null }];
+      await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(1);
+      expect(view.textContent).toContain(t('plan.machineUnknown', { count: 1 }));
+      expect(view.querySelector('.machine-command')).toBeNull();
       expect(view.textContent).toContain(
         locale === 'en'
           ? '1 machine has no matching GPU; hidden.'
           : '1 台机器没有匹配的 GPU，已隐藏。',
       );
-      expect(view.textContent).not.toContain(t('plan.machinesEmpty'));
-      expect(
-        [...view.querySelectorAll('select option')].map((option) => option.textContent),
-      ).toContain('NVIDIA L4');
-      data.instances.push({ ...item, id: 'other', name: 'other' });
+      data.instances.push({ ...item, id: 'third', name: 'third', gpus: named });
       await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(1);
       expect(view.textContent).toContain(
         locale === 'en'
           ? '2 machines have no matching GPU; hidden.'
           : '2 台机器没有匹配的 GPU，已隐藏。',
       );
-      item.gpus = [{ ...item.gpus![0], name: null }];
-      await act(async () => root.render(<PlanPage ctx={context(data)} />));
-      expect(view.querySelectorAll('.machine-options li')).toHaveLength(1);
-      expect(view.textContent).toContain(t('plan.machineUnknown', { count: 1 }));
-      expect(view.querySelector('.machine-command')).toBeNull();
       window.history.replaceState(null, '', '#/plan');
       await act(async () => root.render(<PlanPage ctx={context(data)} />));
-      expect(view.querySelectorAll('.machine-options li')).toHaveLength(2);
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(3);
       expect(view.textContent).not.toContain(t('plan.machinesNoMatch', { count: 1 }));
+      expect(view.textContent).not.toContain(t('plan.machinesNoMatch', { count: 2 }));
     } finally {
       await act(async () => root.unmount());
     }
@@ -282,12 +289,20 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
       { ...item, id: 'old', gpus_observed_at: new Date(Date.now() - 1200001).toISOString() },
       { ...item, id: 'missing', gpus: null, gpus_observed_at: null },
       { ...item, id: 'stopped', state: 'stopped', gpus: null },
+      // One machine matches, so the Machines panel shows and carries the hidden counts.
+      {
+        ...item,
+        id: 'match',
+        name: 'match',
+        gpus: item.gpus!.map((gpu) => ({ ...gpu, name: 'H100' })),
+      },
     );
     window.history.replaceState(null, '', '#/plan?model=H100');
     const view = document.createElement('div');
     const root = createRoot(view);
     try {
       await act(async () => root.render(<PlanPage ctx={context(data)} />));
+      expect(view.querySelectorAll('.machine-options li')).toHaveLength(1);
       expect(view.textContent).toContain(t('plan.machinesNoMatch', { count: 1 }));
       expect(view.textContent).toContain(
         locale === 'en'
@@ -357,16 +372,26 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     );
     expect(machines.textContent).not.toContain('1 GPUs');
   });
-  it('explains unknown memory without falsely reporting unreadable processes', () => {
+  it('explains unknown memory without falsely reporting unreadable processes', async () => {
     setLocale(locale);
     const { data, item } = fixture();
     expect(item.gpus![3]).toMatchObject({ processes: [], memory_used_mb: null, in_use: null });
     const missing = data.summary.unmeasured.filter((row) => row.subject.id === item.id);
     expect(missing).toHaveLength(1);
     expect(missing[0].reason.code).toBe('summary_gpu_processes_unavailable');
-    const view = parse(
-      renderToStaticMarkup(<UnmeasuredLinks items={missing} ctx={context(data)} />),
-    );
+    const view = document.createElement('div');
+    document.body.append(view);
+    const root = createRoot(view);
+    await act(async () => root.render(<UnmeasuredLinks items={missing} ctx={context(data)} />));
+    // Without a figure the trigger is an unknown mark; its name says what is not counted.
+    const trigger = view.querySelector('button')!;
+    expect(trigger.getAttribute('aria-label')).toBe(t('unmeasured.count', { count: 1 }));
+    expect(trigger.title).toBe(t('unmeasured.count', { count: 1 }));
+    expect(view.textContent).toBe('');
+    await act(async () => trigger.click());
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(view.textContent).toContain(
       locale === 'en'
         ? 'GPU use not readable on every GPU (processes or memory)'
@@ -375,6 +400,8 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     expect(view.textContent).not.toContain(
       locale === 'en' ? 'GPU processes not available' : '无法读取 GPU 进程',
     );
+    await act(async () => root.unmount());
+    view.remove();
   });
   it('labels measured use without implying visible processes', () => {
     setLocale(locale);
@@ -453,17 +480,24 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
     window.history.replaceState(null, '', '#/plan?gpus=2');
     const ctx = context(data);
     const view = parse(renderToStaticMarkup(<PlanPage ctx={ctx} />));
-    expect(view.textContent).toContain(t('plan.machinesNote'));
     expect(view.textContent).toContain(t('plan.machineFree', { free: '≥ 1', total: 4 }));
+    // The machine name is the one way to its detail; no extra Open button per row.
+    expect(view.querySelector('.machine-options .grow > button.link')?.textContent).toContain(
+      item.name,
+    );
     expect(view.textContent).not.toContain(t('plan.empty'));
     expect(
       [...view.querySelectorAll('select option')].map((option) => option.textContent),
     ).toContain('NVIDIA L4');
+    // A current machine keeps the Machines panel, which explains the one hidden as stale.
+    data.instances.push({ ...item, id: 'current', name: 'current' });
     item.gpus_observed_at = null;
-    const stale = renderToStaticMarkup(<PlanPage ctx={ctx} />);
-    expect(stale).toContain(t('plan.machinesEmpty'));
-    expect(stale).toContain(t('plan.machineFreshness'));
-    expect(stale).toContain(t('plan.machinesStale', { count: 1 }));
+    const stale = parse(renderToStaticMarkup(<PlanPage ctx={ctx} />));
+    expect(stale.querySelectorAll('.machine-options li')).toHaveLength(1);
+    expect(stale.querySelector('.machine-options .grow > button.link')!.textContent).toContain(
+      'current',
+    );
+    expect(stale.textContent).toContain(t('plan.machinesStale', { count: 1 }));
   });
   it.each([
     { requested: 1, indexes: [3, 1, 2], selected: '1', muted: false },
@@ -485,13 +519,11 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
         );
         const command = `ssh -t 'lab-server' 'export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=${selected}; exec "\${SHELL:-sh}" -l'`;
         expect(container.querySelector('.machine-command')!.textContent).toBe(command);
-        expect(container.textContent).toContain(
-          locale === 'en'
-            ? 'Copy only: paste to open an SSH shell with these GPU settings, then run your command there. Copying runs nothing and reserves no GPU.'
-            : '仅复制：粘贴后会打开带有这些 GPU 设置的 SSH shell，然后在其中运行你的命令。复制操作不会执行命令或预留 GPU。',
-        );
-        const [copy, open] =
-          container.querySelectorAll<HTMLButtonElement>('.machine-actions button');
+        // One action per machine: copy. The name opens the machine instead of a second button.
+        const actions = container.querySelectorAll<HTMLButtonElement>('.machine-actions button');
+        expect(actions).toHaveLength(1);
+        const [copy] = actions;
+        const open = container.querySelector<HTMLButtonElement>('.machine-options .grow > button')!;
         expect(copy.textContent).toBe(
           muted
             ? locale === 'en'
@@ -500,7 +532,14 @@ describe.each(['en', 'zh-CN'] as const)('machine UI in %s', (locale) => {
             : t('plan.machineCopy'),
         );
         await act(async () => copy.click());
-        expect(ctx.copy).toHaveBeenCalledWith(command);
+        // Copy-only is said once, when it matters: in the confirmation after copying.
+        expect(ctx.copy).toHaveBeenCalledWith(command, {
+          kind: 'command',
+          message:
+            locale === 'en'
+              ? 'Copied. Nothing ran and no GPU is reserved.'
+              : '已复制。没有运行任何命令，也未预留 GPU。',
+        });
         await act(async () => open.click());
         expect(ctx.openInstance).toHaveBeenCalledWith(data.instances[0]);
       } finally {

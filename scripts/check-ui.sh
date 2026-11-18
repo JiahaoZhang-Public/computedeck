@@ -14,6 +14,11 @@ cleanup() {
     kill "$service_pid" 2>/dev/null || true
     wait "$service_pid" 2>/dev/null || true
   fi
+  if [[ "$status" != 0 && -f "$work/service.log" ]]; then
+    mkdir -p "$root/web/test-results"
+    cp "$work/service.log" "$root/web/test-results/service.log"
+    tail -n 80 "$work/service.log" >&2
+  fi
   rm -rf "$work" || true
   exit "$status"
 }

@@ -8,9 +8,10 @@ import {
   money,
   runningPrice,
   sourceHasData,
-  dateTime,
   calendarDate,
   clockTime,
+  costThisRun,
+  runDuration,
   runningHours,
 } from '../domain';
 import { findGroup } from '../groups';
@@ -18,14 +19,13 @@ import { Chips, Empty, Panel, RankedBars, Stat } from '../ui';
 import { setRouteParams, useRouteParam } from '../useRouteParam';
 import { usageDays, usageTotal, mergeUnrecordedDays } from '../usage';
 import type { UsageTotal } from '../usage';
-import type { UsageRollups } from '../types';
+import type { Instance, UsageRollups } from '../types';
+import { StatusShape } from '../ui/Status';
 import type { ChartData } from '../chart/types';
 import { absoluteTime } from '../format';
 import { HistoryPanel } from './HistoryPanel';
 import type { Ctx } from './shared';
-import { InstanceRunCost } from './shared';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
-import { where } from './util';
 
 const HOUR = 3600000;
 const RANGES = [
@@ -58,28 +58,76 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <h2 className="usage-heading">{t('usage.now')}</h2>
-      <p className="panel-note">{t('usage.scope')}</p>
-      <div className="stats three">
+      <div className="stats">
         <Stat
           label={t('usage.gpu')}
-          value={pct(summary.utilization)}
+          value={
+            // How many GPUs the average covers is one hover away, not a caption.
+            <span
+              title={
+                summary.utilization == null
+                  ? undefined
+                  : t('usage.gpuHint', { count: summary.covered })
+              }
+            >
+              {pct(summary.utilization)}
+            </span>
+          }
           unit={summary.utilization == null ? undefined : '%'}
-          hint={t('usage.gpuHint', { count: summary.covered })}
         />
         <Stat
           label={t('usage.cpu')}
           value={pct(summary.cpu_utilization)}
           unit={summary.cpu_utilization == null ? undefined : '%'}
-          hint={t('usage.hostHint')}
         />
         <Stat
           label={t('usage.memory')}
           value={pct(summary.memory_utilization)}
           unit={summary.memory_utilization == null ? undefined : '%'}
-          hint={t('usage.hostHint')}
         />
       </div>
-      <Panel title={t('usage.nowGpus')}>
+      {spend?.applies && Object.keys(spend.rates).length > 0 && (
+        <div className="stats">
+          {Object.entries(spend.rates).flatMap(([currency, rate], _, all) => {
+            const suffix = all.length > 1 ? ` · ${currency}` : '';
+            const partial = !!spend.unpriced.length;
+            const unpriced = t('cost.unpriced', { count: spend.unpriced.length });
+            return [
+              <Stat
+                key={`now-${currency}`}
+                label={t('cost.now') + suffix}
+                value={
+                  <UnmeasuredLinks
+                    value={
+                      (partial ? '≥ ' : '') +
+                      t('usage.hourlyRate', { price: money(rate, currency, partial) })
+                    }
+                    items={spend.unpriced}
+                    ctx={ctx}
+                    label={unpriced}
+                  />
+                }
+              />,
+              <Stat
+                key={`day-${currency}`}
+                label={t('usage.perDay') + suffix}
+                value={
+                  <UnmeasuredLinks
+                    value={(partial ? '≥ ' : '≈ ') + money(rate * 24, currency, partial)}
+                    items={spend.unpriced}
+                    ctx={ctx}
+                    label={unpriced}
+                  />
+                }
+              />,
+            ];
+          })}
+        </div>
+      )}
+      <Panel
+        title={t('usage.nowGpus')}
+        actions={<UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />}
+      >
         {activeGroups.length ? (
           <RankedBars
             items={activeGroups.map((group) => {
@@ -87,7 +135,6 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
               return {
                 key: group.key,
                 label: group.label,
-                group,
                 value: value?.allocated ?? value?.known_allocated ?? null,
                 partial: value?.allocated == null,
               };
@@ -96,120 +143,153 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
         ) : (
           <Empty title={t('usage.noGroups')} />
         )}
-        {!!summary.unmeasured.length && (
-          <div className="panel-note">
-            <UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />
-          </div>
-        )}
       </Panel>
-      <Panel title={t('usage.spendNow')}>
-        {spend?.applies ? (
-          <>
-            {Object.entries(spend.rates).map(([currency, rate]) => (
-              <div key={currency} className="usage-block">
-                <h3>
-                  {spend.unpriced.length ? '≥ ' : ''}
-                  {t('cost.rate', {
-                    price: money(rate, currency, !!spend.unpriced.length),
-                    currency,
-                  })}
-                </h3>
-                <p>
-                  {t('usage.projection', {
-                    amount: `${spend.unpriced.length ? '≥ ' : '≈ '}${money(rate * 24, currency, !!spend.unpriced.length)}`,
-                    currency,
-                  })}
-                </p>
-                <RankedBars
-                  format={(value, partial) =>
-                    t('usage.hourlyRate', { price: money(value, currency, partial) })
-                  }
-                  items={activeGroups
-                    .filter((group) => {
-                      const value = summary.groups[group.key]?.spend;
-                      return value?.applies && value.rates[currency] != null;
-                    })
-                    .map((group) => {
-                      const value = summary.groups[group.key].spend!;
-                      return {
-                        key: group.key,
-                        label: group.label,
-                        group,
-                        value: value.rates[currency] ?? (value.unpriced.length ? null : 0),
-                        partial: !!value.unpriced.length,
-                      };
-                    })}
+      <Panel
+        title={t('usage.spendNow')}
+        actions={
+          spend?.applies && (
+            <>
+              {/* With a rate shown above, the rate itself opens the unpriced list. */}
+              {!Object.keys(spend.rates).length && (
+                <UnmeasuredLinks
+                  items={spend.unpriced}
+                  ctx={ctx}
+                  label={t('cost.unpriced', { count: spend.unpriced.length })}
                 />
-              </div>
+              )}
+            </>
+          )
+        }
+      >
+        {spend?.applies && (Object.keys(spend.rates).length > 0 || priced.length > 0) ? (
+          <>
+            {Object.keys(spend.rates).map((currency) => (
+              <RankedBars
+                key={currency}
+                format={(value, partial) =>
+                  t('usage.hourlyRate', { price: money(value, currency, partial) })
+                }
+                items={activeGroups
+                  .filter((group) => {
+                    const value = summary.groups[group.key]?.spend;
+                    return value?.applies && value.rates[currency] != null;
+                  })
+                  .map((group) => {
+                    const value = summary.groups[group.key].spend!;
+                    return {
+                      key: group.key,
+                      label: group.label,
+                      value: value.rates[currency] ?? (value.unpriced.length ? null : 0),
+                      partial: !!value.unpriced.length,
+                    };
+                  })}
+              />
             ))}
-            {!Object.keys(spend.rates).length && (
-              <p className="panel-note">
-                {spend.unpriced.length ? t('status.unknown') : t('cost.none')}
-              </p>
-            )}
-            {!!spend.unpriced.length && (
-              <div className="panel-note">
-                <p>{t('cost.unpriced', { count: spend.unpriced.length })}</p>
-                <UnmeasuredLinks items={spend.unpriced} ctx={ctx} />
-              </div>
-            )}
-            <ul className="usage-instances">
-              {priced.map((item) => (
-                <li key={item.id}>
-                  <button className="link" onClick={() => ctx.openInstance(item)}>
-                    {item.name} ·{' '}
-                    {t('cost.rate', {
-                      price: money(runningPrice(item), item.currency),
-                      currency: item.currency,
-                    })}
-                  </button>
-                  <ClockText>
-                    {() => {
-                      const source = data.sources.find((row) => row.id === item.source_id);
-                      return (
-                        runningHours(item, source) && (
-                          <InstanceRunCost item={item} source={source} />
-                        )
-                      );
-                    }}
-                  </ClockText>
-                </li>
-              ))}
-            </ul>
+            {priced.length > 0 && <InstanceCosts ctx={ctx} items={priced} />}
           </>
         ) : (
-          <Empty title={t('cost.none')} />
+          <Empty title={spend?.unpriced.length ? t('status.unknown') : t('cost.none')} />
         )}
-        <p className="panel-note">{t('usage.pricesNote')}</p>
       </Panel>
       <Panel
         title={t('usage.overRange')}
         actions={
-          <Chips
-            label={t('chart.range')}
-            value={String(hours)}
-            onChange={(value) =>
-              setRouteParams({
-                range: RANGES.find((item) => item.hours === Number(value))!.value,
-                end: null,
-              })
-            }
-            options={RANGES.map((item) => ({
-              value: String(item.hours),
-              label: t(
-                item.hours === 24
-                  ? 'chart.range.day'
-                  : item.hours === 168
-                    ? 'chart.range.week'
-                    : 'usage.month',
-              ),
-            }))}
-          />
+          // A time range is a small segmented control, not a set of tabs.
+          <div className="segmented">
+            <Chips
+              label={t('chart.range')}
+              value={String(hours)}
+              onChange={(value) =>
+                setRouteParams({
+                  range: RANGES.find((item) => item.hours === Number(value))!.value,
+                  end: null,
+                })
+              }
+              options={RANGES.map((item) => ({
+                value: String(item.hours),
+                label: t(
+                  item.hours === 24
+                    ? 'chart.range.day'
+                    : item.hours === 168
+                      ? 'chart.range.week'
+                      : 'usage.month',
+                ),
+              }))}
+            />
+          </div>
         }
       >
         <UsageRange key={String(demo)} ctx={ctx} hours={hours} />
       </Panel>
     </>
+  );
+}
+
+/** Priced instances now: one row each, the drawer has the rest. */
+function InstanceCosts({ ctx, items }: { ctx: Ctx; items: Instance[] }) {
+  return (
+    <div className="table-wrap">
+      <table data-detail-list className="table stack-on-phone meta-on-phone">
+        <thead>
+          <tr>
+            <th>{t('cloud.col.instance')}</th>
+            <th className="num">{t('usage.col.rate')}</th>
+            <th className="num">{t('usage.col.runningFor')}</th>
+            <th className="num">{t('usage.col.costSoFar')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr
+              key={item.id}
+              data-detail-key="instance"
+              data-detail-id={item.id}
+              className="clickable"
+              tabIndex={0}
+              onClick={() => ctx.openInstance(item)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') ctx.openInstance(item);
+              }}
+            >
+              <td>
+                <strong>{item.name}</strong>
+              </td>
+              <td className="num" data-label={t('usage.col.rate')}>
+                {t('usage.hourlyRate', { price: money(runningPrice(item), item.currency) })}
+              </td>
+              <ClockText>
+                {() => {
+                  const source = ctx.data.sources.find((row) => row.id === item.source_id);
+                  const run = runningHours(item, source);
+                  const cost = costThisRun(item, source);
+                  // Seen running (not reported by the provider): a lower bound.
+                  const lower = run?.origin !== 'provider' ? '≥ ' : '';
+                  return (
+                    <>
+                      <td className="num" data-label={t('usage.col.runningFor')}>
+                        {run ? lower + runDuration(run.hours) : '—'}
+                      </td>
+                      <td className="num" data-label={t('usage.col.costSoFar')}>
+                        {cost == null ? '—' : (lower || '≈ ') + money(cost, item.currency, !!lower)}
+                      </td>
+                    </>
+                  );
+                }}
+              </ClockText>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Part of a period was not observed: a mark on the figure, its share in the name. */
+function CoverageMark({ text }: { text: string }) {
+  return (
+    <span className="coverage-mark" title={text}>
+      <StatusShape kind="unknown" label={text} />
+    </span>
   );
 }
 
@@ -357,7 +437,6 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
         data={result.chart}
         onPage={pageWindow}
         onRange={(range) => setRouteParams({ range, end: null })}
-        note={ctx.demo ? t('usage.demo') : t('usage.historyNote', { where: where(ctx) })}
       />
     </>
   );
@@ -393,9 +472,8 @@ function emptySpend(total: UsageTotal) {
 }
 
 function spendText(total: UsageTotal, currency: string) {
-  if (!total.observed) return `${t('usage.notRecorded')} · ${currency}`;
-  if (!total.spendKnown) return `${t('status.unknown')} · ${currency}`;
-  return `${total.spendPartial ? '≥ ' : '≈ '}${money(total.spend[currency] ?? 0, currency, total.spendPartial)} · ${currency}`;
+  if (!total.observed || !total.spendKnown) return '—';
+  return `${total.spendPartial ? '≥ ' : '≈ '}${money(total.spend[currency] ?? 0, currency, total.spendPartial)}`;
 }
 
 /** Daily panels share the same hourly server integrals as the today/seven-day totals. */
@@ -452,100 +530,145 @@ export function UsageHistory({
       .filter(Boolean)
       .join(' · ');
   };
+  // Coverage is shown only as an exception: a fully observed period needs no caption.
   const coverage = (total: UsageTotal, seconds: number) =>
     !total.observed
       ? t('usage.notRecorded')
-      : t('usage.coverage', {
-          percent:
-            total.observed >= seconds - 1 ? 100 : Math.floor((total.observed / seconds) * 100),
-        });
+      : total.observed >= seconds - 1
+        ? undefined
+        : t('usage.coverage', { percent: Math.floor((total.observed / seconds) * 100) });
+  const rows = mergeUnrecordedDays(days, rollups);
+  const hoursText = (value: UsageTotal) =>
+    value.gpuHours == null
+      ? '—'
+      : `${value.gpuPartial ? '≥ ' : ''}${number(value.gpuHours, value.gpuPartial)}`;
+  // A cell's coverage gap is its tooltip; only the period tiles carry a visible mark.
+  const cellNote = (value: UsageTotal, seconds: number, gpu = false) =>
+    !value.observed
+      ? t('usage.notRecorded')
+      : gpu && value.gpuHours == null
+        ? t('usage.notMeasured')
+        : coverage(gpu ? { ...value, observed: value.gpuObserved } : value, seconds);
   return (
     <div className="usage-history">
-      <p>{t('usage.historyEstimate')}</p>
-      <p className="sub">{t('cost.asOf', { time: dateTime(rollups.end) })}</p>
-      <div className="stats three">
-        {totals.map((total, index) => (
-          <Stat
-            key={index}
-            label={t(index ? 'usage.sevenDays' : 'usage.today')}
-            value={
-              currencies.length
-                ? currencies.map((currency) => (
-                    <span className="sub" key={currency}>
-                      {spendText(total, currency)}
-                    </span>
-                  ))
-                : emptySpend(total)
-            }
-            hint={coverage(
-              total,
-              (weekEnd - (index ? weekEnd - 168 * HOUR : today.getTime())) / 1000,
-            )}
-          />
-        ))}
+      <div className="stats">
+        {totals.flatMap((total, index) => {
+          const label = t(index ? 'usage.sevenDays' : 'usage.today');
+          const note = coverage(
+            total,
+            (weekEnd - (index ? weekEnd - 168 * HOUR : today.getTime())) / 1000,
+          );
+          return (currencies.length ? currencies : ['']).map((currency) => (
+            <Stat
+              key={`${index}-${currency}`}
+              label={currencies.length > 1 ? `${label} · ${currency}` : label}
+              value={
+                <>
+                  {currency ? spendText(total, currency) : emptySpend(total)}
+                  {note && total.observed > 0 && <CoverageMark text={note} />}
+                </>
+              }
+            />
+          ));
+        })}
       </div>
       <h3>{t('usage.gpuHours')}</h3>
-      {!keys.length && <p>{t('usage.notRecorded')}</p>}
-      {keys.map((key) => {
-        const total = usageTotal(rollups, start, end, key);
-        return (
-          <details className="usage-daily" key={key}>
-            <summary>
-              {findGroup(ctx.groups, key)?.label ??
-                t('usage.removedGroup', { name: key.replace(/^platform:/, '') })}{' '}
-              ·{' '}
-              {total.gpuHours == null
-                ? '—'
-                : `${total.gpuPartial ? '≥ ' : ''}${number(total.gpuHours, total.gpuPartial)} ${t('usage.gpuHourUnit')}`}
-            </summary>
-            <RankedBars
-              ordered
-              limit={Infinity}
-              format={number}
-              items={mergeUnrecordedDays(days, rollups, key).map((day) => {
-                const value = usageTotal(rollups, day.start, day.end, key);
-                return {
-                  key: String(day.start),
-                  label: dayLabel(day),
-                  group: findGroup(ctx.groups, key),
-                  value: value.gpuHours,
-                  partial: value.gpuPartial,
-                  note: !value.observed
-                    ? t('usage.notRecorded')
-                    : value.gpuHours == null
-                      ? t('usage.notMeasured')
-                      : coverage(
-                          { ...value, observed: value.gpuObserved },
-                          (day.end - day.start) / 1000,
-                        ),
-                };
-              })}
-            />
-          </details>
-        );
-      })}
-      <h3>{t('usage.estimatedSpend')}</h3>
-      {!currencies.length && <p>{emptySpend(usageTotal(rollups, start, end))}</p>}
-      {currencies.map((currency) => (
-        <div key={currency}>
-          <h4>{spendText(usageTotal(rollups, start, end), currency)}</h4>
-          <RankedBars
-            ordered
-            limit={Infinity}
-            format={(value, partial) => money(value, currency, partial)}
-            items={mergeUnrecordedDays(days, rollups).map((day) => {
-              const value = usageTotal(rollups, day.start, day.end);
-              return {
-                key: String(day.start),
-                label: dayLabel(day),
-                value: value.observed && value.spendKnown ? (value.spend[currency] ?? 0) : null,
-                partial: value.spendPartial,
-                note: coverage(value, (day.end - day.start) / 1000),
-              };
-            })}
-          />
+      {keys.length ? (
+        <div className="table-wrap">
+          <table className="table usage-table">
+            <thead>
+              <tr>
+                <th>{t('usage.col.day')}</th>
+                {keys.map((key) => (
+                  <th key={key} className="num">
+                    {findGroup(ctx.groups, key)?.label ??
+                      t('usage.removedGroup', { name: key.replace(/^platform:/, '') })}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((day) => (
+                <tr key={day.start}>
+                  <td>{dayLabel(day)}</td>
+                  {keys.map((key) => {
+                    const value = usageTotal(rollups, day.start, day.end, key);
+                    return (
+                      <td
+                        key={key}
+                        className="num"
+                        title={cellNote(value, (day.end - day.start) / 1000, true)}
+                      >
+                        {hoursText(value)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">{t('usage.col.total')}</th>
+                {keys.map((key) => (
+                  <td key={key} className="num">
+                    {hoursText(usageTotal(rollups, start, end, key))}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
         </div>
-      ))}
+      ) : (
+        <p>{t('usage.notRecorded')}</p>
+      )}
+      <h3>{t('usage.estimatedSpend')}</h3>
+      {currencies.length ? (
+        <div className="table-wrap">
+          <table className="table usage-table">
+            <thead>
+              <tr>
+                <th>{t('usage.col.day')}</th>
+                {currencies.map((currency) => (
+                  <th key={currency} className="num">
+                    {currency}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((day) => {
+                const value = usageTotal(rollups, day.start, day.end);
+                return (
+                  <tr key={day.start}>
+                    <td>{dayLabel(day)}</td>
+                    {currencies.map((currency) => (
+                      <td
+                        key={currency}
+                        className="num"
+                        title={cellNote(value, (day.end - day.start) / 1000)}
+                      >
+                        {spendText(value, currency)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">{t('usage.col.total')}</th>
+                {currencies.map((currency) => (
+                  <td key={currency} className="num">
+                    {spendText(usageTotal(rollups, start, end), currency)}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
+        <p>{emptySpend(usageTotal(rollups, start, end))}</p>
+      )}
     </div>
   );
 }
