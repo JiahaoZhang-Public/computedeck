@@ -1,6 +1,6 @@
 [project]
 name = "computedeck"
-version = "0.7.0"
+version = "0.8.0"
 description = "Read-only dashboard for your GPU work on clusters, cloud GPU accounts and SSH machines"
 # The PyPI description is README.md with absolute links; see fancy-pypi-readme below.
 dynamic = ["readme"]

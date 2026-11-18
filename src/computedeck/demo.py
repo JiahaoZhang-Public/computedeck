@@ -989,7 +989,7 @@ def nodes() -> list[dict[str, Any]]:
             "command": "~/.local/bin/computedeck",
             "mode": "collect",
             "status": "ok",
-            "version": "0.7.0",
+            "version": "0.8.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.8.0 (2026-11-18)
 
 - Run ComputeDeck on your own laptop even when some sources are only reachable from another machine. Add routes with **Add route** in the Routes panel of the Sources page (or as `[[node]]` in a configuration file) and set each source's **Route**; every other source still connects directly from this computer. The panel draws each route as a path, such as *This computer → Lab gateway → Cluster B*, with its kind and status, and a routed login names its route in the **Route** column.
 - Add jump hosts (`mode = "jump"`): a source's SSH connections pass through that machine, as with `ssh -J`, with this computer's keys, SSH configuration and credentials. Nothing is installed there and collection runs here. The route carries collection, connection checks, SSH checks of machines and the job logs that notifications read, and replaces the target alias's own `ProxyJump` or `ProxyCommand`. The hop is as strict as any other connection: no prompts, verified host keys, no forwarding. Jump hosts carry clusters and SSH machines; a source that does not connect over SSH is refused, with a hint to use a collection machine.

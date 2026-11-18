@@ -132,7 +132,7 @@ uv run computedeck serve --open
 
 ## 路线图
 
-- **0.8（进行中）：** 经由跳板机或采集机器的路由，让 ComputeDeck 可以在笔记本上运行；
+- **0.8：** 经由跳板机或采集机器的路由，让 ComputeDeck 可以在笔记本上运行；
   能指出出错环节的连接检查；重新设计、更简洁的界面（细节按需展开）和手机布局；在 CI 中
   构建并检查的发布包。
 - **下一步：** 首个带 wheel 的正式发布（Releases 页面），配置好 Trusted Publishing 后
