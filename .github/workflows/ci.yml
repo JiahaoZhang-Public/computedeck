@@ -32,6 +32,12 @@ jobs:
       - run: npm --prefix web ci
       - run: bash scripts/check.sh
       - run: bash scripts/build.sh
+      - name: Smoke-test the wheel and the sdist
+        env:
+          PYTHON: ${{ matrix.python }}
+        run: |
+          bash scripts/smoke-wheel.sh dist/computedeck-*.whl
+          bash scripts/smoke-wheel.sh dist/computedeck-*.tar.gz
   secrets:
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +52,7 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     container: mcr.microsoft.com/playwright:v1.64.1-noble
     steps:
       - uses: actions/checkout@v7

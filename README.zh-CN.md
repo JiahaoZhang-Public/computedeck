@@ -2,103 +2,74 @@
 
 # ComputeDeck
 
-用于查看 Slurm 作业、云 GPU 和 SSH 机器的仪表盘。查看哪些作业在运行、为什么排队，以及下一项任务适合使用哪些资源。
+ComputeDeck 是一个只读的 GPU 工作仪表盘：无论作业跑在 Slurm、PBS、LSF 还是 Kubernetes
+集群上，还是在云 GPU 账号或你自己的 SSH 机器上，都能在一处看清。哪些作业在运行、
+为什么排队或失败、实例花了多少钱、下一项任务适合放在哪里，一目了然。它在你自己的电脑上
+运行，沿用你已有的 SSH 别名和 API 密钥，不需要管理员权限，也不用在集群上安装任何代理程序。
 
-ComputeDeck 沿用已有的 SSH 别名和云平台 API，在你自己的机器上运行，无需集群管理员权限。
+[English](README.md) · [安装](docs/install.md) · [运行方式](docs/deployment.md) · [配置说明](docs/configuration.md) · [插件开发](docs/plugins.md) · [变更记录](CHANGELOG.md)
 
-[English](README.md) · [演示](https://jiahaozhang-public.github.io/computedeck/#demo) · [配置说明](docs/configuration.md) · [插件开发](docs/plugins.md)
+![使用内置示例数据的 ComputeDeck 总览：在用 GPU、排队与运行总数、待处理列表，以及两个集群上的当前作业](docs/assets/screens/overview.png)
 
-[![示例总览：两个集群、云实例、GPU 占用和历史曲线](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
+*截图均使用 ComputeDeck 内置的示例数据。*
 
-*以下截图均使用较早预览版的内置示例数据；0.7.0 的布局和数字已有变化。点击总览可观看 20 秒演示。*
+## 能做什么
 
-## 功能
+- **所有作业集中查看。** 汇总各集群账号中运行、排队和最近失败的作业，显示调度器给出的
+  排队或失败原因；已知时还会显示时长上限和日志路径。
+- **下一项任务放在哪里。** 按 GPU 型号、数量和运行时长，比较可用 GPU、QoS 上限和你自己的
+  排队需求，并说明每项估计的依据。可以复制相应的 Slurm 参数；ComputeDeck 从不提交作业。
+- **云 GPU 及其费用。** 查看 RunPod、Lambda、AWS EC2、Vast.ai 和 GPUhub 上的实例、
+  已知小时单价、累计费用、每日用量，以及长时间闲置 GPU 的提示。
+- **自有机器上的空闲 GPU。** 显示 SSH 机器上每张 GPU 的显存、利用率和使用者，支持
+  NVIDIA 和 AMD。
+- **出了问题能修。** 统一的待处理列表，可逐项忽略；每个页面都显示仍需处理的数量（没有时
+  显示数据的采集时间），连接检查会指出是哪一步、哪台机器出错。
+- **直连不到的来源也能接入。** 通过跳板机或采集机器访问集群，让 ComputeDeck 可以直接在
+  笔记本上运行。添加来源时会根据 `~/.ssh/config` 推荐主机别名。界面支持中文和英文，
+  电脑和手机均可使用。
 
-- 汇总不同集群账号的运行中、排队和最近失败的作业。
-- 按 GPU 型号、数量和运行时长比较可用容量与 QoS 上限，估计时计入你自己的排队需求。
-- 查看云实例、已知小时单价，以及 SSH 主机上的 GPU 使用情况。
-- 统一待处理列表，在每个页面显示采集时间和服务健康状态，并提供连接诊断与修复建议。
+<table>
+  <tr>
+    <td width="40%"><img src="docs/assets/screens/job-detail.png" alt="作业列表旁的排队作业详情：用通俗语言说明调度器给出的排队原因、下一步建议和常见等待时间"></td>
+    <td width="40%"><img src="docs/assets/screens/where-to-run.png" alt="去哪跑：为 4 张 H100、24 小时的任务给出最佳估计和可用选项，其余选项折叠为一行"></td>
+    <td width="20%"><img src="docs/assets/screens/phone-overview.png" alt="手机上的总览：待处理和当前作业排成一列"></td>
+  </tr>
+</table>
 
-核心只读取资源，不提交作业或停止实例。缺失数据会标为未知，规划结果是估计，不能保证调度成功。详见[数字的计算方式](docs/metrics.md)。
+## 三种运行方式
 
-**值得信赖的数字：** 不完整的合计显示 `≥`，并列出未能测量的机器或登录身份。
-总览、用量和历史使用同一套数字。运行中的云实例按服务商报告的 GPU 分配计数；
-SSH 机器按有可见计算进程或显存用量达到阈值的 GPU 计数；进程不可读，或没有可见进程且显存缺失时，使用量保持未知。关闭监控的手动机器不计入。
-服务商更新实例列表后，SSH 检查结果仍保留自己的检查时间。
+![ComputeDeck 的三种运行方式：1. 在你的电脑上直接访问所有来源；2. 在你的电脑上运行，部分来源经由跳板机或采集机器访问；3. 在常开的服务器上运行，从笔记本通过 SSH 隧道查看](docs/assets/ways-to-run.svg)
 
-顶部栏的**数据时效与服务状态**指示器显示已启用来源中最早的成功采集时间；
-只要有一个已启用的来源从未成功，就显示**尚未采集**。
-点击可查看错误和重试时间。总览突出显示待处理和当前作业；趋势图集中在「用量与费用」。
-隐藏标签页会暂停浏览器请求，服务端仍继续采集。
-升级说明见 [0.4.0 变更记录](CHANGELOG.md)，其中包括历史曲线可能出现跳变的原因。
+1. **在你的电脑上运行。** ComputeDeck 用你的 SSH 配置和密钥直接访问所有集群、云账号和
+   机器，运行期间持续采集。
+2. **在你的电脑上运行，部分来源走路由。** 电脑直连不到的来源经由另一台机器访问。
+   **跳板机**只转发你的 SSH 连接，无需安装任何东西；**采集机器**上安装了 ComputeDeck，
+   用它自己的密钥、凭据和网络采集该来源。
+3. **在常开的服务器上运行。** 服务全天采集；在笔记本上运行 `computedeck connect my-server`，
+   通过 SSH 隧道打开它。
 
-**0.5.0 — 看懂问题，完成修复**新增分步连接检查、作业原因和时间、窄屏表格，以及可保留的页面链接状态。详见[变更记录](CHANGELOG.md)。
+先从方式 1 开始，需要时再为单个来源加路由：你自己的密钥能登录目标机器时用跳板机；只有那台
+机器才有密钥、VPN 或所需软件时用采集机器。笔记本休眠时也要继续采集，就选方式 3。
+要从服务器迁到笔记本？运行 `computedeck import --from my-server` 即可接管服务器上的来源：
+可以继续由服务器采集，也可以把它当作跳板机或改为直连（`--route collect|jump|direct`）。
+详见[运行方式](docs/deployment.md)。
 
-**0.6.0 — 及时知道发生了什么**新增可搜索的动态、作业结果记录与数组摘要、合并通知及发送状态、可见的观测空档，以及待处理项的确认与暂缓。详见[变更记录](CHANGELOG.md)。
+![来源页面中的路由面板：每条路由画成一条路径，例如「本机 → Lab gateway → Cluster B」，并标出类型和状态](docs/assets/screens/routes.png)
 
-**0.7.0 — 有依据地选择资源**说明资源估计及其依据，列出 SSH 机器的空闲 GPU，并根据采集到的事实复制 Slurm 提交参数。「用量与费用」新增按日观测用量和费用估算；持续低利用率提示、Slurm 队列位置和有历史支持的等待区间，帮助你决定在哪里运行。详见[变更记录](CHANGELOG.md)。
+## 快速开始
 
-## 版本预览
+需要 macOS 或 Linux、Python 3.12 或 3.13，以及 OpenSSH 客户端。
 
-以下包含已完成的里程碑与后续计划；未来范围与优先级可能调整。
+**安装发布版。** [Releases 页面](https://github.com/JiahaoZhang-Public/computedeck/releases)
+上的每个版本都附带已内置网页的 wheel。用 `uv tool install` 或 `pipx` 安装后运行
+`computedeck serve --open` 即可；具体命令、升级方法和数据存放位置见
+[安装说明](docs/install.md#install-a-release)。ComputeDeck 尚未发布到 PyPI。
 
-- [x] **v0.5 — 看懂问题，完成修复：** 分步连接诊断与凭据更新、清晰的作业原因和时间、自适应表格，以及保存在网址中的筛选条件和规划输入。
-- [x] **v0.6 — 及时知道发生了什么：** 可搜索的动态页、每个作业一条结果记录及失败说明、合并的作业与数组通知及发送状态、待处理项的确认与暂缓，以及可见的观测空档。
-- [x] **v0.7 — 有依据地选择资源：** 可解释的资源比较、SSH 空闲 GPU 与仅复制的 Slurm 参数、观测用量与费用估算、持续低利用率提示、Slurm 队列位置、有历史支持的等待区间，以及同主机 GPU 去重计数。
-- [ ] **v1.0 — 全新的界面与交互：** 重做的视觉体系、按问题组织的导航、命令面板、带底部标签栏的手机布局，以及集中添加和修复连接的入口。
+**从源码运行。** 如果 Releases 页面还没有任何版本，或者你想使用最新代码，可以用
+[uv](https://docs.astral.sh/uv/) 和 Node.js 22.18+（或 24）构建：
 
-## 界面术语
-
-| 术语 | 含义 |
-|---|---|
-| 来源 | 用于采集数据的一条连接：集群登录身份、云 API 账号或 SSH 主机。多个来源可以对应同一个集群或平台。 |
-| 集群或平台 | **集群与云平台**面板和分组筛选器中的资源分组。 |
-| 实例 / 机器 | 一台租用或自有的机器。**云平台与机器**包括云实例、SSH 来源和手动添加的机器。 |
-| 采集机器 | 为当前服务采集来源的另一台电脑，标为**经由 {name}**，不是计算节点。 |
-| 节点 | 集群调度器报告的计算节点。可用容量不包含不可用节点。 |
-| 在用 GPU | 你的运行中作业和持有的云实例所分配的 GPU，或 SSH 机器上有可见计算进程或显存用量达到阈值的 GPU。进程不可读，或没有可见进程且显存缺失时，使用量保持未知；不等同于 GPU 利用率。 |
-| 容量读数中的“可用 GPU” | 可用节点上面向所有用户的容量，不保证当前登录身份能够分配这些资源。 |
-| 待处理 | 当前故障和警告的统一列表；导航徽标、统计卡片和面板统一统计尚未确认、也未暂缓的项目。 |
-
-作业详情使用对应调度器的术语：Slurm 为账户 / 分区 / QoS，PBS 为账户 / 队列，
-LSF 为项目 / 队列，Kubernetes 为命名空间 / 节点池 / 优先级类。
-其他驱动使用通用的账户 / 分区 / QoS 标签。
-
-## 使用案例
-
-<details>
-<summary><strong>查看作业为什么排队</strong></summary>
-
-这个作业申请了 4 张 A100。详情同时显示账户、QoS 和 Slurm 返回的 `QOSMaxGRESPerUser` 排队原因，便于定位是哪项限制在影响作业。
-
-[![示例作业详情：4 张 A100 的申请与 QoS 排队原因](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)
-
-</details>
-
-<details>
-<summary><strong>为 4 张 H100、24 小时的任务选择资源</strong></summary>
-
-输入型号、数量和时长后，规划器会标出不匹配的选项：debug QoS 最多运行 2 小时，Cluster A 没有 H100。可行选项仍是基于最近采集的估计。
-
-[![示例资源比较：4 张 H100、24 小时，显示时长限制与型号不匹配](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)
-
-</details>
-
-## 支持的来源
-
-| 集群 | 云 GPU | 其他机器 |
-|---|---|---|
-| Slurm、Kubernetes、PBS、LSF | RunPod、Lambda、AWS EC2、Vast.ai、GPUhub | 通过 SSH 访问的 NVIDIA / AMD GPU 主机；手动添加的实例 |
-
-Kubernetes、PBS、LSF、Vast.ai 和 GPUhub 集成处于测试阶段。界面支持中文和英文。
-
-## 从源码运行
-
-ComputeDeck 目前提供源码预览，尚未发布 PyPI 包。
-
-需要 macOS 或 Linux、Python 3.12 或 3.13、[uv](https://docs.astral.sh/uv/)、Node.js 22.18+（或 24）和 OpenSSH。Node 用于构建网页。
-
-```sh
+```bash
 git clone https://github.com/JiahaoZhang-Public/computedeck.git
 cd computedeck
 uv sync --frozen
@@ -107,51 +78,103 @@ npm --prefix web run build
 uv run computedeck serve --open
 ```
 
-开启**示例数据**，无需接入资源即可浏览界面，其中包含采集失败、数据过期、云账号限流和作业超时的场景。
-刷新页面后仍保留该模式，网页中的修改请求会被阻止，包括通知、聊天和插件请求；仍可通过访问令牌登录。
-工具和设置页面依然显示你自己的数据，已有的后台采集也会继续。
-使用横幅中的**关闭示例数据**恢复修改。服务监听 `http://127.0.0.1:8710`。
+页面地址为 `http://127.0.0.1:8710`。接下来：
 
-接入集群时，在**来源 → 添加来源**中填写已有的 SSH 别名和用户名。SSH 必须能够无需交互地登录。云平台凭据填写 `env:RUNPOD_API_KEY` 这样的引用，而不是密钥本身。详见[配置说明](docs/configuration.md)和 [Slurm 接入指南](docs/drivers/slurm.md)。
+- 开启**示例数据**，无需接入任何资源即可浏览界面。关闭前，示例模式会阻止一切修改。
+- 在**来源 → 添加来源**中填写你已在使用的 SSH 别名和用户名接入集群；SSH 必须能够免交互
+  登录。云账号的凭据请填写 `env:RUNPOD_API_KEY` 这样的引用，而不是密钥本身。详见
+  [配置说明](docs/configuration.md)和 [Slurm 接入指南](docs/drivers/slurm.md)。
+- 本机直连不到的来源，在来源表单中为它选择**路由**；跳板机和采集机器可在来源页面通过
+  **添加路由**创建。
+- 来源出错时，使用**测试连接**或 `uv run computedeck doctor --language zh-CN` 检查；
+  结果说明见[诊断指南](docs/doctor.md)。`computedeck --version` 显示已安装的版本。
 
-使用**测试连接**或 `uv run computedeck doctor --language zh-CN` 检查来源，结果说明见[诊断指南](docs/doctor.md)。
+## 支持的来源
 
-## 在服务器上运行
+| 集群 | 云 GPU | 其他机器 |
+|---|---|---|
+| Slurm、Kubernetes（测试版）、PBS（测试版）、LSF（测试版） | RunPod、Lambda、AWS EC2、Vast.ai（测试版）、GPUhub（测试版） | 通过 SSH 访问的 NVIDIA / AMD GPU 机器；手动添加的机器 |
 
-```sh
-# 在服务器的 ComputeDeck 源码目录中：
-uv run computedeck service install
+测试版集成在真实系统上的验证还有限，已知情况见各[驱动说明](docs/drivers/)。插件可以添加
+更多驱动。
 
-# 在笔记本的 ComputeDeck 源码目录中：
-uv run computedeck connect my-server
-```
+## 值得信赖的数字
 
-笔记本关闭后，服务器仍可持续采集；客户端通过 SSH 连接。共用的服务器应设置 `COMPUTEDECK_AUTH=token`。详见[部署、认证与备份](docs/deployment.md)。
+- **未知就是未知。** 缺失或无法读取的数据显示为未知，绝不当作 0 或空闲。
+- **不完整会标明。** 不完整的合计显示 `≥`，并列出未能测量的机器或登录身份。
+- **口径一致。** 总览、用量与费用和历史曲线使用同一套统计方法。
+- **在用 GPU** 指分配给你的作业和持有云实例的 GPU，或 SSH 机器上有计算进程、显存用量
+  明显的 GPU；它不等于 GPU 利用率。
+- **估计会注明。** 去哪跑、典型等待时间和费用都是估计，不代表调度器承诺或实际账单；
+  过期数据会显示其采集时间。
 
-数据保存在服务所在机器上：macOS 为 `~/Library/Application Support/ComputeDeck`，Linux 为 `~/.local/share/ComputeDeck`。可用 `COMPUTEDECK_DATA_DIR` 指定其他目录。
+详见[数字的计算方式](docs/metrics.md)。
 
-## 插件与贡献
+## 安全与隐私
 
-插件可以添加工具、来源驱动、通知渠道和页面。插件在服务进程内运行，拥有运行用户的权限。请在服务所在机器上安装，并在**工具箱**中启用。
+- **只读。** 核心只读取数据，从不提交作业、停止实例或修改集群。
+- **仅限本机。** 服务只监听 `127.0.0.1`，只接受来自自身页面的修改。
+- **可选访问令牌。** 与他人共用的机器上，设置 `COMPUTEDECK_AUTH=token`。
+- **凭据只存引用。** 来源保存的是 `env:`、`keychain:` 或 `file:` 引用，而不是密钥。
+- **不收集遥测。** 除了你配置的来源，以及你主动使用的插件市场和通知渠道，不会向任何地方
+  发送数据。
 
-- [官方插件](https://github.com/JiahaoZhang-Public/computedeck-plugins)：网络诊断和 Shell 凭据引用，首次发布仍在准备中。
+插件以你的用户权限运行。详见 [SECURITY.md](SECURITY.md) 和[运行方式](docs/deployment.md#access-token)。
+
+## 插件
+
+插件可以添加工具、来源驱动、通知渠道和页面。请安装在运行服务的机器上，并在**工具箱**中
+启用；内置的任务提醒和团队留言工具默认关闭。
+
+- [官方插件](https://github.com/JiahaoZhang-Public/computedeck-plugins)：网络诊断和 Shell
+  凭据引用，首次发布仍在准备中。
 - [开发插件](docs/plugins.md)：项目模板、Python API 和网页 API。
-- [贡献插件与提交 PR](https://github.com/JiahaoZhang-Public/computedeck-plugins/blob/main/CONTRIBUTING.md)：本地环境、测试和审查要求。
 
-修改核心时，请让每个 PR 解决一个具体问题，写明行为变化和执行过的检查。测试和截图使用虚构数据。
+## 路线图
 
-```sh
-bash scripts/check.sh    # lint、格式、类型、测试和网页构建
-bash scripts/check-ui.sh # 浏览器 UI 检查：截图、axe、DOM 检查（见 docs/ui-testing.md）
-bash scripts/build.sh    # 本地构建 wheel 和 sdist，包含网页
+- **0.8（进行中）：** 经由跳板机或采集机器的路由，让 ComputeDeck 可以在笔记本上运行；
+  能指出出错环节的连接检查；重新设计、更简洁的界面（细节按需展开）和手机布局；在 CI 中
+  构建并检查的发布包。
+- **下一步：** 首个带 wheel 的正式发布（Releases 页面），配置好 Trusted Publishing 后
+  再发布到 PyPI；官方插件的首次发布。
+- **之后：** 命令面板，以及集中添加和修复连接的入口；测试版集成在真实系统上验证后转为
+  正式支持。
+
+计划可能调整。历史版本见[变更记录](CHANGELOG.md)。
+
+## 术语
+
+| 术语 | 含义 |
+|---|---|
+| 来源 | 一条被采集的连接：集群登录身份、云 API 账号或 SSH 机器。 |
+| 集群或平台 | **集群与云平台**面板和分组筛选器中的资源分组。 |
+| 路由 | ComputeDeck 访问来源的方式：从本机直连、经由跳板机，或由采集机器采集。走路由的登录身份在**路由**一列显示所用路由。 |
+| 跳板机 | 转发你的 SSH 连接的机器，相当于 `ssh -J`。上面无需安装任何东西，使用的是本机的密钥和 SSH 配置。 |
+| 采集机器 | 安装了 ComputeDeck、用它自己的密钥、凭据和网络为你采集来源的机器。 |
+| 节点 | 调度器报告的计算节点，与路由无关。 |
+| 在用 GPU | 已分配或明显在用的 GPU，定义见上文；不等于利用率。 |
+| 待处理 | 当前故障和警告的统一列表，不含已忽略或暂缓的项目；已忽略的项目发生变化后会重新出现。 |
+
+作业详情使用各调度器自己的术语，例如 Slurm 的分区和 QoS、PBS 和 LSF 的队列。
+
+## 参与贡献
+
+请让每个 PR 只解决一个具体问题，写明行为变化和执行过的检查。测试、文档和截图请使用虚构
+数据，见 [AGENTS.md](AGENTS.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，
+不要提交公开 issue。
+
+```bash
+bash scripts/check.sh        # lint、格式、类型、测试和网页构建
+bash scripts/check-ui.sh     # 浏览器 UI 检查：截图、axe、DOM 检查
+bash scripts/build.sh        # 在 dist/ 中构建包含网页的 wheel 和 sdist
+bash scripts/smoke-wheel.sh dist/computedeck-*.whl   # 安装并试用构建出的 wheel
 ```
-
-每个条目完成后都须运行浏览器 UI 检查。Playwright 已包含在 `web/` 的开发依赖中；浏览器选择、页面筛选和基线更新流程见[本地 UI 检查](docs/ui-testing.md)。
 
 Python 服务位于 `src/computedeck`，React 界面位于 `web`，Python 测试位于 `tests`。
-
-网页类型检查使用 TypeScript 7，ESLint 同时使用官方 TypeScript 6 API 包。运行 `npm --prefix web run typecheck` 会明确调用 TypeScript 7 编译器。
+浏览器、基线和页面筛选见[本地 UI 检查](docs/ui-testing.md)；发布流程见
+[发布说明](docs/publishing.md)。
 
 ## 许可证
 
-采用 [Apache-2.0](LICENSE)。第三方依赖声明见 [NOTICE](NOTICE) 和 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。
+采用 [Apache-2.0](LICENSE)。见 [NOTICE](NOTICE)；包内附带的浏览器端依赖的许可声明见
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。

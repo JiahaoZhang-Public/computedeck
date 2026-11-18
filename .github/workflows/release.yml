@@ -1,23 +1,50 @@
-name: Release computedeck
+name: Release
+# A `v*` tag builds the wheel and sdist (with the web app bundled), checks and smoke-tests
+# them, and creates a DRAFT GitHub release with both files and the version's CHANGELOG.md
+# section. A maintainer reviews the draft and publishes it by hand.
+#
+# PyPI is not enabled yet. The testpypi and pypi jobs run only from a manual dispatch that
+# asks for them, with the repository variable PUBLISHING_ENABLED set to 'true', and through
+# the protected `testpypi` / `pypi` environments using Trusted Publishing (no tokens).
+# PyPI receives the same files that TestPyPI accepted in that run.
+# See docs/publishing.md before turning any of that on.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, for example v0.8.0
+        required: true
+        type: string
+      publish:
+        description: Also upload (pypi uploads to TestPyPI first, then the same files to PyPI; see docs/publishing.md)
+        type: choice
+        options: [none, testpypi, pypi]
+        default: none
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 jobs:
   build:
-    # Enable only after the publication checklist and protected environments are ready.
-    if: github.repository == 'JiahaoZhang-Public/computedeck' && vars.PUBLISHING_ENABLED == 'true'
+    if: github.repository == 'JiahaoZhang-Public/computedeck'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
       stable: ${{ steps.release.outputs.stable }}
     steps:
+      - name: Refuse an upload that is not switched on
+        if: inputs.publish != '' && inputs.publish != 'none' && vars.PUBLISHING_ENABLED != 'true'
+        run: |
+          echo "::error::Uploading to a package index is not enabled; see docs/publishing.md"
+          exit 1
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
           fetch-depth: 0
       - name: Require a commit on main
         run: git merge-base --is-ancestor HEAD origin/main
@@ -32,24 +59,72 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Validate the tag
+      - name: Validate the tag and extract release notes
         id: release
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: python3 scripts/release_check.py . "$RELEASE_TAG" v >> "$GITHUB_OUTPUT"
+        run: python3 scripts/release_check.py . "$RELEASE_TAG" v --notes release-notes.md >> "$GITHUB_OUTPUT"
+      - name: Keep prereleases off PyPI
+        if: inputs.publish == 'pypi' && steps.release.outputs.stable != 'true'
+        run: |
+          echo "::error::$RELEASE_TAG is a prerelease; upload it to testpypi instead"
+          exit 1
       - run: uv sync --frozen
       - run: npm --prefix web ci
       - run: bash scripts/check.sh
       - run: bash scripts/build.sh
+      - name: Smoke-test the wheel and the sdist
+        run: |
+          for python in 3.12 3.13; do
+            PYTHON="$python" bash scripts/smoke-wheel.sh dist/computedeck-*.whl
+          done
+          bash scripts/smoke-wheel.sh dist/computedeck-*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: distributions
-          path: dist/*
+          path: dist/computedeck-*
           if-no-files-found: error
-  testpypi:
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  github-release:
     needs: build
     runs-on: ubuntu-latest
-    environment: testpypi
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: distributions
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          STABLE: ${{ needs.build.outputs.stable }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::notice::A release for $RELEASE_TAG already exists; it was left unchanged."
+            exit 0
+          fi
+          prerelease=()
+          if [ "$STABLE" != true ]; then prerelease=(--prerelease); fi
+          gh release create "$RELEASE_TAG" --draft --verify-tag "${prerelease[@]}" \
+            --title "ComputeDeck $VERSION" --notes-file release-notes.md \
+            dist/computedeck-*.whl dist/computedeck-*.tar.gz
+
+  testpypi:
+    needs: build
+    if: (inputs.publish == 'testpypi' || inputs.publish == 'pypi') && vars.PUBLISHING_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/computedeck
     permissions:
       id-token: write
     steps:
@@ -60,11 +135,14 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
   pypi:
-    needs: [build, testpypi]
-    if: needs.build.outputs.stable == 'true'
+    needs: [build, github-release, testpypi]
+    if: inputs.publish == 'pypi' && vars.PUBLISHING_ENABLED == 'true' && needs.build.outputs.stable == 'true'
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/p/computedeck
     permissions:
       id-token: write
     steps:
