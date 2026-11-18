@@ -9,6 +9,28 @@ computedeck export > config.toml   # current sources, instances and settings
 
 Import keeps the collected data and state of sources that already exist. Run it while the service is stopped, or refresh in the app afterwards. A complete example is in [examples/config.toml](../examples/config.toml).
 
+### Moving from another server
+
+When ComputeDeck used to run on another machine (say an always-on desktop with the network
+access and keys) and should now run on this computer, import that server's sources over SSH:
+
+```sh
+computedeck import --from old-server                 # collected there, as a collection machine
+computedeck import --from old-server --route jump    # collected here, through it as a jump host
+computedeck import --from old-server --route direct  # collected here, directly
+```
+
+This runs `computedeck export` on `old-server` (a Host alias of this computer, connected to
+non-interactively with strict host-key checking; use `--command` for another path or data
+directory there, e.g. `--command "~/.local/bin/computedeck --data-dir /srv/computedeck"`).
+With `collect`, a collection machine for the alias is created or updated and every imported
+source uses it, so nothing changes about where they are collected. With `jump`, a jump host
+is created and only sources that connect over SSH use it; with `jump` and `direct`, those
+sources' SSH aliases must exist in this computer's `~/.ssh/config`. Settings, hand-added
+machines and the other server's own `[[node]]` tables stay there; a source that server
+collects through its own node is refused, since routes do not chain. Stop the other
+server's service once this computer has taken over, so the sources are not collected twice.
+
 ## Terms / 术语
 
 The interface uses the [English glossary](../README.md#terms-in-the-interface) and
@@ -20,6 +42,7 @@ The interface uses the [English glossary](../README.md#terms-in-the-interface) a
 | Cluster or platform / 集群或平台 | A resource group: a `[[cluster]]` or a cloud platform name / 资源分组，由 `[[cluster]]` 或云平台名称表示。 |
 | Instance / machine / 实例 / 机器 | A collected machine or hand-added `[[instance]]` / 采集到的机器或手动添加的机器。 |
 | Collection machine / 采集机器 | `[[node]]`, selected by a source's `node` field / 通过来源的 `node` 字段选择的采集电脑。 |
+| Jump host / 跳板机 | `[[node]]` with `mode = "jump"`: SSH passes through it, nothing runs there / `mode = "jump"` 的 `[[node]]`：SSH 经由它连接，不在其上运行任何程序。 |
 | Node / 节点 | A scheduler's compute node, not `[[node]]` / 调度器的计算节点，不是配置中的采集机器。 |
 | Needs attention / 待处理 | Derived faults and warnings, not a configuration table / 根据当前状态生成的故障和警告列表，不是配置表。 |
 
@@ -67,9 +90,9 @@ Each `[[cluster.identity]]` is one login:
 | Key | Meaning |
 |---|---|
 | `username` | Login name on the cluster. Only this user's jobs are collected. |
-| `ssh_alias` | A `Host` from `~/.ssh/config` on the machine that collects. ProxyJump, ProxyCommand and keys come from there. |
+| `ssh_alias` | A `Host` from `~/.ssh/config` on the machine that collects. ProxyJump, ProxyCommand and keys come from there; through a jump host, the jump host replaces the alias's own ProxyJump or ProxyCommand. |
 | `options` | Driver-specific settings as an inline table, e.g. `options = { context = "lab" }` for Kubernetes. See [drivers](drivers/). |
-| `node` | The `id` of a `[[node]]` that collects this source. Empty (default) means the machine running the service. |
+| `node` | The `id` of a `[[node]]` this source is reached through: a collection machine collects it there; a jump host carries this machine's SSH connections to it. Empty (default) means the machine running the service connects directly. |
 | `enabled` | `false` keeps the identity without collecting it. Default `true`. |
 | `interval_minutes` | 5–1440. Default 10. |
 
@@ -88,16 +111,50 @@ One table per API account or machine. `driver` defaults to `"runpod"`; built in 
 
 ## `[[node]]`
 
-A collection machine: another computer that collects the sources naming it, over SSH, with
-its own SSH configuration, credentials and network. It needs ComputeDeck installed; no
-service has to run there.
+A machine, reached over SSH, that sources go through when the machine running the service
+cannot reach them directly. There are two kinds:
+
+- **Collection machine** (`mode = "collect"`, the default): another computer that collects
+  the sources naming it with its own drivers, SSH configuration, credentials and network. It
+  needs ComputeDeck installed; no service has to run there.
+- **Jump host** (`mode = "jump"`): a plain SSH server with nothing installed, such as a
+  bastion. The machine running the service collects the sources naming it with its own
+  drivers, SSH configuration and credentials, and every SSH connection of those sources goes
+  through the jump host, as with `ssh -J`. Only sources that connect over SSH can use one:
+  Slurm, PBS, LSF, an SSH machine, or Kubernetes with an `ssh_alias`. Cloud API sources and
+  Kubernetes without an `ssh_alias` are refused.
 
 | Key | Meaning |
 |---|---|
 | `id` | Identifier used by `node` in sources: lowercase letters, digits and dashes, up to 40. Defaults to a slug of `name`. |
 | `name` | Display name. |
 | `ssh_alias` | The alias, on the machine running the service, that reaches it. |
-| `command` | How to run ComputeDeck there: a path and plain arguments, not empty. Default `computedeck`; SSH commands do not load your login `PATH`, so a full path such as `~/.local/bin/computedeck` is often needed. |
+| `mode` | `"collect"` (default) or `"jump"`. `export` writes it only for jump hosts. |
+| `command` | Collection machines only: how to run ComputeDeck there, a path and plain arguments, not empty. Default `computedeck`; SSH commands do not load your login `PATH`, so a full path such as `~/.local/bin/computedeck` is often needed. |
+
+Through a jump host, both hops are non-interactive and strict (`BatchMode=yes`,
+`StrictHostKeyChecking=yes`, a 10-second connect timeout), so log in once with
+`ssh -J <jump-alias> <alias>` to accept both host keys. The jump host's own alias keeps its
+settings from `~/.ssh/config` (user, port, keys). The source's alias loses any ProxyJump or
+ProxyCommand of its own: the jump host is the only route, never chained after another one.
+Its HostName is resolved by the jump host, so it may be a private name or address there.
+
+When a routed connection fails, the jump host is reached once on its own to tell the hops
+apart: `route_unreachable` names a jump host this machine cannot reach; a failure beyond it
+keeps its usual code (such as `ssh_failed`) and names the jump host it went through. Each
+collection also updates the jump host's status in the app.
+
+The mode of a node that sources use cannot change, in the app or on import; move the sources
+to another node first. Import refuses a jump host for a source that makes no SSH connection.
+
+中文：`[[node]]` 是来源经由的机器，有两种。采集机器（`mode = "collect"`，默认）需要安装
+ComputeDeck，用它自己的驱动、配置和凭据采集。跳板机（`mode = "jump"`）上不安装任何东西：
+由运行服务的这台电脑用自己的驱动、SSH 配置和凭据采集，来源的每个 SSH 连接都经由跳板机，
+相当于 `ssh -J`。只有通过 SSH 连接的来源可以使用跳板机；云 API 来源和未填写 `ssh_alias`
+的 Kubernetes 来源会被拒绝。两段连接都是非交互且严格校验主机密钥的，请先用
+`ssh -J <跳板别名> <别名>` 登录一次以确认两个主机密钥。来源别名自身的 ProxyJump 或
+ProxyCommand 会被跳板机取代。连接失败时会单独连一次跳板机来判断是哪一段出错：
+`route_unreachable` 表示本机连不上跳板机；跳板机之后的失败保留原来的错误代码，并注明经由的跳板机。
 
 ## `[[instance]]`
 
@@ -248,11 +305,12 @@ zero sends nothing.
 
 The Notifications page refreshes its delivery log while visible and enabled. Activity
 shows recorded delivery outcomes, and a channel's recent failed attempt appears in Needs
-attention. Acknowledge or snooze quiets that attention item; it does not disable its rule,
-stop retries or mute the service health indicator. A later success clears the channel
-warning. Missing delivery records mean unknown, not successful delivery.
+attention. Dismissing or snoozing that item quiets it and lowers the count in the top bar;
+it does not disable its rule or stop retries, and a service that cannot be reached still
+shows. A later success clears the channel warning. Missing delivery records mean unknown, not successful delivery.
 
-Acknowledgements and snoozes are saved on the service and shared by viewers. “Until
+Dismissals and snoozes are saved on the service and shared by viewers; with example data
+they stay in the browser and nothing is saved. “Until
 tomorrow” expires at the next midnight in the service host's timezone. Overview's **Mark
 seen** is separate: it stays in this browser and does not acknowledge faults or affect
 notification delivery. See [Needs attention](metrics.md#needs-attention).
@@ -286,7 +344,7 @@ low_use_window_minutes = 90
 
 Changes recompute hints from recorded readings. They do not enable any new collection
 or SSH checks. At least three consecutive measurements must cover the chosen window, with no gap exceeding twice the
-collection interval. A deliberately quiet inference server can be acknowledged or snoozed in Needs attention. Readings are retained for
+collection interval. A deliberately quiet inference server can be dismissed in Needs attention, or snoozed from its details. Readings are retained for
 seven days. See [sustained low GPU use](metrics.md#sustained-low-gpu-use) for coverage.
 
 中文：“设置 → GPU 低利用率”提供服务端共享设置：利用率阈值 `low_use_threshold` 默认 10%，
@@ -587,3 +645,7 @@ with subject counts and collection cadence derived from the example sources.
 长区间或多样本读数显示统计，表格始终保留统计。实时右端标“现在”，使用弱化的虚线；
 历史端点显示日期。示例图表与每日明细共用最近十天的已记录时段，覆盖数及采集周期
 由示例来源推导。
+
+`section=ssh` remains the SSH overlay alias. Other `section` values belong to Settings
+and are retained when opening/closing forms or switching example mode. Detail-list
+navigation clears competing panel keys and steps only within its rendered list.

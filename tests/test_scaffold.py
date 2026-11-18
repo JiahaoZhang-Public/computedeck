@@ -117,3 +117,12 @@ def test_web_example_covers_the_public_styling_contract(tmp_path: Path) -> None:
     assert "if (demo) return" in source
     assert "'zh-CN':" in source
     assert "requires: 'hello-example'" in source
+
+
+def test_web_spinner_rotates_the_icon_instead_of_a_stretched_grid_item() -> None:
+    from computedeck.scaffold import WEB_ENTRY
+
+    source = WEB_ENTRY.format(id="example", title="Example")
+    assert '<Icon className="spin" />' in source
+    assert '<span className="spin"' not in source
+    assert "className={className}" in source

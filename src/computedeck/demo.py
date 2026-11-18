@@ -474,7 +474,14 @@ def dashboard() -> dict[str, Any]:
     machine_source = _source(
         ("example:lab-server", "Lab server", "ssh", "example:lab-server", "alice"), observed
     )
-    machine_source.update(ssh_alias="lab-server", credential="", capabilities=["instances"])
+    # The lab server is reachable only through the campus bastion, which this machine
+    # connects through: a route with nothing installed on the jump host.
+    machine_source.update(
+        ssh_alias="lab-server",
+        credential="",
+        capabilities=["instances"],
+        node="example:campus-bastion",
+    )
     sources.append(machine_source)
     machine = parse_machine(
         json.dumps(
@@ -972,7 +979,7 @@ def events() -> list[dict[str, Any]]:
 
 
 def nodes() -> list[dict[str, Any]]:
-    """An example collection machine."""
+    """An example collection machine and an example SSH jump host."""
     observed = (now() - timedelta(minutes=3)).isoformat()
     return [
         {
@@ -980,13 +987,58 @@ def nodes() -> list[dict[str, Any]]:
             "name": "Lab gateway",
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
+            "mode": "collect",
             "status": "ok",
             "version": "0.7.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,
             "error": None,
-        }
+        },
+        {
+            "id": "example:campus-bastion",
+            "name": "Campus bastion",
+            "ssh_alias": "campus-bastion",
+            "command": "computedeck",
+            "mode": "jump",
+            "status": "ok",
+            "version": None,
+            "drivers": [],
+            "checked_at": observed,
+            "last_collected_at": observed,
+            "error": None,
+        },
+    ]
+
+
+def ssh_hosts() -> list[dict[str, Any]]:
+    """Example Host aliases, as if read from ~/.ssh/config."""
+    return [
+        {
+            "alias": "campus-bastion",
+            "hostname": "bastion.example.org",
+            "user": "alice",
+            "proxy_jump": None,
+        },
+        {
+            "alias": "cluster-a",
+            "hostname": "login.cluster-a.example.org",
+            "user": "alice",
+            "proxy_jump": None,
+        },
+        {
+            "alias": "gpu-box",
+            "hostname": "192.0.2.40",
+            "user": "alice",
+            "proxy_jump": "campus-bastion",
+        },
+        {"alias": "lab-gateway", "hostname": "192.0.2.5", "user": "alice", "proxy_jump": None},
+        {
+            "alias": "lab-server",
+            "hostname": "192.0.2.30",
+            "user": "alice",
+            "proxy_jump": "campus-bastion",
+        },
     ]
 
 
@@ -1019,7 +1071,9 @@ def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
     """Chart examples at the demo sources' cadence, including missing/partial data."""
     current = now()
-    coverage = chart_observation(dashboard(), current=current)
+    data = dashboard()
+    coverage = chart_observation(data, current=current)
+    groups = group_history(data)
     cadence = int(min(coverage["intervals"]))
     points = []
     for age in range(hours * 3600 // cadence, -1, -1):
@@ -1037,6 +1091,17 @@ def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
                 "known_allocated_gpus": None if unknown else value,
                 "unknown_allocation_sources": 1 if partial else 0,
                 "gpu_utilization": None if unknown else round(60 + 20 * math.sin(ago), 1),
+                "by_group": {
+                    key: {
+                        **group,
+                        "allocated": None if unknown or partial else group["known_allocated"],
+                        "known_allocated": None if unknown else group["known_allocated"],
+                        "unknown_allocation_sources": int(unknown or partial),
+                        "spend": {} if unknown else group["spend"],
+                        "spend_unknown": int(unknown or partial) + group["spend_unknown"],
+                    }
+                    for key, group in groups.items()
+                },
                 "chart_coverage": {
                     **{
                         metric: {

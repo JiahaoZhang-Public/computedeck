@@ -230,9 +230,11 @@ const words = {{
     settings: '示例设置',
   }},
 }};
-function Icon() {{
+function Icon({{ className }} = {{}}) {{
   return (
     <svg
+      className={{className}}
+      aria-hidden="true"
       width="16"
       height="16"
       viewBox="0 0 24 24"
@@ -356,9 +358,7 @@ function Page({{ request, demo, locale }}) {{
         <Meter value={{50}} />
         <Stat label={{text.example}} value={{42}} unit="GPU" />
         <BrandMark />
-        <span className="spin" aria-hidden="true">
-          <BrandMark size={{16}} />
-        </span>
+        <Icon className="spin" />
         <Empty title={{text.empty}} />
       </div>
       <div className="table-wrap">

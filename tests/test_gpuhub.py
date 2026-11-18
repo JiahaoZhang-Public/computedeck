@@ -27,7 +27,7 @@ CONTAINER = {
     "price": 1600,
     "data_center": "Singapore-A",
     "info": {
-        "ssh_command": "ssh -p 22345 root@sg-a.example-gpu.com",
+        "ssh_command": "ssh -p 22345 root@sg-a.gpu.example.com",
         "root_password": "never-show-this",
     },
 }
@@ -82,7 +82,7 @@ async def test_balance_and_containers_are_collected(monkeypatch: pytest.MonkeyPa
     assert (first["state"], first["gpu_count"], first["gpu_type"]) == ("running", 2, "RTX 5090")
     assert first["hourly_cost"] is None and first["region"] == "Singapore-A"
     assert (first["host"], first["port"], first["username"]) == (
-        "sg-a.example-gpu.com",
+        "sg-a.gpu.example.com",
         22345,
         "root",
     )

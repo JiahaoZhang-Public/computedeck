@@ -4,7 +4,8 @@ A source can name a node. The hub then runs ``computedeck collect`` on that mach
 its SSH alias, sends the source on standard input and reads one JSON result. The node uses
 its own drivers, SSH configuration, credentials and network (a VPN, a cluster only it can
 reach); it needs ComputeDeck installed but no running service, port or token. Results,
-history and events stay on the hub.
+history and events stay on the hub. A node can instead be a plain SSH jump host with nothing
+installed (``mode = "jump"``); routes.py handles those.
 
 Request:  {"protocol": 1, "action": "info"}
           or {"protocol": 1, "action": "collect", "source": {...}}
@@ -21,7 +22,7 @@ import json
 import re
 import shlex
 import sys
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -53,8 +54,12 @@ class NodeInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
     ssh_alias: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-    # The command on the node; non-interactive SSH may not load the login PATH.
+    # The command on the node; non-interactive SSH may not load the login PATH. A jump
+    # host runs nothing, so it does not use it.
     command: str = Field(default="computedeck", max_length=500)
+    # "collect" runs ComputeDeck on the node; "jump" only passes SSH through it (routes.py).
+    # Unset keeps the current kind of an edited node, and a new node collects.
+    mode: Literal["collect", "jump"] | None = None
 
 
 def command_parts(command: Any) -> list[str]:
@@ -87,6 +92,7 @@ def node_record(body: NodeInput, node_id: str) -> dict[str, Any]:
         "name": body.name,
         "ssh_alias": body.ssh_alias,
         "command": body.command,
+        "mode": body.mode or "collect",
         "status": "unchecked",
         "version": None,
         "drivers": [],
@@ -95,11 +101,16 @@ def node_record(body: NodeInput, node_id: str) -> dict[str, Any]:
     }
 
 
-def _remote(node: dict[str, Any]) -> str:
-    parts = command_parts(node["command"])
+def remote_command(command: Any, subcommand: str) -> str:
+    """The remote shell command that runs ``subcommand`` through a node command."""
+    parts = command_parts(command)
     # A leading ~ must stay unquoted for the remote shell to expand it.
     head = parts[0] if parts[0].startswith("~/") else shlex.quote(parts[0])
-    return " ".join([head, *(shlex.quote(part) for part in parts[1:]), "collect"])
+    return " ".join([head, *(shlex.quote(part) for part in parts[1:]), subcommand])
+
+
+def _remote(node: dict[str, Any]) -> str:
+    return remote_command(node["command"], "collect")
 
 
 async def request(node: dict[str, Any], body: dict[str, Any], seconds: float) -> dict[str, Any]:

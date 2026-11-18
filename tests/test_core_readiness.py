@@ -146,7 +146,8 @@ def test_python_and_frontend_versions_match():
     uv_lock = tomllib.loads((root / "uv.lock").read_text())
     core = next(entry for entry in uv_lock["package"] if entry["name"] == "computedeck")
     assert python == core["version"]
-    assert all(node["version"] == python for node in demo.nodes())
+    # A jump host runs nothing, so only collection machines report a version.
+    assert all(node["version"] == python for node in demo.nodes() if node["mode"] == "collect")
 
 
 def test_changelog_names_the_current_version():

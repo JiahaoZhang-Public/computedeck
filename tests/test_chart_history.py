@@ -391,3 +391,53 @@ def test_demo_coverage_uses_dashboard_subjects_and_cadence(monkeypatch: pytest.M
     utilization = chart(points)["series"][0]["buckets"]
     assert any(b["value"] is not None and not b["partial"] for b in utilization)
     assert any(b["value"] is not None and b["partial"] for b in utilization)
+
+
+def test_usage_buckets_integrate_groups_and_keep_currencies_separate() -> None:
+    sample = {
+        "allocated": 6,
+        "known_allocated": 6,
+        "unknown_allocation_sources": 0,
+        "spend": {"USD": 12, "EUR": 6},
+        "spend_unknown": 0,
+    }
+    result = chart([point(12, by_group={"cluster-a": sample})])
+    series = {s["id"]: s for s in result["usage_series"]}
+    assert set(series) == {"gpu_hours:cluster-a", "money:USD", "money:EUR"}
+    assert series["money:EUR"]["format"] == {"kind": "money", "currency": "EUR"}
+    assert sum(b["value"] or 0 for b in series["gpu_hours:cluster-a"]["buckets"]) == pytest.approx(
+        1.2
+    )
+    assert sum(b["value"] or 0 for b in series["money:USD"]["buckets"]) == pytest.approx(2.4)
+    assert sum(b["value"] or 0 for b in series["money:EUR"]["buckets"]) == pytest.approx(1.2)
+    assert [b["start"] for b in series["money:USD"]["buckets"]] == [
+        b["start"] for b in result["series"][0]["buckets"]
+    ]
+    assert series["money:USD"]["buckets"][0]["value"] is None
+
+
+def test_usage_partial_values_remain_bounds_and_long_outages_remain_gaps() -> None:
+    sample = {
+        "allocated": None,
+        "known_allocated": 2,
+        "unknown_allocation_sources": 1,
+        "spend": {"USD": 4},
+        "spend_unknown": 1,
+    }
+    result = chart([point(90, by_group={"cluster-a": sample})])
+    for series in result["usage_series"]:
+        known = [b for b in series["buckets"] if b["value"] is not None]
+        assert known and all(b["lower_bound"] and b["partial"] for b in known)
+        assert series["buckets"][-1]["value"] is None
+        assert series["buckets"][-1]["gap_reason"]
+
+
+def test_demo_exposes_group_and_currency_integrals_with_unknowns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", END.isoformat())
+    result = chart(demo_chart_history(24, END))
+    series = result["usage_series"]
+    assert {s["format"]["kind"] for s in series} == {"gpu_hours", "money"}
+    assert any(b["lower_bound"] for s in series for b in s["buckets"])
+    assert any(b["value"] is None for s in series for b in s["buckets"])

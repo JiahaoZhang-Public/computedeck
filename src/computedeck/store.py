@@ -707,6 +707,8 @@ class Store:
             for name in ("ssh_alias", "command"):
                 if not isinstance(node.get(name), str):
                     node[name] = ""
+            # Nodes stored before jump hosts existed are collection machines.
+            node["mode"] = "jump" if node.get("mode") == "jump" else "collect"
             node["checked_at"] = timestamp(node.get("checked_at"))
             # What a node reported before replies were checked: never shown as is.
             node["version"] = nodes.reported_version(node.get("version"))

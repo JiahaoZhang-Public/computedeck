@@ -32,22 +32,26 @@ def group_history(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def rollup_history(
-    points: list[dict[str, Any]], hours: int, *, end: datetime | None = None
+    points: list[dict[str, Any]],
+    hours: int,
+    *,
+    end: datetime | None = None,
+    bucket_seconds: int = 3600,
 ) -> dict[str, Any]:
     end = end or datetime.now(UTC)
     start = end - timedelta(hours=hours)
     gap = timedelta(seconds=HOLD_SECONDS)
     buckets: dict[datetime, dict[str, Any]] = {}
-    cursor = start.replace(minute=0, second=0, microsecond=0)
+    cursor = datetime.fromtimestamp(int(start.timestamp()) // bucket_seconds * bucket_seconds, UTC)
     while cursor < end:
-        left, right = max(start, cursor), min(end, cursor + timedelta(hours=1))
+        left, right = max(start, cursor), min(end, cursor + timedelta(seconds=bucket_seconds))
         buckets[cursor] = {
             "at": left.isoformat(),
             "end": right.isoformat(),
             "observed_seconds": 0.0,
             "groups": {},
         }
-        cursor += timedelta(hours=1)
+        cursor += timedelta(seconds=bucket_seconds)
     for index, point in enumerate(points):
         at = datetime.fromisoformat(point["at"])
         next_at = (
@@ -57,8 +61,10 @@ def rollup_history(
         if "by_group" not in point:
             continue  # Pre-upgrade points have no breakdown, including known zeroes.
         while left < right:
-            hour = left.replace(minute=0, second=0, microsecond=0)
-            stop = min(right, hour + timedelta(hours=1))
+            hour = datetime.fromtimestamp(
+                int(left.timestamp()) // bucket_seconds * bucket_seconds, UTC
+            )
+            stop = min(right, hour + timedelta(seconds=bucket_seconds))
             seconds = (stop - left).total_seconds()
             bucket = buckets[hour]
             bucket["observed_seconds"] += seconds
@@ -159,6 +165,7 @@ def chart_history(
     """Aggregate raw observations; empty bins and unknown values never become zero."""
     seconds = 300 if hours <= 24 else 3600 if hours <= 168 else 86400
     start = end - timedelta(hours=hours)
+    usage = usage_chart_series(points, hours, end=end, current=current, seconds=seconds)
     available = [p for p in points if datetime.fromisoformat(p["at"]) <= end]
     last_sample = max((p["at"] for p in available), default=None)
     preceding = [p for p in available if datetime.fromisoformat(p["at"]) < start]
@@ -261,6 +268,7 @@ def chart_history(
         series.append(
             {
                 "id": metric,
+                "format": {"kind": "percent" if metric == "utilization" else "gpu"},
                 "buckets": buckets,
                 "summary": {
                     "code": "chart_summary" if bucket_values else "chart_empty_summary",
@@ -299,4 +307,89 @@ def chart_history(
         "bucket_seconds": seconds,
         "last_sample": last_sample,
         "series": series,
+        "usage_series": usage,
     }
+
+
+def usage_chart_series(
+    points: list[dict[str, Any]], hours: int, *, end: datetime, current: datetime, seconds: int
+) -> list[dict[str, Any]]:
+    """Observed integrals by group and currency, with the same honest bucket contract."""
+    rollup = rollup_history(points, hours, end=end, bucket_seconds=seconds)
+    groups = sorted({key for b in rollup["buckets"] for key in b["groups"]})
+    currencies = sorted(
+        {c for b in rollup["buckets"] for g in b["groups"].values() for c in g["spend"]}
+    )
+    result = []
+    for kind, key in [("gpu_hours", g) for g in groups] + [("money", c) for c in currencies]:
+        buckets = []
+        for b in rollup["buckets"]:
+            entries = (
+                [b["groups"][key]]
+                if kind == "gpu_hours" and key in b["groups"]
+                else list(b["groups"].values())
+                if kind == "money"
+                else []
+            )
+            values = (
+                [g["gpu_hours"] for g in entries if g["gpu_hours"] is not None]
+                if kind == "gpu_hours"
+                else [g["spend"][key] for g in entries if key in g["spend"]]
+            )
+            partial = any(
+                g["gpu_partial" if kind == "gpu_hours" else "spend_partial"] for g in entries
+            )
+            if kind == "money":
+                partial |= len(entries) < len(groups)
+            value = sum(values) if values else None
+            buckets.append(
+                {
+                    "start": b["at"],
+                    "end": b["end"],
+                    "value": value,
+                    "min": value,
+                    "max": value,
+                    "samples": sum(
+                        b["at"] <= p["at"] < b["end"] and "by_group" in p for p in points
+                    ),
+                    "held_from": None,
+                    "expected_samples": None,
+                    "known_sources": None,
+                    "total_sources": None,
+                    "partial": partial,
+                    "lower_bound": partial and value is not None,
+                    "gap_reason": {"code": "chart_no_samples"} if value is None else None,
+                    "so_far": b["end"] == current.isoformat(),
+                }
+            )
+        known = [b["value"] for b in buckets if b["value"] is not None]
+        result.append(
+            {
+                "id": f"{kind}:{key}",
+                "label": key,
+                "group_key": key if kind == "gpu_hours" else None,
+                "format": {"kind": kind, **({"currency": key} if kind == "money" else {})},
+                "buckets": buckets,
+                "summary": {
+                    "code": "chart_summary" if known else "chart_empty_summary",
+                    "mean": sum(known) / len(known) if known else None,
+                    "min": min(known) if known else None,
+                    "max": max(known) if known else None,
+                    "lower_bound": any(b["lower_bound"] for b in buckets),
+                    "gaps": sum(
+                        b["value"] is None and (i == 0 or buckets[i - 1]["value"] is not None)
+                        for i, b in enumerate(buckets)
+                    ),
+                    "minutes": sum(
+                        (
+                            datetime.fromisoformat(b["end"]) - datetime.fromisoformat(b["start"])
+                        ).total_seconds()
+                        / 60
+                        for b in buckets
+                        if b["value"] is None
+                    ),
+                    "partial": sum(b["partial"] for b in buckets),
+                },
+            }
+        )
+    return result

@@ -27,9 +27,20 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import (
+    auth,
+    credentials,
+    demo,
+    drivers,
+    marketplace,
+    nodes,
+    paths,
+    routes,
+    ssh_hosts,
+    toolbox,
+)
 from . import plugins as plugin_host
-from .collector import Collector, ProbeConflict
+from .collector import NODE_KEYS, Collector, ProbeConflict
 from .demo import delivery_status as demo_delivery_status
 from .demo import demo_chart_history
 from .demo import now as demo_now
@@ -118,12 +129,13 @@ def encodable(body: bytes) -> bool:
     return True
 
 
-def validate_source(source: dict[str, Any]) -> None:
+def validate_source(source: dict[str, Any], node: dict[str, Any] | None = None) -> None:
     try:
         driver = drivers.get(source["driver"])
         if source.get("credential"):
-            if source.get("node"):
-                # Resolved on the node, which may have schemes this machine lacks.
+            if source.get("node") and routes.mode(node) == "collect":
+                # Resolved on the node, which may have schemes this machine lacks. A jump
+                # host only carries SSH: its sources' credentials resolve here.
                 if not re.fullmatch(r"[a-z][a-z0-9-]*:[^\s]{1,250}", source["credential"]):
                     raise SourceError(
                         "invalid_credential_reference", reference=source["credential"]
@@ -542,8 +554,7 @@ def create_app(
             for other in store().sources()
         ):
             raise HTTPException(409, message("cluster_driver_mismatch"))
-        check_node(source)
-        validate_source(source)
+        validate_source(source, check_node(source))
         if source["enabled"]:
             source["next_due_at"] = now()
         store().save_source(source)
@@ -573,8 +584,7 @@ def create_app(
         )
         enabled_changed = "enabled" in changes and changes["enabled"] != source["enabled"]
         source.update(changes)
-        check_node(source)
-        validate_source(source)
+        validate_source(source, check_node(source))
         source["next_due_at"] = now()
         if connection_changed or enabled_changed:
             source.update(
@@ -602,9 +612,17 @@ def create_app(
         collector.try_clear_resolved_attention()
         return store().source(source_id) or source
 
-    def check_node(source: dict[str, Any]) -> None:
-        if source.get("node") and store().node(source["node"]) is None:
+    def check_node(source: dict[str, Any]) -> dict[str, Any] | None:
+        """The node a source names, if any; 422 when it is missing or cannot carry it."""
+        if not source.get("node"):
+            return None
+        node = store().node(source["node"])
+        if node is None:
             raise HTTPException(422, message("node_not_found", node=source["node"]))
+        if routes.mode(node) == "jump" and not routes.applies(source):
+            # A jump host carries SSH connections; this source makes none.
+            raise HTTPException(422, message("route_not_applicable", node=node["name"]))
+        return node
 
     @app.get("/api/nodes")
     async def node_list(demo: bool = False, since: str | None = None) -> Response:
@@ -633,10 +651,17 @@ def create_app(
         current = store().node(node_id)
         if current is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
+        # An edit that does not name the kind keeps it.
+        body = body.model_copy(update={"mode": body.mode or current["mode"]})
         try:
             node = {**current, **nodes.node_record(body, node_id)}
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
+        if node["mode"] != current["mode"] and any(
+            source.get("node") == node_id for source in store().sources()
+        ):
+            # Where a source is collected and its credentials resolve would change under it.
+            raise HTTPException(409, message("node_mode_in_use"))
         store().save_node(node)
         fields = [key for key in body.model_dump() if node.get(key) != current.get(key)]
         if fields:
@@ -663,14 +688,19 @@ def create_app(
         if node is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
         try:
-            result = {**await nodes.info(node), "status": "ok", "error": None}
+            if routes.mode(node) == "jump":
+                # Nothing runs on a jump host: this machine reaching it is the check.
+                await routes.reach(node)
+                result: dict[str, Any] = {"status": "ok", "error": None}
+            else:
+                result = {**await nodes.info(node), "status": "ok", "error": None}
         except SourceError as error:
             result = {"status": "error", "error": error.message()}
         # Read again: the node may have been deleted or edited while it was checked.
         current = store().node(node_id)
         if current is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
-        if any(current.get(key) != node.get(key) for key in ("ssh_alias", "command")):
+        if any(current.get(key) != node.get(key) for key in NODE_KEYS):
             # The answer describes the old connection.
             raise HTTPException(409, message("node_changed", node=current["name"]))
         current.update(result, checked_at=now())
@@ -789,6 +819,13 @@ def create_app(
     @app.get("/api/ssh/config")
     async def ssh_config() -> dict[str, Any]:
         return ssh_state()
+
+    @app.get("/api/ssh/hosts")
+    async def ssh_host_list(demo: bool = False) -> dict[str, Any]:
+        """Host aliases of this service user's ~/.ssh/config, offered when adding a source."""
+        if demo:
+            return {"hosts": demo_ssh_hosts(), "readable": True}
+        return await asyncio.to_thread(ssh_hosts.discover, Path.home() / ".ssh")
 
     @app.post("/api/ssh/install")
     async def ssh_install(body: ConfirmInput) -> dict[str, Any]:
@@ -1030,6 +1067,10 @@ def demo_dashboard() -> dict[str, Any]:
 
 def demo_nodes() -> list[dict[str, Any]]:
     return demo.nodes()
+
+
+def demo_ssh_hosts() -> list[dict[str, Any]]:
+    return demo.ssh_hosts()
 
 
 def demo_events() -> list[dict[str, Any]]:

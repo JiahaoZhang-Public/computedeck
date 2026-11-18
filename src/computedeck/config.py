@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from . import credentials, drivers
+from . import credentials, drivers, routes
 from .errors import SourceError
 from .nodes import NodeInput, node_record
 from .records import (
@@ -36,7 +36,7 @@ _SOURCE_KEYS = (
     "enabled",
     "interval_minutes",
 )
-_NODE_KEYS = ("id", "name", "ssh_alias", "command")
+_NODE_KEYS = ("id", "name", "ssh_alias", "command", "mode")
 _INSTANCE_KEYS = (
     "name",
     "host",
@@ -138,9 +138,7 @@ def load(text: str) -> dict[str, Any]:
     for row in data.get("node", []):
         _check_keys(row, set(_NODE_KEYS), f"[[node]] {row.get('name', '')}")
         try:
-            body = NodeInput(
-                **{key: row[key] for key in ("name", "ssh_alias", "command") if key in row}
-            )
+            body = NodeInput(**{key: row[key] for key in _NODE_KEYS[1:] if key in row})
             node_id = row.get("id") or slug(body.name)
             # The rule of the app: an id it can show, edit and delete.
             if not isinstance(node_id, str) or not re.fullmatch(SLUG, node_id):
@@ -171,9 +169,55 @@ def load(text: str) -> dict[str, Any]:
     }
 
 
+def migrated(text: str, alias: str, route: str, command: str = "computedeck") -> dict[str, Any]:
+    """Another server's export, parsed so that its sources are collected from here.
+
+    ``collect`` adds a collection machine for ``alias`` and sets it on every source; ``jump``
+    adds a jump host for it and sets it on the sources that connect over SSH; ``direct``
+    sets none. Settings, hand-added machines and identity slots describe the other server
+    and are left out.
+    """
+    parsed = load(text)
+    chained = sorted({body.name for body in parsed["sources"] if body.node})
+    if chained:
+        raise ConfigError(
+            f"{alias} collects {', '.join(chained)} through its own nodes; "
+            "routes through two machines are not supported"
+        )
+    machines = []
+    sources = parsed["sources"]
+    if route != "direct":
+        try:
+            body = NodeInput.model_validate(
+                {"name": alias, "ssh_alias": alias, "command": command, "mode": route}
+            )
+            node = node_record(body, slug(alias))
+        except (ValidationError, ValueError) as error:
+            raise ConfigError(f"node {alias}: {error}") from None
+        machines.append(node)
+        sources = [
+            source.model_copy(update={"node": node["id"]})
+            if route == "collect"
+            or routes.applies({"driver": source.driver, "ssh_alias": source.ssh_alias})
+            else source
+            for source in sources
+        ]
+    return {
+        "settings": SettingsInput(),
+        "identity_slots": {},
+        "sources": sources,
+        "instances": [],
+        "nodes": machines,
+    }
+
+
 def apply(store: Store, text: str) -> dict[str, int]:
     """Create or update everything in the file. Nothing is deleted."""
-    parsed = load(text)
+    return apply_parsed(store, load(text))
+
+
+def apply_parsed(store: Store, parsed: dict[str, Any]) -> dict[str, int]:
+    """Create or update everything ``load`` read. Nothing is deleted."""
     sources = []
     for body in parsed["sources"]:
         try:
@@ -186,10 +230,26 @@ def apply(store: Store, text: str) -> dict[str, int]:
         except (ValueError, SourceError) as error:
             raise ConfigError(f"{body.name} ({body.username or body.driver}): {error}") from None
         sources.append(record)
-    known_nodes = {node["id"] for node in [*store.nodes(), *parsed["nodes"]]}
+    # The file's nodes replace the stored ones of the same id.
+    known_nodes = {node["id"]: node for node in [*store.nodes(), *parsed["nodes"]]}
     for record in sources:
         if record["node"] and record["node"] not in known_nodes:
             raise ConfigError(f"{record['name']}: no node {record['node']}")
+    # The sources after the import: the file's replace the stored ones of the same id.
+    after = {source["id"]: source for source in [*store.sources(), *sources]}
+    in_use = {source.get("node") for source in after.values()}
+    for node in parsed["nodes"]:
+        stored = store.node(node["id"])
+        if stored is not None and stored["mode"] != node["mode"] and node["id"] in in_use:
+            # As in the app: where its sources are collected would change under them.
+            raise ConfigError(f"node {node['name']}: cannot change mode while sources use it")
+    for record in sources:
+        node = known_nodes.get(record["node"])
+        if node is not None and routes.mode(node) == "jump" and not routes.applies(record):
+            raise ConfigError(
+                f"{record['name']}: node {node['name']} is an SSH jump host, "
+                "and this source makes no SSH connection"
+            )
     clusters: dict[str, str] = {}
     for record in [*store.sources(), *sources]:
         if clusters.setdefault(record["cluster_id"], record["driver"]) != record["driver"]:
@@ -217,7 +277,7 @@ def apply(store: Store, text: str) -> dict[str, int]:
                 **{
                     key: existing_node[key]
                     for key in ("status", "version", "drivers", "checked_at", "error")
-                    if key in existing_node
+                    if key in existing_node and existing_node["mode"] == node["mode"]
                 },
             }
         )
@@ -295,7 +355,9 @@ def export(store: Store) -> str:
     for node in store.nodes():
         lines += ["", "[[node]]"]
         for key in _NODE_KEYS:
-            lines.append(f"{key} = {_value(node[key])}")
+            # Written only when it is not the default, so older versions can import the file.
+            if key != "mode" or node["mode"] != "collect":
+                lines.append(f"{key} = {_value(node[key])}")
     groups: dict[str, list[dict[str, Any]]] = {}
     for source in store.sources():
         groups.setdefault(source["cluster_id"], []).append(source)

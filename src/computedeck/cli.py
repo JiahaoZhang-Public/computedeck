@@ -107,25 +107,78 @@ def doctor(args: argparse.Namespace) -> int:
     return run(paths.data_dir(), args.port or paths.port(), args.source, args.json, args.language)
 
 
+def _remote_export(alias: str, command: str) -> str:
+    """``computedeck export`` run on another server over strict, non-interactive SSH."""
+    import asyncio
+
+    from .drivers import ssh
+    from .nodes import remote_command
+    from .ssh_config import validate_alias
+
+    remote = remote_command(command, "export")
+    destination = validate_alias(alias)
+
+    async def run() -> str:
+        async with asyncio.timeout(60):
+            return await ssh.ssh_command(destination, remote)
+
+    output = asyncio.run(run())
+    # Anything a login script printed before the file.
+    start = output.find("# ComputeDeck configuration")
+    return output[start:] if start > 0 else output
+
+
 def import_config(args: argparse.Namespace) -> int:
     _with_data_dir(args)
-    from .config import ConfigError, apply
+    from .config import ConfigError, apply, apply_parsed, migrated
+    from .drivers import ssh
     from .plugins import Runtime, discover, load
     from .store import Store
 
+    if (args.file is None) == (args.source_alias is None):
+        print("Import a FILE or --from SSH_ALIAS, one of the two.", file=sys.stderr)
+        return 2
+    if args.source_alias is not None:
+        alias = args.source_alias
+        try:
+            text = _remote_export(alias, args.remote_command)
+        except ValueError:
+            print("Import failed: the alias or --command is not plain text.", file=sys.stderr)
+            return 1
+        except (ssh.SSHError, OSError, TimeoutError) as error:
+            print(f"Could not run export on {alias}: {error or 'timed out'}", file=sys.stderr)
+            return 1
     store = Store(paths.data_dir() / "computedeck.sqlite")
     runtime = Runtime(paths.data_dir())
     runtime.store = store
     # Plugins that are on may register credential schemes that the file refers to.
     load(discover(paths.data_dir()), runtime)
     try:
-        counts = apply(store, Path(args.file).read_text(encoding="utf-8"))
+        if args.source_alias is None:
+            counts = apply(store, Path(args.file).read_text(encoding="utf-8"))
+        else:
+            parsed = migrated(text, alias, args.route, args.remote_command)
+            counts = apply_parsed(store, parsed)
+            routed = sum(1 for body in parsed["sources"] if body.node)
     except (ConfigError, OSError, UnicodeError) as error:
         print(f"Import failed: {error}", file=sys.stderr)
         return 1
     finally:
         store.db.close()
-    print(f"Imported {counts['sources']} sources and {counts['instances']} instances.")
+    if args.source_alias is None:
+        print(f"Imported {counts['sources']} sources and {counts['instances']} instances.")
+        return 0
+    how = {
+        "collect": f"{routed} are collected on {alias}.",
+        "jump": f"{routed} connect through {alias}, the rest directly; their SSH aliases "
+        "must be in this computer's ~/.ssh/config.",
+        "direct": "All are reached directly; their SSH aliases must be in this computer's "
+        "~/.ssh/config.",
+    }[args.route]
+    print(
+        f"Imported {counts['sources']} sources from {alias}. {how} Its settings and "
+        "hand-added machines stay there. Stop its service once this computer has taken over."
+    )
     return 0
 
 
@@ -260,7 +313,10 @@ def collect(args: argparse.Namespace) -> int:
 
 
 def parser() -> argparse.ArgumentParser:
+    from .versions import core_version
+
     root = argparse.ArgumentParser(prog="computedeck", description=__doc__)
+    root.add_argument("--version", action="version", version=f"computedeck {core_version()}")
     root.add_argument("--data-dir", help="data directory (default: platform user data dir)")
     commands = root.add_subparsers(dest="command")
 
@@ -269,8 +325,29 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--open", action="store_true", help="open the web app in a browser")
     run.set_defaults(handler=serve)
 
-    load = commands.add_parser("import", help="create or update sources from a TOML file")
-    load.add_argument("file")
+    load = commands.add_parser(
+        "import", help="create or update sources from a TOML file or another server"
+    )
+    load.add_argument("file", nargs="?")
+    load.add_argument(
+        "--from",
+        dest="source_alias",
+        metavar="SSH_ALIAS",
+        help="read the sources of the ComputeDeck server at this SSH alias instead of a file",
+    )
+    load.add_argument(
+        "--route",
+        choices=["collect", "jump", "direct"],
+        default="collect",
+        help="with --from: collect them on that server (default), connect through it as an "
+        "SSH jump host, or connect directly",
+    )
+    load.add_argument(
+        "--command",
+        dest="remote_command",
+        default="computedeck",
+        help="with --from: how to run ComputeDeck there (default: %(default)s)",
+    )
     load.set_defaults(handler=import_config)
 
     dump = commands.add_parser("export", help="print sources and settings as TOML")
