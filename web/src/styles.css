@@ -934,13 +934,11 @@ form > .form-error {
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
-  text-decoration: underline dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
   cursor: pointer;
 }
-.partial:hover {
-  text-decoration-color: var(--accent);
+/* Its dotted line is drawn in ui/display.css, beside the one under a time. */
+button.partial:hover > span {
+  --dots: var(--accent);
 }
 .unmeasured-list {
   display: grid;

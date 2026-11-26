@@ -50,7 +50,8 @@ export function UnmeasuredLinks({
         }}
         onKeyDown={keepActivation}
       >
-        {value ?? <StatusShape kind="unknown" />}
+        {/* The span carries the dotted line (styles.css, button.partial > span). */}
+        {value === undefined ? <StatusShape kind="unknown" /> : <span>{value}</span>}
       </button>
       {anchor && (
         <Suspense fallback={null}>

@@ -138,7 +138,9 @@ describe('jobs of a cluster whose collection is not current', () => {
     expect(tabs(html).slice(0, 2)).toEqual(['Running=—', 'Queued=—']);
     expect(result(html)).toBe('— jobs');
     // The partial count is its own trigger, not a separate icon.
-    expect(html).toMatch(/<span class="result-count"><button[^>]*class="partial"[^>]*>—<\/button>/);
+    expect(html).toMatch(
+      /<span class="result-count"><button[^>]*class="partial"[^>]*><span>—<\/span><\/button>/,
+    );
     expect(html).not.toMatch(/No jobs/);
     expect(html.match(/class="clickable stale-row"/g)).toHaveLength(3);
     expect(html).toContain('last updated 1 h ago');
@@ -211,7 +213,7 @@ describe('jobs of a cluster whose collection is not current', () => {
     );
     // The panel's partial count is the trigger for whose jobs are missing.
     expect(html).toMatch(
-      /Current jobs<span class="count"><button[^>]*class="partial"[^>]*>—<\/button><\/span>/,
+      /Current jobs<span class="count"><button[^>]*class="partial"[^>]*><span>—<\/span><\/button><\/span>/,
     );
     expect(html).toContain('stale-row');
     expect(html).toContain(t('jobs.missing.count', { count: 1 }));

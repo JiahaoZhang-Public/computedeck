@@ -67,8 +67,14 @@
   color: inherit;
   font: inherit;
   height: auto;
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
+}
+/* The dots under a time or a partial figure are a background, not a text decoration: Chromium
+   rasterises a dotted decoration differently from one load to the next, which the screenshot
+   gate rejects. Forced colours drop background images, so that mode keeps the decoration. */
+.display-time > button > time,
+button.partial > span {
+  background: linear-gradient(to right, var(--dots, currentColor) 50%, transparent 0) left bottom /
+    2px 1px repeat-x;
 }
 .time-disclosure[hidden] {
   display: none;
@@ -156,6 +162,12 @@
 @media (forced-colors: active) {
   .status-shape {
     color: CanvasText;
+  }
+  .display-time > button > time,
+  button.partial > span {
+    background: none;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
   }
   .identity-swatch {
     background: CanvasText;
