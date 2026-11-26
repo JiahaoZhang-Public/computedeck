@@ -153,9 +153,9 @@ export async function focusObstructions(page: Page) {
         );
       };
       let visible = exposed();
-      // WebKit may reveal focused controls two frames after focus(). Let the
-      // browser finish its own reveal; never scroll on its behalf.
-      for (let frame = 0; !visible && frame < 3; frame++) {
+      // WebKit may reveal focused controls two frames after focus(), and later on a busy
+      // runner. Let the browser finish its own reveal; never scroll on its behalf.
+      for (let frame = 0; !visible && frame < 10; frame++) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         visible = exposed();
       }
