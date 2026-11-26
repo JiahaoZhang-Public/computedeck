@@ -1,0 +1,23 @@
+{
+  "--text": "--fg-default",
+  "--text-2": "--fg-muted",
+  "--text-3": "--fg-subtle",
+  "--text-4": "--fg-subtle",
+  "--surface": "--bg-surface",
+  "--surface-2": "--bg-sunken",
+  "--border": "--border-muted",
+  "--accent": "--accent-fill",
+  "--accent-soft": "--accent-bg",
+  "--accent-text": "--accent-fg",
+  "--gray-soft": "--status-unknown-bg",
+  "--green": "--status-ok-fg",
+  "--green-soft": "--status-ok-bg",
+  "--amber": "--status-warn-fg",
+  "--amber-soft": "--status-warn-bg",
+  "--red": "--status-error-fg",
+  "--radius": "--r-block",
+  "--radius-sm": "--r-control",
+  "--mono": "--font-mono",
+  "--accent-hover": "--accent-fill",
+  "--text-muted": "--fg-muted"
+}

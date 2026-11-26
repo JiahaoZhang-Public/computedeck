@@ -658,3 +658,66 @@ def test_demo_pending_array_siblings_count_as_ties() -> None:
         if job["queue"] is not None:
             earlier = sum(int(other["array_index"]) < int(job["array_index"]) for other in waiting)
             assert job["queue"] == [{"partition": "gpu", "ahead": 0, "ties": earlier}]
+
+
+def test_fixed_demo_clock_keeps_all_examples_and_summary_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from computedeck import demo, summary
+
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T22:00:37+08:00")
+    assert demo.now() == datetime(2026, 1, 15, 14, tzinfo=UTC)
+    first = (dashboard(), demo_history(24), events(), nodes())
+
+    class Later(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return datetime(2030, 1, 1, tzinfo=UTC)
+
+    monkeypatch.setattr(demo, "datetime", Later)
+    monkeypatch.setattr(summary, "datetime", Later)
+    assert (dashboard(), demo_history(24), events(), nodes()) == first
+    data = first[0]
+    machine = next(row for row in data["instances"] if row["name"] == "dev-box")
+    assert summary.manual_state(machine, now=demo.now()) == "running"
+    assert summary.manual_state(machine) == "unknown"  # Live time ignores the example override.
+    assert data["summary"]["known_allocated"] == summarize(data, now=demo.now())["known_allocated"]
+    assert first[1][-1]["at"] == demo.now().isoformat()
+    assert nodes()[0]["checked_at"] == "2026-01-15T13:57:00+00:00"
+
+
+def test_demo_clock_defaults_to_current_utc_minute(monkeypatch: pytest.MonkeyPatch) -> None:
+    from computedeck.demo import now
+
+    monkeypatch.delenv("COMPUTEDECK_DEMO_NOW", raising=False)
+    before = datetime.now(UTC).replace(second=0, microsecond=0)
+    actual = now()
+    assert before <= actual <= datetime.now(UTC).replace(second=0, microsecond=0)
+
+
+@pytest.mark.parametrize("value", ["not-a-date", "2026-01-15T14:00:00"])
+def test_demo_clock_rejects_invalid_or_naive_time(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from computedeck.demo import now
+
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", value)
+    with pytest.raises(ValueError):
+        now()
+
+
+def test_demo_history_api_rollups_end_at_demo_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from computedeck.app import create_app
+
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    with TestClient(create_app(tmp_path, polling=False, plugins=[])) as client:
+        first = client.get("/api/history?demo=true&hours=24&rollup=1")
+        assert first.status_code == 200
+        assert first.json() == client.get("/api/history?demo=true&hours=24&rollup=1").json()
+        rollups = first.json()["rollups"]
+        assert rollups["end"] == "2026-01-15T14:00:00+00:00"
+        assert rollups["start"] == "2026-01-14T14:00:00+00:00"

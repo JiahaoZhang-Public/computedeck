@@ -22,7 +22,16 @@ Check environment references in the service's environment, not only in your inte
 Sources assigned to collection nodes are checked on those nodes through the existing read-only
 collection protocol. If that fails, run doctor on the collection node to inspect its local setup.
 
-The Sources page's **Test connection** button and the initial connection dialog use the same
+Sources routed through an SSH jump host (a `[[node]]` with `mode = "jump"`) start with a
+`route` step, "Reach <jump host> from this computer", which runs `true` on the jump host
+alone. If it fails, the checks stop there with guidance for that hop: network or VPN,
+login and keys of the jump host's alias, its host key, or its SSH port. Otherwise the usual
+SSH and command steps follow, each going through the jump host as collection does, and a
+failed login explains that the connection goes from the jump host to the target: whether the
+jump host could not reach the target, the target refused it, or the target rejected this
+computer's key. The suggested command then uses `ssh -J <jump-alias>`.
+
+The **Test connection** button in a source's details and the initial connection dialog use the same
 diagnostic labels and repair messages as this command, in English or Chinese. A successful
 command-presence check does not guarantee scheduler permissions; the first collection reports
 which data can actually be read. Missing optional history or inventories remain informational.
@@ -35,7 +44,7 @@ if it is free or already answers as ComputeDeck; no credential is sent to identi
 
 ## Diagnose and repair a connection
 
-Open a source diagnosis and choose **Test connection**. Steps update as they run; a failed
+Click a source on the Sources page to open its details and choose **Test connection**. Steps update as they run; a failed
 step explains what to check next. A suggested SSH command runs `true` only. Confirm a changed
 host key with its administrator before updating `known_hosts`; do not disable host checks.
 Closing the diagnosis cancels the active request. Opening the diagnosis alone runs no checks.

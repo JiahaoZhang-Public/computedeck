@@ -1,8 +1,65 @@
-"""Source builds and installed wheels select their own browser assets."""
+"""Release archives carry browser assets without UI screenshot baselines."""
+
+import io
+import os
+import shutil
+import subprocess
+import tarfile
+import zipfile
+from pathlib import Path
 
 import pytest
 
 from computedeck import paths
+
+
+@pytest.mark.parametrize("snapshot_platform", [None, "linux", "darwin"])
+def test_build_rejects_sdist_screenshot_baselines(tmp_path, snapshot_platform):
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    (root / "web/dist").mkdir(parents=True)
+    (root / "web/dist/index.html").write_text("example browser app")
+    (root / "src/computedeck").mkdir(parents=True)
+    script = root / "scripts/build.sh"
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts/build.sh", script)
+
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    with tarfile.open(archives / "computedeck-0.0.0.tar.gz", "w:gz") as archive:
+        name = "computedeck-0.0.0/src/computedeck/static/index.html"
+        if snapshot_platform:
+            name = f"computedeck-0.0.0/web/e2e/snapshots/{snapshot_platform}/gallery.png"
+        entry = tarfile.TarInfo(name)
+        entry.size = 7
+        archive.addfile(entry, io.BytesIO(b"example"))
+    with zipfile.ZipFile(archives / "computedeck-0.0.0.whl", "w") as archive:
+        archive.writestr("computedeck/static/index.html", "example browser app")
+        archive.writestr("computedeck-0.0.0.dist-info/licenses/THIRD_PARTY_NOTICES", "example")
+
+    # Exercise the real archive checks without installing packages or building the app.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in {
+        "npm": "exit 0",
+        "uv": 'mkdir dist\ncp "$TEST_ARCHIVES"/* dist/',
+    }.items():
+        executable = bin_dir / name
+        executable.write_text("#!/bin/bash\nset -eu\n" + body + "\n")
+        executable.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "TEST_ARCHIVES": str(archives),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == (1 if snapshot_platform else 0), result.stdout + result.stderr
+    if snapshot_platform:
+        assert "contains UI screenshot baselines" in result.stderr
 
 
 @pytest.mark.parametrize(

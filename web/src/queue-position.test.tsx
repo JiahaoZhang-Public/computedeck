@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { groupsOf } from './groups';
 import { formatMessage, setLocale, t } from './i18n';
+import { jobReason } from './jobFacts';
 import { JobDetail } from './pages/Details';
 import type { Ctx } from './pages/shared';
 import { serverDemo } from './test-server';
@@ -38,7 +39,10 @@ describe.each(['en', 'zh-CN'] as const)('queue estimates in %s', (locale) => {
       t('job.queue.fairshare', { account: job.account, factor: '0.12' }),
     );
     expect(view.textContent).toContain(t('common.sampledAt'));
-    expect(callout.textContent).toContain(t('job.nextStep'));
+    // The next step closes the callout as a plain sentence, without a heading of its own.
+    const driver = ctx.data.sources.find((source) => source.id === job.source_id)!.driver;
+    expect(callout.querySelector('p:last-child')!.textContent).toBe(jobReason(job, driver)!.next);
+    expect(callout.textContent).not.toContain('Next step');
   });
   it.each([0, 1, 3])(
     'renders count %i with no-one-ahead wording for zero and singular wording for one',

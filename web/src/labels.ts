@@ -83,3 +83,90 @@ export function connectedSource(source: Source) {
     !source.stale
   );
 }
+
+/** Shared domain-to-shape vocabulary; legacy statusTone remains the plugin contract. */
+export function statusKind(state: string): import('./ui/shapes').StatusKind {
+  if (state === 'HELD') return 'warn';
+  const value = state.toLowerCase();
+  if (
+    [
+      'ok',
+      'running',
+      'reported_running',
+      'ready',
+      'reachable',
+      'completed',
+      'usable',
+      'on',
+      'enabled',
+      'held',
+    ].includes(value)
+  )
+    return 'ok';
+  if (
+    [
+      'wait',
+      'pending',
+      'waiting',
+      'configuring',
+      'completing',
+      'syncing',
+      'checking',
+      'connecting',
+      'starting',
+      'provisioning',
+      'desired_running',
+      'available',
+      'queued',
+    ].includes(value)
+  )
+    return 'wait';
+  if (
+    [
+      'warn',
+      'suspended',
+      'partial',
+      'degraded',
+      'needs_setup',
+      'configured',
+      'unconfigured',
+    ].includes(value)
+  )
+    return 'warn';
+  if (
+    [
+      'error',
+      'bad',
+      'failed',
+      'failing',
+      'unavailable',
+      'down',
+      'timeout',
+      'out_of_memory',
+      'node_fail',
+      'boot_fail',
+      'preempted',
+    ].includes(value)
+  )
+    return 'error';
+  if (
+    [
+      'off',
+      'disabled',
+      'paused',
+      'stopped',
+      'stopping',
+      'terminated',
+      'terminating',
+      'cancelled',
+      'released',
+    ].includes(value)
+  )
+    return 'off';
+  return 'unknown';
+}
+
+export function statusKindLabel(state: string) {
+  if (state.toUpperCase() === 'PENDING') return t('display.status.wait');
+  return hasKey(`status.${state}`) ? statusLabel(state) : t(`display.status.${statusKind(state)}`);
+}

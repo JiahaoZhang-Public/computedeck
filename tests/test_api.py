@@ -6,6 +6,7 @@ import sqlite3
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -1444,6 +1445,17 @@ def test_activity_filters_match_example_mode(
 ) -> None:
     from computedeck import demo
 
+    # Identical windows need identical clocks: demo time is rounded to the minute.
+    fixed = demo.now()
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return fixed
+
+    monkeypatch.setattr(api, "datetime", FixedClock)
+    monkeypatch.setattr(api, "demo_now", lambda: fixed)
+    monkeypatch.setattr(demo, "now", lambda: fixed)
     rows = demo.events()
     data = demo.dashboard()
     monkeypatch.setattr(api, "demo_events", lambda: rows)
@@ -1657,6 +1669,59 @@ def test_activity_categories_keep_changes_opt_in_and_filter_before_limit(
     recent = client.get("/api/events?demo=true&range=24h&group=1").json()
     older = client.get("/api/events?demo=true&range=30d&group=1").json()
     assert len(older) > 30 > len(recent)
+
+
+@pytest.mark.parametrize(("window", "days"), [("24h", 1), ("7d", 7), ("30d", 30)])
+@pytest.mark.parametrize("group", [False, True])
+@pytest.mark.parametrize("since_hours", [None, 12])
+def test_demo_event_ranges_use_fixed_clock(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    window: str,
+    days: int,
+    group: bool,
+    since_hours: int | None,
+) -> None:
+    fixed = datetime(2026, 1, 15, 14, tzinfo=UTC)
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", fixed.isoformat())
+    cutoff = fixed - timedelta(days=days)
+    params = {
+        "demo": "true",
+        "range": window,
+        "group": str(group).lower(),
+        "include": "changes",
+        "limit": "200",
+    }
+    if since_hours is not None:
+        cutoff = max(cutoff, fixed - timedelta(hours=since_hours))
+        params["since"] = cutoff.isoformat()
+    expected = [row for row in api.demo_events() if datetime.fromisoformat(row["at"]) >= cutoff]
+    assert expected
+    assert len(expected) < 200  # Compare the entire window, without pagination truncation.
+    if group:
+        expected = api.group_events(expected)
+    response = client.get("/api/events", params=params)
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+@pytest.mark.parametrize("window", ["24h", "7d", "30d"])
+def test_live_event_ranges_ignore_fixed_demo_clock(
+    client: TestClient, data_dir: Path, monkeypatch: pytest.MonkeyPatch, window: str
+) -> None:
+    fixed = "2026-01-15T14:00:00+00:00"
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", fixed)
+    store = Store(data_dir / "computedeck.sqlite")
+    store.add_events(
+        [
+            {"key": key, "type": "source.recovered", "at": at, "source_id": "cluster-a", "data": {}}
+            for key, at in [("old", fixed), ("recent", datetime.now(UTC).isoformat())]
+        ]
+    )
+    store.db.close()
+    response = client.get("/api/events", params={"range": window})
+    assert response.status_code == 200
+    assert [row["key"] for row in response.json()] == ["recent"]
 
 
 def attention_fault(client: TestClient, data_dir: Path) -> dict[str, Any]:
@@ -1991,3 +2056,114 @@ def test_low_use_settings_api(client: TestClient) -> None:
     ):
         assert client.put("/api/settings", json=values, headers=HEADERS).status_code == 422
     assert client.get("/api/settings").json()["low_use_window_minutes"] == 120
+
+
+def test_demo_layer_examples_are_fictional_and_live_dashboard_omits_them(
+    client: TestClient,
+) -> None:
+    demo = client.get("/api/dashboard?demo=true").json()
+    assert demo["layer_example"] == {"names": ["build-small", "train-small"]}
+    assert "layer_example" not in client.get("/api/dashboard").json()
+
+
+def test_chart_is_opt_in_and_does_not_replace_legacy_history(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    old = client.get("/api/history?hours=24&demo=true&rollup=1").json()
+    new = client.get("/api/history?hours=24&demo=true&rollup=1&chart=1").json()
+    assert {k: v for k, v in new.items() if k != "chart"} == old
+    assert new["chart"]["bucket_seconds"] == 300
+    assert len(new["chart"]["series"][0]["buckets"]) == 288
+    assert client.get("/api/history?chart=1&end=2026-01-01T12:00:00").status_code == 422
+    historical = client.get(
+        "/api/history?hours=168&chart=1&demo=true&end=2026-01-14T14:00:00Z"
+    ).json()["chart"]
+    assert historical["end"] == "2026-01-14T14:00:00+00:00"
+    assert not any(b["so_far"] for s in historical["series"] for b in s["buckets"])
+
+
+@pytest.mark.parametrize("group", [False, True])
+def test_chart_activity_window_precedes_grouping(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, group: bool
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    events = api.demo_events()
+    left = sorted(events, key=lambda e: e["at"])[len(events) // 3]["at"]
+    right = sorted(events, key=lambda e: e["at"])[2 * len(events) // 3]["at"]
+    params = {
+        "demo": "true",
+        "include": "changes",
+        "since": left,
+        "until": right,
+        "group": str(group).lower(),
+        "limit": 200,
+    }
+    rows = client.get("/api/events", params=params).json()
+    expected = api.filter_events(events, since=left, until=right, include_changes=True)
+    assert rows == (api.group_events(expected) if group else expected)[:200]
+
+
+def test_chart_live_raw_samples_and_activity_bounds(client: TestClient, data_dir: Path) -> None:
+    end = datetime.now(UTC)
+    store = Store(data_dir / "computedeck.sqlite")
+    try:
+        for i in range(650):
+            at = (end - timedelta(seconds=650 - i)).isoformat()
+            point = {"at": at, "allocated_gpus": i, "gpu_utilization": None}
+            store.db.execute("INSERT INTO history VALUES (?, ?)", (at, json.dumps(point)))
+        store.db.commit()
+        chart = store.history_chart(24, end, end)
+        assert sum(b["samples"] for b in chart["series"][1]["buckets"]) == 650
+        assert max(b["max"] or 0 for b in chart["series"][1]["buckets"]) == 649
+        store.add_events(
+            [
+                {
+                    "key": f"chart-event-{i}",
+                    "type": "source.failed",
+                    "at": (end - timedelta(minutes=i)).isoformat(),
+                    "source_id": "example",
+                    "data": {},
+                }
+                for i in range(5)
+            ]
+        )
+    finally:
+        store.db.close()
+    result = client.get(
+        "/api/events",
+        params={
+            "since": (end - timedelta(minutes=3)).isoformat(),
+            "until": (end - timedelta(minutes=1)).isoformat(),
+        },
+    ).json()
+    assert sorted((datetime.fromisoformat(r["at"]) for r in result), reverse=True) == [
+        end - timedelta(minutes=2),
+        end - timedelta(minutes=3),
+    ]
+
+
+@pytest.mark.parametrize("until", ["0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00"])
+def test_activity_until_outside_utc_range_names_end_time(client: TestClient, until: str) -> None:
+    response = client.get("/api/events", params={"until": until})
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "event_until_invalid"}
+
+
+@pytest.mark.parametrize("demo", [False, True])
+@pytest.mark.parametrize(
+    "end",
+    [
+        "0001-01-01T00:30:00Z",
+        "0001-01-01T00:00:00+05:00",
+        "9999-12-31T23:59:59-05:00",
+    ],
+)
+def test_chart_end_outside_utc_range_names_end_time(
+    client: TestClient, demo: bool, end: str
+) -> None:
+    response = client.get(
+        "/api/history", params={"chart": "1", "demo": str(demo).lower(), "end": end}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "chart_end_invalid"}

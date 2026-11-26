@@ -1,6 +1,7 @@
 import { ApiError, t } from './i18n';
 import type { Message } from './i18n';
 import { verifiedToken } from './token';
+import { responseTokens } from './data/poll';
 
 export type Request = <T>(path: string, body?: unknown, method?: string) => Promise<T>;
 
@@ -142,7 +143,10 @@ export async function api<T>(
   }
   // 204 No Content (and other empty replies) carry no JSON body.
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const result = (await response.json()) as T;
+  const token = response.headers.get('X-ComputeDeck-Since');
+  if (token && result && typeof result === 'object') responseTokens.set(result, token);
+  return result;
 }
 
 /** Send a file as the raw request body. */

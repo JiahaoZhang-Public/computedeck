@@ -8,7 +8,7 @@ The driver class is `computedeck.drivers.ssh_host.SSHHostDriver` (driver name `s
 
 On the computer that runs ComputeDeck:
 
-- A Host entry in `~/.ssh/config`, for example `gpu-box`. User, port, keys and any `ProxyJump` come from that entry; ComputeDeck does not generate a Host block for it.
+- A Host entry in `~/.ssh/config`, for example `gpu-box`. User, port, keys and any `ProxyJump` come from that entry; ComputeDeck does not generate a Host block for it. Alternatively, choose a jump host as the source's route (a `[[node]]` with `mode = "jump"`, see [configuration](../configuration.md#node)); it then replaces the entry's own `ProxyJump`, and on-demand hardware checks of the machine go through it too.
 - Non-interactive access. Connections use `BatchMode=yes` and `StrictHostKeyChecking=yes`, so log in once with a normal `ssh gpu-box` to accept the host key, and use a key or agent rather than a password.
 
 On the machine:

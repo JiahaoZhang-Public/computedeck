@@ -4,9 +4,12 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
+import { Puzzle } from 'lucide-react';
+import { registerWebPlugin } from './plugins';
 import { api } from './api';
 import { setLocale, t } from './i18n';
-import { jobReason, jobWaiting } from './jobFacts';
+import { jobElapsed, jobReason, jobWaiting } from './jobFacts';
+import { failureExplanation } from './failures';
 import { relativeTime } from './domain';
 import { serverDashboard, serverDemo } from './test-server';
 import { routeParams, setRouteParams } from './useRouteParam';
@@ -47,6 +50,9 @@ afterEach(async () => {
 async function render(url: string) {
   window.history.replaceState(null, '', url);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 async function input(element: HTMLInputElement, value: string) {
   await act(async () => {
@@ -145,9 +151,35 @@ it('links to a failed attempt separately from the current job list', async () =>
   const failed = data.recent_failures![0];
   await render(`/?demo=true#/jobs?state=failed&failure=${encodeURIComponent(failed.id)}`);
   expect(container.querySelector('#detail-title')?.textContent).toBe(failed.name);
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.failureReason'));
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t('job.nextStep'));
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(failed.exit_code!);
+  // What happened leads the failure callout and the next step follows as a plain sentence,
+  // without headings of their own.
+  const dialog = container.querySelector('[role="dialog"]')!;
+  const driver = data.sources.find((source) => source.id === failed.source_id)!.driver;
+  const callout = dialog.querySelector('.failure-explanation')!;
+  expect(callout.querySelector('p.lead')?.textContent).toBe(
+    failureExplanation(failed, driver)!.summary,
+  );
+  expect(callout.querySelector('p:last-child')?.textContent).toBe(jobReason(failed, driver)!.next);
+  expect(dialog.textContent).not.toContain('What happened');
+  expect(dialog.textContent).not.toContain('Next step');
+  expect(dialog.textContent).toContain(failed.exit_code!);
+  // A scheduler code, when reported, sits beside the state in the header, not in the body.
+  expect(dialog.querySelector('.drawer-code')?.textContent ?? null).toBe(failed.reason || null);
+});
+
+it('shows a queued job reason as lead text with its code in the header', async () => {
+  const job = data.jobs.find((item) => item.state === 'PENDING' && item.reason)!;
+  await render(`/?demo=true#/jobs?job=${encodeURIComponent(job.id)}`);
+  const dialog = container.querySelector('[role="dialog"]')!;
+  const driver = data.sources.find((source) => source.id === job.source_id)!.driver;
+  expect(dialog.querySelector('.callout p.lead')?.textContent).toBe(
+    jobReason(job, driver)!.summary,
+  );
+  expect(dialog.querySelector('.drawer-header .drawer-chips code.drawer-code')?.textContent).toBe(
+    job.reason,
+  );
+  expect(dialog.querySelector('.drawer-body code')?.textContent).not.toBe(job.reason);
+  expect(dialog.textContent).not.toContain('Pending reason');
 });
 
 it('uses the same deduplicated job record in the list and detail', async () => {
@@ -185,14 +217,15 @@ it.each(['en', 'zh-CN'] as const)(
     expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
     expect(routeParams().get('job')).toBeNull();
     expect(push).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    // The id chip names an array; the breadcrumb always leads back to Jobs.
+    expect(container.querySelector('.drawer-id')?.textContent).toContain(t('drawer.array'));
     expect(container.querySelectorAll('.drawer .array-elements-table tbody tr')).toHaveLength(50);
     const table = container.querySelector<HTMLTableElement>('.drawer .array-elements-table')!;
     expect(table.classList.contains('stack-on-phone')).toBe(true);
     expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual([
       t('jobs.array.element'),
-      t('jobs.col.state'),
       'GPU',
+      t('jobs.col.state'),
       t('jobs.col.nodeReason'),
       t('jobs.col.timing'),
     ]);
@@ -204,10 +237,10 @@ it.each(['en', 'zh-CN'] as const)(
       expect(row.textContent).not.toContain(example.name);
       expect(row.textContent).not.toContain(example.gpu_type);
     }
+    // One value per cell: the element index alone; the row still identifies its job.
+    expect(table.tBodies[0].rows[0].cells[0].textContent).toBe('0');
     expect(table.tBodies[0].rows[0].cells[0].querySelector('strong')?.textContent).toBe('0');
-    expect(table.tBodies[0].rows[0].cells[0].querySelector('.sub.mono')?.textContent).toBe(
-      data.jobs[0].id,
-    );
+    expect(table.tBodies[0].rows[0].dataset.detailId).toBe(data.jobs[0].id);
     const facts = [...container.querySelectorAll('.drawer .kv dd')].map((cell) => cell.textContent);
     expect(facts).toEqual(['Cluster A', example.user, example.qos, example.partition]);
 
@@ -226,13 +259,15 @@ it.each(['en', 'zh-CN'] as const)(
     await act(async () => container.querySelector<HTMLElement>('.drawer .clickable')!.click());
     expect(routeParams().get('job')).toBe(data.jobs[0].id);
     expect(routeParams().get('array')).toBeNull();
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.job'));
+    expect(container.querySelector('.drawer-kind')?.textContent).toBe(`${t('nav.jobs')} ›`);
+    expect(container.querySelector('.drawer-id')?.textContent).not.toContain(t('drawer.array'));
     await act(async () => {
       window.history.back();
       await vi.advanceTimersByTimeAsync(100);
     });
     expect(routeParams().get('array')).toBe(`${example.cluster_id}:48300`);
-    expect(container.querySelector('.drawer-kind')?.textContent).toBe(t('drawer.array'));
+    // The id chip names an array; the breadcrumb always leads back to Jobs.
+    expect(container.querySelector('.drawer-id')?.textContent).toContain(t('drawer.array'));
     await act(async () =>
       container
         .querySelector('.drawer .clickable')!
@@ -261,8 +296,15 @@ it.each([
     })),
   });
   await render('/?demo=true#/jobs');
-  expect(container.querySelector('.array-row .sub.mono')?.textContent).toBe(
-    `${label} · ${t('jobs.array.count', { count: 2 })}`,
+  // The row names the array only; its scheduler label is the name's tooltip, and the element
+  // count is the State cell's value.
+  const name = container.querySelector('.array-row td:first-child strong')!;
+  expect(name.textContent).toBe(example.name);
+  expect(name.getAttribute('title')).toBe(`${example.name} ${label}`);
+  expect(container.querySelector('.array-row .sub')).toBeNull();
+  expect(example.state).toBe('RUNNING');
+  expect(container.querySelector('.array-row .array-states')?.textContent).toBe(
+    t('jobs.array.summary', { count: 2, running: 2 }),
   );
   await act(async () => container.querySelector<HTMLElement>('.array-row')!.click());
   expect(routeParams().get('array')).toBe(`${example.cluster_id}:${id}`);
@@ -303,7 +345,11 @@ it('keeps tab and navigation counts in elements when the Jobs table groups array
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
     `${t('status.PENDING')}1`,
   );
-  expect(container.querySelector('a[href="#/jobs"] .badge')?.textContent).toBe('3');
+  // The navigation carries no job count; the result count names the current view's elements.
+  expect(container.querySelector('a[href="#/jobs"] .badge')).toBeNull();
+  expect(container.querySelector('.result-count')?.textContent).toBe(
+    t('jobs.resultCount.one', { count: 1 }),
+  );
   await act(async () => setRouteParams({ state: 'running' }));
   expect(container.querySelectorAll('.jobs-table .array-row')).toHaveLength(1);
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
@@ -347,17 +393,30 @@ it('keeps compact element resources, waiting reasons and stale tags', async () =
     ...container.querySelectorAll<HTMLTableRowElement>('.drawer .array-elements-table tbody tr'),
   ];
   expect(rows).toHaveLength(2);
-  expect(rows[0].cells[2].textContent).toBe(String(example.gpu_count));
+  // Compact columns: Element, GPU, State, Node or reason, Time; one value per cell.
+  expect(rows[0].cells[1].textContent).toBe(String(example.gpu_count));
   expect(rows[0].cells[3].textContent).toBe(example.node);
-  expect(rows[0].cells[4].textContent).toBe(example.elapsed);
-  expect(rows[1].cells[2].textContent).toBe(t('jobs.requested', { count: '?' }));
-  expect(rows[1].cells[3].textContent).toBe(jobReason(pending, 'slurm')!.summary);
+  const stale = t('cloud.staleSince', { time: relativeTime(example.observed_at) });
+  expect(rows[0].cells[4].textContent).toBe(jobElapsed(example.elapsed));
+  // A queued element's request is muted, without a "requests" word; unknown stays a dash.
+  expect(rows[1].cells[1].querySelector('.requested')?.textContent).toBe('—');
+  expect(rows[1].cells[1].textContent).not.toContain('requests');
+  // A queued element shows the short reason label only: no raw code, no sentence, no tooltip.
+  const reason = jobReason(pending, 'slurm')!;
+  expect(reason.label).toBe(t('job.short.resources'));
+  expect(rows[1].cells[3].textContent).toBe(reason.label);
+  expect(rows[1].cells[3].textContent).not.toContain(reason.summary);
+  expect(rows[1].cells[3].querySelector('.clamp')).not.toBeNull();
+  expect(rows[1].cells[3].querySelector('.clamp')!.hasAttribute('title')).toBe(false);
   expect(rows[1].cells[4].textContent).toBe(jobWaiting(pending));
   for (const row of rows) {
     expect(row.classList.contains('stale-row')).toBe(true);
-    expect(row.cells[0].textContent).toContain(
-      t('cloud.staleSince', { time: relativeTime(example.observed_at) }),
-    );
+    // The one exception a row flags sits with its state, not under its name.
+    const mark = row.cells[2].querySelector('.stale-mark')!;
+    expect(mark.getAttribute('title')).toBe(stale);
+    expect(mark.querySelector('.sr-only')!.textContent).toBe(stale);
+    expect(row.cells[0].textContent).not.toContain(stale);
+    expect(row.cells[4].textContent).not.toContain(stale);
   }
 });
 
@@ -423,8 +482,9 @@ it('opens failure rows with no end time and only copies the inspection command',
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
   );
   expect(routeParams().get('failure')).toBe(failure.id);
-  const button = [...container.querySelectorAll<HTMLButtonElement>('.drawer button')].find((item) =>
-    item.textContent?.includes(t('failure.copyInspection')),
+  // The command is shown as a row; its copy action sits at the row's end.
+  const button = container.querySelector<HTMLButtonElement>(
+    `.drawer .command-row button[aria-label="${t('failure.copyInspection')}"]`,
   )!;
   await act(async () => button.click());
   expect(writeText).toHaveBeenCalledOnce();
@@ -508,3 +568,364 @@ it('announces that copying submit flags submitted nothing', async () => {
   expect(container.textContent).toContain(t('plan.submit.copied'));
   expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
 });
+
+// The 0.7 URL inventory, including the combined links documented in configuration.md.
+// Assertions exercise rendered views, rather than just accepting query strings.
+function selected(label: string) {
+  expect(
+    [...container.querySelectorAll('[role="tab"][aria-selected="true"]')].some((tab) =>
+      tab.textContent?.startsWith(label),
+    ),
+  ).toBe(true);
+}
+function searchValue(value: string) {
+  expect(container.querySelector<HTMLInputElement>('.search input')?.value).toBe(value);
+}
+function planValue(index: number, value: string) {
+  expect(container.querySelectorAll<HTMLInputElement>('.plan-form input')[index].value).toBe(value);
+}
+function detailTitle(value: string) {
+  expect(container.querySelector('#detail-title')?.textContent).toContain(value);
+}
+const urlFixtures: [string, () => string, string, () => void][] = [
+  ['app q', () => 'jobs?q=train', 'jobs', () => searchValue('train')],
+  [
+    'app group',
+    () => `jobs?group=${data.jobs[0].cluster_id}`,
+    'jobs',
+    () =>
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
+        data.jobs[0].cluster_id,
+      ),
+  ],
+  [
+    'app provider',
+    () => `jobs?provider=${data.jobs[0].cluster_id}`,
+    'jobs',
+    () =>
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
+        data.jobs[0].cluster_id,
+      ),
+  ],
+  [
+    'app job',
+    () => `jobs?job=${encodeURIComponent(data.jobs[0].id)}`,
+    'jobs',
+    () => detailTitle(data.jobs[0].name),
+  ],
+  [
+    'app failure',
+    () => `jobs?failure=${encodeURIComponent(data.recent_failures![0].id)}`,
+    'jobs',
+    () => detailTitle(data.recent_failures![0].name),
+  ],
+  [
+    'app instance',
+    () => `cloud?instance=${encodeURIComponent(data.instances[0].id)}`,
+    'cloud',
+    () => detailTitle(data.instances[0].name),
+  ],
+  [
+    'app array',
+    () => {
+      const job = data.jobs.find((job) => job.array_id)!;
+      return `jobs?array=${encodeURIComponent(`${job.cluster_id}:${job.array_id}`)}`;
+    },
+    'jobs',
+    () => expect(container.querySelector('.array-elements-table')).not.toBeNull(),
+  ],
+  ['app event', () => 'activity?event=77', 'activity', () => detailTitle(data.jobs[0].name)],
+  [
+    'Jobs state / documented Jobs link',
+    () => 'jobs?state=pending&q=train',
+    'jobs',
+    () => {
+      selected(t('status.PENDING'));
+      searchValue('train');
+    },
+  ],
+  [
+    'Activity type / range / documented Activity link',
+    () => 'activity?type=failed&range=7d&q=train',
+    'activity',
+    () => {
+      selected(t('activity.filter.failed'));
+      selected(t('activity.range.7d'));
+      searchValue('train');
+    },
+  ],
+  [
+    'Activity job_filter',
+    () => 'activity?job_filter=cluster-a%3A123',
+    'activity',
+    () => {
+      expect(container.textContent).toContain(t('activity.forJob', { job: '123' }));
+      expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('job=cluster-a%3A123'))).toBe(
+        true,
+      );
+    },
+  ],
+  ...(['24h', '7d', '30d', '24', '72', '3d', '168'] as const).map(
+    (range): [string, () => string, string, () => void] => [
+      `Usage range ${range}`,
+      () => `usage?range=${range}`,
+      'usage',
+      () =>
+        selected(
+          t(
+            range === '24h' || range === '24'
+              ? 'chart.range.day'
+              : range === '30d'
+                ? 'usage.month'
+                : 'chart.range.week',
+          ),
+        ),
+    ],
+  ),
+  [
+    'Cloud use low',
+    () => 'cloud?use=low',
+    'cloud',
+    () => selected(t('lowUse.filter', { minutes: data.low_use_settings?.window_minutes ?? 60 })),
+  ],
+  [
+    'Cloud use unknown',
+    () => 'cloud?use=unknown',
+    'cloud',
+    () => selected(t('lowUse.unknownFilter')),
+  ],
+  [
+    'Clusters nodes / documented Nodes link',
+    () => 'resources?nodes=abnormal',
+    'resources',
+    () => {
+      selected(t('clusters.abnormalTab'));
+      expect(routeParams().get('tab')).toBe('nodes');
+    },
+  ],
+  [
+    'Toolbox tab / documented Marketplace link',
+    () => 'toolbox?tab=market',
+    'toolbox',
+    () => selected(t('toolbox.market')),
+  ],
+  [
+    'Toolbox q',
+    () => 'toolbox?q=example-1',
+    'toolbox',
+    () => {
+      searchValue('example-1');
+      expect(container.querySelectorAll('.tool-tile')).toHaveLength(1);
+    },
+  ],
+  [
+    'Marketplace market-q',
+    () => 'toolbox?tab=market&market-q=example-1',
+    'toolbox',
+    () => {
+      selected(t('toolbox.market'));
+      searchValue('example-1');
+      expect(container.querySelectorAll('.tool-tile')).toHaveLength(1);
+    },
+  ],
+  [
+    'Plan from',
+    () => `plan?from=${encodeURIComponent(data.jobs[0].id)}`,
+    'plan',
+    () => expect(container.querySelector('.plan-from')?.textContent).toContain(data.jobs[0].name),
+  ],
+  [
+    'Plan gpus / model / hours / documented Plan link',
+    () => 'plan?gpus=4&model=A100&hours=12',
+    'plan',
+    () => {
+      planValue(0, '4');
+      planValue(1, '12');
+      expect(container.querySelector<HTMLSelectElement>('.plan-form select')?.value).toBe('A100');
+    },
+  ],
+  [
+    'clusters alias',
+    () => 'clusters',
+    'resources',
+    () => expect(container.querySelector('.cluster-cards')).not.toBeNull(),
+  ],
+  [
+    'nodes alias with group',
+    () => `nodes?group=${data.jobs[0].cluster_id}&nodes=abnormal`,
+    'resources',
+    () => {
+      expect(routeParams().get('tab')).toBe('nodes');
+      // The cluster is a filter chip; node states are tabs.
+      expect(container.querySelector<HTMLSelectElement>('main select.chip')?.value).toBe(
+        data.jobs[0].cluster_id,
+      );
+      selected(t('clusters.abnormalTab'));
+      expect(container.querySelectorAll('.cluster-card')).toHaveLength(1);
+    },
+  ],
+  ['marketplace alias', () => 'marketplace', 'toolbox', () => selected(t('toolbox.market'))],
+];
+
+for (const language of ['en', 'zh-CN'] as const) {
+  it.each(urlFixtures)(`restores %s in ${language}`, async (_name, url, page, check) => {
+    const original = vi.mocked(api).getMockImplementation()!;
+    const names = ['example-1', 'example-2', 'example-3', 'example-4'];
+    vi.mocked(api).mockImplementation(async (path, ...args) => {
+      if (path === '/settings') return { language };
+      if (path.startsWith('/history?'))
+        return {
+          points: [],
+          rollups: { start: '2026-01-01T00:00:00Z', end: '2026-01-15T14:00:00Z', buckets: [] },
+        };
+      if (path === '/toolbox')
+        return names.map((id) => ({
+          id,
+          name: { en: id },
+          description: { en: 'Example tool' },
+          enabled: false,
+          origin: { kind: 'builtin' },
+          permissions: [],
+          settings: [],
+          values: {},
+          health: {},
+          notes: [],
+          errors: {},
+        }));
+      if (path === '/marketplace')
+        return {
+          marketplaces: [{ name: 'example', source: 'example.test', tier: 'local', plugins: 4 }],
+          plugins: names.map((name) => ({
+            name,
+            description: { en: 'Example plugin' },
+            marketplace: 'example',
+            tier: 'local',
+            tags: [],
+            compatible: true,
+          })),
+        };
+      if (path.startsWith('/events?id=77'))
+        return [
+          {
+            id: 77,
+            type: 'job.started',
+            at: data.as_of,
+            source_id: data.jobs[0].source_id,
+            data: { driver: 'slurm', job: data.jobs[0] },
+          },
+        ];
+      return original(path, ...args);
+    });
+    await render(`/?demo=true#/${url()}`);
+    expect(container.querySelector('main')?.classList.contains(`page-${page}`)).toBe(true);
+    check();
+    expect(vi.mocked(api).mock.calls.every(([, body]) => body === undefined)).toBe(true);
+  });
+}
+
+it('switches from resources to overview through the hash store', async () => {
+  await render('/?demo=true#/resources');
+  expect(container.querySelector('main.page-resources')).not.toBeNull();
+  await act(async () => {
+    window.location.hash = '#/overview';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(container.querySelector('main.page-overview')).not.toBeNull();
+  expect(container.querySelector('h1')?.textContent).toBe(t('nav.overview'));
+});
+
+it.each([
+  ['clusters', '#/resources'],
+  ['nodes', '#/resources?tab=nodes'],
+  ['marketplace', '#/toolbox?tab=market'],
+])('uses the shared alias map for plugin navigate(%s)', async (alias, hash) => {
+  const id = `example-routing-${alias}`;
+  registerWebPlugin({
+    id,
+    pages: [
+      {
+        id,
+        label: 'Example routing',
+        icon: Puzzle,
+        render: (props) => (
+          <button id="plugin-navigate" onClick={() => props.navigate(alias)}>
+            Go
+          </button>
+        ),
+      },
+    ],
+  });
+  await render(`/?demo=true#/${id}`);
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('#plugin-navigate')!.click();
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(window.location.hash).toBe(hash);
+  expect(
+    container.querySelector(`main.page-${hash.includes('toolbox') ? 'toolbox' : 'resources'}`),
+  ).not.toBeNull();
+});
+
+it.each(['jobs?state=pending', 'cloud?q=box'])(
+  'beside navigation stays in the displayed list and preserves history: %s',
+  async (route) => {
+    const media = window.matchMedia('unused');
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...media,
+      media: query,
+      matches: query.includes('1200'),
+    }));
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      {},
+    ] as unknown as DOMRectList);
+    await render(`/?demo=true#/${route}`);
+    const rows = [...container.querySelectorAll<HTMLElement>('main [data-detail-key]')];
+    expect(rows).toHaveLength(route.startsWith('jobs') ? 3 : 2);
+    // jsdom has no layout/scroll implementation; assert the requested reveal.
+    rows.forEach((row) => {
+      row.scrollIntoView = vi.fn();
+    });
+    const shown = rows.map((row) => ({ key: row.dataset.detailKey!, id: row.dataset.detailId! }));
+    if (route.startsWith('jobs')) expect(shown[2].key).toBe('array');
+    await act(async () => rows[0].click());
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    const length = history.length;
+    const check = (index: number) => {
+      expect(routeParams().get(shown[index].key)).toBe(shown[index].id);
+      expect(history.length).toBe(length);
+    };
+    const key = async (value: string) => {
+      await act(async () =>
+        container
+          .querySelector('.context-panel')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }),
+          ),
+      );
+    };
+    check(0);
+    await key('k');
+    check(0);
+    for (let i = 1; i < shown.length; i++) {
+      await key('j');
+      check(i);
+      expect(rows[i].scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    }
+    await key('j');
+    check(shown.length - 1);
+    for (let i = shown.length - 2; i >= 0; i--) {
+      await key('k');
+      check(i);
+      expect(rows[i].scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    }
+    for (const modifier of ['ctrlKey', 'metaKey']) {
+      container.querySelector<HTMLElement>('#detail-title')!.focus();
+      await act(async () =>
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', [modifier]: true })),
+      );
+      expect(document.activeElement).toBe(container.querySelector('main .search input'));
+    }
+  },
+);

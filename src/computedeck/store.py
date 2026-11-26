@@ -15,7 +15,7 @@ from . import drivers, nodes
 from .drivers.base import job_time, node_health_fields, validate_row
 from .drivers.cloud import instance_lifecycle, provider_console_url
 from .errors import SourceError, checked
-from .history import HOLD_SECONDS, group_history, rollup_history
+from .history import HOLD_SECONDS, chart_history, chart_observation, group_history, rollup_history
 from .low_use import low_use
 from .summary import PROBE_INTERVAL as PROBE_INTERVAL
 from .summary import fresh, freshness, summarize, timestamp
@@ -131,6 +131,7 @@ def _read_snapshot(encoded: str, *, lifecycle: bool = True) -> tuple[dict[str, A
 
 class Store:
     def __init__(self, path: Path, *, readonly: bool = False) -> None:
+        self.readonly = readonly
         self.unreadable: dict[str, set[str]] = {}
         if readonly:
             self.path = path
@@ -269,6 +270,25 @@ class Store:
             self.db.executemany("DELETE FROM attention_state WHERE key=?", ((key,) for key in keys))
         for key in keys:
             self._repaired("attention_state", key)
+
+    def identity_slot_overrides(self) -> dict[str, int]:
+        return self._meta("identity_slot_overrides") or {}
+
+    def identity_slots(self, overrides: dict[str, int] | None = None) -> dict[str, int]:
+        from .identity import assign_slots, group_keys
+
+        saved = self._meta("identity_slots") or {}
+        sources = self.sources()
+        instances = [{**item, "manual": True} for item in self.manual_instances()]
+        keys = group_keys(sources, instances)
+        explicit = {**self.identity_slot_overrides(), **(overrides or {})}
+        explicit = {key: slot for key, slot in explicit.items() if key in keys}
+        if explicit != self.identity_slot_overrides() and not self.readonly:
+            self._set_meta("identity_slot_overrides", explicit)
+        slots = assign_slots(keys, {**saved, **explicit})
+        if slots != saved and not self.readonly:
+            self._set_meta("identity_slots", slots)
+        return slots
 
     def settings(self) -> dict[str, Any]:
         result = dict(DEFAULT_SETTINGS)
@@ -500,6 +520,7 @@ class Store:
         cluster_id: str | None = None,
         job: str | None = None,
         since: str | None = None,
+        until: str | None = None,
         q: str | None = None,
         include_changes: bool = False,
         group: bool = False,
@@ -550,6 +571,9 @@ class Store:
         if since is not None:
             where.append("julianday(at) >= julianday(?)")
             args.append(since)
+        if until is not None:
+            where.append("julianday(at) < julianday(?)")
+            args.append(until)
         if q:
             # Treat LIKE metacharacters as literal search text.
             pattern = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
@@ -683,6 +707,8 @@ class Store:
             for name in ("ssh_alias", "command"):
                 if not isinstance(node.get(name), str):
                     node[name] = ""
+            # Nodes stored before jump hosts existed are collection machines.
+            node["mode"] = "jump" if node.get("mode") == "jump" else "collect"
             node["checked_at"] = timestamp(node.get("checked_at"))
             # What a node reported before replies were checked: never shown as is.
             node["version"] = nodes.reported_version(node.get("version"))
@@ -778,6 +804,7 @@ class Store:
                 (source["id"], json.dumps(stored)),
             )
         self._repaired("sources", source["id"])
+        self.identity_slots()
 
     def delete_source(self, source_id: str) -> bool:
         with self.db:
@@ -786,6 +813,7 @@ class Store:
             self.db.execute("DELETE FROM job_wait_samples WHERE source_id=?", (source_id,))
         self._repaired("sources", source_id)
         self._repaired("snapshots", source_id)
+        self.identity_slots()
         return deleted == 1
 
     def record_job_waits(self, source: dict[str, Any], jobs: list[dict[str, Any]]) -> None:
@@ -982,11 +1010,13 @@ class Store:
                 (instance["id"], json.dumps(instance)),
             )
         self._repaired("instances", instance["id"])
+        self.identity_slots()
 
     def delete_instance(self, instance_id: str) -> bool:
         with self.db:
             deleted = self.db.execute("DELETE FROM instances WHERE id=?", (instance_id,)).rowcount
         self._repaired("instances", instance_id)
+        self.identity_slots()
         return deleted == 1
 
     fresh = staticmethod(fresh)
@@ -1105,6 +1135,7 @@ class Store:
             node.update(node_health_fields(node, source_by_id.get(node["source_id"], {})))
         data = {
             "mode": "live",
+            "identity_slots": self.identity_slots(),
             "low_use_settings": {
                 "threshold": settings["low_use_threshold"],
                 "window_minutes": settings["low_use_window_minutes"],
@@ -1181,6 +1212,27 @@ class Store:
                 points.append(row)
         return rollup_history(points, hours, end=end)
 
+    def history_chart(self, hours: int, end: datetime, current: datetime) -> dict[str, Any]:
+        points = []
+        for at, data in self.db.execute(
+            "SELECT at, data FROM history WHERE julianday(at) >= julianday(?) "
+            "AND julianday(at) <= julianday(?) ORDER BY at",
+            ((end - timedelta(hours=hours)).isoformat(), end.isoformat()),
+        ):
+            row = self._read("history", at, data, {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.append(row)
+        preceding = self.db.execute(
+            "SELECT at, data FROM history WHERE julianday(at) < julianday(?) "
+            "ORDER BY at DESC LIMIT 1",
+            ((end - timedelta(hours=hours)).isoformat(),),
+        ).fetchone()
+        if preceding:
+            row = self._read("history", preceding[0], preceding[1], {"at": str})
+            if row is not None and timestamp(row["at"]) is not None:
+                points.insert(0, row)
+        return chart_history(points, hours, end=end, current=current)
+
     def record_history(self) -> None:
         dashboard = self.dashboard()
         summary = dashboard["summary"]
@@ -1192,6 +1244,7 @@ class Store:
             "gpu_utilization": summary["utilization"],
             "coverage_count": summary["covered"],
             "by_group": group_history(dashboard),
+            "chart_coverage": chart_observation(dashboard),
         }
         with self.db:
             self.db.execute("INSERT INTO history VALUES (?, ?)", (point["at"], json.dumps(point)))

@@ -1,6 +1,8 @@
+import { ClockText } from '../data/ClockText';
+import { useConfirm } from '../layers/useConfirm';
 import { useCallback, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Pencil, Plus, Send, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { errorText, formatMessage, localized, t } from '../i18n';
@@ -387,6 +389,7 @@ function RuleEditor({
 
 /** Rules, channels and the delivery log of the notifications tool. */
 export function NotifyPage({ ctx }: { ctx: Ctx }) {
+  const [confirm, confirmation] = useConfirm();
   const [state, setState] = useState<NotifyState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<
@@ -430,7 +433,8 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
     if (saved) void load();
   };
   async function remove(path: string, name: string) {
-    if (!window.confirm(t('notify.removeConfirm', { name }))) return;
+    if (!(await confirm(t('notify.removeConfirm', { name }), t('layer.removeNamed', { name }))))
+      return;
     try {
       await api(path, {}, 'DELETE');
       await load();
@@ -453,17 +457,16 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
 
   return (
     <>
-      <p className="page-note">{t('notify.intro')}</p>
+      {confirmation}
       <Panel
         title={t('notify.rules')}
-        count={state.rules.length}
         actions={
           <button
             className="button small"
             disabled={!state.channels.length || ctx.demo}
             onClick={() => setEditing({ kind: 'rule' })}
           >
-            <Plus size={13} /> {t('notify.addRule')}
+            {t('notify.addRule')}
           </button>
         }
       >
@@ -529,14 +532,13 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
       </Panel>
       <Panel
         title={t('notify.channels')}
-        count={state.channels.length}
         actions={
           <button
             className="button small"
             disabled={ctx.demo}
             onClick={() => setEditing({ kind: 'channel' })}
           >
-            <Plus size={13} /> {t('notify.addChannel')}
+            {t('notify.addChannel')}
           </button>
         }
       >
@@ -555,7 +557,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
                   </span>
                 </div>
                 <button className="button small" onClick={() => void test(channel)}>
-                  <Send size={13} /> {t('notify.test')}
+                  {t('notify.test')}
                 </button>
                 <button
                   className="icon-button"
@@ -580,7 +582,7 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
           editing?.kind !== 'channel' && <p className="panel-note">{t('notify.noChannels')}</p>
         )}
       </Panel>
-      <Panel title={t('notify.log')} count={state.log.length}>
+      <Panel title={t('notify.log')}>
         {state.log.length ? (
           <div className="table-wrap">
             <table className="table">
@@ -595,7 +597,9 @@ export function NotifyPage({ ctx }: { ctx: Ctx }) {
               <tbody>
                 {state.log.map((row) => (
                   <tr key={row.id}>
-                    <td className="nowrap">{relativeTime(row.at)}</td>
+                    <td className="nowrap">
+                      <ClockText>{() => relativeTime(row.at)}</ClockText>
+                    </td>
                     <td className="wrap">
                       {row.subject ?? '—'}
                       {row.count &&

@@ -1,5 +1,13 @@
 name: CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      update_ui_baselines:
+        description: Generate Linux UI baselines for review (download artifact; never auto-commit)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -24,6 +32,12 @@ jobs:
       - run: npm --prefix web ci
       - run: bash scripts/check.sh
       - run: bash scripts/build.sh
+      - name: Smoke-test the wheel and the sdist
+        env:
+          PYTHON: ${{ matrix.python }}
+        run: |
+          bash scripts/smoke-wheel.sh dist/computedeck-*.whl
+          bash scripts/smoke-wheel.sh dist/computedeck-*.tar.gz
   secrets:
     runs-on: ubuntu-latest
     steps:
@@ -35,3 +49,45 @@ jobs:
           go-version: stable
       - run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
       - run: gitleaks git --log-opts=--all --redact --no-banner
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: apt-get update && apt-get install -y fonts-noto-cjk
+      - run: uv sync --frozen
+      - run: npm --prefix web ci
+      - name: UI gate
+        env:
+          UPDATE_BASELINES: ${{ inputs.update_ui_baselines }}
+        run: |
+          if [ "$UPDATE_BASELINES" = true ]; then
+            bash scripts/check-ui.sh --update-snapshots
+          else
+            bash scripts/check-ui.sh
+          fi
+      - name: Upload proposed Linux baselines
+        if: always() && inputs.update_ui_baselines
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-linux-baselines
+          path: web/e2e/snapshots/linux/
+          if-no-files-found: error
+      - name: Upload UI results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-results
+          path: |
+            web/playwright-report/
+            web/test-results/

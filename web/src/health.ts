@@ -1,4 +1,3 @@
-import { groupsOf, sourceLabel } from './groups';
 import { dateTime, relativeTime } from './domain';
 import { formatMessage, hasKey, localized, t } from './i18n';
 import { sourceState } from './labels';
@@ -59,47 +58,39 @@ export function computeHealth(
         page: 'sources',
       });
   }
-  const failing = enabled.filter((source) => source.error || source.status === 'error');
-  const stale = enabled.filter((source) => source.stale);
-  let level: 'ok' | 'warn' | 'bad' | 'unknown' = 'unknown';
+  // Beyond service faults, the pill follows the Needs attention list: dismissing the last item
+  // calms it. Service faults are never dismissible and always show.
+  const active = (data?.attention ?? []).filter((item) => !item.muted);
+  const count = data?.attention_count ?? active.length;
+  let level: import('./ui/shapes').StatusKind = 'unknown';
   let label = t('health.unknown');
-  if (needsToken) label = t('health.unknown');
-  else if (error) {
-    level = 'bad';
+  let quiet = false;
+  if (needsToken) {
+    // Signed out: the service state is unknown.
+  } else if (error) {
+    level = 'error';
     label = t('health.unreachable');
   } else if (faults.length) {
-    level = 'bad';
+    level = 'error';
     label = faults[0].title;
-  } else if (failing.length) {
-    level = failing.some((source) => (source.failures ?? 0) >= 2 || source.stale) ? 'bad' : 'warn';
-    label =
-      failing.length === 1
-        ? t('health.sourceFailing', { name: sourceLabel(groupsOf(data!), failing[0]) })
-        : t('health.failing', { count: failing.length });
-  } else if (stale.length) {
-    level = 'warn';
-    label =
-      stale.length === 1
-        ? t('health.sourceStale', { name: sourceLabel(groupsOf(data!), stale[0]) })
-        : t('health.stale', { count: stale.length });
+  } else if (count > 0) {
+    level = active.some((item) => item.severity === 'error') ? 'error' : 'warn';
+    label = t('health.attention', { count });
   } else if (data && !enabled.length) {
     label = t('health.noSourcesConnected');
   } else if (!demo && health?.polling === false) {
-    level = 'warn';
+    level = 'off';
     label = t('health.pollingOff');
-  } else if (enabled.some((source) => !source.last_success)) {
-    level = 'warn';
-    label = t('health.notCollected');
-  } else if (data?.behind?.length) {
-    level = 'warn';
-    label = t('health.behind', { count: data.behind.length });
-  } else if (data?.as_of && enabled.length && (demo || health) && data.behind) {
-    level = 'ok';
-    label = t('health.fresh', { count: enabled.length });
+  } else {
+    // Nothing needs attention: only the freshness, in a neutral colour.
+    quiet = true;
+    label = age;
   }
   return {
     level,
     label,
+    count: faults.length || error || needsToken ? 0 : count,
+    quiet,
     age: needsToken ? t('health.unknown') : age,
     faults,
     collectorFault: faults.some(
@@ -143,17 +134,7 @@ export function attentionText(item: Attention, tools: Pick<Tool, 'id' | 'name'>[
       name = tool ? localized(tool.name) : t('health.plugin');
     }
   }
-  const message = { ...item.message, name, error_code: item.message.error_code };
-  if (item.kind === 'notification_failed' && typeof message.error_code === 'string') {
-    const error = item.message.error;
-    const notice =
-      error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
-        ? { ...error, code: error.code }
-        : { code: message.error_code };
-    message.error_code =
-      notice.code === 'send_timeout' && !('seconds' in notice)
-        ? t('msg.send_timeout_unknown')
-        : formatMessage(notice);
-  }
+  // Titles name what and its state; the error code and cause are in the item's detail.
+  const message = { ...item.message, name };
   return formatMessage(message);
 }

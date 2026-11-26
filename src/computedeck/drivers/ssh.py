@@ -1,14 +1,44 @@
-"""Strict, non-interactive OpenSSH execution using the user's existing configuration."""
+"""Strict, non-interactive OpenSSH execution using the user's existing configuration.
+
+Inside ``through(jump)`` every connection goes through that SSH jump host, as with
+``ssh -J``. The route travels in a context variable, so drivers and plugins that call
+``ssh_command`` or ``run`` are routed without knowing it, including in tasks they start.
+"""
 
 import asyncio
 import os
 import re
+import shlex
 import signal
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager, suppress
+from contextvars import ContextVar
+
+from ..ssh_config import validate_alias
 
 # OpenSSH lines that say nothing to the user: banner rules around host-key warnings, and
 # the placeholder endpoint it prints when a ProxyCommand or ProxyJump connection fails.
 _NOISE = re.compile(r"^[@*=#-]+$|^Connection to UNKNOWN port \d+ ")
+# Every connection, and the jump hop of a routed one: no prompts, verified host keys, no
+# forwarding, no terminal and nothing run locally or by the configuration.
+STRICT = (
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "RequestTTY=no",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "RemoteCommand=none",
+)
+# The SSH jump host (an alias) that connections in the current context go through.
+_JUMP: ContextVar[str | None] = ContextVar("computedeck_ssh_jump", default=None)
 
 # One in-flight command per SSH destination; different destinations run in parallel.
 _LOCKS: dict[str, asyncio.Lock] = {}
@@ -53,6 +83,39 @@ def failure_cause(error: BaseException) -> str:
     if "connection closed" in text or "connection reset" in text:
         return "closed"
     return "unknown"
+
+
+def through(jump: str | None) -> AbstractContextManager[None]:
+    """Make every SSH connection in this context go through the jump host alias ``jump``.
+
+    ``None`` connects directly. Tasks and threads started inside inherit the route. An alias
+    that is not a plain SSH alias raises ValueError here, before anything connects.
+    """
+    return _route(validate_alias(jump) if jump else None)
+
+
+@contextmanager
+def _route(jump: str | None) -> Iterator[None]:
+    token = _JUMP.set(jump)
+    try:
+        yield
+    finally:
+        _JUMP.reset(token)
+
+
+def route_options() -> list[str]:
+    """The options that send a connection through the current jump host, if any.
+
+    OpenSSH does not pass command-line options on to a ProxyJump connection, so the hop is
+    an explicit ``ssh -W`` ProxyCommand with the same strict options. Given on the command
+    line, it also replaces any ProxyJump or ProxyCommand of the destination's Host block:
+    the chosen route is the only one. The alias was validated, so it is one plain word.
+    """
+    jump = _JUMP.get()
+    if jump is None:
+        return []
+    hop = shlex.join(["ssh", *STRICT, "-W", "[%h]:%p", "--", validate_alias(jump)])
+    return ["-o", f"ProxyCommand={hop}"]
 
 
 def _lock(destination: str) -> asyncio.Lock:
@@ -103,28 +166,8 @@ async def ssh_command(
     input: bytes | None = None,
 ) -> str:
     """Run one command; callers set an operation-appropriate asyncio timeout."""
-    args = [
-        "ssh",
-        "-T",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "ClearAllForwardings=yes",
-        "-o",
-        "RequestTTY=no",
-        "-o",
-        "PermitLocalCommand=no",
-        "-o",
-        "RemoteCommand=none",
-        *(options or []),
-        "--",
-        destination,
-        command,
-    ]
+    args = ["ssh", "-T", *STRICT, *route_options(), *(options or []), "--", destination, command]
+    # Per destination, routed or not: the same login node is never asked twice at once.
     lock = _lock(destination)
     try:
         # A zero wait also respects callers already queued when the lock is released.

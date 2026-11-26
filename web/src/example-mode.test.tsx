@@ -44,7 +44,6 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', fetchMock);
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
   HTMLElement.prototype.scrollTo = vi.fn();
   window.localStorage.clear();
   window.localStorage.setItem('computedeck.chatName', 'alice');
@@ -120,6 +119,9 @@ async function open(page: string, locale: 'en' | 'zh-CN' = 'en') {
   window.localStorage.setItem('computedeck.locale', locale);
   window.history.replaceState(null, '', `/?remote=1&demo=true#/${page}`);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
 }
 
 async function click(element: Element | null | undefined) {
@@ -131,6 +133,11 @@ function button(text: string) {
   return [...container.querySelectorAll('button')].find(
     (item) => item.textContent?.trim() === text,
   );
+}
+
+/** Example mode's own cross, beside the page title. */
+function leaveExample() {
+  return container.querySelector(`.demo-banner button[aria-label="${t('banner.demoOff')}"]`);
 }
 
 function expectOnlyReads() {
@@ -162,11 +169,14 @@ it.each(['en', 'zh-CN'] as const)(
   'refuses Notify test, delete and editor saves in %s',
   async (locale) => {
     await open('notify', locale);
-    expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demoTool'));
+    expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demo'));
     await click(button(t('notify.test')));
     expect(container.textContent).toContain(t('toast.demoReadOnly'));
-    for (const remove of container.querySelectorAll(`button[aria-label="${t('common.remove')}"]`))
+    for (const remove of container.querySelectorAll(`button[aria-label="${t('common.remove')}"]`)) {
       await click(remove);
+      await click(container.querySelector('.confirm-dialog .modal-footer button:last-child'));
+      expect(container.textContent).toContain(t('toast.demoReadOnly'));
+    }
     // Both rule and channel edits use the same real request function as the host.
     const edits = [...container.querySelectorAll(`button[aria-label="${t('common.configure')}"]`)];
     for (const edit of edits) {
@@ -187,6 +197,7 @@ it.each(['en', 'zh-CN'] as const)(
   async (locale) => {
     await open('chat', locale);
     await click(container.querySelector(`button[aria-label="${t('common.remove')}"]`));
+    await click(button(t('layer.removeMessage')));
     expect(container.textContent).toContain(t('toast.demoReadOnly'));
     const textarea = container.querySelector('textarea')!;
     await act(async () => {
@@ -215,7 +226,7 @@ it.each(['en', 'zh-CN'] as const)(
 
 it('preserves other query parameters and the route when toggling and reloading', async () => {
   await open('jobs');
-  await click(button(t('banner.demoOff')));
+  await click(leaveExample());
   expect(window.location.search).toBe('?remote=1');
   expect(window.location.hash).toBe('#/jobs');
   expect(container.querySelector('.demo-banner')).toBeNull();
@@ -225,6 +236,9 @@ it('preserves other query parameters and the route when toggling and reloading',
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(<App />));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demo'));
   expectOnlyReads();
 });
@@ -232,15 +246,26 @@ it('preserves other query parameters and the route when toggling and reloading',
 it.each(['en', 'zh-CN'] as const)(
   'omits the example source count from Settings in %s',
   async (locale) => {
+    // The service reports its own configured sources, which differ from the example ones.
+    const configured = data.sources.length + 2;
+    const reads = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (path: string, init?: RequestInit) =>
+      path === '/api/health'
+        ? new Response(JSON.stringify({ polling: true, plugins: {}, source_count: configured }))
+        : reads(path, init),
+    );
+    const sources = () =>
+      [...container.querySelectorAll('.settings dl.kv > div')]
+        .find((row) => row.querySelector('dt')?.textContent === t('settings.service.sources'))
+        ?.querySelector('dd')?.textContent;
     await open('settings', locale);
-    expect(container.textContent).toContain(t('settings.sourcesMovedExample'));
-    expect(container.textContent).not.toContain(
-      t('settings.sourcesMoved', { count: data.sources.length }),
-    );
-    await click(button(t('banner.demoOff')));
-    expect(container.textContent).toContain(
-      t('settings.sourcesMoved', { count: data.sources.length }),
-    );
+    // Settings has no Data sources panel; the only count is the service's own, never the
+    // example data's.
+    expect(sources()).toBe(String(configured));
+    expect(container.textContent).not.toContain('Managed on the Sources page');
+    expect(container.textContent).not.toContain(`${data.sources.length} configured`);
+    await click(leaveExample());
+    expect(sources()).toBe(String(configured));
   },
 );
 
@@ -252,7 +277,7 @@ it.each([
   await open(kind === 'drawer' ? 'jobs' : 'overview');
   await click(container.querySelector(selector));
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  await click(button(t('banner.demoOff')));
+  await click(leaveExample());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.querySelector('.demo-banner')).toBeNull();
   expectOnlyReads();
@@ -307,12 +332,33 @@ it.each(['en', 'zh-CN'] as const)(
     expect(container.querySelector('.token-gate')).toBeNull();
     expect(container.querySelector('.demo-banner')).not.toBeNull();
     expect(window.location.search).toContain('demo=true');
-    expect(container.querySelector('.health-age')?.textContent).toBe(
-      t('time.hoursAgo', { count: 2 }),
+    // The pill shows the example data: its open attention count, with its age in the label.
+    const pill = container.querySelector('.health-pill')!;
+    expect(pill.querySelector('.health-count')?.textContent).toBe(
+      String(data.attention!.filter((item) => !item.muted).length),
     );
+    expect(pill.getAttribute('aria-label')).toContain(t('time.hoursAgo', { count: 2 }));
     await expect(api('/refresh', {})).rejects.toThrow(t('toast.demoReadOnly'));
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET');
     expect(writes).toHaveLength(1);
     expect(writes[0][0]).toBe('/api/session');
+  },
+);
+
+it.each(['en', 'zh-CN'] as const)(
+  'opens the unlisted gallery and compatibility state in %s without writes',
+  async (locale) => {
+    await open('__gallery', locale);
+    expect(container.querySelector('h1')?.textContent).toBe(t('gallery.title'));
+    expect(container.querySelector('main')?.getAttribute('aria-busy')).toBe('false');
+    expect(container.querySelector('.gallery')).not.toBeNull();
+    expect(container.querySelector('nav a[href="#/__gallery"]')).toBeNull();
+    await act(async () => {
+      window.history.replaceState(null, '', '/?demo=true#/__gallery?compat');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(container.querySelectorAll('[data-token]')).toHaveLength(21);
+    await click(container.querySelector('.gallery .primary-button'));
+    expectOnlyReads();
   },
 );

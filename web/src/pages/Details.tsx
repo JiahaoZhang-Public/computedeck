@@ -1,8 +1,14 @@
-import { useRef, useState } from 'react';
-import { ArrowDownToLine, Check, Copy, Loader2, Wifi } from 'lucide-react';
+import { phoneMedia } from '../breakpoints';
+import { ClockText } from '../data/ClockText';
+import { useMedia } from '../layers/stack';
+import { useConfirm } from '../layers/useConfirm';
+import { useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Copy, Ellipsis, Loader2 } from 'lucide-react';
+import { MenuButton } from '../layers/Popover';
 import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
-import { jobReason, jobTime, jobWaiting } from '../jobFacts';
+import { jobElapsed, jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
@@ -20,14 +26,16 @@ import {
   runningPrice,
   runningSince,
 } from '../domain';
-import { directSSHCommand } from '../connections';
+import { directSSHCommand, routeJump } from '../connections';
 import { jobPlanLink } from '../submit';
 import { jobTerms } from '../labels';
 import { api } from '../api';
 import { Meter, Status } from '../ui';
 import type { Ctx } from './shared';
 import { InstanceRunCost, JobsTable, MachineNodeNote } from './shared';
+import { snoozeItems } from './snooze';
 import { WaitHistory } from '../WaitHistory';
+import { waitRange } from '../waitRange';
 
 export function SSHConfigView({
   config,
@@ -70,7 +78,7 @@ export function SSHConfigView({
             URL.revokeObjectURL(url);
           }}
         >
-          <ArrowDownToLine size={14} /> {t('common.download')}
+          {t('common.download')}
         </button>
         {!remote && (
           <button
@@ -78,7 +86,7 @@ export function SSHConfigView({
             disabled={busy || config.installed || !config.config.trim()}
             onClick={() => void onInstall()}
           >
-            {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+            {busy && <Loader2 size={14} className="spin" />}
             {config.installed ? t('common.installed') : t('ssh.install')}
           </button>
         )}
@@ -185,6 +193,96 @@ export function ArrayDetail({ jobs, ctx }: { jobs: Job[]; ctx: Ctx }) {
   );
 }
 
+/** Underline tabs inside a drawer. Hidden panels stay in the document for search and print. */
+function DrawerTabs({
+  tabs,
+}: {
+  tabs: { id: string; label: string; content: ReactNode | false | null | undefined }[];
+}) {
+  const shown = tabs.filter((tab) => tab.content);
+  const [selected, setSelected] = useState(shown[0]?.id);
+  const active = shown.some((tab) => tab.id === selected) ? selected : shown[0]?.id;
+  const id = useId();
+  return (
+    <>
+      <div className="chips drawer-tabs" role="tablist" aria-label={t('drawer.sections')}>
+        {shown.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`${id}-${tab.id}-tab`}
+            aria-selected={tab.id === active}
+            aria-controls={`${id}-${tab.id}`}
+            className={tab.id === active ? 'active' : ''}
+            onClick={() => setSelected(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {shown.map((tab) => (
+        <div
+          key={tab.id}
+          role="tabpanel"
+          id={`${id}-${tab.id}`}
+          aria-labelledby={`${id}-${tab.id}-tab`}
+          className="drawer-panel"
+          hidden={tab.id !== active}
+        >
+          {tab.content}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Two or three key figures, laid out like stat tiles. */
+function Figures({ items }: { items: { label: string; value: ReactNode; tag?: string }[] }) {
+  return (
+    <dl className="figures">
+      {items.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd>
+            {item.value}
+            {item.tag && <span className="tag">{item.tag}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** A command shown as it will be copied, with the copy action at the row's end. */
+function CommandRow({
+  text,
+  label,
+  copy,
+  disabled,
+}: {
+  text: string;
+  label: string;
+  copy: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="command-row">
+      <code>{text}</code>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        onClick={copy}
+      >
+        <Copy size={14} />
+      </button>
+    </div>
+  );
+}
+
 export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: DeckEvent }) {
   const gpu = jobGpuResources(job);
   const source = ctx.data.sources.find((source) => source.id === job.source_id);
@@ -207,19 +305,28 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
     : historical
       ? ctx.data.failure_history_observed_at
       : job.observed_at;
-  return (
-    <div className="drawer-body">
-      {(pending || failure) && (
-        <div className="drawer-actions">
-          <a className="button" href={jobPlanLink(job, ctx.data.nodes)}>
-            {t('plan.findAnother')}
-          </a>
-        </div>
-      )}
+  const phone = useMedia(phoneMedia);
+  const actions = (pending || failure) && (
+    <div className="drawer-actions">
+      <a className="button primary" href={jobPlanLink(job, ctx.data.nodes)}>
+        {t('plan.findAnother')}
+      </a>
+    </div>
+  );
+  const history = ctx.data.wait_history?.[job.source_id];
+  const ownHistory =
+    history?.status === 'unsupported' ||
+    (source?.username === job.user && source.cluster_id === job.cluster_id);
+  const typical = ownHistory ? waitRange(history, job.qos, job.partition, job.gpu_count) : null;
+  const gpus = `${(pending ? gpu.requested : gpu.allocated) ?? '—'} × ${job.gpu_type || 'GPU'}`;
+  const overview = (
+    <>
       {event && <p className="panel-note">{t('event.recordedJob')}</p>}
       {unknownEnd && (
         <p className="callout">
-          {t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })}
+          <ClockText>
+            {() => t('event.lastSeenEnded', { time: relativeTime(job.observed_at) })}
+          </ClockText>
           {event?.type === 'job.finished' && (
             <>
               {' '}
@@ -236,31 +343,19 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
       )}
       {failure && (
         <div className="callout red failure-explanation">
-          <strong>{t('job.failureReason')}</strong>
-          {failure.summary && <p>{failure.summary}</p>}
+          {/* The scheduler's code is the chip beside the state; the sentence leads here. */}
+          {failure.summary && <p className="lead">{failure.summary}</p>}
           {failure.evidence && <p>{failure.evidence}</p>}
-          {job.reason && (
-            <p>
-              {t('failure.reasonLabel')} <code>{job.reason}</code>
-            </p>
-          )}
-          {nextStep && (
-            <>
-              <strong>{t('job.nextStep')}</strong>
-              <p>{nextStep}</p>
-            </>
-          )}
+          {nextStep && <p>{nextStep}</p>}
         </div>
       )}
       {explanation && (
         <div className="callout">
-          <strong>{t('job.reason')}</strong>
-          <p>
+          <p className="lead">
             {driver === 'slurm' && explanation.kind === 'priority' && job.queue?.length
               ? t('job.queue.priorityReported')
               : explanation.summary}
           </p>
-          {job.reason && <code>{job.reason}</code>}
           {driver === 'slurm' && ['priority', 'resources'].includes(explanation.kind) && (
             <>
               {job.queue?.length ? (
@@ -307,30 +402,94 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
               </p>
             </>
           )}
-          <strong>{t('job.nextStep')}</strong>
           <p>{explanation.next}</p>
         </div>
       )}
-      {pending &&
-        (ctx.data.wait_history?.[job.source_id]?.status === 'unsupported' ||
-        (source?.username === job.user && source.cluster_id === job.cluster_id) ? (
-          <WaitHistory
-            history={ctx.data.wait_history?.[job.source_id]}
-            qos={job.qos}
-            partition={job.partition}
-            gpus={job.gpu_count}
-          />
-        ) : (
-          <p className="wait-history">{t('wait.ownOnly')}</p>
-        ))}
+      <Figures
+        items={
+          pending
+            ? [
+                {
+                  label: t('wait.label'),
+                  value: typical ?? '—',
+                  tag: typical ? t('wait.tag') : undefined,
+                },
+                { label: t('job.requestedGpus'), value: gpus },
+                { label: t('job.waiting'), value: jobWaiting(job) },
+              ]
+            : historical
+              ? [
+                  {
+                    label: t(
+                      unknownEnd || event?.type === 'job.started'
+                        ? 'jobs.col.elapsed'
+                        : 'failure.ranFor',
+                    ),
+                    value:
+                      job.elapsed && job.time_limit
+                        ? t('failure.ranLimit', {
+                            elapsed: jobElapsed(job.elapsed),
+                            limit: jobElapsed(job.time_limit),
+                          })
+                        : jobElapsed(job.elapsed),
+                  },
+                  ...(job.exit_code != null
+                    ? [{ label: t('jobs.col.exitCode'), value: job.exit_code }]
+                    : []),
+                  ...(job.ended_at || job.end
+                    ? [
+                        {
+                          label: t('jobs.col.ended'),
+                          value: <ClockText>{() => failureEnd(job)}</ClockText>,
+                        },
+                      ]
+                    : []),
+                ]
+              : [
+                  { label: t('job.allocatedGpus'), value: gpus },
+                  { label: t('jobs.col.elapsed'), value: jobElapsed(job.elapsed) },
+                  { label: t('job.node'), value: job.node || '—' },
+                ]
+        }
+      />
+      {!historical && (
+        <Metrics
+          values={[
+            { label: 'GPU', value: job.gpu_utilization },
+            { label: 'CPU', value: job.cpu_utilization },
+            { label: t('common.memory'), value: job.memory_utilization },
+          ]}
+        />
+      )}
+      {pending && (
+        <details className="drawer-more">
+          <summary>{t('wait.how')}</summary>
+          {ownHistory ? (
+            <WaitHistory
+              history={history}
+              qos={job.qos}
+              partition={job.partition}
+              gpus={job.gpu_count}
+            />
+          ) : (
+            <p className="wait-history">{t('wait.ownOnly')}</p>
+          )}
+        </details>
+      )}
+    </>
+  );
+  const details = (
+    <>
       <dl className="kv">
-        {(job.ended_at || job.end) && (
+        {!historical && (job.ended_at || job.end) && (
           <div>
             <dt>{t('jobs.col.ended')}</dt>
-            <dd title={jobTime(job.ended_at || job.end)}>{failureEnd(job)}</dd>
+            <dd title={jobTime(job.ended_at || job.end)}>
+              <ClockText>{() => failureEnd(job)}</ClockText>
+            </dd>
           </div>
         )}
-        {job.exit_code != null && (
+        {!historical && job.exit_code != null && (
           <div>
             <dt>{t('jobs.col.exitCode')}</dt>
             <dd>{job.exit_code}</dd>
@@ -394,22 +553,21 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
             <dd>{jobWaiting(job)}</dd>
           </div>
         )}
-        <div>
-          <dt>
-            {t(
-              historical && !unknownEnd && event?.type !== 'job.started'
-                ? 'failure.ranFor'
-                : 'jobs.col.elapsed',
-            )}
-          </dt>
-          <dd className="mono">
-            {pending
-              ? '—'
-              : job.elapsed && job.time_limit
-                ? t('failure.ranLimit', { elapsed: job.elapsed, limit: job.time_limit })
-                : job.elapsed || '—'}
-          </dd>
-        </div>
+        {!historical && (
+          <div>
+            <dt>{t('jobs.col.elapsed')}</dt>
+            <dd>
+              {pending
+                ? '—'
+                : job.elapsed && job.time_limit
+                  ? t('failure.ranLimit', {
+                      elapsed: jobElapsed(job.elapsed),
+                      limit: jobElapsed(job.time_limit),
+                    })
+                  : jobElapsed(job.elapsed)}
+            </dd>
+          </div>
+        )}
         {job.time_limit && !job.elapsed && (
           <div>
             <dt>{t('failure.limit')}</dt>
@@ -432,28 +590,33 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                   : 'common.sampledAt',
             )}
           </dt>
-          <dd title={jobTime(observed)}>{relativeTime(observed)}</dd>
+          <dd title={jobTime(observed)}>
+            <ClockText>{() => relativeTime(observed)}</ClockText>
+          </dd>
         </div>
       </dl>
-      {!historical && (
-        <Metrics
-          values={[
-            { label: 'GPU', value: job.gpu_utilization },
-            { label: 'CPU', value: job.cpu_utilization },
-            { label: t('common.memory'), value: job.memory_utilization },
-          ]}
-        />
-      )}
       {command && (
-        <div className="failure-inspection">
-          <pre className="config-preview">{command}</pre>
-          <button className="button" onClick={() => void ctx.copy(command)}>
-            <Copy size={14} />
-            {t('failure.copyInspection')}
-          </button>
-          <p className="panel-note">{t('failure.copyOnly')}</p>
-        </div>
+        <section className="drawer-section">
+          <h3>{t('failure.inspection')}</h3>
+          <CommandRow
+            text={command}
+            label={t('failure.copyInspection')}
+            copy={() => void ctx.copy(command, { kind: 'command' })}
+          />
+        </section>
       )}
+    </>
+  );
+  return (
+    <div className="drawer-body">
+      {!phone && actions}
+      <DrawerTabs
+        tabs={[
+          { id: 'overview', label: t('drawer.overview'), content: overview },
+          { id: 'details', label: t('drawer.details'), content: details },
+        ]}
+      />
+      {phone && actions}
     </div>
   );
 }
@@ -471,6 +634,7 @@ export function InstanceDetail({
   onEdit: () => void;
   onDelete: () => Promise<void>;
 }) {
+  const [confirm, confirmation] = useConfirm();
   const { demo, remote, busy } = ctx;
   const direct = remote || !!item.existing_alias;
   // Busy GPUs, as the last SSH check counted them.
@@ -479,8 +643,8 @@ export function InstanceDetail({
   const source = ctx.data.sources.find((entry) => entry.id === item.source_id);
   async function copyCommand() {
     if (direct) {
-      const command = directSSHCommand(item);
-      if (command) await ctx.copy(command);
+      const command = directSSHCommand(item, routeJump(source, ctx.nodes));
+      if (command) await ctx.copy(command, { kind: 'command' });
       return;
     }
     try {
@@ -489,49 +653,64 @@ export function InstanceDetail({
         config.installed
           ? `ssh ${item.ssh_alias}`
           : `ssh -F '${config.path.replaceAll("'", "'\\''")}' ${item.ssh_alias}`,
+        { kind: 'command' },
       );
     } catch (reason) {
       ctx.notify(errorText(reason, 'error.sshConfig'), 'error');
     }
   }
-  return (
-    <div className="drawer-body">
-      <div className="drawer-actions">
-        <button
-          className="button"
-          disabled={demo || (direct && !directSSHCommand(item))}
-          title={direct && !directSSHCommand(item) ? t('instance.noEndpoint') : undefined}
-          onClick={() => void copyCommand()}
+  const phone = useMedia(phoneMedia);
+  const jump = routeJump(source, ctx.nodes);
+  const command = direct
+    ? directSSHCommand(item, jump)
+    : item.ssh_alias
+      ? `ssh ${item.ssh_alias}`
+      : null;
+  const snooze = snoozeItems(ctx, item.id);
+  const actions = (
+    <div className="drawer-actions">
+      <button
+        className="button primary"
+        disabled={busy || demo || !item.host}
+        onClick={() => void onProbe()}
+      >
+        {remote ? t('instance.probeRemote', { server: ctx.serverName }) : t('instance.probe')}
+      </button>
+      {/* One action row: the check, then everything else (edit, remove, snooze) in "⋯". */}
+      {(item.manual || snooze.length > 0) && (
+        <MenuButton
+          className="icon-button"
+          aria-label={t('drawer.more')}
+          items={[
+            ...(item.manual
+              ? [
+                  { id: 'edit', label: t('common.edit'), disabled: demo, action: onEdit },
+                  {
+                    id: 'remove',
+                    label: t('common.remove'),
+                    disabled: demo || busy,
+                    action: async () => {
+                      if (
+                        await confirm(
+                          t('instance.deleteConfirm', { name: item.name }),
+                          t('layer.removeInstance'),
+                        )
+                      )
+                        void onDelete();
+                    },
+                  },
+                ]
+              : []),
+            ...snooze,
+          ]}
         >
-          <Copy size={14} />
-          {remote ? t('instance.copyDirect') : t('instance.copyCommand')}
-        </button>
-        <button
-          className="button primary"
-          disabled={busy || demo || !item.host}
-          onClick={() => void onProbe()}
-        >
-          <Wifi size={14} />
-          {remote ? t('instance.probeRemote', { server: ctx.serverName }) : t('instance.probe')}
-        </button>
-        {item.manual && (
-          <>
-            <button className="button" disabled={demo} onClick={onEdit}>
-              {t('common.edit')}
-            </button>
-            <button
-              className="button danger-text"
-              disabled={demo || busy}
-              onClick={() => {
-                if (window.confirm(t('instance.deleteConfirm', { name: item.name })))
-                  void onDelete();
-              }}
-            >
-              {t('common.remove')}
-            </button>
-          </>
-        )}
-      </div>
+          <Ellipsis size={16} />
+        </MenuButton>
+      )}
+    </div>
+  );
+  const overview = (
+    <>
       {item.ssh_status === 'error' && item.ssh_error && (
         <div className="callout red">
           <strong>{t('instance.probeFailed')}</strong>
@@ -539,104 +718,28 @@ export function InstanceDetail({
         </div>
       )}
       <MachineNodeNote item={item} />
-      <dl className="kv">
-        <div>
-          <dt>{t('usage.col.platform')}</dt>
-          <dd>{item.platform}</dd>
-        </div>
-        <div>
-          <dt>GPU</dt>
-          <dd>
-            {item.gpu_count ?? '?'} × {item.gpu_type || 'GPU'}
-          </dd>
-        </div>
-        <div>
-          <dt>{t('cost.price')}</dt>
-          <dd>
-            {item.hourly_cost == null
-              ? '—'
-              : runningPrice(item) == null
-                ? t('cloud.priceWhenRunning', { price: money(item.hourly_cost, item.currency) })
-                : t('cost.perInstance', { price: money(item.hourly_cost, item.currency) })}
-            {item.hourly_cost != null && (item.gpu_count ?? 0) > 0 && (
-              <span className="sub">
-                {t('cost.perGpu', {
-                  price: money(item.hourly_cost / item.gpu_count!, item.currency),
-                })}
-              </span>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>{t('cost.since')}</dt>
-          <dd>
-            {since
-              ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) })
-              : item.manual
-                ? t('cost.manualStartUnknown')
-                : '—'}
-          </dd>
-        </div>
-        <div>
-          <dt>{t('cost.thisRun')}</dt>
-          <dd>
-            <InstanceRunCost item={item} source={source} />
-          </dd>
-        </div>
-        <div>
-          <dt>{t('instance.sshState')}</dt>
-          <dd>
-            <Status state={item.ssh_status} />
-            {item.last_probe_attempt && (
-              <span className="muted">
-                {' · '}
-                {t('instance.checked', { time: relativeTime(item.last_probe_attempt) })}
-              </span>
-            )}
-          </dd>
-        </div>
-        {(item.manual || item.metrics_scope === 'host_visible') && (
-          <div>
-            <dt>{t('instance.gpusBusy')}</dt>
-            <dd>
-              {inUse ?? '—'}
-              {inUse == null && item.probe_warnings?.length ? (
-                <span className="muted"> · {formatMessage(item.probe_warnings[0])}</span>
-              ) : null}
-            </dd>
-          </div>
+      <Figures
+        items={[
+          { label: 'GPU', value: `${item.gpu_count ?? '?'} × ${item.gpu_type || 'GPU'}` },
+          ...(item.manual || item.metrics_scope === 'host_visible'
+            ? [{ label: t('instance.gpusBusy'), value: inUse ?? '—' }]
+            : []),
+          {
+            label: t('cost.price'),
+            value:
+              runningPrice(item) == null
+                ? '—'
+                : t('usage.hourlyRate', { price: money(runningPrice(item)!, item.currency) }),
+          },
+        ]}
+      />
+      {(item.manual || item.metrics_scope === 'host_visible') &&
+        inUse == null &&
+        !!item.probe_warnings?.length && (
+          <p className="panel-note">{formatMessage(item.probe_warnings[0])}</p>
         )}
-        <div>
-          <dt>{item.existing_alias ? t('instance.existingAlias') : t('instance.hostPort')}</dt>
-          <dd className="mono">
-            {item.existing_alias ? item.host : `${item.host || '—'}:${item.port ?? '—'}`}
-          </dd>
-        </div>
-        <div>
-          <dt>{t('instance.username')}</dt>
-          <dd className="mono">{item.username}</dd>
-        </div>
-        <div>
-          <dt>{t('cloud.col.alias')}</dt>
-          <dd className="mono">{item.ssh_alias || '—'}</dd>
-        </div>
-        <div>
-          <dt>
-            {remote ? t('instance.keyRemote', { server: ctx.serverName }) : t('instance.key')}
-          </dt>
-          <dd className="mono">{item.identity_file || t('instance.defaultKey')}</dd>
-        </div>
-        <div>
-          <dt>{t('instance.id')}</dt>
-          <dd className="mono">{item.id}</dd>
-        </div>
-        <div>
-          <dt>{t('common.sampledAt')}</dt>
-          <dd>{relativeTime(item.observed_at)}</dd>
-        </div>
-      </dl>
       {item.gpu_count !== 0 && (
-        <section>
+        <section className="drawer-section">
           <h3>{t('lowUse.title')}</h3>
           {item.low_use?.state === 'low' ? (
             <p>{lowUseText(item, ctx.data.low_use_settings)}</p>
@@ -666,12 +769,6 @@ export function InstanceDetail({
           )}
         </section>
       )}
-      {item.console_url?.startsWith('https://') && (
-        <a className="link" href={item.console_url} target="_blank" rel="noreferrer">
-          {t('lowUse.console')}
-        </a>
-      )}
-      <GpuDetails item={item} />
       <Metrics
         values={[
           { label: 'GPU', value: item.gpu_utilization },
@@ -679,10 +776,145 @@ export function InstanceDetail({
           { label: t('common.memory'), value: item.memory_utilization },
         ]}
       />
-      <p className="panel-note">
-        {remote ? t('instance.note.remote', { server: ctx.serverName }) : t('instance.note.local')}{' '}
-        {t('instance.note.scope')}
-      </p>
+      {item.console_url?.startsWith('https://') && (
+        <a className="link" href={item.console_url} target="_blank" rel="noreferrer">
+          {t('lowUse.console')}
+        </a>
+      )}
+    </>
+  );
+  const connect = (
+    <>
+      {command && (
+        <section className="drawer-section">
+          <h3>{remote ? t('instance.copyDirect') : t('instance.copyCommand')}</h3>
+          <CommandRow
+            text={command}
+            label={remote ? t('instance.copyDirect') : t('instance.copyCommand')}
+            copy={() => void copyCommand()}
+            disabled={demo}
+          />
+          <p className="panel-note">
+            {remote
+              ? t('instance.note.remote', { server: ctx.serverName })
+              : t('instance.note.local')}
+          </p>
+        </section>
+      )}
+      <dl className="kv">
+        <div>
+          <dt>{t('instance.sshState')}</dt>
+          <dd>
+            <Status state={item.ssh_status} />
+            {item.last_probe_attempt && (
+              <span className="muted">
+                {' · '}
+                <ClockText>
+                  {() => t('instance.checked', { time: relativeTime(item.last_probe_attempt) })}
+                </ClockText>
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{item.existing_alias ? t('instance.existingAlias') : t('instance.hostPort')}</dt>
+          <dd className="mono">
+            {item.existing_alias ? item.host : `${item.host || '—'}:${item.port ?? '—'}`}
+          </dd>
+        </div>
+        <div>
+          <dt>{t('instance.username')}</dt>
+          <dd className="mono">{item.username}</dd>
+        </div>
+        <div>
+          <dt>{t('cloud.col.alias')}</dt>
+          <dd className="mono">{item.ssh_alias || '—'}</dd>
+        </div>
+        <div>
+          <dt>
+            {remote ? t('instance.keyRemote', { server: ctx.serverName }) : t('instance.key')}
+          </dt>
+          <dd className="mono">{item.identity_file || t('instance.defaultKey')}</dd>
+        </div>
+      </dl>
+    </>
+  );
+  const cost = (
+    <dl className="kv">
+      <div>
+        <dt>{t('cost.price')}</dt>
+        <dd>
+          {item.hourly_cost == null
+            ? '—'
+            : runningPrice(item) == null
+              ? t('cloud.priceWhenRunning', { price: money(item.hourly_cost, item.currency) })
+              : t('cost.perInstance', { price: money(item.hourly_cost, item.currency) })}
+          {item.hourly_cost != null && (item.gpu_count ?? 0) > 0 && (
+            <span className="sub">
+              {t('cost.perGpu', {
+                price: money(item.hourly_cost / item.gpu_count!, item.currency),
+              })}
+            </span>
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>{t('cost.since')}</dt>
+        <dd>
+          {since
+            ? t(`cost.since.${since.origin}`, { time: dateTime(since.at) })
+            : item.manual
+              ? t('cost.manualStartUnknown')
+              : '—'}
+        </dd>
+      </div>
+      <div>
+        <dt>{t('cost.thisRun')}</dt>
+        <dd>
+          <InstanceRunCost item={item} source={source} />
+        </dd>
+      </div>
+    </dl>
+  );
+  const details = (
+    <>
+      <dl className="kv">
+        <div>
+          <dt>{t('usage.col.platform')}</dt>
+          <dd>{item.platform}</dd>
+        </div>
+        <div>
+          <dt>{t('instance.id')}</dt>
+          <dd className="mono">{item.id}</dd>
+        </div>
+        <div>
+          <dt>{t('common.sampledAt')}</dt>
+          <dd>
+            <ClockText>{() => relativeTime(item.observed_at)}</ClockText>
+          </dd>
+        </div>
+      </dl>
+      <p className="panel-note">{t('instance.note.scope')}</p>
+    </>
+  );
+  return (
+    <div className="drawer-body">
+      {confirmation}
+      {!phone && actions}
+      <DrawerTabs
+        tabs={[
+          { id: 'overview', label: t('drawer.overview'), content: overview },
+          { id: 'connect', label: t('drawer.connect'), content: connect },
+          {
+            id: 'hardware',
+            label: t('gpu.title'),
+            content: !!item.gpus?.length && <GpuDetails item={item} />,
+          },
+          { id: 'cost', label: t('drawer.cost'), content: cost },
+          { id: 'details', label: t('drawer.details'), content: details },
+        ]}
+      />
+      {phone && actions}
     </div>
   );
 }
@@ -721,9 +953,13 @@ function GpuDetails({ item }: { item: Instance }) {
     <section className="gpu-details">
       <h3>{t('gpu.title')}</h3>
       <p className="panel-note" title={dateTime(item.gpus_observed_at)}>
-        {item.gpus_observed_at
-          ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
-          : t('gpu.sampleUnknown')}
+        <ClockText>
+          {() =>
+            item.gpus_observed_at
+              ? t('gpu.sampled', { time: relativeTime(item.gpus_observed_at) })
+              : t('gpu.sampleUnknown')
+          }
+        </ClockText>
       </p>
       <ul className="rows">
         {item.gpus.map((gpu, index) => {

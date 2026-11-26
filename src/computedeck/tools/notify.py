@@ -26,6 +26,7 @@ import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from .. import routes
 from ..drivers import ssh
 from ..errors import SourceError, message
 from ..events import FAILURE_OUTCOMES, OUTCOMES
@@ -536,33 +537,38 @@ async def job_log(store: Store, event: dict[str, Any]) -> str | None:
     job_id = str(job["id"]).rsplit(":", 1)[-1]
     if not re.fullmatch(r"\d+(_\d+)?", job_id):
         return None
+    # A source collected through an SSH jump host is read through it as well.
+    jump = routes.jump_alias(store.node(source.get("node") or ""))
     try:
         alias = validate_alias(source.get("ssh_alias") or "")
+        if jump is not None:
+            validate_alias(jump)
     except ValueError:
         return None
-    # Slurm keeps a finished job in scontrol for a few minutes (MinJobAge). OSError covers
-    # a timeout and an ssh that cannot be started; the message is then sent without a log.
-    try:
-        details = await ssh.run(alias, f"scontrol show job {job_id} 2>/dev/null || true")
-    except (ssh.SSHError, OSError):
-        return None
-    # scontrol prints these fields on dedicated indented lines. Never interpret
-    # key-looking text embedded in JobName, Comment or another field as a path.
-    paths = []
-    for line in details.splitlines():
-        line = line.strip()
-        if line.startswith(("StdOut=", "StdErr=")):
-            path = line.split("=", 1)[1]
-            if _PATH.fullmatch(path):
-                paths.append(path)
-    for path in dict.fromkeys(paths):
-        command = f"tail -c {LOG_BYTES} -- {shlex.quote(path)} | tail -n {LOG_LINES}"
+    with ssh.through(jump):
+        # Slurm keeps a finished job in scontrol for a few minutes (MinJobAge). OSError covers
+        # a timeout and an ssh that cannot be started; the message is then sent without a log.
         try:
-            text = await ssh.run(alias, command)
+            details = await ssh.run(alias, f"scontrol show job {job_id} 2>/dev/null || true")
         except (ssh.SSHError, OSError):
-            continue
-        if text.strip():
-            return _as_shown(text[-LOG_BYTES:])[-LOG_CHARS:]
+            return None
+        # scontrol prints these fields on dedicated indented lines. Never interpret
+        # key-looking text embedded in JobName, Comment or another field as a path.
+        paths = []
+        for line in details.splitlines():
+            line = line.strip()
+            if line.startswith(("StdOut=", "StdErr=")):
+                path = line.split("=", 1)[1]
+                if _PATH.fullmatch(path):
+                    paths.append(path)
+        for path in dict.fromkeys(paths):
+            command = f"tail -c {LOG_BYTES} -- {shlex.quote(path)} | tail -n {LOG_LINES}"
+            try:
+                text = await ssh.run(alias, command)
+            except (ssh.SSHError, OSError):
+                continue
+            if text.strip():
+                return _as_shown(text[-LOG_BYTES:])[-LOG_CHARS:]
     return None
 
 

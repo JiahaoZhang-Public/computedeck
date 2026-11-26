@@ -57,16 +57,18 @@ export function Stat({
 
 export function Empty({
   title,
+  titleId,
   text,
   action,
 }: {
   title: string;
+  titleId?: string;
   text?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="empty">
-      <strong>{title}</strong>
+      <strong id={titleId}>{title}</strong>
       {text && <p>{text}</p>}
       {action}
     </div>

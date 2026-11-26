@@ -1,0 +1,456 @@
+import { CopyContext, createCopy } from '../copy';
+// @vitest-environment jsdom
+import { act, Profiler, StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setLocale, t } from '../i18n';
+import { serverDemo } from '../test-server';
+import { Status as LegacyStatus } from '../ui';
+import { StatusLabel, StatusShape } from './Status';
+import { shapes } from './shapes';
+import type { StatusKind } from './shapes';
+import { Value } from './Value';
+import { Time, Age } from './Time';
+import { CopyButton } from './CopyButton';
+import { DataState } from './DataState';
+import { HowWorkedOut } from './ScopeLine';
+import { DisplayGallery } from './DisplayGallery';
+import { Monogram } from './Identity';
+import { ScopeLine } from './ScopeLine';
+import { saveClock, clockTime, dateTime } from '../format';
+import { useClock } from './clock';
+
+const container = document.createElement('div');
+const root = createRoot(container);
+const example = serverDemo().display_example!;
+beforeEach(() => {
+  document.body.append(container);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+});
+afterEach(async () => {
+  await act(async () => root.render(null));
+  container.remove();
+  setLocale('en');
+  saveClock('24');
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe.each(['en', 'zh-CN'] as const)('display primitives %s', (language) => {
+  beforeEach(() => setLocale(language));
+  it('marks copied commands as English within localized labels', async () => {
+    await act(async () => root.render(<CopyButton text="squeue --me" />));
+    const command = container.querySelector('code')!;
+    expect(command.lang).toBe('en');
+    expect(command.textContent).toBe('squeue --me');
+    expect(container.querySelector('button')?.textContent).toBe(
+      `${t('display.copies')} squeue --me · ${t('display.runsNothing')}`,
+    );
+  });
+  it('renders six SVG shapes, clamps their size and prefixes severity without changing legacy DOM', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          {(Object.keys(shapes) as StatusKind[]).map((kind) => (
+            <StatusLabel kind={kind} key={kind} />
+          ))}
+          <StatusShape kind="unknown" size={8} />
+          <LegacyStatus state="FAILED" />
+        </>,
+      ),
+    );
+    expect(container.querySelectorAll('.display-status svg')).toHaveLength(6);
+    expect(container.querySelector('.severity-error .sr-only')?.textContent).toContain(
+      t('display.errorPrefix'),
+    );
+    expect(container.querySelector('.severity-warn .sr-only')?.textContent).toContain(
+      t('display.warnPrefix'),
+    );
+    expect(container.querySelector<SVGElement>(':scope > svg')!.style.width).toBe('12px');
+    expect(container.querySelector('.status')?.innerHTML).toBe(`<i></i>${t('status.FAILED')}`);
+  });
+  it('names standalone shapes and leaves unlabelled shapes decorative', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          {(Object.keys(shapes) as StatusKind[]).map((kind) => (
+            <StatusShape key={kind} kind={kind} label={t(`display.status.${kind}`)} />
+          ))}
+          <StatusShape kind="warn" />
+        </>,
+      ),
+    );
+    const named = container.querySelectorAll('[role=img]');
+    expect(named).toHaveLength(6);
+    for (const [index, kind] of (Object.keys(shapes) as StatusKind[]).entries()) {
+      const prefix = kind === 'error' || kind === 'warn' ? `${t(`display.${kind}Prefix`)} ` : '';
+      expect(named[index].getAttribute('aria-label')).toBe(prefix + t(`display.status.${kind}`));
+      expect(named[index].hasAttribute('aria-hidden')).toBe(false);
+    }
+    const decorative = container.querySelector('svg:last-child')!;
+    expect(decorative.getAttribute('aria-hidden')).toBe('true');
+    expect(decorative.hasAttribute('aria-label')).toBe(false);
+    expect(decorative.hasAttribute('role')).toBe(false);
+  });
+  it('keeps time disclosures phrasing-only and row descriptions available while collapsed', async () => {
+    await act(async () =>
+      root.render(
+        <p>
+          <Time value={example.at} />
+          <Time value={example.at} descriptionId="row-time" />
+        </p>,
+      ),
+    );
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelector('#row-time')?.parentElement?.querySelector('button')).toBeNull();
+    const button = container.querySelector('button')!;
+    const disclosure = document.getElementById(button.getAttribute('aria-controls')!)!;
+    expect(button.type).toBe('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(disclosure.hidden).toBe(true);
+    expect(container.querySelector('#row-time')?.closest('[hidden]')).toBeNull();
+    expect(container.querySelector('#row-time')?.textContent).toContain('2026');
+    // Native button Enter/Space activation dispatches click; Playwright checks the keys.
+    button.focus();
+    await act(async () => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(disclosure.hidden).toBe(false);
+    await act(async () =>
+      button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(disclosure.hidden).toBe(true);
+    expect(document.activeElement).toBe(button);
+    await act(async () => button.click());
+    await act(async () => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    const parsed = document.createElement('div');
+    await act(async () =>
+      root.render(
+        <>
+          <ScopeLine scope="Mine" groups="All" asOf={example.at} />
+          <Value value={2} kind="lastKnown" at={example.at} reason="old" />
+          <DataState state="stale" reason="old" at={example.at} />
+        </>,
+      ),
+    );
+    parsed.innerHTML = container.innerHTML;
+    expect(parsed.querySelector('p.scope-line .display-time button')).not.toBeNull();
+    expect(parsed.querySelector('span.display-value .display-time button')).not.toBeNull();
+    expect(parsed.querySelector('.data-state p .display-time button')).not.toBeNull();
+    expect(parsed.querySelector('details')).toBeNull();
+  });
+  it('shows distinct two-letter or explicit monograms with the full accessible name', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          <Monogram slot={1} label="Cluster A" />
+          <Monogram slot={1} label="Cluster B" />
+          <Monogram label={t('nav.clusters')} initial="C3" />
+        </>,
+      ),
+    );
+    const marks = [...container.querySelectorAll('[role=img]')];
+    expect(marks.map((node) => node.textContent)).toEqual(['CA', 'CB', 'C3']);
+    expect(marks.map((node) => node.getAttribute('aria-label'))).toEqual([
+      'Cluster A',
+      'Cluster B',
+      t('nav.clusters'),
+    ]);
+  });
+  it('shows a real age for data under one minute old', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-15T14:00:00Z'));
+    await act(async () =>
+      root.render(<Age label={t('clusters.nodes')} value="2026-01-15T13:59:30Z" />),
+    );
+    expect(container.textContent).toContain(t('cost.duration.seconds', { count: 30 }));
+  });
+  it('marks bounds, estimates, unknowns, last-known values and stale exact figures', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          <Value value={29} kind="lower" unit="GPU" />
+          <Value value={41.2} kind="estimate" currency="USD" />
+          <Value value={null} reason="missing" />
+          <Value value={2} kind="lastKnown" at={example.at} reason="old" />
+          <Value value={2} stale reason="late" />
+          <Value value={29} kind="lower" stale />
+        </>,
+      ),
+    );
+    const values = [...container.querySelectorAll('.display-value')].map(
+      (node) => node.textContent,
+    );
+    expect(values[0]).toBe('≥ 29 GPU');
+    expect(values[1]).toContain(language === 'zh-CN' ? '≈ US$41.20' : '≈ $41.20');
+    expect(values[1]).not.toContain(t('display.estimate'));
+    expect(values[2]).toBe('— · missing');
+    const unknown = container.querySelector('.value-unknown')!;
+    expect(unknown.querySelector('.value-unknown-mark')?.textContent).toBe('—');
+    expect(unknown.querySelector('.value-unit')?.closest('.value-unknown-mark')).toBeNull();
+    expect(values[3]).toContain(`${t('display.lastKnown')} 2`);
+    expect(values[4]).toBe('— · late');
+    expect(values[5]).toBe('≥ 29');
+  });
+  it('shows a date for readings outside today in the local timezone', async () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 0, 15, 14, 0);
+    vi.setSystemTime(now);
+    const today = new Date(2026, 0, 15, 13, 46).toISOString();
+    const yesterday = new Date(2026, 0, 14, 13, 46).toISOString();
+    const lastYear = new Date(2025, 0, 15, 13, 46).toISOString();
+    await act(async () =>
+      root.render(
+        <>
+          <Time value={today} />
+          <Time value={yesterday} />
+          <Time value={lastYear} descriptionId="older-time" />
+        </>,
+      ),
+    );
+    expect([...container.querySelectorAll('time')].map((node) => node.textContent)).toEqual([
+      clockTime(Date.parse(today)),
+      dateTime(yesterday),
+      dateTime(lastYear),
+    ]);
+    expect(container.querySelector('#older-time')?.textContent).toContain('2025');
+  });
+  it('exposes the server trace and all data states in the gallery', async () => {
+    await act(async () => root.render(<DisplayGallery example={example} />));
+    for (const state of ['loading', 'first', 'quiet', 'filtered', 'error', 'stale'])
+      expect(container.querySelector(`[data-state=${state}]`)).not.toBeNull();
+    expect(container.querySelector('[data-state=loading]')?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelector('.data-skeleton')?.getAttribute('style')).toBe('height: 40px;');
+    expect(container.textContent).toContain(t('msg.display_example_rule'));
+    expect(container.textContent).toContain(t('msg.display_example_missing'));
+    expect(container.querySelectorAll('.identity-swatch')).toHaveLength(6);
+    expect(
+      new Set([...container.querySelectorAll('.identity-monogram')].map((node) => node.textContent))
+        .size,
+    ).toBe(6);
+    expect(
+      container
+        .querySelector('[data-state=loading]')
+        ?.parentElement?.hasAttribute('data-static-sample'),
+    ).toBe(true);
+    expect(container.querySelector('[data-state=filtered] button')?.getAttribute('type')).toBe(
+      'button',
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-state=filtered] button')!.click(),
+    );
+    expect(container.querySelector('[data-state=filtered]')).toBeNull();
+  });
+  it('keeps last data visible on error and prints the trace literally rather than recomputing it', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          <DataState state="error" reason="offline" at={example.at}>
+            <p>last readings</p>
+          </DataState>
+          <HowWorkedOut
+            trace={{ rule: 'server rule', included: ['Cluster A'], excluded: [], as_of: null }}
+          />
+        </>,
+      ),
+    );
+    expect(container.textContent).toContain('offline');
+    expect(container.textContent).toContain('last readings');
+    expect(container.textContent).toContain('server rule');
+    expect(container.textContent).toContain(t('display.none'));
+  });
+});
+
+it('publishes only minute boundaries and format changes, with one timer under StrictMode', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-01-15T14:00:30Z'));
+  let renders = 0;
+  const commits = vi.fn();
+  function Snapshot() {
+    return <output>{useClock()}</output>;
+  }
+  function Row() {
+    renders++;
+    return (
+      <>
+        <Profiler id="labels" onRender={commits}>
+          <Time value="2026-01-15T13:59:00Z" relative descriptionId="absolute" />
+          <Time value="2026-01-15T13:59:00Z" />
+          <Age value="2026-01-15T13:59:00Z" />
+          <Time value="invalid" />
+          <Snapshot />
+        </Profiler>
+      </>
+    );
+  }
+  await act(async () =>
+    root.render(
+      <StrictMode>
+        <Row />
+      </StrictMode>,
+    ),
+  );
+  expect(vi.getTimerCount()).toBe(1);
+  expect(container.querySelector('output')?.textContent).toBe(
+    String(Date.parse('2026-01-15T14:00:00Z')),
+  );
+  expect(container.textContent).toContain(t('time.minutesAgo', { count: 1 }));
+  const before = renders;
+  commits.mockClear();
+  await act(async () => vi.advanceTimersByTime(29999));
+  expect(commits).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTime(1));
+  expect(commits).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain(t('time.minutesAgo', { count: 2 }));
+  expect(container.querySelector('output')?.textContent).toBe(
+    String(Date.parse('2026-01-15T14:01:00Z')),
+  );
+  await act(async () => vi.advanceTimersByTime(59999));
+  expect(commits).toHaveBeenCalledTimes(1);
+  await act(async () => vi.advanceTimersByTime(1));
+  expect(commits).toHaveBeenCalledTimes(2);
+  const absolute = container.querySelector('button time')!;
+  const previousTime = absolute.textContent;
+  await act(async () => saveClock('12'));
+  expect(commits).toHaveBeenCalledTimes(3);
+  expect(absolute.textContent).toBe(clockTime(Date.parse('2026-01-15T13:59:00Z')));
+  expect(absolute.textContent).not.toBe(previousTime);
+  await act(async () => saveClock('12'));
+  expect(commits).toHaveBeenCalledTimes(3);
+  // Flush jsdom's zero-delay storage event, not a clock tick.
+  await act(async () => vi.advanceTimersByTime(0));
+  expect(commits).toHaveBeenCalledTimes(3);
+  expect(renders).toBe(before);
+  expect(container.querySelector('#absolute')?.textContent).toContain('2026');
+  expect(vi.getTimerCount()).toBe(1);
+  await act(async () => root.render(null));
+  expect(vi.getTimerCount()).toBe(0);
+  await act(async () =>
+    root.render(
+      <StrictMode>
+        <Row />
+      </StrictMode>,
+    ),
+  );
+  expect(vi.getTimerCount()).toBe(1);
+});
+
+it.each([false, true])('uses the shared copy service in example mode %s', async (example) => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const notify = vi.fn();
+  await act(async () =>
+    root.render(
+      <CopyContext value={createCopy(example, notify)}>
+        <CopyButton text="squeue --me" />
+      </CopyContext>,
+    ),
+  );
+  await act(async () => container.querySelector('button')!.click());
+  expect(writeText).toHaveBeenCalledWith(example ? 'squeue --me\n# example data' : 'squeue --me');
+  expect(notify).toHaveBeenCalledExactlyOnceWith(t('display.copied'));
+  expect(container.querySelector('[role=status]')).toBeNull();
+});
+it('shares link/text semantics and announces clipboard failures once', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const notify = vi.fn();
+  const copy = createCopy(true, notify);
+  await copy('https://example.test', { kind: 'link' });
+  await copy('plain text', { kind: 'text' });
+  expect(writeText.mock.calls).toEqual([['https://example.test'], ['plain text']]);
+  notify.mockClear();
+  writeText.mockRejectedValue(new Error('denied'));
+  await copy('squeue', { kind: 'command' });
+  expect(notify).toHaveBeenCalledExactlyOnceWith(t('toast.clipboard'), 'error');
+});
+
+it('copies through a selection where the page has no Clipboard API', async () => {
+  // Plain http from another machine: navigator.clipboard does not exist.
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  const exec = vi.fn(() => true);
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  opener.focus();
+  const notify = vi.fn();
+  try {
+    await createCopy(false, notify)('sbatch -q long');
+    expect(exec).toHaveBeenCalledExactlyOnceWith('copy');
+    // The helper field is gone and focus is back where it was.
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(notify).toHaveBeenCalledExactlyOnceWith(t('display.copied'));
+    notify.mockClear();
+    exec.mockReturnValue(false);
+    await createCopy(false, notify)('sbatch');
+    expect(notify).toHaveBeenCalledExactlyOnceWith(t('toast.clipboard'), 'error');
+  } finally {
+    Reflect.deleteProperty(document, 'execCommand');
+    opener.remove();
+  }
+});
+
+it('keeps fractional bounds below the actual value and names non-numeric unknowns', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <Value value={28.9996} kind="lower" />
+        <Value value={12.3456} kind="lower" />
+        <Value value={NaN} />
+      </>,
+    ),
+  );
+  expect([...container.querySelectorAll('.display-value')].map((node) => node.textContent)).toEqual(
+    ['≥ 28.999', '≥ 12.345', `— · ${t('display.status.unknown')}`],
+  );
+});
+it('allows row links with last-known figures and scope times without nested buttons', async () => {
+  await act(async () =>
+    root.render(
+      <a href="#/jobs" aria-describedby="last scope">
+        <Value value={2} kind="lastKnown" at={example.at} reason="stale" descriptionId="last" />
+        <ScopeLine scope="Mine" groups="All" asOf={example.at} descriptionId="scope" estimate />
+        <Value value={4} kind="estimate" />
+        <Value value={5} kind="estimate" label />
+      </a>,
+    ),
+  );
+  expect(container.querySelector('a button')).toBeNull();
+  expect(container.querySelectorAll('.sr-only')).toHaveLength(2);
+  expect(container.textContent?.split(t('display.estimate'))).toHaveLength(3);
+});
+it('supports list-specific empty copy and actions', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <DataState
+          state="quiet"
+          title="Jobs"
+          text="No jobs running"
+          action={<button>Reset</button>}
+        />
+        <DataState state="first" title="Nodes" text="Connect a cluster" />
+      </>,
+    ),
+  );
+  expect(container.textContent).toBe('JobsNo jobs runningResetNodesConnect a cluster');
+});
+it('uses the first group slot without losing colour and hides adjacent monograms', async () => {
+  const { groupsOf } = await import('../groups');
+  const group = groupsOf(serverDemo())[0];
+  await act(async () => root.render(<Monogram group={group} decorative />));
+  expect(container.querySelector('span')?.style.getPropertyValue('--identity')).toBe(
+    `var(--id-${group.slot})`,
+  );
+  expect(container.querySelector('span')?.getAttribute('aria-hidden')).toBe('true');
+  expect(container.querySelector('[role=img]')).toBeNull();
+});
+
+it('renders optional scope suffixes without forcing an as-of timestamp', async () => {
+  await act(async () => root.render(<ScopeLine scope="Mine">now</ScopeLine>));
+  expect(container.textContent).toBe('Mine · now');
+  expect(container.querySelector('time')).toBeNull();
+});

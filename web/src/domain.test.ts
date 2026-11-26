@@ -10,7 +10,6 @@ import {
   elapsedSeconds,
   sortJobs,
   historyAllocation,
-  historyPartial,
   jobCount,
   jobGpuResources,
   jobsMissing as readJobsMissing,
@@ -487,25 +486,6 @@ describe('recorded GPU meaning', () => {
     expect(
       historyAllocation({ ...point, allocated_gpus: 4, known_allocated_gpus: null }),
     ).toBeNull();
-  });
-  it('marks a recorded subtotal that leaves sources out as partial', () => {
-    const point: HistoryPoint = {
-      at: '2026-09-14T10:00:00Z',
-      allocated_gpus: 8,
-      known_allocated_gpus: 8,
-      unknown_allocation_sources: 0,
-      gpu_utilization: null,
-      coverage_count: 0,
-    };
-    expect(historyPartial(point)).toBe(false);
-    expect(historyPartial({ ...point, allocated_gpus: null, unknown_allocation_sources: 1 })).toBe(
-      true,
-    );
-    // Older samples recorded only the total, or nothing usable.
-    expect(historyPartial({ ...point, known_allocated_gpus: undefined })).toBe(false);
-    expect(historyPartial({ ...point, allocated_gpus: null, known_allocated_gpus: null })).toBe(
-      false,
-    );
   });
 });
 

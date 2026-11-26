@@ -31,6 +31,11 @@ require `>=0.7,<0.8` or handle their absence on older cores; the same rule appli
 to 0.6 fields with a minimum of 0.6. An existing `<0.7` bound excludes 0.7 even
 though its API version is unchanged.
 
+ComputeDeck 1.0 keeps `PLUGIN_API = 1` and `WEB_API = 1`. A plugin whose upper bound is
+below 1.0, such as `requires=">=0.3,<0.9"`, does not load on 1.0 until the bound is
+widened (for example `requires=">=0.3,<2"`, with the matching pip dependency and
+marketplace entry), after testing against 1.0.
+
 The 0.7 additions are optional per-GPU readings, run-start and spend fields,
 [usage rollups](#observed-usage-rollups-07),
 [low-use hints and settings](#low-gpu-use-additions-07), Slurm queue estimates,
@@ -394,7 +399,7 @@ torque = "computedeck_torque:TorqueDriver"
 `info` builds the add-source form: `username`, `ssh_alias` and `credential` are common
 fields; any other field key is stored in `source["options"]` (read it with
 `computedeck.sdk.options(source)`). `checks` become the first-collection checklist and
-the capability tags on the Sources page.
+the **Reads** list in the source's details.
 
 Rules that keep the numbers honest:
 
@@ -466,7 +471,7 @@ from computedeck.sdk import CloudDriver, CloudInstance, parse_ssh_command
 class ExampleCloud(CloudDriver):
     name = "example-cloud"
     label = {"en": "Example Cloud", "zh-CN": "示例云"}
-    base_url = "https://api.example-cloud.com"
+    base_url = "https://api.example.com"
     key_env = "EXAMPLE_CLOUD_API_KEY"  # the form suggests env:EXAMPLE_CLOUD_API_KEY
     auth_scheme = "Bearer"  # "" sends the key alone
 
@@ -576,12 +581,25 @@ register({
 
 `window.ComputeDeck` offers `React`, `jsxRuntime`, `components` (`Panel`, `Empty`, `Status`,
 `Switch`, `Chips`, `Stat`, `Meter`, `BrandMark`), `request(path, body?, method?)` for the
-API, `format.relativeTime` and `format.dateTime`, `routeHash`, `locale()` and
+API, `format.relativeTime` and `format.dateTime`, `routeHash`, `routeAliases`, `locale()` and
 `localized(text)`. Page components receive `{ request, demo, remote, locale, page, health,
 navigate }`. `computedeck plugin new --web` sets up the build: Vite in library mode, IIFE
 output, with `react` and `react/jsx-runtime` mapped to `ComputeDeck.React` and
 `ComputeDeck.jsxRuntime`. Build the bundle before building the wheel, and include the
 folder with `artifacts` (hatch) or package data.
+
+`routeHash(page, group?)` and the page prop `navigate(page)` share the built-in
+aliases: `clusters` → `resources`, `nodes` → `resources?tab=nodes`, and
+`marketplace` → `toolbox?tab=market`. The read-only `routeAliases` map on
+`window.ComputeDeck` exposes these targets (without `#/`). `clusters`, `nodes` and
+`marketplace` are reserved route names that resolve to core pages; plugin pages
+must not use them. Other existing core and plugin page IDs keep their meaning;
+`WEB_API` remains 1.
+
+中文：`routeHash(page, group?)` 和页面属性 `navigate(page)` 共用上述别名。
+`window.ComputeDeck.routeAliases` 提供只读映射，目标字符串不含 `#/`。
+`clusters`、`nodes` 和 `marketplace` 是指向核心页面的保留路由名称，插件页面不得使用。
+其他现有核心及插件页面 ID 保持有效，`WEB_API` 仍为 1。
 
 While example data is on, the host's `request` rejects every non-GET request before
 fetching, except the access-token check (`POST /session`). This includes requests
@@ -899,6 +917,12 @@ a strict, non-interactive SSH command; wrap it in `asyncio.timeout` to set your 
 Use `wait=False` to raise `SSHBusyError` when another operation is using that destination.
 The separate `parse_ssh_command` parses a provider's connection string without executing it.
 
+A source can be routed through an SSH jump host (`[[node]]` with `mode = "jump"`). Its
+driver then runs on this machine as usual, and every `ssh_command` (or `computedeck.sdk.ssh`
+call) made during `collect` goes through the jump host, including in tasks the driver starts;
+no signature changes. Do not start `ssh` yourself, which would bypass the route. Only sources
+whose driver declares the `ssh_alias` field, with an alias set, can use a jump host.
+
 ```python
 ctx.set_state("last_refresh", {"at": now()})
 previous = ctx.get_state("last_refresh", {})
@@ -956,15 +980,72 @@ visible again; this includes plugin requests and writes. Visible requests do
 not wait for visibility. Hidden GETs to the same path share one request on return,
 with a separate response body for each caller; writes remain separate.
 
-Visible dashboard polls run every ten seconds, or every second for up to sixty
+Visible dashboard polls run every ten seconds with a fine pointer (including the native
+macOS app), and every thirty seconds with a coarse pointer. They run every second for up to sixty
 seconds after Refresh or starting collection for an added source. Fast polling stops
 when the targeted sources leave `collecting`; unrelated collections do not prolong a
 source-specific follow-up. Probe and manual-add responses complete before one reload.
 The paired visibility and focus events on return trigger only one refresh. Health, toolbox and
-collection-machine status keep their ten-second cadence; `/api/health` checks
+collection-machine status keep their normal ten/thirty-second cadence; `/api/health` checks
 only the managed SSH include prefix, without building a dashboard. Activity
-polls every fifteen seconds and when the dashboard token changes. Relative ages
-continue to advance even when the dashboard is unchanged.
+polls every fifteen seconds and when the dashboard token changes. Core relative-age
+labels continue to advance on the shared minute clock even when the dashboard is unchanged,
+without rerendering their parent rows. The host no longer rerenders plugin pages or slots
+on a timer. `window.ComputeDeck.format.relativeTime` formats the time at the call; its
+output does not tick by itself. Plugins displaying relative ages must arrange their own
+updates and clean up their timers on unmount. The existing chart window has its own timer.
+
+`GET /api/health`, `/api/toolbox` and `/api/nodes` also accept `since`. All four
+poll endpoints return `X-ComputeDeck-Since`; the dashboard and health objects also
+include `token`. Toolbox and collection-node full replies remain arrays. A matching
+request returns the same small `{unchanged, token}` object as the dashboard. Do not
+send a token for one path or example/live mode to another. Ordinary requests without
+`since` retain their complete response. The browser remembers tokens only from accepted
+responses; a superseded reply cannot replace newer data or its token.
+Switching example mode clears the dashboard and collection-node list, but retains tools
+and health while the new dashboard loads, keeping enabled plugin pages and navigation
+mounted. The next poll requests full replies for the new mode.
+
+Dashboard sources, jobs, instances, compute nodes, recent failures, attention and history
+rows, plus toolbox and collection-node rows, include an opaque content `rev`. It is not a
+database revision or a timestamp. The browser keeps equal rows by `source_id` plus `id`
+(or `key` / `at`), including across reorders, and shares other unchanged JSON branches.
+Missing revisions on older services are compared by content. A changed poll publishes
+one snapshot; an unchanged poll publishes nothing. There is no retained row history in
+this store; the later page work owns departed-row presentation.
+
+Responses of at least 1,000 bytes use gzip when the client accepts it. Since-tokens are
+independent of transport encoding; unchanged replies remain below 1 KB combined across
+the four endpoints. Source-check NDJSON stays uncompressed (`Content-Encoding: identity`)
+so progress arrives as it is produced. This middleware also covers plugin routes: SSE
+(`text/event-stream`) is excluded automatically; other plugin streams currently need an
+explicit `Content-Encoding: identity` header to bypass compression. That header is a
+temporary workaround, not a standard Content-Encoding value; a content-type exclusion
+for NDJSON is a follow-up. API versions and the public Request signature
+are unchanged.
+
+仪表盘、健康、工具箱与采集节点的正常轮询周期为精细指针 10 秒（含 macOS 原生应用）、
+粗略指针 30 秒；页面隐藏时暂停，重新可见或获得焦点时刷新。
+用户发起采集后的每秒跟进仍保留，
+辅助接口仍使用正常周期。四个接口都支持 `since` 并返回 `X-ComputeDeck-Since` 响应头；
+仪表盘和健康对象另有 `token` 字段。工具箱与采集节点的完整响应仍是数组，内容未变时
+返回 `{unchanged, token}`。不传 `since` 时始终返回完整内容。令牌按接口和示例模式区分，
+过期请求不会覆盖新数据或令牌。现有 Activity、Chat、Notify 的专用轮询周期不变。
+切换示例模式时清空仪表盘与采集节点列表，但新仪表盘加载期间保留工具与健康信息，
+使已启用的插件页面及导航保持挂载。下一次轮询请求新模式的完整响应。
+
+上述列表行新增不透明的内容标识 `rev`，不写入数据库。浏览器按来源和行 ID 保留未变行的
+对象身份，重排行也能复用；旧服务缺少 `rev` 时比较内容。更新一次发布一个快照，未变时
+不发布。离开列表的行如何展示由后续页面改造负责。核心相对时间每分钟只更新文字组件；
+宿主不再按计时器重绘插件页面或插槽。`window.ComputeDeck.format.relativeTime` 只格式化
+调用时的时间，输出不会自行更新；需要更新相对时间的插件自行安排刷新，并在卸载时清理
+计时器。现有图表窗口仍有自己的计时器。
+
+客户端接受 gzip 时，至少 1,000 字节的响应会压缩；内容令牌与压缩方式无关，四个接口
+未变响应的正文总计不超过 1 KB。源检查的 NDJSON 保持不压缩，确保进度及时到达。
+插件路由也经过压缩中间件：SSE（`text/event-stream`）自动排除，其他插件流目前需显式
+设置 `Content-Encoding: identity` 绕过压缩。这是临时措施，并非标准 Content-Encoding
+值；按内容类型排除 NDJSON 留待后续处理。公开 Request 签名与 API 版本均不变。
 
 ### Per-GPU readings (0.7)
 
@@ -1142,3 +1223,201 @@ meaning; hourly spend is unchanged. Hardware checks still work. API versions,
 route ids and SCHEMA_VERSION are unchanged; no table or remote query is added.
 See [machine/node accounting](metrics.md#machines-that-are-also-scheduler-nodes)
 for matching limits and outage behaviour.
+
+## Styling contract, WEB_API 1
+
+The 0.8 theme keeps the public component DOM and every 0.7 route. `Chips` still uses
+`role="tab"` and is drawn as underline tabs. The interface is monochrome: primary buttons,
+links, active navigation and tabs, and the focus ring are ink (near-black in light themes,
+near-white in dark themes); warning and error text retain their severity colours. Links are
+text-coloured and underlined. Primary buttons use `--accent` with `--fg-on-accent` text, which
+flips with the theme; buttons, inputs and selects are 32 px rounded rectangles (8 px radius),
+and only small filter chips are pills. The legacy names below
+still work and resolve to these ink values.
+
+The supported aliases are in `web/src/theme/tokens-compat.css`; the machine-readable
+old-to-new map is `web/src/theme/compat-map.json` (also shipped at `/tokens-compat.json`):
+
+| Existing token | Semantic token / value |
+| --- | --- |
+| `--text` | `--fg-default` |
+| `--text-2`, `--text-muted` | `--fg-muted` |
+| `--text-3`, `--text-4` | `--fg-subtle` |
+| `--surface` | `--bg-surface` |
+| `--surface-2` | `--bg-sunken` |
+| `--border` | `--border-muted` |
+| `--accent` | `--accent-fill` |
+| `--accent-soft` | `--accent-bg` |
+| `--accent-text` | `--accent-fg` |
+| `--accent-hover` | `color-mix(in oklch, var(--accent-fill) 88%, black)` |
+| `--gray-soft` | `--status-unknown-bg` |
+| `--green`, `--green-soft` | `--status-ok-fg`, `--status-ok-bg` |
+| `--amber`, `--amber-soft` | `--status-warn-fg`, `--status-warn-bg` |
+| `--red` | `--status-error-fg` |
+| `--radius`, `--radius-sm` | 8 px, 6 px (unchanged) |
+| `--mono` | System monospace stack, now with CJK fallbacks |
+
+All 19 original names remain supported, plus `--accent-hover` and the previously missing
+`--text-muted`. The core Vite dev server warns about legacy colour names in CSS/TSX/JSX
+modules outside `web/src`, such as build-time plugins loaded through
+`COMPUTEDECK_WEB_PLUGINS`. Core source is excluded. Runtime plugin bundles built with their
+own Vite config do not pass through this warning, and production builds do not warn.
+Prefer semantic tokens in new code. `--p-*` values
+are private primitives: components and plugins should not read them directly.
+
+`web/src/theme/compat.css` keeps these classes: `panel`, `panel-header`, `panel-note`,
+`button`, `primary-button`, `secondary-button`, `primary` (with `button`), `form-error`,
+`num`, `spin`, `status green|amber|red`, `table-wrap`, `table`, `compact`, `sub`, `muted`,
+`red-text`, `red`, `amber`, `link`, and `banner amber`. The `status green|amber|red`
+pills gain a CSS mask only when they contain neither an `<i>` nor an `<svg>` icon.
+Uncoloured and `.wait` pills gain no shape; an existing icon keeps its meaning. A `panel`
+still owns its heading and padding.
+Each host slot is a bare `div.plugin-slot`; empty slots are hidden and have no host
+heading, border or padding. A plugin returning its own `Panel` gets exactly one heading.
+
+The root's optional `data-theme="light"` or `data-theme="dark"` forces the theme. Absence
+means follow the system; plugins should inherit it. The generated CSS includes an older
+WebKit fallback, contrast-more and forced-colours rules. No webfont is loaded. Chinese uses
+the same one-line heights as English, no synthesized weight or tracking, and a 1.7 prose
+line height (English 1.5). New controls are 32 px tall; Compact makes **table** controls
+30 px and rows 36 px, leaving forms alone. Row sizes include the hairline: single/two-line
+text rows are 44/64 px in Comfortable, 36/52 px in Compact, and 44/60 px with a coarse pointer.
+`table.compact` also selects 36/52 px rows in Comfortable; device Compact and coarse-pointer
+minimums still apply. Tables retain collapsed borders, including plugin borders on rows.
+The final row keeps a transparent 1 px bottom border for consistent collapsed row heights
+in Chromium and WebKit. Table cells inherit the 13 px default but preserve font sizes set
+by cell classes, including the `.mono` family and 12 px size; `.num` remains tabular inside
+tables. Page and plugin cell-padding rules take precedence over the shared two-line rule.
+Padding sets the text-row size, so longer content and stacked cells grow instead of clipping.
+Under `@media (pointer: coarse)`, `button`, `input:not([type='checkbox'])`, `select`,
+`.button`, `.primary-button`, `.secondary-button`, `.link` and `.switch` receive
+`min-height: 44px !important` and `min-width: 44px !important`. These minimums override
+ordinary plugin CSS and inline styles, including compact toolbars and `.link` controls
+within text; allow room for them in plugin layouts. The basic
+button reset still has no border/background/padding; the documented control classes
+supply these. Links now have an underline by default, including ordinary `<a>` elements.
+
+`computedeck plugin new hello-example --web` generates the bilingual styling example:
+page, overview `Panel`, settings `Panel`, and a banner toggled between null and `banner amber`.
+It exercises all eight exported components, the frozen classes, and ordinary links, inputs
+and selects. Its example-mode page makes no greeting request. The core UI gate builds this
+actual template with the server-plugin requirement removed **only in the test build**, plus
+an empty-overview fixture and a page-only fixture. The test-only build flag
+`COMPUTEDECK_TEST_PLUGIN_SLOTS=1` shows slots in example mode; regular builds still hide them.
+
+中文：0.8 保留 WEB_API 1 的组件 DOM、旧路由、上表中的 19 个变量和全部公共类，
+并补齐 `--accent-hover`、`--text-muted`。界面为单色：主按钮、链接、
+当前导航和标签页以及焦点框均为墨色（浅色主题近黑、深色主题近白）；主按钮使用 `--accent` 与
+`--fg-on-accent`，文字颜色随主题翻转；按钮、输入框和下拉框为 32 px 圆角矩形（圆角 8 px），
+只有小型筛选标签为胶囊形。
+旧变量名仍可用，并解析为这些墨色值。普通链接为文字颜色并带下划线。
+核心 Vite 开发服务器只对 `web/src` 之外的 CSS/TSX/JSX 模块提示旧颜色变量，
+例如通过 `COMPUTEDECK_WEB_PLUGINS` 加载的构建时插件；核心源码不提示。
+使用独立 Vite 配置构建的运行时插件包不会经过该检查，生产构建也不提示。
+新代码应采用语义变量；`--p-*` 是内部实现。
+插槽使用无标题、无边框、无内边距的 `div.plugin-slot`，空插槽隐藏，插件的 Panel
+自行提供标题。`status green|amber|red` 仅在没有 `<i>` 或 `<svg>` 图标时添加 CSS
+掩码形状；无颜色及 `.wait` 标签不添加形状，已有图标保留原意。
+根元素的 `data-theme="light|dark"` 强制主题，缺省跟随系统。
+兼容 CSS 覆盖旧版 WebKit、增强对比度和强制颜色模式。中文与英文的单行高度相同，
+不合成字重、不增加字距，说明文字行高为 1.7；不下载字体。
+控件默认 32 像素；紧凑模式只把表格行和控件改为 36/30 像素，表单不受影响，
+行高包含分隔线：舒适模式单行/双行为 44/64 像素，紧凑为 36/52 像素，粗指针为
+44/60 像素。`table.compact` 在舒适模式下也使用 36/52 像素，设备紧凑模式和粗指针
+最小尺寸仍然生效。表格保留折叠边框（包括插件的行边框），末行保留透明的 1 像素底边框，
+使 Chromium 和 WebKit 的折叠行高一致。单元格继承 13 像素默认字号，但保留单元格类指定的
+字号，包括 `.mono` 的字体及 12 像素字号；表格中的 `.num` 仍使用等宽数字；
+页面及插件的单元格内边距优先于通用双行规则。以内边距确定文字行高；更长的内容和
+堆叠单元格会自然增高，不裁剪内容。在 `@media (pointer: coarse)` 下，`button`、
+`input:not([type='checkbox'])`、`select`、`.button`、`.primary-button`、`.secondary-button`、
+`.link` 和 `.switch` 强制使用 `min-height: 44px !important` 与
+`min-width: 44px !important`。这些最小尺寸优先于插件的普通 CSS 及内联样式，
+包括紧凑工具栏和文字内的 `.link` 控件；插件布局应预留空间。
+基础 button reset 不变，尺寸由控件类提供。
+`plugin new --web` 生成的双语示例覆盖所有组件、公共类和插槽，横幅可显示或隐藏。
+UI 测试构建会启用示例模式插槽并移除示例插件的服务端依赖；正式构建不启用该标志。
+
+### Display primitives and identity (0.8)
+
+The eight `window.ComputeDeck.components` and their DOM remain unchanged. New core
+components in `web/src/ui/` are internal; they are not additions to WEB_API 1.
+Icon-less green/amber/red compat pills use masks generated from the same SVG definitions
+as core `StatusShape`; `compat.css` imports those masks. Their ok/warn/error outlines
+changed slightly in 0.8. No frozen class or token is removed.
+The dashboard's additive `identity_slots` map uses 1-based slots (1–6), keyed by `cluster_id`
+for all source-backed groups (including clouds), or normalized `platform:<name>` for manual
+machines; see [configuration](configuration.md#display-identity-and-clock).
+Consumers must not infer a status from an identity colour or recompute slots from list order.
+The legacy host `format.dateTime` now respects the device's 12/24-hour clock choice;
+`format.relativeTime` keeps its existing output contract.
+
+中文：八个插件导出组件及其 DOM 不变，新显示组件仅供核心内部使用。
+无图标的兼容状态标签与核心组件共用 SVG 蒙版定义，正常、警告和错误轮廓在 0.8 中略有调整，
+没有移除已有类名或令牌。数据源组（含云平台）使用 `cluster_id`，手动机器使用规范化平台键。
+仪表盘新增 `identity_slots`，色位为 1–6；不要用颜色推断状态，也不要按列表顺序重新分配。
+`format.dateTime` 遵循设备的 12/24 小时设置，`format.relativeTime` 保持原有输出约定。
+
+### The 1.0 look
+
+Plugin pages inherit the 1.0 styling through the same public classes; no class, token or
+component is removed and the exported components' DOM is unchanged. What looks different:
+`.table` headers are a tinted band with bold dark labels; `.button` is 13 px medium on a
+6 px radius and `.button.primary` is a pill; `.chips` inside `.page-tabs` or `.toolbar`
+are pill filters; `.panel-header` headings are 20 px and start at the content edge;
+`.stats` lays its `.stat` cells out as separate cards; every `details > summary` opens
+with the same chevron. The dark palette is lighter (canvas near `#212121`, a darker
+sidebar). The font stack prefers Inter and IBM Plex Mono when installed. The window
+receives a `computedeck:theme` event after the theme changes.
+
+中文：1.0 的样式通过原有公共类名生效，没有移除任何类名、令牌或组件，导出组件的 DOM 不变。
+表头变为带底色的粗体标签，按钮为 13 px、6 px 圆角，主按钮为胶囊形，`.page-tabs` 与
+`.toolbar` 中的 `.chips` 为胶囊筛选项，面板标题为 20 px 并与内容左缘对齐，`.stats`
+中的各项为独立卡片，所有 `details > summary` 使用同一种箭头。深色主题整体更亮。
+主题变化后 `window` 会收到 `computedeck:theme` 事件。
+
+### Core layers in 0.8
+
+Core uses native modal dialogs for sheets, forms and confirmations, and a
+non-modal beside panel from 1200 px. Installed tool panels use
+`#/toolbox?plugin=<tool-id>`; marketplace panels use
+`#/toolbox?tab=market&plugin=<name>@<marketplace>` (URL-encode the value).
+Back closes an opened panel; a cold link closes to the filtered list.
+`layers/*` remains internal: WEB_API 1, exported component DOM, token aliases and
+frozen compatibility classes are unchanged. Core notifications now share one
+polite region and appear inside the active modal. No default network call or
+plugin permission was added.
+
+中文：核心浮层在 1200 px 起使用非模态旁侧面板，较窄时以及表单/确认使用原生模态框。
+工具与市场插件面板使用上面的 `plugin` 地址，返回关闭面板，直接链接关闭到筛选列表。
+`layers/*` 为内部实现；WEB_API 1、导出组件 DOM、令牌别名和兼容样式类均保持不变。
+通知共用一个礼貌播报区域并移入活动模态框，未增加默认网络请求或插件权限。
+
+### Chart history and Activity windows (0.8)
+
+The internal `chart/` kit replaces the core trend chart; it is not added to
+`window.ComputeDeck.components`. WEB_API, PLUGIN_API, SCHEMA_VERSION, exported
+component DOM, compat tokens/classes and existing route values are unchanged.
+`/api/history?chart=1` adds server bucket series and localized summary message codes;
+`end` pages only that chart, leaving the legacy points and rollups unchanged.
+See [metrics](metrics.md#observed-chart-buckets) for the fields and coverage rules.
+New recorded history has `chart_coverage` (allocation/utilisation source counts and
+collection intervals). Older records remain readable with unknown coverage.
+
+`/api/events` accepts an optional `until` timestamp (exclusive), alongside the existing
+inclusive `since`. Both bounds apply before grouping and pagination, including in
+example mode. `#/activity?from=<ISO>&to=<ISO>` uses these bounds; ordinary Activity
+range links retain their meaning.
+
+内部 `chart/` 替代核心趋势图，不扩展 `window.ComputeDeck.components`。各 API 版本、
+导出组件 DOM、兼容样式及旧 URL 含义不变。`/api/history?chart=1` 增加服务端分桶和摘要，
+`end` 只翻阅图表，不改变旧 `points`、`rollups`。新历史记录保存 `chart_coverage`
+（覆盖源数和周期），旧记录缺失部分按未知处理。`/api/events` 新增 `until`（不含），
+与原有 `since`（含）均在分组分页前应用，示例模式相同。动态链接的 `from`/`to` 映射
+到这两个边界；普通范围链接不变。
+
+Checkpoint compatibility checks pin all eight public component trees to 0.7 markup.
+The hello scaffold demonstrates `.spin` on its own fixed-size SVG, as loader icons use
+it; a grid-stretched wrapper should not carry the rotation. `--accent-hover` uses the
+plain accent when `color-mix()` is unavailable and mixes only inside a feature query. Reserved core
+or route-alias page ids are omitted with a console warning naming the plugin; its other
+pages and slots still load.

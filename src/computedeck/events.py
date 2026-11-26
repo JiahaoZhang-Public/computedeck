@@ -400,6 +400,7 @@ def filter_events(
     cluster_id: str | None = None,
     job: str | None = None,
     since: str | None = None,
+    until: str | None = None,
     q: str | None = None,
     include_changes: bool = False,
     dashboard: dict[str, Any] | None = None,
@@ -444,6 +445,8 @@ def filter_events(
         ):
             continue
         if job is not None and task.get("id") != job:
+            continue
+        if until and datetime.fromisoformat(row["at"]) >= datetime.fromisoformat(until):
             continue
         if since and datetime.fromisoformat(row["at"]) < datetime.fromisoformat(since):
             continue

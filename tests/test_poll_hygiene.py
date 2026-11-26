@@ -226,3 +226,124 @@ def test_attention_snooze_expiry_changes_content_token_without_writes(
         assert item["key"] in db.attention_state()
     finally:
         db.db.close()
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/health", "/api/toolbox", "/api/nodes", "/api/nodes?demo=true"]
+)
+def test_auxiliary_tokens_preserve_shapes_and_are_small(client: TestClient, path: str) -> None:
+    full = client.get(path)
+    data = full.json()
+    assert isinstance(data, dict if path == "/api/health" else list)
+    assert "X-ComputeDeck-Token" not in full.headers
+    token = full.headers["X-ComputeDeck-Since"]
+    if isinstance(data, dict):
+        assert data["token"] == token
+    unchanged = client.get(f"{path}{'&' if '?' in path else '?'}since={token}")
+    assert unchanged.json() == {"unchanged": True, "token": token}
+    assert "X-ComputeDeck-Token" not in unchanged.headers
+    assert unchanged.headers["Cache-Control"] == "no-store"
+    assert "content-encoding" not in unchanged.headers
+    assert len(unchanged.content) < 1000
+    assert client.get(path).json() == data
+    assert client.get(f"{path}{'&' if '?' in path else '?'}since=old").json() == data
+
+
+def test_all_four_unchanged_replies_fit_one_kilobyte(client: TestClient) -> None:
+    size = 0
+    for path in ("/api/dashboard", "/api/health", "/api/toolbox", "/api/nodes"):
+        token = client.get(path).headers["X-ComputeDeck-Since"]
+        response = client.get(path, params={"since": token})
+        size += len(response.content)
+        assert response.json()["unchanged"] is True
+    assert size <= 1000
+
+
+def test_health_and_node_tokens_observe_external_writes(client: TestClient, tmp_path: Path) -> None:
+    health = client.get("/api/health").json()
+    node_token = client.get("/api/nodes").headers["X-ComputeDeck-Since"]
+    db = store.Store(tmp_path / "computedeck.sqlite")
+    try:
+        db.save_settings({"server_name": "Example service"})
+        db.save_node(
+            {
+                "id": "collector-a",
+                "name": "Collector A",
+                "ssh_alias": "example.test",
+                "status": "unchecked",
+            }
+        )
+        updated = client.get("/api/health", params={"since": health["token"]}).json()
+        assert updated["server_name"] == "Example service"
+        assert updated["token"] != health["token"]
+        rows = client.get("/api/nodes", params={"since": node_token}).json()
+        assert rows[0]["id"] == "collector-a"
+        assert len(rows[0]["rev"]) == 16
+        assert "rev" not in db.nodes()[0]
+    finally:
+        db.db.close()
+
+
+def test_plugin_health_and_switches_change_both_auxiliary_tokens(tmp_path: Path) -> None:
+    from computedeck.plugins import Plugin, PluginContext
+
+    status = {"ready": True}
+
+    def setup(context: PluginContext) -> None:
+        context.health = lambda: status.copy()
+
+    with TestClient(
+        api.create_app(tmp_path, polling=False, plugins=[Plugin("example", setup)])
+    ) as client:
+        health = client.get("/api/health")
+        toolbox = client.get("/api/toolbox")
+        status["ready"] = False
+        for path, before in (("/api/health", health), ("/api/toolbox", toolbox)):
+            after = client.get(path, params={"since": before.headers["X-ComputeDeck-Since"]})
+            assert after.headers["X-ComputeDeck-Since"] != before.headers["X-ComputeDeck-Since"]
+            assert "unchanged" not in after.json()
+        assert client.get("/api/toolbox").json()[0]["rev"] != toolbox.json()[0]["rev"]
+        before = client.get("/api/toolbox")
+        response = client.put(
+            "/api/toolbox/example",
+            json={"enabled": False},
+            headers={"Origin": "http://127.0.0.1:8710", "X-ComputeDeck": "1"},
+        )
+        assert response.status_code == 200
+        assert (
+            client.get(
+                "/api/toolbox", params={"since": before.headers["X-ComputeDeck-Since"]}
+            ).json()[0]["enabled"]
+            is False
+        )
+
+
+def test_row_revisions_change_only_with_their_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COMPUTEDECK_DEMO_NOW", "2026-01-15T14:00:00Z")
+    before = client.get("/api/dashboard?demo=true").json()
+    for key in ("sources", "jobs", "instances", "nodes", "history", "attention", "recent_failures"):
+        assert all(len(row["rev"]) == 16 for row in before[key])
+    original = api.demo_dashboard
+
+    def changed() -> dict[str, Any]:
+        data = original()
+        data["jobs"][0]["state"] = "COMPLETED"
+        return data
+
+    monkeypatch.setattr(api, "demo_dashboard", changed)
+    after = client.get("/api/dashboard", params={"demo": True, "since": before["token"]}).json()
+    assert after["jobs"][0]["rev"] != before["jobs"][0]["rev"]
+    assert after["jobs"][1:] == before["jobs"][1:]
+    assert after["sources"] == before["sources"]
+
+
+def test_gzip_negotiation_keeps_tokens_independent_of_encoding(client: TestClient) -> None:
+    compressed = client.get("/api/dashboard?demo=true", headers={"Accept-Encoding": "gzip"})
+    plain = client.get("/api/dashboard?demo=true", headers={"Accept-Encoding": "identity"})
+    assert compressed.headers["Content-Encoding"] == "gzip"
+    assert "Accept-Encoding" in compressed.headers["Vary"]
+    assert "Content-Encoding" not in plain.headers
+    assert compressed.json() == plain.json()
+    assert int(compressed.headers["Content-Length"]) < len(plain.content)

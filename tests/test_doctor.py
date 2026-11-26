@@ -239,9 +239,11 @@ def test_web_stream_sends_progress_and_a_complete_result(tmp_path, connected):
                 "Origin": "http://127.0.0.1:8710",
                 "X-ComputeDeck": "1",
                 "Accept": "application/x-ndjson",
+                "Accept-Encoding": "gzip",
             },
         )
     assert response.status_code == 200
+    assert response.headers["Content-Encoding"] == "identity"
     events = [json.loads(line) for line in response.text.splitlines()]
     assert any(row["state"] == "checking" for event in events for row in event["rows"])
     assert events[-1]["done"] is True

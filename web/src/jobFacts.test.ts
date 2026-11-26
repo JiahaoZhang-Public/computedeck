@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
-import { jobReason, jobTime, jobWaiting, reasonCode, reasonKind } from './jobFacts';
+import { duration } from './format';
+import { jobElapsed, jobReason, jobTime, jobWaiting, reasonCode, reasonKind } from './jobFacts';
 import { setLocale, t } from './i18n';
 import type { Job } from './types';
 
@@ -47,7 +48,11 @@ it('bounds waits by observation time and preserves unknown timestamps', () => {
     observed_at: '2026-01-05T08:30:00Z',
     started_at: null,
   } as Job;
-  expect(jobWaiting(job)).toBe(t('job.waitDuration', { hours: 2, minutes: 30 }));
+  expect(jobWaiting(job)).toBe(duration(2.5 * 3600));
+  expect(jobElapsed('1-06:12:04')).toBe(duration(30 * 3600 + 12 * 60 + 4));
+  expect(jobElapsed('00:42:00')).toBe(duration(42 * 60));
+  expect(jobElapsed('about an hour')).toBe('about an hour');
+  expect(jobElapsed(null)).toBe('—');
   expect(jobWaiting({ ...job, state: 'RUNNING' })).toBe('—');
   expect(jobWaiting({ ...job, submitted_at: '2026-01-05T10:00:00' })).toBe('—');
   expect(jobWaiting({ ...job, observed_at: '2025-01-01T00:00:00Z' })).toBe('—');

@@ -1,8 +1,8 @@
 import { statusLabel } from './labels';
 import type { DeckEvent, Job } from './types';
-import { formatMessage, locale, t } from './i18n';
+import { formatMessage, t } from './i18n';
 import type { MessageKey } from './i18n';
-import { dateTime } from './domain';
+import { dateTime, formatDate } from './format';
 
 export const OUTCOME_LABELS: Record<string, MessageKey> = {
   completed: 'event.outcome.completed',
@@ -69,7 +69,11 @@ export function changeFieldLabel(field: string): string {
 export type EventTone = 'green' | 'amber' | 'red' | 'gray';
 
 /** One line describing an event, in the current language. */
-export function eventText(event: DeckEvent): string {
+/**
+ * What happened, in a few words, for a list row. With `detail`, the full sentence (the period,
+ * the scheduler's state and exit code, the collection error) for the event's pane.
+ */
+export function eventText(event: DeckEvent, detail = false): string {
   if (event.type.startsWith('change.')) {
     const key = CHANGE_LABELS[event.type]?.[event.data.action ?? ''];
     return t(key ?? 'event.change.unknown', {
@@ -119,18 +123,23 @@ export function eventText(event: DeckEvent): string {
         checked &&
         event.data.unobserved_from &&
         Date.parse(checked) > Date.parse(event.data.unobserved_from);
-      return t(unchecked ? 'event.sourceGapUnchecked' : 'event.sourceGap', {
-        source,
-        from: dateTime(event.data.unobserved_from),
-        to: dateTime(event.data.unobserved_to),
-        time: dateTime(checked),
-      });
+      // What happened, in a few words; the period and what could not be checked are details.
+      if (detail)
+        return t(unchecked ? 'event.sourceGapUnchecked' : 'event.sourceGap', {
+          source,
+          from: dateTime(event.data.unobserved_from),
+          to: dateTime(event.data.unobserved_to),
+          time: dateTime(checked),
+        });
+      return t('event.short.sourceGap', { source });
     }
     case 'service.gap':
-      return t('event.serviceGap', {
-        from: dateTime(event.data.from),
-        to: dateTime(event.data.to),
-      });
+      return detail
+        ? t('event.serviceGap', {
+            from: dateTime(event.data.from),
+            to: dateTime(event.data.to),
+          })
+        : t('event.short.serviceGap');
     case 'job.started':
       return job?.node
         ? t('event.jobStartedOn', { job: name, node: job.node })
@@ -138,20 +147,24 @@ export function eventText(event: DeckEvent): string {
     case 'job.finished': {
       const outcome = t(OUTCOME_LABELS[event.data.outcome ?? 'unknown'] ?? 'event.outcome.unknown');
       const text = t('event.jobFinished', { job: name, outcome });
-      return event.data.outcome === 'unknown'
+      return detail && event.data.outcome === 'unknown'
         ? `${text} · ${t(event.data.outcome_reason === 'outcomes_unavailable' ? 'event.outcomesUnavailable' : event.data.outcome_reason === 'outside_lookback' ? 'event.outsideLookback' : 'event.outcomeNotReported')}`
         : text;
     }
     case 'job.ended':
       return t('event.jobEnded', { job: name });
     case 'job.failed':
-      return t('event.jobFailed', {
-        job: name,
-        state: statusLabel(job?.state ?? ''),
-        code: job?.exit_code ?? '—',
-      });
+      return detail
+        ? t('event.jobFailed', {
+            job: name,
+            state: statusLabel(job?.state ?? ''),
+            code: job?.exit_code ?? '—',
+          })
+        : t('event.short.jobFailed', { job: name, state: statusLabel(job?.state ?? '') });
     case 'source.failed':
-      return t('event.sourceFailed', { source, error: formatMessage(event.data.error) });
+      return detail
+        ? t('event.sourceFailed', { source, error: formatMessage(event.data.error) })
+        : t('event.short.sourceFailed', { source });
     case 'source.recovered':
       return t('event.sourceRecovered', { source });
     default:
@@ -210,7 +223,7 @@ function ownTime(event: DeckEvent): string | null {
 function eventClock(at: string): string {
   const date = new Date(at);
   return date.toDateString() === new Date().toDateString()
-    ? date.toLocaleTimeString(locale(), { hour12: false, hour: '2-digit', minute: '2-digit' })
+    ? formatDate(date, { hour: '2-digit', minute: '2-digit' })
     : dateTime(at);
 }
 

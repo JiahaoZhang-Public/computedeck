@@ -3,8 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      data-theme="light"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#202020"
+      data-theme="dark"
+      media="(prefers-color-scheme: dark)"
+    />
+    <script>
+      // Apply device choices before the stylesheet or application bundle can paint.
+      try {
+        const theme = localStorage.getItem('computedeck.theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+          for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+            meta.media = meta.dataset.theme === theme ? 'all' : 'not all';
+          }
+        }
+        document.documentElement.dataset.density =
+          localStorage.getItem('computedeck.density') === 'compact' ? 'compact' : 'comfortable';
+      } catch {
+        // Blocked storage keeps the system theme and comfortable density.
+      }
+    </script>
     <meta
       name="description"
       content="ComputeDeck: your Slurm jobs, GPU allocations and cloud instances"

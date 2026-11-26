@@ -1,8 +1,9 @@
-import { useRouteParam } from '../useRouteParam';
-import { useDialogFocus } from '../useDialogFocus';
+import { setRouteParams, useRouteParam } from '../useRouteParam';
+import { ContextPanel, FocusView } from '../layers/Surface';
+import { openLayer, closeLayer } from '../layers/routes';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowRight, ExternalLink, Puzzle, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import type { Tool } from '../types';
 import { ApiError, errorText, formatMessage, localized, t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -12,7 +13,6 @@ import { readSettings } from '../settingValues';
 import type { Values } from '../settingValues';
 import { SettingInput } from '../SettingInput';
 import { TIER_LABELS, TIER_TONES } from '../tiers';
-import { toolIcons } from '../toolIcons';
 import { Chips, Empty, Panel, Switch } from '../ui';
 import { MarketplaceTab } from './Marketplace';
 import type { Ctx } from './shared';
@@ -57,18 +57,15 @@ function settingError(tool: Tool, reason: unknown) {
 
 function ToolTile({
   tool,
-  page,
   ctx,
   onOpen,
   onToggle,
 }: {
   tool: Tool;
-  page?: string;
   ctx: Ctx;
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const status = tool.rejected
     ? formatMessage(tool.rejected)
     : tool.enabled
@@ -76,6 +73,8 @@ function ToolTile({
       : missing(tool).length
         ? t('toolbox.needsSetup')
         : '';
+  // One short line at most: the tool's state when it has one; what it does is in the drawer.
+  const line = status;
   return (
     <article className={`tool-tile ${tool.enabled ? 'on' : ''} ${tool.rejected ? 'broken' : ''}`}>
       <button
@@ -84,33 +83,18 @@ function ToolTile({
         onClick={onOpen}
         aria-label={t('toolbox.details', { name: localized(tool.name) })}
       >
-        <span className="tool-icon">
-          <Icon size={18} />
-        </span>
         <span className="tool-tile-text">
-          <strong>
-            {localized(tool.name)} <OriginTag tool={tool} />
-          </strong>
-          <span className="tool-tile-description">{localized(tool.description)}</span>
+          <strong>{localized(tool.name)}</strong>
+          {line && <span className={`tool-status ${tool.rejected ? 'red-text' : ''}`}>{line}</span>}
         </span>
       </button>
-      <footer>
-        <span className={`tool-status ${tool.rejected ? 'red-text' : tool.enabled ? '' : 'muted'}`}>
-          {status}
-        </span>
-        {tool.enabled && page && (
-          <a className="button small" href={routeHash(page)}>
-            {t('toolbox.openShort')} <ArrowRight size={12} />
-          </a>
-        )}
-        <Switch
-          checked={tool.enabled}
-          name={localized(tool.name)}
-          disabled={ctx.demo || !!tool.rejected}
-          label={tool.enabled ? t('toolbox.on') : t('toolbox.off')}
-          onChange={onToggle}
-        />
-      </footer>
+      <Switch
+        checked={tool.enabled}
+        name={localized(tool.name)}
+        disabled={ctx.demo || !!tool.rejected}
+        label=""
+        onChange={onToggle}
+      />
     </article>
   );
 }
@@ -128,10 +112,10 @@ function ToolDrawer({
   onClose: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
-  const dialog = useDialogFocus(`tool-details-${tool.id}`);
+  const [editId] = useRouteParam('edit');
+  const closeEdit = () => closeLayer(['edit', 'step']);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   const failures = Object.values(tool.errors);
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -141,6 +125,7 @@ function ToolDrawer({
     try {
       const values: Values = readSettings(tool.settings, new FormData(event.currentTarget));
       await ctx.updateTool(tool.id, { settings: values });
+      closeEdit();
       ctx.notify(t('toolbox.saved', { name: localized(tool.name) }));
     } catch (reason) {
       setError(settingError(tool, reason));
@@ -150,21 +135,15 @@ function ToolDrawer({
   }
 
   return (
-    <div className="drawer-overlay" onMouseDown={onClose}>
-      <aside
-        className="drawer tool-drawer"
-        ref={dialog}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tool-title"
-        onMouseDown={(event) => event.stopPropagation()}
+    <>
+      <ContextPanel
+        labelledBy="tool-title"
+        close={onClose}
+        className="tool-drawer"
+        returnFocusId={`tool-details-${tool.id}`}
       >
         <header className="drawer-header">
           <div className="tool-drawer-title">
-            <span className="tool-icon large">
-              <Icon size={20} />
-            </span>
             <div>
               <h2 id="tool-title">{localized(tool.name)}</h2>
               <span className="tool-meta">
@@ -194,12 +173,12 @@ function ToolDrawer({
             )}
             {tool.enabled && page && (
               <a className="button" href={routeHash(page)} onClick={onClose}>
-                {t('toolbox.open', { name: localized(tool.name) })} <ArrowRight size={13} />
+                {t('toolbox.open', { name: localized(tool.name) })}
               </a>
             )}
             {tool.homepage && /^https:\/\//.test(tool.homepage) && (
               <a className="link" href={tool.homepage} target="_blank" rel="noreferrer">
-                {t('toolbox.homepage')} <ExternalLink size={12} />
+                {t('toolbox.homepage')}
               </a>
             )}
           </div>
@@ -226,28 +205,51 @@ function ToolDrawer({
             </p>
           ))}
           {tool.settings.length > 0 && (
-            <form className="tool-settings" onSubmit={(event) => void save(event)}>
-              <h3>{t('toolbox.settings')}</h3>
-              <div className="form-grid">
-                {tool.settings.map((field) => (
-                  <SettingInput key={field.key} field={field} value={tool.values[field.key]} />
-                ))}
-              </div>
-              {error && (
-                <p className="form-error" role="alert">
-                  {error}
-                </p>
-              )}
-              <footer>
-                <button className="button" type="submit" disabled={saving || ctx.demo}>
-                  {t('common.save')}
-                </button>
-              </footer>
-            </form>
+            <button
+              id={`tool-settings-${tool.id}`}
+              className="button"
+              onClick={() => openLayer({ edit: tool.id, step: '1' })}
+            >
+              {t('toolbox.settings')}
+            </button>
           )}
         </div>
-      </aside>
-    </div>
+      </ContextPanel>
+      {editId === tool.id && (
+        <FocusView
+          labelledBy="tool-edit-title"
+          close={closeEdit}
+          initial="[data-safe]"
+          returnFocusId={`tool-settings-${tool.id}`}
+        >
+          <header className="modal-header">
+            <h2 id="tool-edit-title">
+              {t('toolbox.settings')} · {localized(tool.name)}
+            </h2>
+          </header>
+          <form className="tool-settings" onSubmit={(event) => void save(event)}>
+            <div className="form-grid">
+              {tool.settings.map((field) => (
+                <SettingInput key={field.key} field={field} value={tool.values[field.key]} />
+              ))}
+            </div>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <footer className="modal-footer">
+              <button type="button" className="button" data-safe onClick={closeEdit}>
+                {t('common.cancel')}
+              </button>
+              <button className="button" type="submit" disabled={saving || ctx.demo}>
+                {t('common.save')}
+              </button>
+            </footer>
+          </form>
+        </FocusView>
+      )}
+    </>
   );
 }
 
@@ -262,64 +264,60 @@ function ConfirmEnable({
   onConfirm: () => void;
   onSetup: () => void;
 }) {
-  const dialog = useDialogFocus(`tool-details-${tool.id}`);
+  useEffect(() => {
+    window.addEventListener('popstate', onCancel);
+    window.addEventListener('hashchange', onCancel);
+    return () => {
+      window.removeEventListener('popstate', onCancel);
+      window.removeEventListener('hashchange', onCancel);
+    };
+  }, [onCancel]);
   const needed = missing(tool);
-  const Icon = toolIcons[tool.icon ?? ''] ?? Puzzle;
   return (
-    <div className="overlay" onMouseDown={onCancel}>
-      <section
-        className="modal"
-        ref={dialog}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="modal-header tool-confirm-header">
-          <span className="tool-icon">
-            <Icon size={18} />
-          </span>
-          <h2 id="confirm-title">{t('toolbox.confirmTitle', { name: localized(tool.name) })}</h2>
-        </header>
-        <div className="tool-confirm-body">
-          {tool.permissions.length > 0 && (
-            <>
-              <p>{t('toolbox.confirmIntro')}</p>
-              <ul>
-                {tool.permissions.map((item) => (
-                  <li key={localized(item)}>{localized(item)}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          {needed.length > 0 && (
-            <p className="amber-text">
-              {t('toolbox.confirmMissing', {
-                fields: needed
-                  .map((field) => localized(field.label))
-                  .join(t('common.listSeparator')),
-              })}
-            </p>
-          )}
-        </div>
-        <footer className="modal-footer">
-          <span className="grow" />
-          <button className="button" onClick={onCancel}>
-            {t('common.cancel')}
+    <FocusView
+      labelledBy="confirm-title"
+      close={onCancel}
+      initial="[data-safe]"
+      returnFocusId={`tool-details-${tool.id}`}
+    >
+      <header className="modal-header tool-confirm-header">
+        <h2 id="confirm-title">{t('toolbox.confirmTitle', { name: localized(tool.name) })}</h2>
+      </header>
+      <div className="tool-confirm-body">
+        {tool.permissions.length > 0 && (
+          <>
+            <p>{t('toolbox.confirmIntro')}</p>
+            <ul>
+              {tool.permissions.map((item) => (
+                <li key={localized(item)}>{localized(item)}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {needed.length > 0 && (
+          <p className="amber-text">
+            {t('toolbox.confirmMissing', {
+              fields: needed.map((field) => localized(field.label)).join(t('common.listSeparator')),
+            })}
+          </p>
+        )}
+      </div>
+      <footer className="modal-footer">
+        <span className="grow" />
+        <button className="button" data-safe onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+        {needed.length ? (
+          <button className="button primary" onClick={onSetup}>
+            {t('toolbox.fillSettings')}
           </button>
-          {needed.length ? (
-            <button className="button primary" onClick={onSetup}>
-              {t('toolbox.fillSettings')}
-            </button>
-          ) : (
-            <button className="button primary" onClick={onConfirm}>
-              {t('toolbox.turnOn')}
-            </button>
-          )}
-        </footer>
-      </section>
-    </div>
+        ) : (
+          <button className="button primary" onClick={onConfirm}>
+            {t('toolbox.turnOn')}
+          </button>
+        )}
+      </footer>
+    </FocusView>
   );
 }
 
@@ -331,25 +329,21 @@ const SECTIONS: { key: 'on' | 'off' | 'broken'; title: MessageKey }[] = [
 
 /** Installed tools as tiles: switch them on with consent, open them, change settings. */
 export function ToolboxPage({ ctx }: { ctx: Ctx }) {
-  const [requestedTab, setTab] = useRouteParam('tab', 'installed');
+  const [requestedTab] = useRouteParam('tab', 'installed');
+  const setTab = (tab: string) =>
+    setRouteParams({ tab: tab === 'installed' ? null : tab, plugin: null, edit: null, step: null });
   const tab = requestedTab === 'market' ? 'market' : 'installed';
   const [query, setQuery] = useRouteParam('q');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId] = useRouteParam('plugin');
+  const [editId] = useRouteParam('edit');
+  const setOpenId = (id: string | null) =>
+    id ? openLayer({ plugin: id }) : closeLayer(['plugin', 'edit', 'step']);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (confirmId) setConfirmId(null);
-      else setOpenId(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [confirmId]);
   const webPlugins = useWebPlugins();
   // A plugin's own page: declared by the server plugin, or registered by its web bundle.
   const pageOf = (tool: Tool) =>
     tool.page ?? pagesOf(webPlugins.filter((plugin) => plugin.requires === tool.id))[0]?.id;
-  const opened = ctx.tools.find((tool) => tool.id === openId) ?? null;
+  const opened = ctx.tools.find((tool) => tool.id === (openId || editId)) ?? null;
   const confirming = ctx.tools.find((tool) => tool.id === confirmId) ?? null;
 
   const visible = useMemo(() => {
@@ -388,28 +382,32 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
   }
 
   const bar = (
-    <div className="toolbox-bar">
-      <Chips
-        label={t('nav.toolbox')}
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: 'installed', label: t('toolbox.installed'), count: ctx.tools.length },
-          { value: 'market', label: t('toolbox.market') },
-        ]}
-      />
+    <>
+      <div className="page-tabs">
+        <Chips
+          label={t('nav.toolbox')}
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'installed', label: t('toolbox.installed'), count: ctx.tools.length },
+            { value: 'market', label: t('toolbox.market') },
+          ]}
+        />
+      </div>
       {tab === 'installed' && ctx.tools.length > 3 && (
-        <label className="search">
-          <Search size={14} />
-          <input
-            value={query}
-            placeholder={t('toolbox.search')}
-            aria-label={t('toolbox.search')}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <div className="toolbar bare">
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              placeholder={t('toolbox.search')}
+              aria-label={t('toolbox.search')}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+        </div>
       )}
-    </div>
+    </>
   );
 
   if (tab === 'market')
@@ -429,15 +427,12 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
       ) : (
         SECTIONS.filter((section) => groups[section.key].length).map((section) => (
           <section key={section.key} className="tool-section">
-            <h2>
-              {t(section.title)} <span className="count">{groups[section.key].length}</span>
-            </h2>
+            <h2>{t(section.title)}</h2>
             <div className="tool-tiles">
               {groups[section.key].map((tool) => (
                 <ToolTile
                   key={tool.id}
                   tool={tool}
-                  page={pageOf(tool)}
                   ctx={ctx}
                   onOpen={() => setOpenId(tool.id)}
                   onToggle={(enabled) => toggle(tool, enabled)}
@@ -448,7 +443,14 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
         ))
       )}
       {query && !visible.length && <p className="page-note">{t('market.noMatch')}</p>}
-      <p className="page-note">{t('toolbox.intro')}</p>
+      {openId && !opened && (
+        <ContextPanel labelledBy="tool-title" close={() => setOpenId(null)}>
+          <h2 id="tool-title">{t('drawer.unavailable')}</h2>
+          <button className="button" onClick={() => setOpenId(null)}>
+            {t('common.close')}
+          </button>
+        </ContextPanel>
+      )}
       {opened && (
         <ToolDrawer
           key={opened.id}
@@ -466,6 +468,7 @@ export function ToolboxPage({ ctx }: { ctx: Ctx }) {
           onSetup={() => {
             setConfirmId(null);
             setOpenId(confirming.id);
+            openLayer({ edit: confirming.id, step: '1' });
           }}
           onConfirm={() => {
             setConfirmId(null);

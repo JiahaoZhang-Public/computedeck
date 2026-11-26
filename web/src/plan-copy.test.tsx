@@ -33,7 +33,38 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 const render = () => act(async () => root.render(<PlanPage ctx={ctx} />));
-const buttons = () => [...host.querySelectorAll<HTMLButtonElement>('.plan-submit button')];
+/** Copy buttons only: each sits beside its own flag-format menu trigger. */
+const buttons = () => [...host.querySelectorAll<HTMLButtonElement>('.plan-submit > button')];
+/** A row's text with its disclosure row, where unconfirmed flags are listed. */
+const explained = (row: Element) => `${row.textContent}${row.nextElementSibling?.textContent}`;
+/** Opens the first copy control's flag-format menu and returns its choices. */
+async function formatChoices() {
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  const trigger = host.querySelector<HTMLButtonElement>(
+    `.plan-submit [aria-label^="${t('plan.submit.format')}"]`,
+  )!;
+  expect(trigger.disabled).toBe(false);
+  await act(async () => trigger.click());
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+}
+/** Picks a flag format from the copy control's menu, as a pointer user would. */
+async function chooseFormat(format: 'line' | 'header') {
+  const item = (await formatChoices()).find(
+    (choice) => choice.textContent === t(`plan.submit.${format}`),
+  );
+  expect(item).toBeDefined();
+  await act(async () => item!.click());
+}
+/** An option row, found by its Cluster, Login and QoS cells. */
+const optionRow = (name: string, username: string, qos: string) =>
+  [...host.querySelectorAll<HTMLTableRowElement>('.plan-table tbody tr.plan-option-row')].find(
+    (row) =>
+      row.cells[0].textContent?.includes(name) &&
+      row.querySelector(`td[data-label="${t('sources.col.login')}"]`)?.textContent === username &&
+      row.querySelector(`td[data-label="${t('job.qos')}"]`)?.textContent === qos,
+  )!;
 
 it.each(['en', 'zh-CN'] as const)(
   'copies flags with the explicit copy-only toast and visible notes (%s)',
@@ -43,37 +74,50 @@ it.each(['en', 'zh-CN'] as const)(
     expect(buttons().length).toBeGreaterThan(1);
     expect(host.querySelector('.plan-best .plan-submit')).not.toBeNull();
     await act(async () => buttons()[0].click());
-    expect(ctx.copy).toHaveBeenCalledWith(
-      expect.stringContaining('--gres=gpu:1'),
-      t('plan.submit.copied'),
-    );
+    expect(ctx.copy).toHaveBeenCalledWith(expect.stringContaining('--gres=gpu:1'), {
+      kind: 'command',
+      message: t('plan.submit.copied'),
+    });
     expect(vi.mocked(ctx.copy).mock.calls[0][0]).not.toContain('#');
-    expect(host.querySelector('.plan-best .plan-submit')!.textContent).toContain(
+    // Unconfirmed flags are named with the flags themselves, never behind the details.
+    expect(host.querySelector('.plan-best')!.textContent).toContain(
+      t('plan.submit.unknown', { flags: '-p, -A' }),
+    );
+    expect(host.querySelector('.plan-best .plan-details')!.textContent).not.toContain(
+      t('plan.submit.unknown', { flags: '-p, -A' }),
+    );
+    expect(host.querySelector('.plan-best .plan-submit')!.textContent).not.toContain(
       t('plan.submit.unknown', { flags: '-p, -A' }),
     );
     expect(vi.mocked(ctx.copy).mock.calls[0][0]).toContain('-q long');
-    expect(host.querySelector('.plan-copy-format > span')!.textContent).toBe(
-      t('plan.submit.format'),
-    );
-    const header = host.querySelectorAll<HTMLButtonElement>('.plan-copy-format button')[1];
-    await act(async () => header.click());
+    // The format is one menu away on the same control, named for the option it copies.
+    expect(
+      host.querySelector(`.plan-best .plan-submit [aria-label^="${t('plan.submit.format')}"]`),
+    ).not.toBeNull();
+    await chooseFormat('header');
     await act(async () => buttons()[0].click());
     expect(vi.mocked(ctx.copy).mock.calls[1][0]).toContain('#SBATCH');
     expect(localStorage.getItem('computedeck.submitFormat')).toBe('header');
     await act(async () => root.unmount());
     root = createRoot(host);
     await render();
-    expect(host.querySelectorAll('.plan-copy-format button')[1].getAttribute('aria-selected')).toBe(
-      'true',
-    );
+    expect(
+      (await formatChoices()).map((choice) => [
+        choice.textContent,
+        choice.getAttribute('aria-checked'),
+      ]),
+    ).toEqual([
+      [t('plan.submit.line'), 'false'],
+      [t('plan.submit.header'), 'true'],
+    ]);
     ctx.demo = true;
     await render();
     expect(buttons().every((button) => !button.disabled)).toBe(true);
     await act(async () => buttons()[0].click());
-    expect(ctx.copy).toHaveBeenLastCalledWith(
-      expect.stringContaining('#SBATCH'),
-      t('plan.submit.copied'),
-    );
+    expect(ctx.copy).toHaveBeenLastCalledWith(expect.stringContaining('#SBATCH'), {
+      kind: 'command',
+      message: t('plan.submit.copied'),
+    });
   },
 );
 
@@ -85,14 +129,12 @@ it('works when format storage cannot be read or written', async () => {
     throw new Error('disabled');
   });
   await render();
-  await act(async () =>
-    host.querySelectorAll<HTMLButtonElement>('.plan-copy-format button')[1].click(),
-  );
+  await chooseFormat('header');
   await act(async () => buttons()[0].click());
-  expect(ctx.copy).toHaveBeenCalledWith(
-    expect.stringContaining('#SBATCH'),
-    t('plan.submit.copied'),
-  );
+  expect(ctx.copy).toHaveBeenCalledWith(expect.stringContaining('#SBATCH'), {
+    kind: 'command',
+    message: t('plan.submit.copied'),
+  });
 });
 
 it.each(['en', 'zh-CN'] as const)(
@@ -198,7 +240,7 @@ it('uses the newest node observation for submit flags on the best card and optio
   }
 });
 
-it('preset chips fill only the request and job context, clearing run time', async () => {
+it('preset chips fill only the request and job context, leaving a typed run time', async () => {
   ctx.data.jobs[0].submitted_at = '2099-01-01T00:00:00Z';
   await act(async () => setRouteParams({ hours: '24' }));
   await render();
@@ -206,7 +248,7 @@ it('preset chips fill only the request and job context, clearing run time', asyn
   expect(presets.length).toBe(4);
   await act(async () => presets[0].click());
   expect(routeParams().get('gpus')).toBe('4');
-  expect(routeParams().get('hours')).toBeNull();
+  expect(routeParams().get('hours')).toBe('24');
   expect(routeParams().get('from')).toBe(ctx.data.jobs[0].id);
   expect(ctx.copy).not.toHaveBeenCalled();
 });
@@ -236,7 +278,7 @@ it('never offers Kubernetes copy actions', async () => {
   });
   await render();
   expect(buttons()).toHaveLength(0);
-  expect(host.querySelector('.plan-copy-format')).toBeNull();
+  expect(host.querySelector(`[aria-label^="${t('plan.submit.format')}"]`)).toBeNull();
 });
 
 it('uses recent failures but not stale live jobs as evidence for copied flags', async () => {
@@ -244,22 +286,16 @@ it('uses recent failures but not stale live jobs as evidence for copied flags', 
   source.capabilities = source.capabilities!.filter((item) => item !== 'jobs');
   ctx.data.recent_failures = [];
   await render();
-  const copyRow = () =>
-    [...host.querySelectorAll('.plan-table tbody tr')].find(
-      (row) =>
-        row.querySelector('td')?.textContent?.includes(source.name) &&
-        row.querySelector('td')?.textContent?.includes(source.username) &&
-        row.querySelector('td .plan-qos')?.textContent === 'normal',
-    )!;
-  expect(copyRow().textContent).toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
+  const copyRow = () => optionRow(source.name, source.username, 'normal');
+  expect(explained(copyRow())).toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
   ctx.data.recent_failures = [{ ...ctx.data.jobs[0], state: 'FAILED', end: null, exit_code: null }];
   await render();
-  expect(copyRow().textContent).not.toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
+  expect(explained(copyRow())).not.toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
   await act(async () => copyRow().querySelector<HTMLButtonElement>('.plan-submit button')!.click());
-  expect(ctx.copy).toHaveBeenCalledWith(
-    expect.stringContaining('-A demo-lab'),
-    t('plan.submit.copied'),
-  );
+  expect(ctx.copy).toHaveBeenCalledWith(expect.stringContaining('-A demo-lab'), {
+    kind: 'command',
+    message: t('plan.submit.copied'),
+  });
 });
 
 it.each(['en', 'zh-CN'] as const)(
@@ -333,13 +369,7 @@ it('copies current jobs from a twin when the kept login has stale jobs, but excl
   ctx.data.sources.push(twin);
   ctx.data.jobs = [{ ...job, source_id: twin.id, account: 'twin-account' }];
   ctx.data.recent_failures = [];
-  const copyRow = () =>
-    [...host.querySelectorAll('.plan-table tbody tr')].find(
-      (row) =>
-        row.querySelector('td')?.textContent?.includes(source.name) &&
-        row.querySelector('td')?.textContent?.includes(source.username) &&
-        row.querySelector('td .plan-qos')?.textContent === 'normal',
-    )!;
+  const copyRow = () => optionRow(source.name, source.username, 'normal');
   await render();
   expect(
     planOptions(ctx.data, { gpus: 1, gpuType: '', hours: null }).find(
@@ -350,13 +380,13 @@ it('copies current jobs from a twin when the kept login has stale jobs, but excl
     )!.source.id,
   ).toBe(source.id);
   await act(async () => copyRow().querySelector<HTMLButtonElement>('.plan-submit button')!.click());
-  expect(ctx.copy).toHaveBeenLastCalledWith(
-    expect.stringContaining('-p gpu -A twin-account'),
-    t('plan.submit.copied'),
-  );
+  expect(ctx.copy).toHaveBeenLastCalledWith(expect.stringContaining('-p gpu -A twin-account'), {
+    kind: 'command',
+    message: t('plan.submit.copied'),
+  });
   twin.stale = true;
   await render();
-  expect(copyRow().textContent).toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
+  expect(explained(copyRow())).toContain(t('plan.submit.unknown', { flags: '-p, -A' }));
   await act(async () => copyRow().querySelector<HTMLButtonElement>('.plan-submit button')!.click());
   expect(vi.mocked(ctx.copy).mock.calls.at(-1)![0]).not.toContain('-A twin-account');
 });
@@ -368,11 +398,14 @@ it.each(['en', 'zh-CN'] as const)(
     ctx.demo = true;
     await render();
     for (const explanation of host.querySelectorAll('.plan-explanation')) {
-      expect(explanation.closest('td')!.colSpan).toBe(6);
+      expect(explanation.closest('td')!.colSpan).toBe(
+        explanation.closest('table')!.querySelectorAll('thead th').length,
+      );
       const row = explanation.closest('tr')!;
       expect(row.classList.contains('plan-explanation-row')).toBe(true);
       expect(row.previousElementSibling!.classList.contains('plan-option-row')).toBe(true);
-      expect(explanation.querySelector('summary')!.getAttribute('aria-label')).toContain(' · ');
+      const toggle = host.querySelector(`[aria-controls="${row.id}"]`)!;
+      expect(toggle.getAttribute('aria-label')).toContain(' · ');
       expect(explanation.querySelectorAll('.plan-factors > div')).toHaveLength(7);
     }
     for (const button of buttons()) expect(button.getAttribute('aria-label')).toContain(' · ');
@@ -382,6 +415,9 @@ it.each(['en', 'zh-CN'] as const)(
     const machineCopy = host.querySelector<HTMLButtonElement>('.machine-actions button')!;
     expect(machineCopy.disabled).toBe(false);
     await act(async () => machineCopy.click());
-    expect(ctx.copy).toHaveBeenLastCalledWith(command.textContent);
+    expect(ctx.copy).toHaveBeenLastCalledWith(command.textContent, {
+      kind: 'command',
+      message: t('plan.machineCopied'),
+    });
   },
 );

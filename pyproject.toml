@@ -1,11 +1,33 @@
 [project]
 name = "computedeck"
-version = "0.7.0"
-description = "Read-only dashboard for your Slurm jobs, GPU allocations and cloud instances"
-readme = "README.md"
+version = "1.0.0"
+description = "Read-only dashboard for your GPU work on clusters, cloud GPU accounts and SSH machines"
+# The PyPI description is README.md with absolute links; see fancy-pypi-readme below.
+dynamic = ["readme"]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES"]
 requires-python = ">=3.12"
+keywords = [
+    "gpu", "dashboard", "hpc", "slurm", "pbs", "lsf", "kubernetes",
+    "cloud-gpu", "runpod", "ssh", "monitoring",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Clustering",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
 dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
@@ -13,6 +35,13 @@ dependencies = [
     "keyring>=25,<27",
     "platformdirs>=4,<5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/JiahaoZhang-Public/computedeck"
+Documentation = "https://github.com/JiahaoZhang-Public/computedeck/blob/main/docs/install.md"
+Changelog = "https://github.com/JiahaoZhang-Public/computedeck/blob/main/CHANGELOG.md"
+Issues = "https://github.com/JiahaoZhang-Public/computedeck/issues"
+Source = "https://github.com/JiahaoZhang-Public/computedeck"
 
 [project.scripts]
 computedeck = "computedeck.cli:main"
@@ -31,8 +60,29 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-fancy-pypi-readme>=24"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+# PyPI does not resolve the README's repository-relative paths, so the package description
+# points them at the release tag: images at raw files, links at GitHub's file view.
+# scripts/smoke-wheel.sh fails if a relative link or image survives.
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '(!\[[^\]]*\])\((?!https?://)([^)\s]+)\)'
+replacement = '\1(https://raw.githubusercontent.com/JiahaoZhang-Public/computedeck/v$HFPR_VERSION/\2)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="(?!https?://)([^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/JiahaoZhang-Public/computedeck/v$HFPR_VERSION/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#|mailto:)([^)\s]+)\)'
+replacement = '](https://github.com/JiahaoZhang-Public/computedeck/blob/v$HFPR_VERSION/\1)'
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/computedeck"]
@@ -40,8 +90,12 @@ packages = ["src/computedeck"]
 artifacts = ["src/computedeck/static"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["web/node_modules", "web/dist"]
-# uv build makes the wheel from the sdist, so the sdist carries the built web app too.
+exclude = [
+    ".claude", "web/node_modules", "web/dist", "web/e2e/snapshots", "web/test-results",
+    "web/playwright-report",
+]
+# uv build makes the wheel from the sdist, so the sdist carries the built web app too:
+# installing from the sdist needs no Node.js.
 artifacts = ["src/computedeck/static"]
 
 [tool.ruff]

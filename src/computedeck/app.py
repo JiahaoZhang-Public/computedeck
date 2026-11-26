@@ -24,15 +24,29 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, credentials, demo, drivers, marketplace, nodes, paths, toolbox
+from . import (
+    auth,
+    credentials,
+    demo,
+    drivers,
+    marketplace,
+    nodes,
+    paths,
+    routes,
+    ssh_hosts,
+    toolbox,
+)
 from . import plugins as plugin_host
-from .collector import Collector, ProbeConflict
+from .collector import NODE_KEYS, Collector, ProbeConflict
 from .demo import delivery_status as demo_delivery_status
+from .demo import demo_chart_history
+from .demo import now as demo_now
 from .errors import SourceError, message
 from .events import CHANGE_TYPES, GAP_TYPES, TYPES, filter_events, group_events
-from .history import rollup_history
+from .history import chart_history, rollup_history
 from .records import (
     InstanceInput,
     SettingsInput,
@@ -77,6 +91,32 @@ class EncodableJSON(JSONResponse):
             return json.dumps(content, allow_nan=False, separators=(",", ":")).encode()
 
 
+def revised_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Content revisions let the browser keep unchanged rows across full replies."""
+    return [
+        {
+            **row,
+            "rev": hashlib.sha256(bytes(EncodableJSON(jsonable_encoder(row)).body)).hexdigest()[
+                :16
+            ],
+        }
+        for row in rows
+    ]
+
+
+def poll_response(result: dict[str, Any] | list[dict[str, Any]], since: str | None) -> Response:
+    # Include time-derived state, not just database writes. Reuse the serialized bytes.
+    body = bytes(EncodableJSON(jsonable_encoder(result)).body)
+    token = hashlib.sha256(body).hexdigest()[:16]
+    headers = {"X-ComputeDeck-Since": token}
+    if since == token:
+        return EncodableJSON({"unchanged": True, "token": token}, headers=headers)
+    if isinstance(result, dict):
+        body = body[:-1] + f',"token":"{token}"}}'.encode()
+    # Array endpoints keep their 0.7 JSON shape; their token travels in the header.
+    return Response(content=body, media_type="application/json", headers=headers)
+
+
 def encodable(body: bytes) -> bool:
     """False when a JSON body holds text UTF-8 cannot encode, which nothing could store or send."""
     try:
@@ -89,12 +129,13 @@ def encodable(body: bytes) -> bool:
     return True
 
 
-def validate_source(source: dict[str, Any]) -> None:
+def validate_source(source: dict[str, Any], node: dict[str, Any] | None = None) -> None:
     try:
         driver = drivers.get(source["driver"])
         if source.get("credential"):
-            if source.get("node"):
-                # Resolved on the node, which may have schemes this machine lacks.
+            if source.get("node") and routes.mode(node) == "collect":
+                # Resolved on the node, which may have schemes this machine lacks. A jump
+                # host only carries SSH: its sources' credentials resolve here.
                 if not re.fullmatch(r"[a-z][a-z0-9-]*:[^\s]{1,250}", source["credential"]):
                     raise SourceError(
                         "invalid_credential_reference", reference=source["credential"]
@@ -179,6 +220,7 @@ def create_app(
     )
     # Lets `serve --open` tell this process from anything else answering on its port.
     app.state.session_nonce = session_nonce
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     # Rejections echo the request, and their details may quote stored text.
@@ -336,16 +378,18 @@ def create_app(
             result["collecting"] = sorted(collector.pending)
             result["attention"] = collector.attention_items(result)
         result["attention_count"] = sum(item["muted"] is None for item in result["attention"])
-        # Hash the complete response, including time-derived state and pending work.
-        # Reuse these bytes so the large dashboard is serialized only once.
-        body = bytes(EncodableJSON(jsonable_encoder(result)).body)
-        token = hashlib.sha256(body).hexdigest()[:16]
-        if since == token:
-            return EncodableJSON({"unchanged": True, "token": token})
-        return Response(
-            content=body[:-1] + f',"token":"{token}"}}'.encode(),
-            media_type="application/json",
-        )
+        for key in (
+            "sources",
+            "jobs",
+            "instances",
+            "nodes",
+            "recent_failures",
+            "attention",
+            "history",
+        ):
+            if key in result:
+                result[key] = revised_rows(result[key])
+        return poll_response(result, since)
 
     @app.put("/api/attention/{key}")
     async def update_attention(key: str, body: AttentionInput) -> dict[str, str]:
@@ -384,7 +428,11 @@ def create_app(
 
     @app.get("/api/history")
     async def history(
-        hours: int = Query(default=24, ge=1, le=720), demo: bool = False, rollup: bool = False
+        hours: int = Query(default=24, ge=1, le=720),
+        demo: bool = False,
+        rollup: bool = False,
+        chart: bool = False,
+        end: datetime | None = None,
     ) -> dict[str, Any]:
         """Chart points, with optional raw-observation rollups (up to 30 days)."""
         points = demo_history(hours) if demo else store().history(hours)
@@ -392,9 +440,26 @@ def create_app(
             "hours": hours,
             "points": [{k: v for k, v in point.items() if k != "by_group"} for point in points],
         }
+        if end is not None and end.tzinfo is None:
+            raise HTTPException(422, message("chart_end_invalid"))
+        if chart:
+            current = demo_now() if demo else datetime.now(UTC)
+            try:
+                right = min(end.astimezone(UTC), current) if end else current
+                # Validate the whole window before either backend subtracts it.
+                right - timedelta(hours=hours)
+            except OverflowError:
+                raise HTTPException(422, message("chart_end_invalid")) from None
+            result["chart"] = (
+                chart_history(demo_chart_history(hours, right), hours, end=right, current=current)
+                if demo
+                else store().history_chart(hours, right, current)
+            )
         if rollup:
             result["rollups"] = (
-                rollup_history(points, hours) if demo else store().history_rollups(hours)
+                rollup_history(points, hours, end=datetime.fromisoformat(points[-1]["at"]))
+                if demo
+                else store().history_rollups(hours)
             )
         return result
 
@@ -471,7 +536,9 @@ def create_app(
                 with suppress(asyncio.CancelledError):
                     await task
 
-        return StreamingResponse(stream(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            stream(), media_type="application/x-ndjson", headers={"Content-Encoding": "identity"}
+        )
 
     @app.post("/api/sources", status_code=201)
     async def add_source(body: SourceInput) -> dict[str, Any]:
@@ -487,8 +554,7 @@ def create_app(
             for other in store().sources()
         ):
             raise HTTPException(409, message("cluster_driver_mismatch"))
-        check_node(source)
-        validate_source(source)
+        validate_source(source, check_node(source))
         if source["enabled"]:
             source["next_due_at"] = now()
         store().save_source(source)
@@ -518,8 +584,7 @@ def create_app(
         )
         enabled_changed = "enabled" in changes and changes["enabled"] != source["enabled"]
         source.update(changes)
-        check_node(source)
-        validate_source(source)
+        validate_source(source, check_node(source))
         source["next_due_at"] = now()
         if connection_changed or enabled_changed:
             source.update(
@@ -547,13 +612,21 @@ def create_app(
         collector.try_clear_resolved_attention()
         return store().source(source_id) or source
 
-    def check_node(source: dict[str, Any]) -> None:
-        if source.get("node") and store().node(source["node"]) is None:
+    def check_node(source: dict[str, Any]) -> dict[str, Any] | None:
+        """The node a source names, if any; 422 when it is missing or cannot carry it."""
+        if not source.get("node"):
+            return None
+        node = store().node(source["node"])
+        if node is None:
             raise HTTPException(422, message("node_not_found", node=source["node"]))
+        if routes.mode(node) == "jump" and not routes.applies(source):
+            # A jump host carries SSH connections; this source makes none.
+            raise HTTPException(422, message("route_not_applicable", node=node["name"]))
+        return node
 
     @app.get("/api/nodes")
-    async def node_list(demo: bool = False) -> list[dict[str, Any]]:
-        return demo_nodes() if demo else store().nodes()
+    async def node_list(demo: bool = False, since: str | None = None) -> Response:
+        return poll_response(revised_rows(demo_nodes() if demo else store().nodes()), since)
 
     @app.post("/api/nodes", status_code=201)
     async def add_node(body: nodes.NodeInput) -> dict[str, Any]:
@@ -578,10 +651,17 @@ def create_app(
         current = store().node(node_id)
         if current is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
+        # An edit that does not name the kind keeps it.
+        body = body.model_copy(update={"mode": body.mode or current["mode"]})
         try:
             node = {**current, **nodes.node_record(body, node_id)}
         except ValueError as error:
             raise HTTPException(422, message(str(error))) from None
+        if node["mode"] != current["mode"] and any(
+            source.get("node") == node_id for source in store().sources()
+        ):
+            # Where a source is collected and its credentials resolve would change under it.
+            raise HTTPException(409, message("node_mode_in_use"))
         store().save_node(node)
         fields = [key for key in body.model_dump() if node.get(key) != current.get(key)]
         if fields:
@@ -608,14 +688,19 @@ def create_app(
         if node is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
         try:
-            result = {**await nodes.info(node), "status": "ok", "error": None}
+            if routes.mode(node) == "jump":
+                # Nothing runs on a jump host: this machine reaching it is the check.
+                await routes.reach(node)
+                result: dict[str, Any] = {"status": "ok", "error": None}
+            else:
+                result = {**await nodes.info(node), "status": "ok", "error": None}
         except SourceError as error:
             result = {"status": "error", "error": error.message()}
         # Read again: the node may have been deleted or edited while it was checked.
         current = store().node(node_id)
         if current is None:
             raise HTTPException(404, message("node_not_found", node=node_id))
-        if any(current.get(key) != node.get(key) for key in ("ssh_alias", "command")):
+        if any(current.get(key) != node.get(key) for key in NODE_KEYS):
             # The answer describes the old connection.
             raise HTTPException(409, message("node_changed", node=current["name"]))
         current.update(result, checked_at=now())
@@ -735,6 +820,13 @@ def create_app(
     async def ssh_config() -> dict[str, Any]:
         return ssh_state()
 
+    @app.get("/api/ssh/hosts")
+    async def ssh_host_list(demo: bool = False) -> dict[str, Any]:
+        """Host aliases of this service user's ~/.ssh/config, offered when adding a source."""
+        if demo:
+            return {"hosts": demo_ssh_hosts(), "readable": True}
+        return await asyncio.to_thread(ssh_hosts.discover, Path.home() / ".ssh")
+
     @app.post("/api/ssh/install")
     async def ssh_install(body: ConfirmInput) -> dict[str, Any]:
         if not body.confirm:
@@ -755,10 +847,10 @@ def create_app(
         return store().save_settings(body.model_dump(exclude_unset=True))
 
     @app.get("/api/health")
-    async def health() -> dict[str, Any]:
+    async def health(since: str | None = None) -> Response:
         sources = store().sources()
         enabled = {source["id"] for source in sources if source["enabled"]}
-        return {
+        result = {
             "status": "ok",
             "application": "ComputeDeck",
             "server_host": platform.node(),
@@ -779,6 +871,7 @@ def create_app(
             },
             "unreadable_rows": store().unreadable_rows(),
         }
+        return poll_response(result, since)
 
     def plugin_context(plugin_id: str) -> plugin_host.PluginContext:
         context = next((item for item in contexts if item.id == plugin_id), None)
@@ -787,8 +880,10 @@ def create_app(
         return context
 
     @app.get("/api/toolbox")
-    async def toolbox_list() -> list[dict[str, Any]]:
-        return [toolbox.entry(context, runtime) for context in contexts]
+    async def toolbox_list(since: str | None = None) -> Response:
+        return poll_response(
+            revised_rows([toolbox.entry(context, runtime) for context in contexts]), since
+        )
 
     @app.put("/api/toolbox/{plugin_id}")
     async def toolbox_update(plugin_id: str, body: toolbox.ToolboxUpdate) -> dict[str, Any]:
@@ -859,6 +954,7 @@ def create_app(
         job: str | None = None,
         range: Literal["24h", "7d", "30d"] | None = None,
         since: datetime | None = None,
+        until: datetime | None = None,
         q: str | None = Query(default=None, max_length=64),
     ) -> list[dict[str, Any]]:
         def with_delivery(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -885,8 +981,14 @@ def create_app(
                 since = since.replace(tzinfo=since.tzinfo or UTC).astimezone(UTC)
             except OverflowError:
                 raise HTTPException(422, message("event_since_invalid")) from None
+        if until is not None:
+            try:
+                until = until.replace(tzinfo=until.tzinfo or UTC).astimezone(UTC)
+            except OverflowError:
+                raise HTTPException(422, message("event_until_invalid")) from None
         if range:
-            cutoff = datetime.now(UTC) - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
+            current = demo_now() if demo else datetime.now(UTC)
+            cutoff = current - timedelta(days={"24h": 1, "7d": 7, "30d": 30}[range])
             since = max(since, cutoff) if since else cutoff
         filters: dict[str, Any] = dict(
             types=type,
@@ -895,6 +997,7 @@ def create_app(
             cluster_id=cluster_id,
             job=job,
             since=since.isoformat() if since else None,
+            until=until.isoformat() if until else None,
             q=q,
             include_changes=include_changes,
         )
@@ -921,6 +1024,7 @@ def create_app(
                 cluster_id is not None,
                 job is not None,
                 since,
+                until,
                 q,
             )
         ):
@@ -963,6 +1067,10 @@ def demo_dashboard() -> dict[str, Any]:
 
 def demo_nodes() -> list[dict[str, Any]]:
     return demo.nodes()
+
+
+def demo_ssh_hosts() -> list[dict[str, Any]]:
+    return demo.ssh_hosts()
 
 
 def demo_events() -> list[dict[str, Any]]:

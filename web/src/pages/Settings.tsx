@@ -1,82 +1,48 @@
-import { useState } from 'react';
-import { ArrowDownToLine, ArrowRight } from 'lucide-react';
+import { ClockText } from '../data/ClockText';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, isLocale, locales, t } from '../i18n';
 import { relativeTime } from '../domain';
-import { routeHash } from '../routes';
+import { readClock, saveClock, type Clock } from '../format';
 import { Panel, Status } from '../ui';
+import { readTheme, readDensity, saveTheme, saveDensity, THEME_EVENT } from '../theme/preferences';
+import type { Theme, Density } from '../theme/preferences';
 import type { Ctx } from './shared';
 
 export function SettingsPage({ ctx }: { ctx: Ctx }) {
   const { data, remote, health, demo, busy } = ctx;
-  const panels = demo ? [] : ctx.webPlugins.filter((plugin) => plugin.settings);
+  const panels =
+    demo && !__TEST_PLUGIN_SLOTS__ ? [] : ctx.webPlugins.filter((plugin) => plugin.settings);
   return (
-    <div className="grid wide-narrow settings">
-      <div className="stack">
-        <Panel title={t('settings.sources')}>
-          <div className="setting-row">
-            <p>
-              {demo
-                ? t('settings.sourcesMovedExample')
-                : t('settings.sourcesMoved', { count: data.sources.length })}
-            </p>
-            <a className="button" href={routeHash('sources')}>
-              {t('sources.open')} <ArrowRight size={13} />
-            </a>
+    // One column of sections: a heading, then each field's label over its control.
+    <div className="settings">
+      {panels.map((plugin) => {
+        const Settings = plugin.settings!;
+        return (
+          <div className="plugin-slot" data-plugin={plugin.id} key={plugin.id}>
+            <Settings {...ctx.plugin} />
           </div>
-        </Panel>
-        {panels.map((plugin) => {
-          const Settings = plugin.settings!;
-          return <Settings key={plugin.id} {...ctx.plugin} />;
-        })}
-        <LowUseSettings
-          key={`${data.low_use_settings?.threshold}:${data.low_use_settings?.window_minutes}`}
-          ctx={ctx}
-        />
-        <Panel title={t('settings.language')}>
-          <div className="setting-row">
-            <p>{t('settings.languageHint')}</p>
-            <select
-              className="select"
-              value={ctx.locale}
-              aria-label={t('settings.language')}
-              onChange={(event) => {
-                if (isLocale(event.target.value)) ctx.changeLocale(event.target.value);
-              }}
-            >
-              {locales.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </Panel>
-        <Panel title={t('settings.ssh')}>
-          <div className="setting-row">
-            <p>
-              {remote
-                ? t('settings.ssh.remote', { server: ctx.serverName })
-                : t('settings.ssh.local')}
-            </p>
-            <button className="button" onClick={() => void ctx.showSSH()}>
-              {remote ? t('settings.ssh.previewDownload') : t('settings.ssh.preview')}
-            </button>
-          </div>
-        </Panel>
-        <Panel title={t('settings.backup')}>
-          <div className="setting-row">
-            <p>
-              {remote
-                ? t('settings.backup.remote', { server: ctx.serverName })
-                : t('settings.backup.local')}
-            </p>
-            <button className="button" disabled={busy || demo} onClick={() => void ctx.backup()}>
-              <ArrowDownToLine size={14} /> {t('settings.backup.now')}
-            </button>
-          </div>
-        </Panel>
-      </div>
+        );
+      })}
+      <LowUseSettings
+        key={`${data.low_use_settings?.threshold}:${data.low_use_settings?.window_minutes}`}
+        ctx={ctx}
+      />
+      <AppearanceSettings ctx={ctx} />
+      <Panel>
+        <div className="setting-row">
+          <span>{t('settings.ssh')}</span>
+          <button className="button" onClick={() => void ctx.showSSH()}>
+            {remote ? t('settings.ssh.previewDownload') : t('settings.ssh.preview')}
+          </button>
+        </div>
+        <div className="setting-row">
+          <span>{t('settings.backup')}</span>
+          <button className="button" disabled={busy || demo} onClick={() => void ctx.backup()}>
+            {t('settings.backup.now')}
+          </button>
+        </div>
+      </Panel>
       <Panel
         title={
           remote ? t('settings.service.remote', { server: ctx.serverName }) : t('settings.service')
@@ -121,7 +87,9 @@ export function SettingsPage({ ctx }: { ctx: Ctx }) {
           </div>
           <div>
             <dt>{t('settings.service.started')}</dt>
-            <dd>{relativeTime(health?.started_at)}</dd>
+            <dd>
+              <ClockText>{() => relativeTime(health?.started_at)}</ClockText>
+            </dd>
           </div>
         </dl>
         {health?.database_path && (
@@ -164,42 +132,142 @@ function LowUseSettings({ ctx }: { ctx: Ctx }) {
           }
         }}
       >
-        <p className="panel-note">{t('lowUse.settingsHint')}</p>
         <div className="setting-row">
-          <label>
-            {t('lowUse.threshold')}
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={50}
-              step={1}
-              required
-              disabled={ctx.demo || saving}
-              value={threshold}
-              onChange={(event) => setThreshold(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            {t('lowUse.window')}
-            <input
-              className="input"
-              type="number"
-              min={30}
-              max={360}
-              step={1}
-              required
-              disabled={ctx.demo || saving}
-              value={windowMinutes}
-              onChange={(event) => setWindowMinutes(Number(event.target.value))}
-            />
-          </label>
-          <button className="button" disabled={ctx.demo || ctx.busy || saving}>
+          <label htmlFor="low-use-threshold">{t('lowUse.threshold')}</label>
+          <input
+            id="low-use-threshold"
+            className="input"
+            type="number"
+            min={1}
+            max={50}
+            step={1}
+            required
+            disabled={ctx.demo || saving}
+            value={threshold}
+            onChange={(event) => setThreshold(Number(event.target.value))}
+          />
+        </div>
+        <div className="setting-row">
+          <label htmlFor="low-use-window">{t('lowUse.window')}</label>
+          <input
+            id="low-use-window"
+            className="input"
+            type="number"
+            min={30}
+            max={360}
+            step={1}
+            required
+            disabled={ctx.demo || saving}
+            value={windowMinutes}
+            onChange={(event) => setWindowMinutes(Number(event.target.value))}
+          />
+        </div>
+        <div className="setting-row">
+          <button
+            className="button small"
+            disabled={
+              ctx.demo ||
+              ctx.busy ||
+              saving ||
+              // Nothing to save until a value changes.
+              (threshold === (ctx.data.low_use_settings?.threshold ?? 10) &&
+                windowMinutes === (ctx.data.low_use_settings?.window_minutes ?? 60))
+            }
+          >
             {t('common.save')}
           </button>
         </div>
         {message && <p role="alert">{message}</p>}
       </form>
+    </Panel>
+  );
+}
+
+function AppearanceSettings({ ctx }: { ctx: Ctx }) {
+  const [theme, setTheme] = useState(readTheme);
+  // The sidebar's switch changes the same preference.
+  useEffect(() => {
+    const sync = () => setTheme(readTheme());
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
+  const [density, setDensity] = useState(readDensity);
+  const [clock, setClock] = useState(readClock);
+  return (
+    <Panel title={t('settings.appearance')}>
+      <div className="setting-row">
+        <label htmlFor="appearance-theme">{t('settings.theme')}</label>
+        <select
+          id="appearance-theme"
+          value={theme}
+          onChange={(event) => {
+            const value = event.target.value as Theme;
+            saveTheme(value);
+            setTheme(value);
+          }}
+        >
+          {(['system', 'light', 'dark'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.theme.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <label htmlFor="appearance-density">{t('settings.density')}</label>
+        <select
+          id="appearance-density"
+          value={density}
+          onChange={(event) => {
+            const value = event.target.value as Density;
+            saveDensity(value);
+            setDensity(value);
+          }}
+        >
+          {(['comfortable', 'compact'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.density.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <label htmlFor="appearance-clock">{t('settings.clock')}</label>
+        <select
+          id="appearance-clock"
+          value={clock}
+          onChange={(event) => {
+            const value = event.target.value as Clock;
+            saveClock(value);
+            setClock(value);
+          }}
+        >
+          {(['24', '12'] as const).map((value) => (
+            <option key={value} value={value}>
+              {t(`settings.clock.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <label htmlFor="settings-language">{t('settings.language')}</label>
+        <select
+          id="settings-language"
+          className="select"
+          aria-label={t('settings.language')}
+          value={ctx.pendingLocale ?? ctx.locale}
+          aria-busy={!!ctx.pendingLocale}
+          onChange={(event) => {
+            if (isLocale(event.target.value)) ctx.changeLocale(event.target.value);
+          }}
+        >
+          {locales.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </Panel>
   );
 }

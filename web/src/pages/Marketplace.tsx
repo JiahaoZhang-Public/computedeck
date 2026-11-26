@@ -1,7 +1,9 @@
-import { useDialogFocus } from '../useDialogFocus';
+import { ClockText } from '../data/ClockText';
+import { ContextPanel } from '../layers/Surface';
+import { openLayer, closeLayer } from '../layers/routes';
 import { useEffect, useState } from 'react';
 import { useRouteParam } from '../useRouteParam';
-import { Copy, Puzzle, X } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 import type { MarketPlugin, Marketplaces } from '../types';
 import { api } from '../api';
 import { errorText, localized, t } from '../i18n';
@@ -25,7 +27,7 @@ function Command({ text, ctx }: { text: string; ctx: Ctx }) {
       <button
         className="icon-button"
         aria-label={t('common.copy')}
-        onClick={() => void ctx.copy(text)}
+        onClick={() => void ctx.copy(text, { kind: 'command' })}
       >
         <Copy size={13} />
       </button>
@@ -62,77 +64,63 @@ function PluginDrawer({
   ctx: Ctx;
   onClose: () => void;
 }) {
-  const dialog = useDialogFocus();
   const status = state(plugin);
   const installable =
     !plugin.blocked && plugin.compatible && (!plugin.installed_version || plugin.update);
   return (
-    <div className="drawer-overlay" onMouseDown={onClose}>
-      <aside
-        className="drawer tool-drawer"
-        ref={dialog}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="plugin-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="drawer-header">
-          <div className="tool-drawer-title">
-            <span className="tool-icon large">
-              <Puzzle size={20} />
+    <ContextPanel labelledBy="plugin-title" close={onClose} className="tool-drawer">
+      <header className="drawer-header">
+        <div className="tool-drawer-title">
+          <div>
+            <h2 id="plugin-title">{localized(plugin.display_name ?? {}) || plugin.name}</h2>
+            <span className="tool-meta">
+              <TierTag tier={plugin.tier} />{' '}
+              {[
+                `${plugin.name}@${plugin.marketplace}`,
+                `v${plugin.version}`,
+                plugin.author,
+                plugin.license,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
-            <div>
-              <h2 id="plugin-title">{localized(plugin.display_name ?? {}) || plugin.name}</h2>
-              <span className="tool-meta">
-                <TierTag tier={plugin.tier} />{' '}
-                {[
-                  `${plugin.name}@${plugin.marketplace}`,
-                  `v${plugin.version}`,
-                  plugin.author,
-                  plugin.license,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            </div>
           </div>
-          <button className="icon-button" aria-label={t('common.close')} onClick={onClose}>
-            <X size={16} />
-          </button>
-        </header>
-        <div className="drawer-body">
-          <p className={status.tone}>{status.text}</p>
-          {plugin.description && <p>{localized(plugin.description)}</p>}
-          {plugin.permissions.length > 0 && (
-            <section className="tool-permissions">
-              <h3>{t('toolbox.permissions')}</h3>
-              <ul>
-                {plugin.permissions.map((item) => (
-                  <li key={localized(item)}>{localized(item)}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-          {installable && (
-            <section className="tool-permissions">
-              <h3>{t('market.howToInstall')}</h3>
-              <p className="muted">{t('market.installNote', { where: ctx.serverName })}</p>
-              <Command text={plugin.command} ctx={ctx} />
-            </section>
-          )}
-          <p className="tool-meta">
-            {t('market.source', { kind: plugin.source_type })}
-            {plugin.requires && ` · ComputeDeck ${plugin.requires}`}
-          </p>
-          {plugin.homepage && /^https:\/\//.test(plugin.homepage) && (
-            <a className="link" href={plugin.homepage} target="_blank" rel="noreferrer">
-              {t('toolbox.homepage')}
-            </a>
-          )}
         </div>
-      </aside>
-    </div>
+        <button className="icon-button" aria-label={t('common.close')} onClick={onClose}>
+          <X size={16} />
+        </button>
+      </header>
+      <div className="drawer-body">
+        <p className={status.tone}>{status.text}</p>
+        {plugin.description && <p>{localized(plugin.description)}</p>}
+        {plugin.permissions.length > 0 && (
+          <section className="tool-permissions">
+            <h3>{t('toolbox.permissions')}</h3>
+            <ul>
+              {plugin.permissions.map((item) => (
+                <li key={localized(item)}>{localized(item)}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {installable && (
+          <section className="tool-permissions">
+            <h3>{t('market.howToInstall')}</h3>
+            <p className="muted">{t('market.installNote', { where: ctx.serverName })}</p>
+            <Command text={plugin.command} ctx={ctx} />
+          </section>
+        )}
+        <p className="tool-meta">
+          {t('market.source', { kind: plugin.source_type })}
+          {plugin.requires && ` · ComputeDeck ${plugin.requires}`}
+        </p>
+        {plugin.homepage && /^https:\/\//.test(plugin.homepage) && (
+          <a className="link" href={plugin.homepage} target="_blank" rel="noreferrer">
+            {t('toolbox.homepage')}
+          </a>
+        )}
+      </div>
+    </ContextPanel>
   );
 }
 
@@ -141,16 +129,14 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
   const [data, setData] = useState<Marketplaces | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useRouteParam('market-q');
-  const [open, setOpen] = useState<MarketPlugin | null>(null);
+  const [openId] = useRouteParam('plugin');
+  const open = data?.plugins.find((plugin) => `${plugin.name}@${plugin.marketplace}` === openId);
+  const setOpen = (plugin: MarketPlugin | null) =>
+    plugin ? openLayer({ plugin: `${plugin.name}@${plugin.marketplace}` }) : closeLayer(['plugin']);
   useEffect(() => {
     api<Marketplaces>('/marketplace')
       .then(setData)
       .catch((reason) => setError(errorText(reason, 'error.service')));
-  }, []);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setOpen(null);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, []);
   if (error) return <p className="page-note red-text">{error}</p>;
   if (!data) return <p className="page-note">{t('chart.loading')}</p>;
@@ -206,7 +192,8 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
           <span key={market.name} className="market-source" title={market.source}>
             <strong>{market.name}</strong> <TierTag tier={market.tier} />
             <small>
-              {t('market.count', { count: market.plugins })} · {relativeTime(market.updated_at)}
+              {t('market.count', { count: market.plugins })} ·{' '}
+              <ClockText>{() => relativeTime(market.updated_at)}</ClockText>
             </small>
           </span>
         ))}
@@ -231,9 +218,6 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
           return (
             <article key={`${plugin.name}@${plugin.marketplace}`} className="tool-tile">
               <button className="tool-tile-main" onClick={() => setOpen(plugin)}>
-                <span className="tool-icon">
-                  <Puzzle size={18} />
-                </span>
                 <span className="tool-tile-text">
                   <strong>
                     {localized(plugin.display_name ?? {}) || plugin.name}{' '}
@@ -254,6 +238,14 @@ export function MarketplaceTab({ ctx }: { ctx: Ctx }) {
       </div>
       {!plugins.length && <p className="page-note">{t('market.noMatch')}</p>}
       <p className="page-note">{t('market.installNote', { where: ctx.serverName })}</p>
+      {openId && !open && (
+        <ContextPanel labelledBy="plugin-title" close={() => setOpen(null)}>
+          <h2 id="plugin-title">{t('drawer.unavailable')}</h2>
+          <button className="button" onClick={() => setOpen(null)}>
+            {t('common.close')}
+          </button>
+        </ContextPanel>
+      )}
       {open && <PluginDrawer plugin={open} ctx={ctx} onClose={() => setOpen(null)} />}
     </>
   );

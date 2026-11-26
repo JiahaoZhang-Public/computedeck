@@ -72,6 +72,38 @@ function dom(html: string) {
   element.innerHTML = html;
   return element;
 }
+/** The day table under its `h3` heading ("GPU-hours" or "Estimated spend"). */
+function dayTable(html: Element, heading: string) {
+  const title = [...html.querySelectorAll('h3')].find((h3) => h3.textContent === heading);
+  return title?.nextElementSibling?.querySelector('table') ?? null;
+}
+/** The cell of `row` under the column headed `header`: one value per cell. */
+function cellOf(row: Element, header: string) {
+  const headers = [...row.closest('table')!.querySelectorAll('thead th')].map(
+    (th) => th.textContent,
+  );
+  expect(headers).toContain(header);
+  return row.children[headers.indexOf(header)] as HTMLElement;
+}
+/** A day table's column: one cell per day row, and the tfoot total. */
+function column(table: Element | null, header: string) {
+  expect(table).not.toBeNull();
+  return {
+    cells: [...table!.querySelectorAll('tbody tr')].map((row) => cellOf(row, header)),
+    total: cellOf(table!.querySelector('tfoot tr')!, header),
+  };
+}
+/** A stat tile's value; its label carries the meaning (and the currency when several). */
+function tile(html: Element, label: string) {
+  return [...html.querySelectorAll('.stat')]
+    .find((stat) => stat.querySelector('.stat-label')?.textContent === label)
+    ?.querySelector('.stat-value');
+}
+function panel(html: Element, title: string) {
+  return [...html.querySelectorAll('.panel')].find(
+    (panel) => panel.querySelector('h2')?.textContent === title,
+  );
+}
 
 it('clips hourly buckets, sums currencies separately, and keeps unobserved hours unknown', () => {
   const result = usageTotal(rollups(), end - 2 * hour, end);
@@ -137,11 +169,14 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       (day, index) =>
         `${calendarDate(day.label)} · ${t(index ? 'usage.dayUntil' : 'usage.dayFrom', { time })}`,
     );
-    for (const bars of html.querySelectorAll('.ranked-bars')) {
-      for (const [index, row] of [...bars.querySelectorAll('li')].entries()) {
-        expect(row.textContent).toContain(labels[index]);
-        expect(row.textContent).toContain(t('usage.coverage', { percent: 100 }));
-      }
+    for (const heading of [t('usage.gpuHours'), t('usage.estimatedSpend')]) {
+      const table = dayTable(html, heading);
+      expect(table).not.toBeNull();
+      expect(
+        [...table!.querySelectorAll('tbody tr')].map((row) => row.querySelector('td')?.textContent),
+      ).toEqual(labels);
+      // A fully observed day carries no caption; only gaps are called out.
+      expect(table!.querySelectorAll('[title]')).toHaveLength(0);
     }
   });
 
@@ -158,38 +193,54 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     setLocale(locale);
     const ctx = context();
     const html = dom(renderToStaticMarkup(<UsagePage ctx={ctx} />));
-    const blocks = [...html.querySelectorAll('.usage-block')];
+    const spend = panel(html, t('usage.spendNow'))!;
+    // One bar list per currency, in the order of the current rates.
+    const currencies = Object.keys(ctx.data.summary.spend!.rates);
+    expect([...currencies].sort()).toEqual(['EUR', 'USD']);
+    const lists = [...spend.querySelectorAll('.ranked-bars')];
+    expect(lists).toHaveLength(currencies.length);
+    const bars = (currency: string) => lists[currencies.indexOf(currency)];
+    const values = (currency: string) =>
+      [...bars(currency).querySelectorAll('.ranked-value')].map((row) => row.textContent);
     for (const currency of ['USD', 'EUR']) {
-      const block = blocks.find((block) =>
-        block.querySelector('h3')?.textContent?.includes(currency),
-      )!;
-      expect(block.querySelector('h3')?.textContent?.match(new RegExp(currency, 'g'))).toHaveLength(
-        1,
-      );
-      const values = [...block.querySelectorAll('.ranked-value')].map((row) => row.textContent);
-      expect(values).toContain(
+      // The currency is printed once, in the tile label; values carry only the symbol.
+      for (const label of [t('cost.now'), t('usage.perDay')]) {
+        const value = tile(html, `${label} · ${currency}`);
+        expect(value).toBeTruthy();
+        expect(value!.textContent).not.toContain(currency);
+      }
+      expect(values(currency)).toContain(
         `${currency === 'USD' ? '≥ ' : ''}${t('usage.hourlyRate', { price: money(currency === 'USD' ? 1.04 : 0.4, currency) })}`,
       );
+      for (const value of values(currency)) expect(value).not.toContain(currency);
     }
-    const usd = blocks.find((block) => block.querySelector('h3')?.textContent?.includes('USD'))!;
-    expect(usd.querySelector('.ranked-bars')?.textContent).not.toContain('Lab workstation');
-    expect(usd.querySelector('.ranked-bars')?.textContent).not.toContain('Example EC2');
+    expect(bars('USD').textContent).not.toContain('Lab workstation');
+    expect(bars('USD').textContent).not.toContain('Example EC2');
     expect(html.textContent).toContain('Example EC2');
-    expect([...usd.querySelectorAll('.ranked-value')].map((row) => row.textContent)).not.toContain(
-      '—',
-    );
-    const eur = blocks.find((block) => block.querySelector('h3')?.textContent?.includes('EUR'))!;
-    expect(eur.querySelector('.ranked-bars')?.textContent).not.toMatch(/RunPod|Example EC2/);
-    const manual = [...html.querySelectorAll('.usage-instances li')].find((row) =>
-      row.textContent?.includes('dev-box'),
+    expect(values('USD')).not.toContain('—');
+    expect(bars('EUR').textContent).not.toMatch(/RunPod|Example EC2/);
+    // A hand-added machine has no tracked run: run time and cost so far stay unknown.
+    const manual = [...spend.querySelectorAll('tbody tr')].find(
+      (row) => row.querySelector('strong')?.textContent === 'dev-box',
     )!;
-    expect(manual.textContent).toBe(manual.querySelector('button')?.textContent);
+    expect(cellOf(manual, t('usage.col.rate')).textContent).toBe(
+      t('usage.hourlyRate', { price: money(0.4, 'EUR') }),
+    );
+    expect(cellOf(manual, t('usage.col.runningFor')).textContent).toBe('—');
+    expect(cellOf(manual, t('usage.col.costSoFar')).textContent).toBe('—');
     const daily = dom(
       renderToStaticMarkup(<UsageHistory rollups={rollups()} hours={24} ctx={ctx} />),
     );
-    for (const heading of daily.querySelectorAll('h4')) {
-      expect(heading.textContent?.match(/USD|EUR/g)).toHaveLength(1);
-    }
+    const labels = [...daily.querySelectorAll('.stat-label')];
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(label.textContent?.match(/USD|EUR/g)).toHaveLength(1);
+    // Daily spend keeps one column per currency; the cells hold only the amount.
+    const table = dayTable(daily, t('usage.estimatedSpend'))!;
+    expect([...table.querySelectorAll('thead th')].slice(1).map((th) => th.textContent)).toEqual([
+      'EUR',
+      'USD',
+    ]);
+    for (const td of table.querySelectorAll('td')) expect(td.textContent).not.toMatch(/USD|EUR/);
   });
 
   it('scales fractional values to the largest row and leaves zero or unknown tracks empty', () => {
@@ -232,11 +283,15 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     const html = dom(
       renderToStaticMarkup(<UsageHistory rollups={data} hours={1} ctx={context()} />),
     );
-    const notes = [...html.querySelectorAll('.ranked-note')];
-    expect(notes.length).toBeGreaterThan(0);
-    expect(notes.every((note) => note.textContent === t('usage.coverage', { percent: 100 }))).toBe(
-      true,
+    // Truncated timestamps count as full coverage, so no day cell claims a gap.
+    const tables = [t('usage.gpuHours'), t('usage.estimatedSpend')].map((heading) =>
+      dayTable(html, heading),
     );
+    for (const table of tables) {
+      expect(table?.querySelectorAll('tbody tr').length).toBeGreaterThan(0);
+      expect(table!.querySelectorAll('[title]')).toHaveLength(0);
+    }
+    expect(html.innerHTML).not.toContain(t('usage.coverage', { percent: 99 }));
   });
 
   it('formats GPU-hours concisely and leaves unknown units out', () => {
@@ -256,9 +311,10 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       const data = rollups();
       data.buckets[1].groups['example:cluster-a'].gpu_hours = value;
       const html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={ctx} />));
-      expect(html.querySelector('summary')?.textContent).toBe(
-        `Cluster A · ${value == null ? '—' : `≥ ${text} ${t('usage.gpuHourUnit')}`}`,
-      );
+      // The unit is the table heading; the Cluster A total holds only the number.
+      const { total } = column(dayTable(html, t('usage.gpuHours')), 'Cluster A');
+      expect(total.textContent).toBe(value == null ? '—' : `≥ ${text}`);
+      expect(total.textContent).not.toContain('GPU-hours');
     }
   });
 
@@ -285,18 +341,22 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     let html = dom(
       renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
     );
-    expect(html.querySelector('.usage-daily .ranked-note')?.textContent).toBe(
-      t('usage.notMeasured'),
-    );
-    expect(html.querySelector('summary')?.textContent).toBe('Cluster A · —');
+    let gpu = column(dayTable(html, t('usage.gpuHours')), 'Cluster A');
+    expect(gpu.cells).toHaveLength(1);
+    // Observed but never measured: unknown, and the cell's title says why.
+    expect(gpu.cells[0].textContent).toBe('—');
+    expect(gpu.cells[0].getAttribute('title')).toBe(t('usage.notMeasured'));
+    expect(gpu.total.textContent).toBe('—');
     Object.assign(data.buckets[0].groups['example:cluster-a'], {
       gpu_hours: 2,
       gpu_observed_seconds: 3600,
     });
     html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />));
-    expect(html.querySelector('.usage-daily .ranked-note')?.textContent).toBe(
-      t('usage.coverage', { percent: 4 }),
-    );
+    gpu = column(dayTable(html, t('usage.gpuHours')), 'Cluster A');
+    // Only the measured hour counts: a lower bound whose title discloses the coverage gap.
+    expect(gpu.cells[0].textContent).toBe('≥ 2');
+    expect(gpu.cells[0].getAttribute('title')).toBe(t('usage.coverage', { percent: 4 }));
+    expect(gpu.total.textContent).toBe('≥ 2');
   });
 
   it.each([4.35, 0.29, 66.6 - 1e-12])(
@@ -309,10 +369,11 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
         renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={context()} />),
       );
       const expected = `≥ ${money(value, 'USD')}`;
-      expect(html.querySelector('h4')?.textContent).toBe(`${expected} · USD`);
-      expect(
-        [...html.querySelectorAll('.ranked-value')].some((row) => row.textContent === expected),
-      ).toBe(true);
+      // The USD column total and its day cell keep exact cents; so does the seven-day tile.
+      const usd = column(dayTable(html, t('usage.estimatedSpend')), 'USD');
+      expect(usd.total.textContent).toBe(expected);
+      expect(usd.cells.some((cell) => cell.textContent === expected)).toBe(true);
+      expect(tile(html, t('usage.sevenDays'))?.textContent).toBe(expected);
       expect(money(value, 'USD', true)).toBe(money(value, 'USD'));
       expect(money(value, 'invalid', true)).toBe(`invalid ${value.toFixed(2)}`);
       expect(money(1.239, 'invalid', true)).toBe('invalid 1.23');
@@ -328,18 +389,38 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     const ctx = context();
     ctx.groups = ctx.groups.filter((group) => group.key !== 'platform:lab workstation');
     const html = dom(renderToStaticMarkup(<UsageHistory rollups={data} hours={24} ctx={ctx} />));
-    expect(html.querySelector('summary')?.textContent).toContain(
+    const gpu = dayTable(html, t('usage.gpuHours'))!;
+    expect([...gpu.querySelectorAll('thead th')].map((th) => th.textContent)).toContain(
       t('usage.removedGroup', { name: 'lab workstation' }),
     );
     expect(html.textContent).not.toContain('platform:');
-    expect(html.querySelector('h4')?.textContent).toBe(`≥ ${money(1.23, 'USD')} · USD`);
-    expect(
-      [...html.querySelectorAll('.ranked-value')].some(
-        (row) => row.textContent === `≥ ${money(1.23, 'USD')}`,
-      ),
-    ).toBe(true);
+    const usd = column(dayTable(html, t('usage.estimatedSpend')), 'USD');
+    expect(usd.total.textContent).toBe(`≥ ${money(1.23, 'USD')}`);
+    expect(usd.cells.some((cell) => cell.textContent === `≥ ${money(1.23, 'USD')}`)).toBe(true);
     expect(money(1.239, 'USD')).toBe(money(1.24, 'USD'));
   });
+
+  it.each(['', '2026-01-14T14:00:00Z'])(
+    'requests only current week rollups beside the selected chart (end=%s)',
+    async (at) => {
+      setLocale(locale);
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      const suffix = at ? `&end=${encodeURIComponent(at)}` : '';
+      window.history.replaceState(null, '', `/#/usage?range=24h${suffix}`);
+      vi.mocked(api).mockResolvedValue({ points: [], rollups: rollups() });
+      const host = document.createElement('div'),
+        root = createRoot(host);
+      try {
+        await act(async () => root.render(<UsagePage ctx={context()} />));
+        expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+          `/history?hours=24&rollup=1&chart=1&demo=false${suffix}`,
+          '/history?hours=168&rollup=1&demo=false',
+        ]);
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
 
   it.each([
     ['7d', 168],
@@ -357,7 +438,7 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
       try {
         await act(async () => root.render(<UsagePage ctx={ctx} />));
         expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
-          `/history?hours=${hours}&rollup=1&demo=false`,
+          `/history?hours=${hours}&rollup=1&chart=1&demo=false`,
         ]);
         expect(host.querySelector('.panel .panel')).toBeNull();
         expect(host.querySelector('.usage-trend h3')?.textContent).toBe(t('chart.heading'));
@@ -383,10 +464,19 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
         <UsageHistory rollups={selected} week={week} hours={24} ctx={context()} />,
       ),
     );
-    const stat = html.querySelectorAll('.stat')[1];
-    expect(stat.textContent).toContain(`≥ ${money(1, 'USD')} · USD`);
-    expect(stat.textContent).toContain(`≥ ${money(3, 'EUR')} · EUR`);
-    expect(stat.textContent).toContain(t('usage.coverage', { percent: 0 }));
+    // One seven-day tile per currency; the partial figure itself opens its coverage gap.
+    const coverage = t('usage.coverage', { percent: 0 });
+    for (const [currency, amount] of [
+      ['USD', 1],
+      ['EUR', 3],
+    ] as const) {
+      const value = tile(html, `${t('usage.sevenDays')} · ${currency}`)!;
+      expect(value.textContent).toBe(`≥ ${money(amount, currency)}`);
+      const trigger = value.querySelector('button.partial')!;
+      expect(trigger.getAttribute('title')).toBe(coverage);
+      expect(trigger.getAttribute('aria-label')).toBe(`≥ ${money(amount, currency)}, ${coverage}`);
+      expect(value.querySelector('[role="img"]')).toBeNull();
+    }
   });
 
   it.each([
@@ -450,25 +540,35 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     let html = dom(renderToStaticMarkup(<UsagePage ctx={ctx} />));
     expect(html.textContent).toContain('123');
     expect(html.textContent).toContain(t('usage.spendNow'));
-    expect(html.textContent).toContain(
-      t('cost.rate', { price: money(0.4, 'EUR'), currency: 'EUR' }),
+    // Unpriced instances keep every current rate a lower bound, currency by currency.
+    expect(tile(html, `${t('cost.now')} · EUR`)?.textContent).toBe(
+      `≥ ${t('usage.hourlyRate', { price: money(0.4, 'EUR', true) })}`,
     );
     expect(Object.keys(ctx.data.summary.groups).sort()).toEqual(
       ctx.groups.map((group) => group.key).sort(),
     );
-    expect(html.querySelector('table')).toBeNull();
+    // The only table is the priced instances' costs: one row each, the drawer has the rest.
+    expect(html.querySelectorAll('table')).toHaveLength(1);
+    expect([...html.querySelectorAll('table thead th')].map((th) => th.textContent)).toEqual([
+      t('cloud.col.instance'),
+      t('usage.col.rate'),
+      t('usage.col.runningFor'),
+      t('usage.col.costSoFar'),
+    ]);
     expect(html.textContent).not.toContain(locale === 'en' ? 'Instance prices' : '实例单价');
-    expect(html.querySelector('.usage-instances')?.textContent).toContain(pod.name);
-    expect(html.textContent).toContain(
-      t('usage.projection', { amount: `≥ ${money(24.96, 'USD')}`, currency: 'USD' }),
-    );
+    const costRow = () => html.querySelector(`tbody tr[data-detail-id="${pod.id}"]`);
+    expect(costRow()?.querySelector('strong')?.textContent).toBe(pod.name);
+    // The projection is labelled by its tile, and stays a lower bound.
+    expect(tile(html, `${t('usage.perDay')} · USD`)?.textContent).toBe(`≥ ${money(24.96, 'USD')}`);
     source.enabled = false;
     html = dom(renderToStaticMarkup(<UsagePage ctx={ctx} />));
-    expect(html.querySelector('.usage-instances')?.textContent).not.toContain(pod.name);
+    expect(html.querySelectorAll('table tbody tr').length).toBeGreaterThan(0);
+    expect(costRow()).toBeNull();
     source.enabled = true;
     pod.state = 'unknown';
     html = dom(renderToStaticMarkup(<UsagePage ctx={ctx} />));
-    expect(html.querySelector('.usage-instances')?.textContent).not.toContain(pod.name);
+    expect(html.querySelectorAll('table tbody tr').length).toBeGreaterThan(0);
+    expect(costRow()).toBeNull();
   });
 
   it('renders daily lower bounds, coverage, unknowns, currencies and pre-upgrade days', () => {
@@ -478,18 +578,30 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     const html = dom(
       renderToStaticMarkup(<UsageHistory rollups={rollups()} hours={168} ctx={ctx} />),
     );
-    expect(html.textContent).toContain(t('usage.historyEstimate'));
-    expect(html.textContent).toContain(t('usage.notRecorded'));
-    expect(html.textContent).toContain('USD');
-    expect(html.textContent).toContain('EUR');
-    expect(html.querySelector('summary')?.textContent).toContain(`≥ 2 ${t('usage.gpuHourUnit')}`);
-    expect(html.querySelectorAll('.ranked-track.partial').length).toBeGreaterThan(0);
+    const gpu = dayTable(html, t('usage.gpuHours'))!;
+    const spend = dayTable(html, t('usage.estimatedSpend'))!;
+    // Days before recording began: unknown dashes whose title says "not recorded".
+    for (const table of [gpu, spend]) {
+      const first = [...table.querySelectorAll('tbody tr')][0];
+      const cells = [...first.querySelectorAll('td')].slice(1);
+      expect(cells.length).toBeGreaterThan(0);
+      for (const cell of cells) {
+        expect(cell.textContent).toBe('—');
+        expect(cell.getAttribute('title')).toBe(t('usage.notRecorded'));
+      }
+    }
+    // Currencies stay in separate columns, each a lower bound.
+    expect(column(spend, 'USD').total.textContent).toBe(`≥ ${money(1, 'USD')}`);
+    expect(column(spend, 'EUR').total.textContent).toBe(`≥ ${money(3, 'EUR')}`);
+    expect(column(gpu, 'Cluster A').total.textContent).toBe('≥ 2');
+    expect(column(gpu, 'Cluster A').cells.at(-1)?.textContent).toBe('≥ 2');
     const lastDay = usageDays(end - 168 * hour, end).at(-1)!;
-    expect(html.textContent).toContain(
-      t('usage.coverage', {
-        percent: Math.floor((1800 / ((lastDay.end - lastDay.start) / 1000)) * 100),
-      }),
-    ); // 30 min of this 12-hour day.
+    const coverage = t('usage.coverage', {
+      percent: Math.floor((1800 / ((lastDay.end - lastDay.start) / 1000)) * 100),
+    }); // 30 min of this 12-hour day.
+    expect(column(gpu, 'Cluster A').cells.at(-1)?.getAttribute('title')).toBe(coverage);
+    expect(column(spend, 'USD').cells.at(-1)?.getAttribute('title')).toBe(coverage);
+    expect(column(spend, 'EUR').cells.at(-1)?.getAttribute('title')).toBe(coverage);
   });
 
   it('keeps range in the URL, ignores late responses, retries errors and opens instance buttons', async () => {
@@ -510,8 +622,9 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     try {
       await act(async () => root.render(<UsagePage ctx={ctx} />));
       expect(host.textContent).toContain(t('chart.loading'));
+      // Each priced instance row opens its drawer.
       await act(async () =>
-        host.querySelector<HTMLButtonElement>('.usage-instances button')!.click(),
+        host.querySelector<HTMLElement>('tbody tr[data-detail-key="instance"]')!.click(),
       );
       expect(ctx.openInstance).toHaveBeenCalledOnce();
       await act(async () => host.querySelectorAll<HTMLButtonElement>('[role="tab"]')[2].click());
@@ -555,5 +668,7 @@ it('collapses consecutive unrecorded days without merging measured or partly mea
   const ctx = context();
   const html = document.createElement('div');
   html.innerHTML = renderToStaticMarkup(<UsageHistory rollups={data} hours={720} ctx={ctx} />);
-  expect(html.querySelectorAll('.ranked-bars li')).toHaveLength(6);
+  // Both day tables show the merged unrecorded span and the measured day: two rows each.
+  for (const heading of [t('usage.gpuHours'), t('usage.estimatedSpend')])
+    expect(dayTable(html, heading)?.querySelectorAll('tbody tr')).toHaveLength(2);
 });

@@ -1,5 +1,4 @@
-import en from './locales/en';
-import zhCN from './locales/zh-CN';
+import type en from './locales/en';
 
 export type Locale = 'en' | 'zh-CN';
 export type MessageKey = keyof typeof en;
@@ -11,8 +10,27 @@ export const locales: { value: Locale; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'zh-CN', label: '中文' },
 ];
-const dictionaries: Record<Locale, Record<MessageKey, string>> = { en, 'zh-CN': zhCN };
+const dictionaries: Partial<Record<Locale, Record<MessageKey, string>>> = {};
+const pending: Partial<Record<Locale, Promise<void>>> = {};
+
+/** Fetch only a requested dictionary; failed requests can be retried. */
+export function loadLocale(locale: Locale): Promise<void> {
+  if (dictionaries[locale]) return Promise.resolve();
+  return (pending[locale] ??= (locale === 'en' ? import('./locales/en') : import('./locales/zh-CN'))
+    .then((module) => {
+      dictionaries[locale] = module.default;
+    })
+    .catch((error: unknown) => {
+      delete pending[locale];
+      throw error;
+    }));
+}
+
+export function localeLoaded(locale: Locale): boolean {
+  return !!dictionaries[locale];
+}
 const STORAGE_KEY = 'computedeck.locale';
+const SERVER_STORAGE_KEY = 'computedeck.serverLocale';
 let current: Locale = 'en';
 
 export function isLocale(value: unknown): value is Locale {
@@ -21,12 +39,33 @@ export function isLocale(value: unknown): value is Locale {
 
 /** The viewer's own choice on this device, if any. */
 export function storedLocale(): Locale | null {
+  return readStoredLocale(STORAGE_KEY);
+}
+
+function readStoredLocale(key: string): Locale | null {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
+    const value = window.localStorage.getItem(key);
     return isLocale(value) ? value : null;
   } catch {
     return null;
   }
+}
+
+/** A startup hint only; the next settings response remains authoritative. */
+export function rememberedServerLocale(): Locale | null {
+  return readStoredLocale(SERVER_STORAGE_KEY);
+}
+
+export function rememberServerLocale(locale: Locale) {
+  try {
+    window.localStorage.setItem(SERVER_STORAGE_KEY, locale);
+  } catch {
+    /* Storage is optional; the server default still applies to this page. */
+  }
+}
+
+export function startupLocale(): Locale {
+  return storedLocale() ?? rememberedServerLocale() ?? 'en';
 }
 
 export function storeLocale(locale: Locale) {
@@ -38,6 +77,7 @@ export function storeLocale(locale: Locale) {
 }
 
 export function setLocale(locale: Locale) {
+  if (!dictionaries[locale]) throw new Error(`Load the ${locale} dictionary before selecting it`);
   current = locale;
   if (typeof document !== 'undefined') document.documentElement.lang = locale;
 }
@@ -65,8 +105,9 @@ function fill(template: string, params?: Params) {
 export function t(key: MessageKey, params?: Params): string {
   // A `<key>.one` variant, where present, is used for a count of exactly 1.
   const one = `${key}.one`;
-  const chosen = params?.count === 1 && one in en ? (one as MessageKey) : key;
-  return fill(dictionaries[current][chosen] ?? en[chosen], params);
+  const dictionary = dictionaries[current]!;
+  const chosen = params?.count === 1 && one in dictionary ? (one as MessageKey) : key;
+  return fill(dictionary[chosen], params);
 }
 
 /** Text a driver or plugin supplies in several languages; English is the fallback. */
@@ -76,7 +117,7 @@ export function localized(text: Record<string, string> | undefined, params?: Par
 }
 
 export function hasKey(key: string): key is MessageKey {
-  return key in en;
+  return key in dictionaries[current]!;
 }
 
 /** Compact low-use duration, rounded down and omitting zero parts. */
@@ -116,7 +157,9 @@ export function formatMessage(value: Message | string | null | undefined): strin
       params.cost_note = t('lowUse.cost', { cost });
     }
   }
-  const text = hasKey(key) ? t(key, params) : value.code;
+  let text = hasKey(key) ? t(key, params) : value.code;
+  // A failure beyond a jump host names the hop, so the right machine gets checked.
+  if (typeof value.via === 'string' && value.via) text += t('msg.via', { name: value.via });
   return value.detail && !text.includes(value.detail) ? `${text}: ${value.detail}` : text;
 }
 

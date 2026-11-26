@@ -34,8 +34,8 @@ describe('translations', () => {
   });
   it('spaces Latin names and numbers from Chinese text', () => {
     setLocale('zh-CN');
-    expect(t('market.installNote', { where: 'gpu-box' })).toContain('需要在 gpu-box 上用');
-    expect(t('market.installNote', { where: '本机' })).toContain('需要在本机上用');
+    expect(t('market.installNote', { where: 'gpu-box' })).toContain('在 gpu-box 上运行');
+    expect(t('market.installNote', { where: '本机' })).toContain('在本机上运行');
     expect(t('toolbox.turnedOn', { name: '任务提醒' })).toBe('已开启任务提醒');
   });
   it('renders server messages with parameters and keeps untranslated remote detail', () => {
@@ -44,6 +44,18 @@ describe('translations', () => {
       'SSH failed: Permission denied',
     );
     expect(formatMessage({ code: 'brand_new_code' })).toBe('brand_new_code');
+    // A failure beyond a jump host names the hop, before the remote detail.
+    expect(
+      formatMessage({ code: 'ssh_failed', via: 'Campus bastion', detail: 'Permission denied' }),
+    ).toBe('SSH failed (through Campus bastion): Permission denied');
+    expect(formatMessage({ code: 'ssh_timeout', via: '' })).toBe(
+      formatMessage({ code: 'ssh_timeout' }),
+    );
+    setLocale('zh-CN');
+    expect(formatMessage({ code: 'ssh_failed', via: 'Campus bastion' })).toBe(
+      'SSH 失败（经由 Campus bastion）',
+    );
+    setLocale('en');
     expect(formatMessage('plain text')).toBe('plain text');
     expect(formatMessage(null)).toBe('');
   });
@@ -93,15 +105,22 @@ describe('translations', () => {
   });
 });
 
-it.each(['en', 'zh-CN'] as const)('renders unreadable-row counts in %s', (locale) => {
+it.each(['en', 'zh-CN'] as const)('renders unreadable-row titles and counts in %s', (locale) => {
   setLocale(locale);
   for (const count of [1, 2]) {
     const text = formatMessage({ code: 'attention_unreadable_rows', name: 'jobs', count });
     expect(text).toBe(
       t(`msg.attention_unreadable_rows${count === 1 ? '.one' : ''}`, { name: 'jobs', count }),
     );
-    if (locale === 'en')
-      expect(text).toContain(`${count} unreadable ${count === 1 ? 'row;' : 'rows;'}`);
+    // The row title is short and complete; the count is in the health panel's fault text.
+    expect(text).not.toContain('{');
+    expect(text).not.toContain(String(count));
+    expect(text).toBe(locale === 'en' ? 'jobs: unreadable rows' : 'jobs：有无法读取的行');
+    expect(t('health.unreadable', { count })).toBe(
+      locale === 'en'
+        ? `${count} stored ${count === 1 ? 'row' : 'rows'} could not be read`
+        : `无法读取 ${count} 条存储记录`,
+    );
   }
 });
 
@@ -111,13 +130,18 @@ it.each(['en', 'zh-CN'] as const)('uses singular count hints in %s', (locale) =>
     locale === 'en' ? '+1 last-known job not counted' : '+1 个上次已知作业未计入',
   );
   expect(t('summary.unknownNodes', { count: 1 })).toBe(
-    locale === 'en' ? '1 node has unknown state or measurements' : '1 个节点的状态或测量数据未知',
+    locale === 'en' ? '1 node unknown' : '1 个节点未知',
+  );
+  expect(t('unmeasured.count', { count: 1 })).toBe(
+    locale === 'en' ? '1 not counted' : '1 项未计入',
+  );
+  expect(t('jobs.missing.count', { count: 1 })).toBe(
+    locale === 'en' ? 'Jobs unknown for 1 login' : '1 个登录的作业未知',
   );
   if (locale === 'en') {
     expect(t('jobs.lastKnownCount', { count: 2 })).toBe('+2 last-known jobs not counted');
-    expect(t('summary.unknownNodes', { count: 2 })).toBe(
-      '2 nodes have unknown state or measurements',
-    );
+    expect(t('summary.unknownNodes', { count: 2 })).toBe('2 nodes unknown');
+    expect(t('jobs.missing.count', { count: 2 })).toBe('Jobs unknown for 2 logins');
   }
 });
 
@@ -132,12 +156,6 @@ it.each(['en', 'zh-CN'] as const)('pluralizes array hints in %s', (locale) => {
     locale === 'en'
       ? 'All 2 listed elements, including any last-known jobs. Open an element for details.'
       : '共 2 个已列出的数组元素，包含保留的上次观测作业。打开元素可查看详情。',
-  );
-  expect(t('jobs.array.otherReasons', { count: 1 })).toBe(
-    locale === 'en' ? '+1 other reason' : '另有 1 种等待原因',
-  );
-  expect(t('jobs.array.otherReasons', { count: 2 })).toBe(
-    locale === 'en' ? '+2 other reasons' : '另有 2 种等待原因',
   );
   expect(t('jobs.array.unknownGpus', { count: 1 })).toBe(
     locale === 'en' ? 'GPU count unknown for 1 allocated job' : '1 个占用资源的作业 GPU 数量未知',

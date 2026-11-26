@@ -1,31 +1,49 @@
+import { useStableActions } from './useStableActions';
+import {
+  collectSource,
+  finishCollections,
+  testSource,
+  setSourcePaused,
+  useSourceInFlight,
+} from './sourceActions';
+import { dismissErrorRow } from './layers/focus';
+import { CopyContext, createCopy } from './copy';
 import { routeParams, setRouteParams } from './useRouteParam';
 import { computeHealth } from './health';
-import { HealthPanel } from './HealthPanel';
-import { SourceDiagnosis } from './SourceDiagnosis';
 import { useVisibleInterval } from './useVisibleInterval';
-import { useDialogFocus } from './useDialogFocus';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { usePollCadence } from './data/cadence';
+import { createLiveStore } from './data/store';
+import type { LiveSnapshot } from './data/store';
+import { changed, sincePath, tokenOf } from './data/poll';
+import type { Unchanged } from './data/poll';
+import { transitions } from './data/transitions';
+import { LocaleGate } from './app/LocaleGate';
+import { Frame } from './app/Frame';
+import { lazyView } from './app/lazyView';
+import { StatusLabel } from './ui/Status';
+import { Time } from './ui/Time';
+import { Toasts } from './layers/Toasts';
+import type { Toast, ToastAction } from './layers/Toasts';
+import { hasModalLayer } from './layers/stack';
 import {
-  Activity,
-  Cable,
-  Check,
-  Cloud,
-  Compass,
-  Gauge,
-  History,
-  LayoutDashboard,
-  Loader2,
-  Menu,
-  Plus,
-  Puzzle,
-  RefreshCw,
-  Server,
-  Settings2,
-  Terminal,
-  TriangleAlert,
-  X,
-} from 'lucide-react';
+  openLayer,
+  closeLayer,
+  detailKeys,
+  detailValues,
+  formKeys as getFormKeys,
+} from './layers/routes';
+import type { Modal, Detail } from './app/Layers';
+import { Routes } from './app/Routes';
+import { Loading } from './app/LoadState';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type {
   Attention,
   CollectionNode,
@@ -33,146 +51,176 @@ import type {
   DeckEvent,
   DriverInfo,
   Health,
-  Instance,
-  Job,
   Settings,
   Source,
   SSHConfig,
   Tool,
 } from './types';
-import { arrayLabel, dateTime, listedJobs, partialCount, uniqueJobs } from './domain';
+import { arrayLabel, listedJobs, uniqueJobs } from './domain';
 import { clientSSHConfig } from './connections';
 import { eventJob } from './events';
 import { api } from './api';
 import { groupsOf } from './groups';
-import { ApiError, errorText, isLocale, setLocale, storeLocale, storedLocale, t } from './i18n';
-import type { Locale, MessageKey } from './i18n';
-import { corePages, readRoute, routeHash } from './routes';
-import type { CorePage, Filter, Page } from './routes';
 import {
-  activePlugins,
-  buildTimePlugins,
-  labelText,
-  loadBundles,
-  pagesOf,
-  useWebPlugins,
-} from './plugins';
+  ApiError,
+  errorText,
+  isLocale,
+  loadLocale,
+  rememberServerLocale,
+  setLocale,
+  storeLocale,
+  storedLocale,
+  t,
+} from './i18n';
+import type { Locale } from './i18n';
+import { canonicalHash, corePages, readRoute, routeHash, useHash } from './routes';
+import type { Filter, Page } from './routes';
+import { activePlugins, buildTimePlugins, loadBundles, pagesOf, useWebPlugins } from './plugins';
 import type { PluginProps } from './plugins';
-import { InstanceForm, SourceForm } from './forms';
 import type { SourcePreset } from './forms';
 import { TokenGate } from './TokenGate';
 import { sessionRejected, setToken } from './token';
-import { BrandMark, Status } from './ui';
 import type { Ctx } from './pages/shared';
 import { where } from './pages/util';
-import { OverviewPage } from './pages/Overview';
-import { ActivityPage } from './pages/Activity';
-import { JobsPage } from './pages/Jobs';
-import { ClustersPage } from './pages/Clusters';
-import { CloudPage } from './pages/Cloud';
-import { UsagePage } from './pages/Usage';
-import { PlanPage } from './pages/Plan';
-import { SourcesPage } from './pages/Sources';
-import { SettingsPage } from './pages/Settings';
-import { ToolboxPage } from './pages/Toolbox';
 import { PageBoundary } from './PageBoundary';
-import { NotifyPage } from './pages/Notify';
-import { ChatPage } from './pages/Chat';
-import { enabledToolPages } from './tools';
-import { ArrayDetail, InstanceDetail, JobDetail, SSHConfigView } from './pages/Details';
 
-type Modal =
-  | { kind: 'instance'; item?: Instance }
-  | { kind: 'source'; source?: Source; preset?: SourcePreset }
-  | { kind: 'diagnosis'; sourceId: string }
-  | { kind: 'ssh'; data: SSHConfig }
-  | null;
-type Detail =
-  | { kind: 'job'; item: Job; event?: DeckEvent }
-  | { kind: 'instance'; item: Instance }
-  | { kind: 'array'; item: { id: string; name: string; jobs: Job[] } }
-  | null;
-type Toast = { text: string; tone: 'ok' | 'error' } | null;
+const Layers = lazyView(async () => ({ default: (await import('./app/Layers')).Layers }));
 
-const startPages = [...corePages, ...pagesOf(buildTimePlugins).map((page) => page.id)];
-const navGroups: {
-  label?: MessageKey;
-  items: { id: CorePage; label: MessageKey; icon: typeof Server }[];
-}[] = [
-  {
-    items: [
-      { id: 'overview', label: 'nav.overview', icon: LayoutDashboard },
-      { id: 'plan', label: 'nav.plan', icon: Compass },
-    ],
-  },
-  {
-    label: 'nav.resources',
-    items: [
-      { id: 'jobs', label: 'nav.jobs', icon: Activity },
-      { id: 'activity', label: 'nav.activity', icon: History },
-      { id: 'resources', label: 'nav.clusters', icon: Server },
-      { id: 'cloud', label: 'nav.cloud', icon: Cloud },
-      { id: 'usage', label: 'nav.usage', icon: Gauge },
-    ],
-  },
-  {
-    label: 'nav.setup',
-    items: [
-      { id: 'sources', label: 'nav.sources', icon: Cable },
-      { id: 'toolbox', label: 'nav.toolbox', icon: Puzzle },
-    ],
-  },
-];
-const dataPages: Page[] = [
-  'overview',
-  'plan',
-  'jobs',
-  'activity',
-  'resources',
-  'cloud',
-  'usage',
-  'sources',
-];
-const pageTitles: Record<CorePage, MessageKey> = {
-  overview: 'nav.overview',
-  plan: 'nav.plan',
-  sources: 'nav.sources',
-  toolbox: 'nav.toolbox',
-  notify: 'nav.notify',
-  chat: 'nav.chat',
-  jobs: 'nav.jobs',
-  activity: 'nav.activity',
-  resources: 'nav.clusters',
-  cloud: 'nav.cloud',
-  usage: 'nav.usage',
-  settings: 'nav.settings',
-};
+const startPages = [...corePages, '__gallery', ...pagesOf(buildTimePlugins).map((page) => page.id)];
 
-function initialLocale(): Locale {
-  const locale = storedLocale() ?? 'en';
-  setLocale(locale);
-  return locale;
+export default function App() {
+  return <LocaleGate>{(language) => <Application initialLocale={language} />}</LocaleGate>;
 }
 
-/** "Group · login", or just the group when a source is named like its group. */
-export default function App() {
+function Application({ initialLocale }: { initialLocale: Locale }) {
   const remote = new URLSearchParams(window.location.search).get('remote') === '1';
-  const [locale, setLocaleState] = useState<Locale>(initialLocale);
-  const [hash, setHash] = useState(() => window.location.hash);
+  const [locale, setLocaleState] = useState(() => {
+    setLocale(initialLocale);
+    return initialLocale;
+  });
+  const hash = useHash();
   const group = readRoute(startPages, hash).group;
   const query = routeParams(hash).get('q') ?? '';
   const setQuery = (value: string) => setRouteParams({ q: value });
   const [demo, setDemo] = useState(
     () => new URLSearchParams(window.location.search).get('demo') === 'true',
   );
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [needsToken, setNeedsToken] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [live] = useState(createLiveStore);
+  const {
+    data: served,
+    health,
+    tools,
+    nodes,
+    error,
+    needsToken,
+    loading,
+    announcement,
+  } = useSyncExternalStore(live.subscribe, live.getSnapshot);
+  // Example mode keeps dismissals on the page: nothing is sent, and a reload or leaving example
+  // mode resets them (they are kept only for the mode they were made in).
+  const [local, setLocal] = useState<{
+    demo: boolean;
+    muted: Record<string, Attention['muted']>;
+  }>({ demo, muted: {} });
+  const localMuted = useMemo(() => (local.demo === demo ? local.muted : {}), [local, demo]);
+  const data = useMemo(() => {
+    if (!served || !demo || !Object.keys(localMuted).length) return served;
+    const attention = (served.attention ?? []).map((item) =>
+      item.key in localMuted ? { ...item, muted: localMuted[item.key] } : item,
+    );
+    return {
+      ...served,
+      attention,
+      attention_count: attention.filter((item) => !item.muted).length,
+    };
+  }, [served, demo, localMuted]);
+  const cadence = usePollCadence();
+  const publish = useCallback(
+    (patch: Partial<LiveSnapshot>) => {
+      const before = live.getSnapshot();
+      const text = transitions(before, { ...before, ...patch }, demo);
+      live.update({
+        ...patch,
+        ...(text ? { announcement: { id: before.announcement.id + 1, text } } : {}),
+      });
+    },
+    [live, demo],
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
-  const [modal, setModal] = useState<Modal>(null);
+  const [sshData, setSSHData] = useState<SSHConfig | null>(null);
+  const [sourcePreset, setSourcePreset] = useState<SourcePreset | undefined>();
   const params = routeParams(hash);
+  const formKeys = getFormKeys(params);
+  const sourceId = params.get('repair') || params.get('source');
+  const editId = hash.split('?')[0] === '#/toolbox' ? null : params.get('edit');
+  const add = params.get('add');
+  const editedSource = data?.sources.find((item) => item.id === editId);
+  const editedInstance = data?.instances.find((item) => item.id === editId);
+  // A source's pane opens once sources are known. Opened on a cold link before they load, it
+  // said "not found" and dropped focus when the source's own heading replaced that line.
+  const modal: Modal = sourceId
+    ? data
+      ? { kind: 'diagnosis', sourceId, reading: !params.has('repair') }
+      : null
+    : params.get('section') === 'ssh' && sshData
+      ? { kind: 'ssh', data: sshData }
+      : editId && editedSource
+        ? { kind: 'source', source: editedSource }
+        : editId && editedInstance
+          ? { kind: 'instance', item: editedInstance }
+          : editId && data
+            ? { kind: 'missing' }
+            : add === 'instance' || add === 'manual'
+              ? { kind: 'instance' }
+              : add
+                ? {
+                    kind: 'source',
+                    preset: { ...sourcePreset, ...(add !== 'source' ? { driver: add } : {}) },
+                  }
+                : null;
+  const setModal = (next: Modal) => {
+    if (!next) {
+      closeLayer([...formKeys, ...(params.has('source') ? ['source'] : [])]);
+      return;
+    }
+    if (next.kind === 'ssh') setSSHData(next.data);
+    if (next.kind === 'source') setSourcePreset(next.preset);
+    openLayer(
+      {
+        add:
+          next.kind === 'instance' && !next.item
+            ? 'instance'
+            : next.kind === 'source' && !next.source
+              ? (next.preset?.driver ?? 'source')
+              : null,
+        edit:
+          next.kind === 'instance'
+            ? (next.item?.id ?? null)
+            : next.kind === 'source'
+              ? (next.source?.id ?? null)
+              : null,
+        ...detailValues(),
+        repair: next.kind === 'diagnosis' && !next.reading ? next.sourceId : null,
+        source: next.kind === 'diagnosis' && next.reading ? next.sourceId : null,
+        section:
+          next.kind === 'ssh'
+            ? 'ssh'
+            : params.get('section') === 'ssh'
+              ? null
+              : params.get('section'),
+        step:
+          next.kind === 'source'
+            ? next.source || next.preset?.driver
+              ? '2'
+              : '1'
+            : next.kind === 'instance'
+              ? '1'
+              : null,
+      },
+      !!modal,
+    );
+  };
   const eventId = params.get('event');
   const [selectedEvent, setSelectedEvent] = useState<{ demo: boolean; event: DeckEvent } | null>(
     null,
@@ -207,11 +255,12 @@ export default function App() {
   }, [eventId, demo, selected]);
   const historicalJob = selected ? eventJob(selected) : null;
   const detailId =
-    params.get('job') ||
-    params.get('failure') ||
-    params.get('instance') ||
-    params.get('array') ||
-    eventId;
+    hash.split('?')[0] === '#/__gallery'
+      ? null
+      : (detailKeys
+          .filter((key) => key !== 'source')
+          .map((key) => params.get(key))
+          .find(Boolean) ?? null);
   const job = params.get('failure')
     ? data?.recent_failures?.find((item) => item.id === params.get('failure'))
     : params.get('job')
@@ -248,36 +297,37 @@ export default function App() {
       const failure =
         next?.kind === 'job' &&
         (!!next.item.end || data?.recent_failures?.some((item) => item === next.item));
-      setRouteParams(
+      openLayer(
         {
-          event: null,
+          ...detailValues(),
           job: next?.kind === 'job' && !failure ? next.item.id : null,
           failure: next?.kind === 'job' && failure ? next.item.id : null,
           instance: next?.kind === 'instance' ? next.item.id : null,
           array: next?.kind === 'array' ? next.item.id : null,
         },
-        !!next,
+        !next,
       );
     },
     [data?.recent_failures],
   );
   const closeDetail = useCallback(() => {
-    if (window.history.state?.detail) window.history.back();
-    else setDetail(null);
-  }, [setDetail]);
-  const modalRef = useDialogFocus(undefined, !!modal);
-  const detailRef = useDialogFocus(undefined, !!detailId);
-  const [toast, setToast] = useState<Toast>(null);
+    closeLayer([...detailKeys]);
+  }, []);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [noticeErrors, setNoticeErrors] = useState<(Toast & { at: string })[]>([]);
+  const toastId = useRef(0);
+  const dismissToast = useCallback(
+    (id?: number) =>
+      setToasts((items) => (id === undefined ? [] : items.filter((item) => item.id !== id))),
+    [],
+  );
   const [busy, setBusy] = useState(false);
-  const [health, setHealth] = useState<Health | null>(null);
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [nodes, setNodes] = useState<CollectionNode[]>([]);
   const allPlugins = useWebPlugins();
   const plugins = useMemo(() => activePlugins(allPlugins, tools), [allPlugins, tools]);
   const pluginPages = pagesOf(plugins);
   const knownPages = useMemo(
-    () => [...corePages, ...pagesOf(plugins).map((item) => item.id)],
+    () => [...corePages, '__gallery', ...pagesOf(plugins).map((item) => item.id)],
     [plugins],
   );
   // Re-evaluate the requested route as plugin pages become available or disappear.
@@ -290,46 +340,109 @@ export default function App() {
   const loadId = useRef(0);
   const driversLoaded = useRef(false);
   const dashboardToken = useRef<string | undefined>(undefined);
+  const auxTokens = useRef<Record<string, string | undefined>>({});
   const lastAuxLoad = useRef(-Infinity);
   const activePoll = useRef<{ startedAt: number; promise: Promise<void> } | null>(null);
   const [followUntil, setFollowUntil] = useState(0);
   const followSources = useRef<string[] | null>(null);
   const latestCollecting = useRef<string[]>([]);
   const followLoaded = useRef(false);
-  const notify = useCallback(
-    (text: string, tone: 'ok' | 'error' = 'ok') => setToast({ text, tone }),
-    [],
-  );
+  const notify = useCallback((text: string, tone: 'ok' | 'error' = 'ok', action?: ToastAction) => {
+    const item = { id: ++toastId.current, text, tone, action, at: new Date().toISOString() };
+    setToasts((items) => [...items, item].slice(-3));
+    if (tone === 'error')
+      setNoticeErrors((items) =>
+        items.some((row) => row.text === text) ? items : [...items, item],
+      );
+  }, []);
+  const sshOpen = params.get('section') === 'ssh';
+  useEffect(() => {
+    if (!sshOpen || sshData || !data) return;
+    let active = true;
+    const request =
+      remote || demo
+        ? Promise.resolve({
+            config: clientSSHConfig(data.instances),
+            path: t('ssh.downloadPath'),
+            installed: false,
+          })
+        : api<SSHConfig>('/ssh/config');
+    void request.then(
+      (data) => {
+        if (active) setSSHData(data);
+      },
+      (reason) => {
+        if (active) notify(errorText(reason, 'error.sshConfig'), 'error');
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [sshOpen, sshData, demo, remote, data, notify]);
   const serverName = demo
     ? t('where.local')
     : health?.server_name || health?.server_host || t('where.server');
 
-  const changeLocale = useCallback((next: Locale) => {
-    setLocale(next);
-    storeLocale(next);
-    setLocaleState(next);
-  }, []);
+  const localeChange = useRef(0);
+  const [pendingLocale, setPendingLocale] = useState<Locale | null>(null);
+  const changeLocale = useCallback(
+    (next: Locale) => {
+      const request = ++localeChange.current;
+      setPendingLocale(next);
+      void loadLocale(next)
+        .then(() => {
+          if (request !== localeChange.current) return;
+          setLocale(next);
+          storeLocale(next);
+          setLocaleState(next);
+        })
+        .catch(() => {
+          if (request === localeChange.current) notify(t('error.locale'), 'error');
+        })
+        .finally(() => {
+          if (request === localeChange.current) setPendingLocale(null);
+        });
+    },
+    [notify],
+  );
   useEffect(() => {
     // The server's language applies until the viewer picks one on this device.
     if (storedLocale()) return;
-    api<Settings>('/settings')
-      .then((settings) => {
-        if (isLocale(settings.language)) {
-          setLocale(settings.language);
-          setLocaleState(settings.language);
-        }
+    let cancelled = false;
+    const request = localeChange.current;
+    void api<Settings>('/settings')
+      .then(async (settings) => {
+        if (
+          cancelled ||
+          storedLocale() ||
+          request !== localeChange.current ||
+          !isLocale(settings.language)
+        )
+          return;
+        rememberServerLocale(settings.language);
+        await loadLocale(settings.language);
+        if (cancelled || storedLocale() || request !== localeChange.current) return;
+        setLocale(settings.language);
+        setLocaleState(settings.language);
       })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
+  useEffect(
+    () => () => {
+      localeChange.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
-    let previous = window.location.hash;
+    let previous = canonicalHash(window.location.hash);
     const onHashChange = () => {
-      const next = window.location.hash;
-      setHash(next);
+      const next = canonicalHash(window.location.hash);
       if (previous.split('?')[0] !== next.split('?')[0]) {
         setSidebarOpen(false);
-        setModal(null);
         window.scrollTo(0, 0);
       }
       previous = next;
@@ -341,11 +454,14 @@ export default function App() {
       window.removeEventListener('popstate', onHashChange);
     };
   }, []);
-  const navigate = useCallback((next: Page, filter: Filter = 'all') => {
-    const hash = routeHash(next, filter);
-    if (window.location.hash === hash) setSidebarOpen(false);
-    else window.location.hash = hash;
-  }, []);
+  const navigate = useCallback(
+    (next: Page, filter: Filter = 'all') => {
+      const hash = routeHash(next, filter);
+      if (window.location.hash === hash) setSidebarOpen(false);
+      else window.location.hash = hash;
+    },
+    [setSidebarOpen],
+  );
   const setGroup = (filter: Filter) => {
     setRouteParams({ group: filter === 'all' ? null : filter, provider: null });
   };
@@ -357,28 +473,52 @@ export default function App() {
       const requestId = loadId.current;
       const requestedAt = Date.now();
       return Promise.all([
-        api<Dashboard | { unchanged: true; token: string }>(
+        api<Dashboard | Unchanged>(
           `/dashboard?demo=${demo}${dashboardToken.current ? `&since=${dashboardToken.current}` : ''}`,
         ),
         // Health also carries plugin state; a failure here must not hide the dashboard.
-        dashboardOnly ? null : api<Health>('/health').catch(() => null),
-        dashboardOnly ? null : api<Tool[]>('/toolbox').catch(() => null),
-        dashboardOnly ? null : api<CollectionNode[]>(`/nodes?demo=${demo}`).catch(() => null),
+        dashboardOnly
+          ? null
+          : api<Health | Unchanged>(sincePath('/health', auxTokens.current.health)).catch(
+              () => null,
+            ),
+        dashboardOnly
+          ? null
+          : api<Tool[] | Unchanged>(sincePath('/toolbox', auxTokens.current.toolbox)).catch(
+              () => null,
+            ),
+        dashboardOnly
+          ? null
+          : api<CollectionNode[] | Unchanged>(
+              sincePath(`/nodes?demo=${demo}`, auxTokens.current.nodes),
+            ).catch(() => null),
       ])
         .then(([next, status, toolbox, machines]) => {
           if (requestId !== loadId.current) return;
           followLoaded.current = true;
-          if (!('unchanged' in next)) {
+          const patch: Partial<LiveSnapshot> = { error: null, needsToken: false, loading: false };
+          if (changed(next)) {
             dashboardToken.current = next.token;
             latestCollecting.current = next.collecting ?? [];
-            setData(next);
+            finishCollections(latestCollecting.current);
+            patch.data = next;
           }
           if (!dashboardOnly) {
             lastAuxLoad.current = requestedAt;
-            setHealth(status);
+            if (!status || changed(status)) {
+              patch.health = status;
+              auxTokens.current.health = status ? tokenOf(status) : undefined;
+            }
           }
-          if (toolbox) setTools(toolbox);
-          if (machines) setNodes(machines);
+          if (changed(toolbox)) {
+            auxTokens.current.toolbox = tokenOf(toolbox);
+            patch.tools = toolbox;
+          }
+          if (changed(machines)) {
+            auxTokens.current.nodes = tokenOf(machines);
+            patch.nodes = machines;
+          }
+          publish(patch);
           // Driver descriptions do not change while the service runs; fetch them once.
           if (!document.hidden && !driversLoaded.current) {
             driversLoaded.current = true;
@@ -388,19 +528,17 @@ export default function App() {
                 driversLoaded.current = false;
               });
           }
-          setError(null);
-          setNeedsToken(false);
         })
         .catch((reason) => {
           if (requestId !== loadId.current) return;
-          setNeedsToken(reason instanceof ApiError && reason.status === 401);
-          setError(errorText(reason, 'error.service'));
-        })
-        .finally(() => {
-          if (requestId === loadId.current) setLoading(false);
+          publish({
+            needsToken: reason instanceof ApiError && reason.status === 401,
+            error: errorText(reason, 'error.service'),
+            loading: false,
+          });
         });
     },
-    [demo, setData],
+    [demo, publish],
   );
   useEffect(
     () => () => {
@@ -424,13 +562,13 @@ export default function App() {
     // Give slow replies time to finish, but let polling recover from a stalled tunnel.
     const startedAt = Date.now();
     if (activePoll.current && startedAt - activePoll.current.startedAt < 10000) return;
-    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < 10000);
+    const pending = load(!!followUntil && startedAt - lastAuxLoad.current < cadence);
     activePoll.current = { startedAt, promise: pending };
     return pending.finally(() => {
       if (activePoll.current?.promise === pending) activePoll.current = null;
     });
-  }, [load, followUntil]);
-  useVisibleInterval(poll, followUntil ? 1000 : 10000);
+  }, [load, followUntil, cadence]);
+  useVisibleInterval(poll, followUntil ? 1000 : cadence);
   const followCollection = useCallback((sourceIds: string[] | null = null) => {
     followSources.current = sourceIds;
     followLoaded.current = false;
@@ -439,21 +577,10 @@ export default function App() {
     activePoll.current = null;
     setFollowUntil(Date.now() + 60000);
   }, []);
-  const [, setClock] = useState(Date.now);
-  const tickClock = useCallback(() => setClock(Date.now()), []);
-  useVisibleInterval(tickClock, 30000);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), toast.tone === 'error' ? 12000 : 4500);
-    return () => clearTimeout(timer);
-  }, [toast]);
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        if (modal) setModal(null);
-        else if (detailId) closeDetail();
-        else setSidebarOpen(false);
-      }
+      if (event.defaultPrevented || hasModalLayer()) return;
+      if (event.key === 'Escape') setSidebarOpen(false);
       if ((event.metaKey || event.ctrlKey) && event.key === 'k' && searchRef.current) {
         event.preventDefault();
         searchRef.current.focus();
@@ -462,7 +589,7 @@ export default function App() {
     }
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [modal, detailId, closeDetail]);
+  }, []);
 
   async function refresh(sourceId?: string) {
     setRefreshing(true);
@@ -496,11 +623,13 @@ export default function App() {
   }
   async function updateTool(id: string, body: unknown): Promise<Tool> {
     const saved = await api<Tool>(`/toolbox/${encodeURIComponent(id)}`, body, 'PUT');
-    setTools((current) => current.map((tool) => (tool.id === id ? saved : tool)));
+    live.update({ tools: live.getSnapshot().tools.map((tool) => (tool.id === id ? saved : tool)) });
     return saved;
   }
   const blockedInDemo = () => {
-    if (demo) notify(t('toast.demoReadOnly'), 'error');
+    // The refusal carries its own way out.
+    if (demo)
+      notify(t('toast.demoReadOnly'), 'ok', { label: t('banner.demoOff'), run: toggleDemo });
     return demo;
   };
   async function showSSH() {
@@ -523,9 +652,33 @@ export default function App() {
   const configure = (source?: Source, preset?: SourcePreset) => {
     if (!blockedInDemo()) setModal({ kind: 'source', source, preset });
   };
+  const sourceInFlight = useSourceInFlight();
+  async function pauseSource(source: Source) {
+    if (blockedInDemo()) return;
+    try {
+      await setSourcePaused(source, source.enabled);
+      await load();
+      notify(t(source.enabled ? 'sources.paused' : 'sources.resumed'), 'ok', {
+        label: t('layer.undo'),
+        undo: true,
+        run: () => {
+          void setSourcePaused(source, !source.enabled)
+            .then(() => load())
+            .catch((reason) => notify(errorText(reason, 'error.service'), 'error'));
+        },
+      });
+    } catch (reason) {
+      notify(errorText(reason, 'error.service'), 'error');
+    }
+  }
   async function collect(source: Source) {
     try {
-      await api('/refresh', { source_id: source.id });
+      if (
+        blockedInDemo() ||
+        data?.collecting?.includes(source.id) ||
+        !(await collectSource(source))
+      )
+        return;
       followCollection([source.id]);
       notify(
         t('toast.collectSource', { name: `${source.name} · ${source.username || source.driver}` }),
@@ -537,14 +690,10 @@ export default function App() {
   const addInstance = () => {
     if (!blockedInDemo()) setModal({ kind: 'instance' });
   };
-  const copy = async (text: string, message?: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      notify(message ?? t('toast.copied'));
-    } catch {
-      notify(t('toast.clipboard'), 'error');
-    }
-  };
+  const copy = useCallback<import('./copy').Copy>(
+    (text, options) => createCopy(demo, notify)(text, options),
+    [demo, notify],
+  );
   async function backup() {
     try {
       const result = await mutate<{ path: string }>('/backup', {});
@@ -556,18 +705,27 @@ export default function App() {
   const toggleDemo = () => {
     loadId.current += 1;
     dashboardToken.current = undefined;
+    auxTokens.current = {};
     lastAuxLoad.current = -Infinity;
     setFollowUntil(0);
-    setData(null);
-    setLoading(true);
+    live.update({
+      data: null,
+      nodes: [],
+      loading: true,
+      announcement: { id: 0, text: '' },
+    });
     const next = !demo;
+    // Leaving or entering example mode forgets dismissals made on the page.
+    setLocal({ demo: next, muted: {} });
     const url = new URL(window.location.href);
     if (next) url.searchParams.set('demo', 'true');
     else url.searchParams.delete('demo');
     window.history.replaceState(null, '', url);
     setDemo(next);
-    setModal(null);
-    setDetail(null);
+    setSSHData(null);
+    setToasts([]);
+    setNoticeErrors([]);
+    setRouteParams(Object.fromEntries([...formKeys, ...detailKeys].map((key) => [key, null])));
     setHealthOpen(false);
     setRouteParams({ group: null, provider: null, q: null });
   };
@@ -578,12 +736,9 @@ export default function App() {
     [data],
   );
   const attention = data?.attention ?? [];
-  const problems = data?.attention_count ?? attention.length;
-  const diagnose = (source: Source) => setModal({ kind: 'diagnosis', sourceId: source.id });
-  const diagnosisSource =
-    modal?.kind === 'diagnosis'
-      ? data?.sources.find((source) => source.id === modal.sourceId)
-      : undefined;
+  // A source opens as the pane beside the list (a sheet on phones), like a job.
+  const diagnose = (source: Source) =>
+    setModal({ kind: 'diagnosis', sourceId: source.id, reading: true });
   const openAttention = (item: Attention) => {
     if (item.action === 'diagnose') {
       const source = data?.sources.find((source) => source.id === item.subject.id);
@@ -595,575 +750,187 @@ export default function App() {
     else if (item.action === 'toolbox') navigate('toolbox');
     else setHealthOpen(true);
   };
-  const jobCount = data ? partialCount(data.summary.jobs.total, data.summary.jobs.known) : 0;
-  const isDataPage = dataPages.includes(page);
+  /** Dismiss (until it changes), snooze or restore an attention item. */
+  const muteAttention = async (
+    item: Attention,
+    action: 'acknowledge' | 'snooze' | 'clear',
+    until?: '1h' | 'tomorrow',
+  ) => {
+    if (demo) {
+      const at = new Date();
+      const end = new Date(at);
+      if (until === '1h') end.setHours(end.getHours() + 1);
+      else end.setHours(24, 0, 0, 0);
+      setLocal((current) => ({
+        demo: true,
+        muted: {
+          ...(current.demo ? current.muted : {}),
+          [item.key]:
+            action === 'clear'
+              ? null
+              : {
+                  state: action === 'snooze' ? 'snoozed' : 'acknowledged',
+                  at: at.toISOString(),
+                  until: action === 'snooze' ? end.toISOString() : null,
+                },
+        },
+      }));
+      return;
+    }
+    try {
+      await api(
+        `/attention/${encodeURIComponent(item.key)}`,
+        { action, until, ...(action === 'clear' ? {} : { fingerprint: item.fingerprint }) },
+        'PUT',
+      );
+    } finally {
+      await load();
+    }
+  };
   const healthState = computeHealth(data, health, error, needsToken, demo, nodes);
-  const healthDescription =
-    healthState.label === healthState.age
-      ? healthState.label
-      : t('health.withAge', { label: healthState.label, age: healthState.age });
   const plugin: PluginProps = { request: api, demo, remote, locale, page, health, navigate };
   const activePluginPage = pluginPages.find((item) => item.id === page);
-  const toolNav = enabledToolPages(tools);
 
-  const ctx: Ctx | null = data
-    ? {
-        data,
-        groups,
-        demo,
-        remote,
-        serverName,
-        busy,
-        group,
-        setGroup,
-        query,
-        setQuery,
-        searchRef,
-        attention,
-        openAttention,
-        diagnose,
-        health,
-        locale,
-        changeLocale,
-        plugin,
-        navigate,
-        webPlugins: plugins,
-        drivers,
-        nodes,
-        reload: load,
-        tools,
-        updateTool,
-        configure,
-        collect,
-        addInstance,
-        showSSH,
-        openJob: (item) => setDetail({ kind: 'job', item }),
-        openEvent: (event) => {
-          setSelectedEvent({ demo, event });
-          setRouteParams(
-            { event: String(event.id), job: null, failure: null, instance: null, array: null },
-            true,
-          );
-        },
-        openArray: (item) => setDetail({ kind: 'array', item }),
-        openInstance: (item) => setDetail({ kind: 'instance', item }),
-        copy,
-        notify,
-        backup,
-        toggleDemo,
-      }
-    : null;
-
-  const pageActions: Partial<Record<Page, ReactNode>> = {
-    sources: (
-      <button className="button primary" aria-label={t('source.add')} onClick={() => configure()}>
-        <Plus size={14} />
-        <span className="label">{t('source.add')}</span>
-      </button>
-    ),
-    resources: (
-      <button
-        className="button"
-        aria-label={t('clusters.addAccount')}
-        onClick={() => configure(undefined, { kind: 'cluster' })}
-      >
-        <Plus size={14} />
-        <span className="label">{t('clusters.addAccount')}</span>
-      </button>
-    ),
-    cloud: (
-      <>
-        <button className="button" aria-label={t('settings.ssh')} onClick={() => void showSSH()}>
-          <Terminal size={14} />
-          <span className="label">{t('settings.ssh')}</span>
-        </button>
-        <button className="button primary" aria-label={t('cloud.add')} onClick={addInstance}>
-          <Plus size={14} />
-          <span className="label">{t('cloud.add')}</span>
-        </button>
-      </>
-    ),
+  const actions = useStableActions<import('./pages/shared').CtxActions>({
+    setGroup,
+    setQuery,
+    openAttention,
+    muteAttention,
+    diagnose,
+    changeLocale,
+    navigate,
+    reload: load,
+    updateTool,
+    configure,
+    collect,
+    collectSource: collect,
+    testSource: (source) => {
+      if (blockedInDemo() || data?.collecting?.includes(source.id)) return Promise.resolve();
+      return testSource(source.id);
+    },
+    pauseSource,
+    addInstance,
+    showSSH,
+    openJob: (item) => setDetail({ kind: 'job', item }),
+    openEvent: (event) => {
+      setSelectedEvent({ demo, event });
+      openLayer(detailValues({ event: String(event.id) }));
+    },
+    openArray: (item) => setDetail({ kind: 'array', item }),
+    openInstance: (item) => setDetail({ kind: 'instance', item }),
+    copy,
+    notify,
+    backup,
+    toggleDemo,
+  });
+  const context: Omit<Ctx, 'data'> = {
+    ...actions,
+    actions,
+    groups,
+    demo,
+    remote,
+    serverName,
+    busy,
+    group,
+    query,
+    searchRef,
+    attention,
+    health,
+    locale,
+    pendingLocale,
+    plugin,
+    webPlugins: plugins,
+    drivers,
+    nodes,
+    tools,
+    sourceInFlight,
   };
-  const title = activePluginPage
-    ? labelText(activePluginPage.label, locale)
-    : t(pageTitles[page as CorePage] ?? 'nav.overview');
+  const ctx: Ctx | null = data ? { ...context, data } : null;
 
   return (
-    <div className="app-shell">
-      {sidebarOpen && (
-        <button
-          className="scrim"
-          aria-label={t('nav.close')}
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="brand">
-          <BrandMark size={20} />
-          <strong className="brand-name">
-            Compute<b>Deck</b>
-          </strong>
-          <span className="brand-mode">{remote ? t('mode.remote') : t('mode.local')}</span>
-        </div>
-        <nav aria-label={t('nav.main')}>
-          {navGroups.map((navGroup, index) => (
-            <div className="nav-group" key={index}>
-              {navGroup.label && <div className="nav-label">{t(navGroup.label)}</div>}
-              {navGroup.items.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{t(label)}</span>
-                  {id === 'overview' && problems > 0 && (
-                    <b className="badge warn" title={t('nav.problems', { count: problems })}>
-                      {problems}
-                    </b>
-                  )}
-                  {id === 'jobs' && jobCount !== 0 && <b className="badge">{jobCount}</b>}
-                </a>
-              ))}
-            </div>
-          ))}
-          {toolNav.length + pluginPages.length > 0 && (
-            <div className="nav-group">
-              <div className="nav-label">{t('nav.tools')}</div>
-              {toolNav.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{t(label)}</span>
-                </a>
-              ))}
-              {pluginPages.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={routeHash(id)}
-                  className={`nav-item ${page === id ? 'active' : ''}`}
-                  aria-current={page === id ? 'page' : undefined}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon size={16} />
-                  <span>{labelText(label, locale)}</span>
-                </a>
-              ))}
-            </div>
-          )}
-        </nav>
-        <div className="sidebar-footer">
-          <a
-            href={routeHash('settings')}
-            className={`nav-item ${page === 'settings' ? 'active' : ''}`}
-            aria-current={page === 'settings' ? 'page' : undefined}
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Settings2 size={16} />
-            <span>{t('nav.settings')}</span>
-          </a>
-          <label className="demo-toggle">
-            <span>{t('nav.demo')}</span>
-            <input type="checkbox" role="switch" checked={demo} onChange={toggleDemo} />
-            <i aria-hidden="true" />
-          </label>
-          <div className="service-state" role="status">
-            <span className={`dot ${error ? 'red' : data ? 'green' : ''}`} />
-            {needsToken
-              ? t('token.title')
-              : error
-                ? remote
-                  ? t('service.remoteDown', { server: serverName })
-                  : t('service.localDown')
-                : data
-                  ? remote
-                    ? t('service.remoteUp', { server: serverName })
-                    : t('service.localUp')
-                  : t('service.connecting')}
-          </div>
-        </div>
-      </aside>
-      <div className="main">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-only"
-            aria-label={t('nav.open')}
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={18} />
-          </button>
-          <h1>{title}</h1>
-          <div className="topbar-actions">
-            <div className="health-status">
-              <span className="sr-only" role="status">
-                {healthState.label}
-              </span>
-              <button
-                className={`health-pill health-${healthState.level}`}
-                onClick={() => setHealthOpen(true)}
-                aria-label={t('health.accessible', {
-                  title: t('health.title'),
-                  status: healthDescription,
-                })}
-                aria-haspopup="dialog"
-                aria-expanded={healthOpen}
-                title={
-                  !needsToken && data?.as_of
-                    ? t('health.withAge', { label: healthState.label, age: dateTime(data.as_of) })
-                    : healthDescription
-                }
-              >
-                <span aria-hidden="true">
-                  {healthState.level === 'bad' ? '■' : healthState.level === 'warn' ? '▲' : '●'}
-                </span>
-                <span className="health-label">{healthDescription}</span>
-                <span className="health-age" aria-hidden="true">
-                  {healthState.age}
-                </span>
-              </button>
-            </div>
-            {!!data?.collecting?.length && !needsToken && (
-              <span className="collecting-count">
-                {t('health.collecting', { count: data.collecting.length })}
-              </span>
-            )}
-            {!demo && pageActions[page]}
-            {isDataPage && (
-              <>
-                <button
-                  className="button"
-                  onClick={() => void refresh()}
-                  disabled={refreshing || needsToken}
-                  title={t('topbar.refreshHint')}
-                  aria-label={t('topbar.refresh')}
-                >
-                  <RefreshCw size={14} className={refreshing || data?.refreshing ? 'spin' : ''} />
-                  <span className="label">{t('topbar.refresh')}</span>
-                </button>
-              </>
-            )}
-          </div>
-        </header>
-        {healthState.collectorFault && isDataPage && (
-          <div className="banner red" role="alert">
-            <TriangleAlert size={15} />
-            <span>{t('health.collectorFault')}</span>
-            <button className="link" onClick={() => setHealthOpen(true)}>
-              {t('health.details')}
-            </button>
-          </div>
-        )}
-        {demo && (
-          <div className="banner demo-banner">
-            <span>{t(isDataPage ? 'banner.demo' : 'banner.demoTool')}</span>
-            <button className="link" onClick={toggleDemo}>
-              {t('banner.demoOff')}
-            </button>
-          </div>
-        )}
-        {error && isDataPage && !needsToken && (
-          <div className="banner red" role="alert">
-            <TriangleAlert size={15} />
-            <span>
-              {remote
-                ? t('banner.remoteDown', { server: serverName, error })
-                : t('banner.localDown', { error })}
-            </span>
-            <button className="link" onClick={() => void load()}>
-              {t('common.retry')}
-            </button>
-          </div>
-        )}
-        {!demo &&
-          plugins
-            .filter((item) => item.banner)
-            .map((item) => {
-              const Banner = item.banner!;
-              return <Banner key={item.id} {...plugin} />;
-            })}
-        <main className={`content page-${page}`}>
-          <PageBoundary page={page}>
-            {needsToken ? (
-              <TokenGate
-                where={where({ remote, serverName })}
-                rejected={sessionRejected()}
-                onSave={async (value) => {
-                  const session = await api<{ token: string }>('/session', { token: value });
-                  setToken(session.token);
-                  setLoading(true);
-                  await load();
-                }}
-              />
-            ) : activePluginPage ? (
-              activePluginPage.render(plugin)
-            ) : !ctx ? (
-              loading && (
-                <div className="loading">
-                  <Loader2 className="spin" size={18} />
-                  {t('common.loading')}
-                </div>
-              )
-            ) : page === 'overview' ? (
-              <OverviewPage ctx={ctx} />
-            ) : page === 'jobs' ? (
-              <JobsPage ctx={ctx} />
-            ) : page === 'activity' ? (
-              <ActivityPage ctx={ctx} />
-            ) : page === 'resources' ? (
-              <ClustersPage ctx={ctx} />
-            ) : page === 'cloud' ? (
-              <CloudPage ctx={ctx} />
-            ) : page === 'usage' ? (
-              <UsagePage ctx={ctx} />
-            ) : page === 'plan' ? (
-              <PlanPage ctx={ctx} />
-            ) : page === 'sources' ? (
-              <SourcesPage ctx={ctx} />
-            ) : page === 'toolbox' ? (
-              <ToolboxPage ctx={ctx} />
-            ) : page === 'notify' ? (
-              <NotifyPage ctx={ctx} />
-            ) : page === 'chat' ? (
-              <ChatPage ctx={ctx} />
-            ) : (
-              <SettingsPage ctx={ctx} />
-            )}
-          </PageBoundary>
-        </main>
-      </div>
-      {toast && (
-        <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>
-          {toast.tone === 'error' ? <TriangleAlert size={15} /> : <Check size={15} />}
-          <span>{toast.text}</span>
-          <button
-            className="icon-button"
-            aria-label={t('common.dismiss')}
-            onClick={() => setToast(null)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {healthOpen && (
-        <HealthPanel
-          state={healthState}
-          data={needsToken ? null : data}
-          busy={refreshing || needsToken}
+    <CopyContext value={copy}>
+      <div className="app-shell">
+        <Frame
+          ctx={context}
+          data={data}
+          page={page}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          healthOpen={healthOpen}
+          setHealthOpen={setHealthOpen}
+          healthState={healthState}
+          error={error}
+          needsToken={needsToken}
+          refreshing={refreshing}
           refresh={refresh}
-          close={() => setHealthOpen(false)}
-          addSource={
-            !demo && !needsToken && data && data.sources.length === 0
-              ? () => {
-                  setHealthOpen(false);
-                  configure();
-                }
-              : undefined
-          }
-        />
-      )}
-      {modal && (
-        <div className="overlay" onMouseDown={() => setModal(null)}>
-          <section
-            className={`modal ${modal.kind === 'ssh' ? 'wide' : ''}`}
-            ref={modalRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button
-              className="icon-button modal-close"
-              aria-label={t('common.close')}
-              onClick={() => setModal(null)}
-            >
-              <X size={16} />
-            </button>
-            {modal.kind === 'diagnosis' &&
-              (diagnosisSource ? (
-                <SourceDiagnosis
-                  key={diagnosisSource.id}
-                  source={diagnosisSource}
-                  configure={() => configure(diagnosisSource)}
-                  collect={() => collect(diagnosisSource)}
-                  collecting={data?.collecting?.includes(diagnosisSource.id)}
-                  demo={demo}
-                  drivers={drivers}
+        >
+          <main className={`content page-${page}`} aria-busy={loading || refreshing}>
+            {noticeErrors.length > 0 && (
+              <section className="layer-errors" aria-label={t('layer.errors')}>
+                {noticeErrors.map((item) => (
+                  <div key={item.id}>
+                    <StatusLabel kind="error" label={item.text} />
+                    <Time value={item.at} />
+                    <button
+                      className="button"
+                      onClick={(event) =>
+                        dismissErrorRow(event.currentTarget, () =>
+                          setNoticeErrors((items) => items.filter((row) => row.id !== item.id)),
+                        )
+                      }
+                    >
+                      {t('common.dismiss')}
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
+            <PageBoundary page={page}>
+              {needsToken ? (
+                <TokenGate
+                  where={where({ remote, serverName })}
+                  rejected={sessionRejected()}
+                  onSave={async (value) => {
+                    const session = await api<{ token: string }>('/session', { token: value });
+                    setToken(session.token);
+                    live.update({ loading: true });
+                    await load();
+                  }}
                 />
+              ) : activePluginPage ? (
+                activePluginPage.render(plugin)
+              ) : !ctx ? (
+                loading && <Loading />
               ) : (
-                <h2 id="modal-title">{t('msg.source_not_found')}</h2>
-              ))}
-            {modal.kind === 'instance' && (
-              <InstanceForm
-                item={modal.item}
-                platforms={[
-                  ...new Set(
-                    (data?.instances ?? [])
-                      .filter((item) => item.manual)
-                      .map((item) => item.platform),
-                  ),
-                ]}
-                where={where({ remote, serverName })}
-                busy={busy}
-                onCancel={() => setModal(null)}
-                onSubmit={async (body) => {
-                  await mutate(
-                    modal.item ? `/instances/${encodeURIComponent(modal.item.id)}` : '/instances',
-                    body,
-                    modal.item ? 'PUT' : 'POST',
-                  );
-                  setModal(null);
-                  setDetail(null);
-                  notify(
-                    remote ? t('toast.savedRemote', { server: serverName }) : t('toast.savedSsh'),
-                  );
-                  navigate('cloud');
-                }}
-              />
-            )}
-            {modal.kind === 'source' && (
-              <SourceForm
-                source={modal.source}
-                preset={modal.preset}
-                drivers={drivers}
-                nodes={nodes}
-                sources={data?.sources ?? []}
-                groups={groups}
-                where={where({ remote, serverName })}
-                busy={busy}
-                onCancel={() => setModal(null)}
-                onManual={() => setModal({ kind: 'instance' })}
-                onDelete={async (source) => {
-                  await mutate(`/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE');
-                  setModal(null);
-                  notify(t('toast.sourceRemoved', { name: source.name }));
-                }}
-                onSubmit={async (body, id) => {
-                  const saved = await mutate<Source>(
-                    id ? `/sources/${encodeURIComponent(id)}` : '/sources',
-                    body,
-                    id ? 'PUT' : 'POST',
-                  );
-                  if (saved.enabled) {
-                    await api('/refresh', { source_id: saved.id });
-                    followCollection([saved.id]);
-                  }
-                  if (modal.source) notify(t('toast.sourceSaved'));
-                  return saved;
-                }}
-              />
-            )}
-            {modal.kind === 'ssh' && (
-              <SSHConfigView
-                config={modal.data}
-                remote={remote}
-                serverName={serverName}
-                busy={busy}
-                onInstall={async () => {
-                  try {
-                    await mutate('/ssh/install', { confirm: true });
-                    setModal({ kind: 'ssh', data: await api<SSHConfig>('/ssh/config') });
-                    notify(t('toast.includeInstalled'));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.sshConfig'), 'error');
-                  }
-                }}
-              />
-            )}
-          </section>
-        </div>
-      )}
-      {detailId && !detail && ctx && (
-        <div className="drawer-overlay" onMouseDown={closeDetail}>
-          <aside
-            className="drawer"
-            ref={detailRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="detail-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h2 id="detail-title">
-              {t(eventId && eventLoad === 'loading' ? 'chart.loading' : 'drawer.unavailable')}
-            </h2>
-            <p>
-              {t(eventId && eventLoad === 'error' ? 'event.loadError' : 'drawer.unavailableHint')}
-            </p>
-            <button className="button" onClick={closeDetail}>
-              {t('common.close')}
-            </button>
-          </aside>
-        </div>
-      )}
-      {detail && ctx && (
-        <div className="drawer-overlay" onMouseDown={closeDetail}>
-          <aside
-            className="drawer"
-            ref={detailRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal={!modal}
-            aria-labelledby="detail-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header className="drawer-header">
-              <div>
-                <span className="drawer-kind">
-                  {detail.kind === 'job'
-                    ? t('drawer.job')
-                    : detail.kind === 'array'
-                      ? t('drawer.array')
-                      : t('drawer.instance')}
-                </span>
-                <h2 id="detail-title">{detail.item.name}</h2>
-                {detail.kind !== 'array' && <Status state={detail.item.state} />}
-              </div>
-              <button className="icon-button" aria-label={t('common.close')} onClick={closeDetail}>
-                <X size={16} />
-              </button>
-            </header>
-            {detail.kind === 'array' ? (
-              <ArrayDetail key={detail.item.id} jobs={detail.item.jobs} ctx={ctx} />
-            ) : detail.kind === 'job' ? (
-              <JobDetail job={detail.item} ctx={ctx} event={detail.event} />
-            ) : (
-              <InstanceDetail
-                item={detail.item}
-                ctx={ctx}
-                onProbe={async () => {
-                  try {
-                    await mutate<Instance>(
-                      `/instances/${encodeURIComponent(detail.item.id)}/probe`,
-                      {},
-                    );
-                    notify(t('toast.probed'));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.probe'), 'error');
-                  }
-                }}
-                onEdit={() => setModal({ kind: 'instance', item: detail.item })}
-                onDelete={async () => {
-                  try {
-                    await mutate(`/instances/${encodeURIComponent(detail.item.id)}`, {}, 'DELETE');
-                    setDetail(null);
-                    notify(t('toast.instanceRemoved', { name: detail.item.name }));
-                  } catch (reason) {
-                    notify(errorText(reason, 'error.save'), 'error');
-                  }
-                }}
-              />
-            )}
-          </aside>
-        </div>
-      )}
-    </div>
+                <Routes page={page} ctx={ctx} compat={params.has('compat')} />
+              )}
+            </PageBoundary>
+          </main>
+        </Frame>
+        <Toasts items={toasts} dismiss={dismissToast} announcement={announcement} />
+        {(modal || detailId || healthOpen) && (
+          <Suspense fallback={null}>
+            <Layers
+              ctx={{ ...context, data }}
+              modal={modal}
+              setModal={setModal}
+              detail={detail}
+              detailId={detailId}
+              closeDetail={closeDetail}
+              eventId={eventId}
+              eventLoad={eventLoad}
+              healthOpen={healthOpen}
+              setHealthOpen={setHealthOpen}
+              healthState={healthState}
+              needsToken={needsToken}
+              refreshing={refreshing}
+              refresh={refresh}
+              mutate={mutate}
+              followCollection={followCollection}
+            />
+          </Suspense>
+        )}
+      </div>
+    </CopyContext>
   );
 }

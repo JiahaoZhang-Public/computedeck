@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, MinusCircle, XCircle } from 'lucide-react';
-import { api } from './api';
+import { testSource } from './sourceActions';
 import { errorText, localized, t } from './i18n';
 import type { Localized } from './types';
 
@@ -46,14 +46,14 @@ export function ConnectionChecks({ sourceId }: { sourceId: string }) {
   useEffect(() => {
     let closed = false;
     const controller = new AbortController();
-    void api<Diagnostic[]>(`/sources/${encodeURIComponent(sourceId)}/check`, {}, 'POST', {
+    void testSource(sourceId, {
       signal: controller.signal,
       onRows: (next) => {
         if (!closed) setRows(next);
       },
     })
       .then((result) => {
-        if (!closed) setRows(result);
+        if (!closed && result) setRows(result);
       })
       .catch((reason) => {
         if (!closed) setError(errorText(reason, 'error.service'));

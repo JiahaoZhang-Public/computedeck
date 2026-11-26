@@ -1,16 +1,7 @@
-import { useSyncExternalStore } from 'react';
-
-function subscribe(update: () => void) {
-  window.addEventListener('hashchange', update);
-  window.addEventListener('popstate', update);
-  return () => {
-    window.removeEventListener('hashchange', update);
-    window.removeEventListener('popstate', update);
-  };
-}
+import { canonicalHash, useHash } from './routes';
 
 export function routeParams(hash = window.location.hash) {
-  return new URLSearchParams(hash.split('?')[1] ?? '');
+  return new URLSearchParams(canonicalHash(hash).split('?')[1] ?? '');
 }
 
 /** Update only view state; the connection and example-mode query stays untouched. */
@@ -22,20 +13,17 @@ export function setRouteParams(values: Record<string, string | null>, push = fal
     if (value) params.set(name, value);
     else params.delete(name);
   }
-  const path = url.hash.split('?')[0] || '#/overview';
-  url.hash = path + (params.size ? `?${params}` : '');
+  const path = canonicalHash(url.hash).split('?')[0] || '#/overview';
+  const query = params.toString();
+  url.hash = canonicalHash(path + (query ? `?${query}` : ''));
   if (url.href === before) return;
   if (push) window.history.pushState({ detail: true }, '', url);
-  else window.history.replaceState(null, '', url);
+  else window.history.replaceState(window.history.state, '', url);
   window.dispatchEvent(new HashChangeEvent('hashchange', { oldURL: before, newURL: url.href }));
 }
 
 export function useRouteParam(name: string, fallback = '') {
-  const hash = useSyncExternalStore(
-    subscribe,
-    () => window.location.hash,
-    () => '',
-  );
+  const hash = useHash();
   const value = routeParams(hash).get(name) ?? fallback;
   return [
     value,

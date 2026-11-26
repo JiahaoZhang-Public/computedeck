@@ -6,8 +6,16 @@ npm --prefix web ci
 npm --prefix web run build
 rm -rf src/computedeck/static
 cp -R web/dist src/computedeck/static
+# The Vite manifest is for development size checks, not shipped browser assets.
+rm -rf src/computedeck/static/.vite
 rm -rf dist
 uv build
+for archive in dist/computedeck-*.tar.gz; do
+  if tar -tzf "$archive" | grep -E '/web/e2e/snapshots(/|$)' >/dev/null; then
+    echo "$archive contains UI screenshot baselines" >&2
+    exit 1
+  fi
+done
 for archive in dist/computedeck-*.whl; do
   if ! unzip -Z1 "$archive" | grep -Fx "computedeck/static/index.html" >/dev/null; then
     echo "$archive does not contain the web app" >&2

@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,7 +11,8 @@ from .drivers.aws_ec2 import parse_instances as parse_ec2_instances
 from .drivers.base import cluster_state, node_health_fields, requires_partition
 from .drivers.runpod import parse_pods
 from .drivers.ssh_host import parse_machine
-from .history import group_history
+from .history import chart_observation, group_history
+from .identity import assign_slots, group_keys
 from .low_use import low_use
 from .summary import fresh, freshness, summarize
 from .wait_history import summarize_waits, wait_sample
@@ -36,6 +38,15 @@ _JOBS = [
     ("example:cluster-a-alice", "llm-sft / ablation", "PENDING", 1, None, None, "00:00:00"),
     ("example:cluster-b-alice", "rl-agent / rollout", "PENDING", 16, None, None, "00:00:00"),
 ]
+
+
+def now() -> datetime:
+    """Minute-aligned example clock; never used by collectors or live data."""
+    value = os.environ.get("COMPUTEDECK_DEMO_NOW")
+    current = datetime.fromisoformat(value) if value else datetime.now(UTC)
+    if current.tzinfo is None:
+        raise ValueError("COMPUTEDECK_DEMO_NOW must include a timezone")
+    return current.astimezone(UTC).replace(second=0, microsecond=0)
 
 
 def _source(row: tuple[str, str, str, str, str], observed: str) -> dict[str, Any]:
@@ -125,7 +136,7 @@ def _job(index: int, spec: tuple[Any, ...], observed: str) -> dict[str, Any]:
 
 def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """A smooth fictional trace, one point per 30 minutes, up to 30 days."""
-    current = datetime.now(UTC).replace(second=0, microsecond=0)
+    current = now()
     data = dashboard() if data is None else data
     summary = data["summary"]
     gaps = [s for s in data["sources"] if s.get("stale") or s.get("error")]
@@ -226,7 +237,7 @@ def demo_history(hours: int, data: dict[str, Any] | None = None) -> list[dict[st
 
 def dashboard() -> dict[str, Any]:
     # Keep example polls stable within a minute, as if these were collected samples.
-    current = datetime.now(UTC).replace(second=0, microsecond=0)
+    current = now()
     observed = (current - timedelta(minutes=3)).isoformat()
     probed = (current - timedelta(minutes=2)).isoformat()
     sources = [_source(row, observed) for row in _SOURCES]
@@ -463,7 +474,14 @@ def dashboard() -> dict[str, Any]:
     machine_source = _source(
         ("example:lab-server", "Lab server", "ssh", "example:lab-server", "alice"), observed
     )
-    machine_source.update(ssh_alias="lab-server", credential="", capabilities=["instances"])
+    # The lab server is reachable only through the campus bastion, which this machine
+    # connects through: a route with nothing installed on the jump host.
+    machine_source.update(
+        ssh_alias="lab-server",
+        credential="",
+        capabilities=["instances"],
+        node="example:campus-bastion",
+    )
     sources.append(machine_source)
     machine = parse_machine(
         json.dumps(
@@ -688,7 +706,26 @@ def dashboard() -> dict[str, Any]:
             item, readings, now=current, interval_minutes=10, threshold=10, window_minutes=60
         )
         item["console_url"] = "https://console.runpod.io" if item["platform"] == "RunPod" else None
-    data["summary"] = summarize(data)
+    data["identity_slots"] = assign_slots(group_keys(sources, data["instances"]), {})
+    # The component gallery exercises display states without inventing live measurements.
+    data["layer_example"] = {"names": ["build-small", "train-small"]}
+    data["display_example"] = {
+        "known": 29,
+        "estimate": 41.2,
+        "last_known": 2,
+        "at": (current - timedelta(minutes=2)).isoformat(),
+        "stale_at": (current - timedelta(minutes=14)).isoformat(),
+        "qos_at": (current - timedelta(hours=6)).isoformat(),
+        "duration_seconds": 11560,
+        "hidden": 31,
+        "trace": {
+            "rule": {"code": "display_example_rule"},
+            "included": ["Cluster A", "Cluster B"],
+            "excluded": [{"source": "Cluster C", "reason": {"code": "display_example_missing"}}],
+            "as_of": observed,
+        },
+    }
+    data["summary"] = summarize(data, now=current)
     # Own accounting demonstrates ranges, small samples and missing GPU counts.
     wait_samples = []
     for source, count, gpus in (
@@ -768,7 +805,7 @@ def events() -> list[dict[str, Any]]:
     sources = {source["id"]: source for source in data["sources"]}
     jobs = {job["id"]: job for job in data["jobs"]}
     timeout, oom = data["recent_failures"][:2]
-    at = datetime.now(UTC).replace(second=0, microsecond=0)
+    at = now()
 
     def context(source_id: str | None) -> dict[str, Any]:
         if source_id is None:
@@ -942,23 +979,66 @@ def events() -> list[dict[str, Any]]:
 
 
 def nodes() -> list[dict[str, Any]]:
-    """An example collection machine."""
-    observed = (
-        datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=3)
-    ).isoformat()
+    """An example collection machine and an example SSH jump host."""
+    observed = (now() - timedelta(minutes=3)).isoformat()
     return [
         {
             "id": "example:lab-gateway",
             "name": "Lab gateway",
             "ssh_alias": "lab-gateway",
             "command": "~/.local/bin/computedeck",
+            "mode": "collect",
             "status": "ok",
-            "version": "0.7.0",
+            "version": "1.0.0",
             "drivers": ["slurm", "kubernetes", "ssh"],
             "checked_at": observed,
             "last_collected_at": observed,
             "error": None,
-        }
+        },
+        {
+            "id": "example:campus-bastion",
+            "name": "Campus bastion",
+            "ssh_alias": "campus-bastion",
+            "command": "computedeck",
+            "mode": "jump",
+            "status": "ok",
+            "version": None,
+            "drivers": [],
+            "checked_at": observed,
+            "last_collected_at": observed,
+            "error": None,
+        },
+    ]
+
+
+def ssh_hosts() -> list[dict[str, Any]]:
+    """Example Host aliases, as if read from ~/.ssh/config."""
+    return [
+        {
+            "alias": "campus-bastion",
+            "hostname": "bastion.example.org",
+            "user": "alice",
+            "proxy_jump": None,
+        },
+        {
+            "alias": "cluster-a",
+            "hostname": "login.cluster-a.example.org",
+            "user": "alice",
+            "proxy_jump": None,
+        },
+        {
+            "alias": "gpu-box",
+            "hostname": "192.0.2.40",
+            "user": "alice",
+            "proxy_jump": "campus-bastion",
+        },
+        {"alias": "lab-gateway", "hostname": "192.0.2.5", "user": "alice", "proxy_jump": None},
+        {
+            "alias": "lab-server",
+            "hostname": "192.0.2.30",
+            "user": "alice",
+            "proxy_jump": "campus-bastion",
+        },
     ]
 
 
@@ -986,3 +1066,52 @@ def delivery_status(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 statuses = ["sent"]
         result.append({**row, "delivery": statuses})
     return result
+
+
+def demo_chart_history(hours: int, end: datetime) -> list[dict[str, Any]]:
+    """Chart examples at the demo sources' cadence, including missing/partial data."""
+    current = now()
+    data = dashboard()
+    coverage = chart_observation(data, current=current)
+    groups = group_history(data)
+    cadence = int(min(coverage["intervals"]))
+    points = []
+    for age in range(hours * 3600 // cadence, -1, -1):
+        at = end - timedelta(seconds=age * cadence)
+        ago = (current - at).total_seconds() / 3600
+        if 10 < ago < 12 or ago > 240:
+            continue
+        partial = ago < 2
+        unknown = 5 < ago < 5.5
+        value = round(16 + 4 * math.sin(at.timestamp() / 3600), 1)
+        points.append(
+            {
+                "at": at.isoformat(),
+                "allocated_gpus": None if partial or unknown else value,
+                "known_allocated_gpus": None if unknown else value,
+                "unknown_allocation_sources": 1 if partial else 0,
+                "gpu_utilization": None if unknown else round(60 + 20 * math.sin(ago), 1),
+                "by_group": {
+                    key: {
+                        **group,
+                        "allocated": None if unknown or partial else group["known_allocated"],
+                        "known_allocated": None if unknown else group["known_allocated"],
+                        "unknown_allocation_sources": int(unknown or partial),
+                        "spend": {} if unknown else group["spend"],
+                        "spend_unknown": int(unknown or partial) + group["spend_unknown"],
+                    }
+                    for key, group in groups.items()
+                },
+                "chart_coverage": {
+                    **{
+                        metric: {
+                            "known": 0 if unknown else coverage[metric]["total"] - int(partial),
+                            "total": coverage[metric]["total"],
+                        }
+                        for metric in ("allocation", "utilization")
+                    },
+                    "intervals": coverage["intervals"],
+                },
+            }
+        )
+    return points

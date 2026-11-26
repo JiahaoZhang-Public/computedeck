@@ -1,11 +1,8 @@
+import { ClockText } from './data/ClockText';
 import { dateTime, relativeTime } from './domain';
-import { lowUseDuration, t } from './i18n';
+import { t } from './i18n';
 import type { WaitHistory as History } from './types';
-
-function waitDuration(seconds: number) {
-  if (seconds < 60) return t('wait.seconds', { count: Math.round(seconds) });
-  return lowUseDuration(Math.round(seconds / 60));
-}
+import { waitDuration } from './waitRange';
 
 /** Both views consume the same server percentiles; history never changes ranking. */
 export function WaitHistory({
@@ -128,7 +125,9 @@ export function WaitHistoryNote({
       {available.length > 0 &&
         (oldest ? (
           <time className="sub" dateTime={oldest} title={dateTime(oldest)}>
-            {t('wait.asOf', { time: relative ? relativeTime(oldest) : dateTime(oldest) })}
+            <ClockText>
+              {() => t('wait.asOf', { time: relative ? relativeTime(oldest) : dateTime(oldest) })}
+            </ClockText>
           </time>
         ) : (
           <span className="sub">{t('wait.asOfUnknown')}</span>

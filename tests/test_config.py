@@ -493,6 +493,14 @@ def test_export_omits_default_low_use_settings(store: Store, settings: dict[str,
     assert {key: exported[key] for key in exported if key.startswith("low_use_")} == settings
 
 
+@pytest.mark.parametrize("configured", [False, True])
+def test_export_omits_automatic_identity_slots(store: Store, configured: bool) -> None:
+    if configured:
+        config.apply(store, CONFIG)
+        assert store.identity_slots()
+    assert "identity_slots" not in tomllib.loads(config.export(store))
+
+
 def test_low_use_settings_round_trip(store: Store) -> None:
     store.save_settings({"low_use_threshold": 5, "low_use_window_minutes": 90})
     exported = config.export(store)

@@ -3,16 +3,17 @@
 import asyncio
 import logging
 import math
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import attention, drivers, events, nodes
+from . import attention, drivers, events, nodes, routes
+from .drivers import ssh
 from .errors import SourceError, message
 from .hardware import probe_instance
 from .plugins import PluginContext, Runtime
-from .ssh_config import write_config
+from .ssh_config import validate_alias, write_config
 from .store import PROBE_INTERVAL, Store, manual_state, now
 
 logger = logging.getLogger("computedeck")
@@ -22,6 +23,8 @@ PERCENTAGES = ("gpu_utilization", "gpu_utilization_max", "cpu_utilization", "mem
 # What a check may change on an instance a source lists. The source stays the authority for
 # its inventory, its GPUs in use and when it was listed.
 LISTED_PROBE_FIELDS = ("ssh_status", "ssh_error", "gpu_observed_count", *PERCENTAGES)
+# Settings of a node whose change means an in-flight result belongs to an old connection.
+NODE_KEYS = ("ssh_alias", "command", "mode")
 
 
 def measured(instance_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -228,7 +231,7 @@ class Collector:
         self.try_clear_resolved_attention()
 
     async def _batch(self, source: dict[str, Any]) -> drivers.Batch:
-        """Collect here, or on the node the source names."""
+        """Collect here, on the node the source names, or here through its jump host."""
         node_id = source.get("node") or ""
         if not node_id:
             return await drivers.get(source["driver"]).collect(source)
@@ -238,12 +241,12 @@ class Collector:
 
         def current_node() -> dict[str, Any]:
             current = self.store.node(node_id)
-            if current is None or any(
-                current.get(key) != node.get(key) for key in ("ssh_alias", "command")
-            ):
+            if current is None or any(current.get(key) != node.get(key) for key in NODE_KEYS):
                 raise NodeChanged
             return current
 
+        if routes.mode(node) == "jump":
+            return await self._through(node, source, current_node)
         try:
             batch = await nodes.collect(node, source)
         except SourceError as error:
@@ -253,6 +256,44 @@ class Collector:
             raise
         current = current_node()
         self.store.save_node({**current, "status": "ok", "error": None, "last_collected_at": now()})
+        return batch
+
+    async def _through(
+        self,
+        node: dict[str, Any],
+        source: dict[str, Any],
+        current_node: Callable[[], dict[str, Any]],
+    ) -> drivers.Batch:
+        """Collect here with every SSH connection going through the jump host ``node``."""
+        try:
+            jump = validate_alias(node["ssh_alias"])
+        except ValueError as error:
+            raise SourceError("route_unreachable", str(error), node=node["name"]) from None
+        try:
+            with ssh.through(jump):
+                batch = await drivers.get(source["driver"]).collect(source)
+        except Exception as error:
+            # The jump host is reached on its own once, to say which hop failed.
+            failure = await routes.blame(node, error)
+            current = current_node()
+            state: dict[str, Any]
+            if isinstance(failure, SourceError) and failure.code == "route_unreachable":
+                state = {"status": "error", "error": failure.message()}
+            else:
+                state = {"status": "ok", "error": None}
+            self.store.save_node({**current, **state, "checked_at": now()})
+            raise failure from None
+        current = current_node()
+        checked = now()
+        self.store.save_node(
+            {
+                **current,
+                "status": "ok",
+                "error": None,
+                "checked_at": checked,
+                "last_collected_at": checked,
+            }
+        )
         return batch
 
     async def probe(self, instance_id: str) -> dict[str, Any]:
@@ -301,7 +342,7 @@ class Collector:
                     try:
                         result = measured(
                             instance_id,
-                            await asyncio.wait_for(probe_instance(instance), timeout=45),
+                            await asyncio.wait_for(self._probe(instance), timeout=45),
                         )
                         break
                     except SourceError as error:
@@ -327,6 +368,19 @@ class Collector:
             return current
         finally:
             self.probes.discard(instance_id)
+
+    async def _probe(self, instance: dict[str, Any]) -> dict[str, Any]:
+        """Check an instance, through the jump host of the source that lists it, if any."""
+        source = self.store.source(instance.get("source_id") or "")
+        node = self.store.node(source.get("node") or "") if source else None
+        jump = routes.jump_alias(node)
+        if node is None or jump is None:
+            return await probe_instance(instance)
+        try:
+            with ssh.through(jump):
+                return await probe_instance(instance)
+        except SourceError as error:
+            raise await routes.blame(node, error) from None
 
     def _instance(self, instance_id: str) -> dict[str, Any] | None:
         return next(

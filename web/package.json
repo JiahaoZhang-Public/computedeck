@@ -1,16 +1,21 @@
 {
   "name": "computedeck-web",
   "private": true,
-  "version": "0.7.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run check:tokens && npm run typecheck && vite build --manifest",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "node node_modules/@typescript/native/bin/tsc -b",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'e2e/**'",
+    "test:ui": "playwright test",
+    "check:size": "node scripts/check-size.mjs",
+    "test:size": "node --test scripts/check-size.node.mjs",
+    "gen:tokens": "node scripts/gen-tokens.mjs",
+    "check:tokens": "node scripts/gen-tokens.mjs --check && node scripts/lint-tokens.mjs && node scripts/report-contrast.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -18,7 +23,9 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.64.1",
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.3.0",

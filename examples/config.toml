@@ -69,3 +69,18 @@ existing_alias = true
 # username = "ml-team"                 # the namespace
 # options = { context = "lab" }
 # node = "lab-gateway"
+
+# An SSH jump host: nothing is installed there. This computer collects the sources naming
+# it with its own drivers and keys, and their SSH connections go through it (like ssh -J).
+# Only sources that connect over SSH can use one; log in once with
+# `ssh -J campus-bastion lab-server` to accept both host keys.
+# [[node]]
+# name = "Campus bastion"
+# ssh_alias = "campus-bastion"
+# mode = "jump"
+#
+# [[cloud]]
+# label = "Lab server"
+# driver = "ssh"                       # one GPU machine, read over SSH
+# ssh_alias = "lab-server"
+# node = "campus-bastion"

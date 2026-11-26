@@ -2,106 +2,82 @@
 
 # ComputeDeck
 
-A dashboard for Slurm jobs, cloud GPUs and SSH machines. See what is running, why jobs are queued, and which resources could fit your next run.
+ComputeDeck is a read-only dashboard for your GPU work, wherever it runs: Slurm, PBS, LSF
+and Kubernetes clusters, cloud GPU accounts and your own SSH machines. It shows what is
+running, why jobs wait or fail, what your instances cost and where your next run could
+fit. It runs on your own computer with the SSH aliases and API keys you already have, and
+needs no administrator access and no agent on the clusters.
 
-ComputeDeck uses your existing SSH aliases and provider APIs. It runs on your own machine and does not require cluster administrator access.
+[中文](README.zh-CN.md) · [Install](docs/install.md) · [Running ComputeDeck](docs/deployment.md) · [Configuration](docs/configuration.md) · [Plugins](docs/plugins.md) · [Changelog](CHANGELOG.md)
 
-[中文](README.zh-CN.md) · [Demo](https://jiahaozhang-public.github.io/computedeck/#demo) · [Configuration](docs/configuration.md) · [Plugins](docs/plugins.md)
+![ComputeDeck overview with built-in example data: GPUs in use, queued and running totals, a Needs attention list and current jobs on two clusters](docs/assets/screens/overview.png)
 
-[![Example overview with two clusters, cloud instances, GPU allocation and history](https://jiahaozhang-public.github.io/computedeck/assets/overview.jpg)](https://jiahaozhang-public.github.io/computedeck/#demo)
+*Screenshots use ComputeDeck's built-in example data.*
 
-*All screenshots use built-in example data from an earlier preview; the 0.7.0 layout and figures have changed. Click the overview for the 20-second demo.*
+## What you get
 
-## Features
+- **Every job in one place.** Running, queued and recently failed jobs across your
+  cluster accounts, with the scheduler's own reason for each wait or failure and, when
+  known, the time limit and log paths.
+- **Where your next run fits.** Compare usable GPUs, QoS limits and your own queue by GPU
+  model, count and run time, with the evidence behind each estimate. Copy matching Slurm
+  flags; ComputeDeck never submits anything.
+- **Cloud GPUs and their cost.** Instances on RunPod, Lambda, AWS EC2, Vast.ai and GPUhub
+  with known hourly prices, cost so far, daily usage and hints about GPUs that sit idle.
+- **Free GPUs on your machines.** Per-GPU memory, utilization and owners on SSH machines,
+  NVIDIA or AMD.
+- **Problems you can fix.** One Needs attention list you can clear item by item, a count
+  of what still needs attention on every page (the age of the data when nothing does), and
+  connection checks that name the step and the machine that failed.
+- **Sources you cannot reach directly.** Reach a cluster through a jump host or a
+  collection machine, so ComputeDeck can run on your laptop. Add-source forms suggest
+  host aliases from your `~/.ssh/config`. The interface is in English and Chinese, on a
+  desktop or a phone.
 
-- Running, queued and recently failed jobs across cluster accounts.
-- Usable GPU capacity and QoS limits, compared by GPU model, count and run time, with estimates that account for your own queue.
-- Cloud instances, known hourly prices and GPU usage on SSH hosts.
-- One Needs attention list, collection age and service health on every page, and connection diagnostics with repair suggestions.
+<table>
+  <tr>
+    <td width="40%"><img src="docs/assets/screens/job-detail.png" alt="Details of a queued job beside the job list: the scheduler's pending reason in plain words, the next step and the typical wait"></td>
+    <td width="40%"><img src="docs/assets/screens/where-to-run.png" alt="Where to run for four H100 GPUs over 24 hours: the best estimate, the options that can take the request, and the rest folded under one line"></td>
+    <td width="20%"><img src="docs/assets/screens/phone-overview.png" alt="The overview on a phone, with Needs attention and current jobs stacked in one column"></td>
+  </tr>
+</table>
 
-The core only reads resources; it does not submit jobs or stop instances. Missing data stays marked as unknown. Planner results are estimates, not scheduler guarantees. See [how the numbers are calculated](docs/metrics.md).
+## Three ways to run it
 
-**Numbers you can trust:** partial totals show `≥` and name the unmeasured
-machines or logins. Overview, Usage and history share the same figures. Running cloud
-instances count their provider's GPU allocation; SSH machines count GPUs with visible compute
-processes or significant GPU memory use. Unreadable processes, or missing memory without visible
-processes, leave use unknown. Hand-added machines with monitoring off are excluded. SSH checks
-keep their own age across provider updates.
+![Three ways to run ComputeDeck: 1, on your computer, reaching every source directly; 2, on your computer, with some sources reached through a jump host or a collection machine; 3, on an always-on server that you view from your laptop through an SSH tunnel](docs/assets/ways-to-run.svg)
 
-The **Data freshness and service health** indicator in the top bar shows the oldest
-enabled source's successful collection, or **Not collected yet** if any enabled source
-has never succeeded. Open it for errors and retry times.
-Overview highlights Needs attention and current jobs; trends live on Usage & cost. Hidden tabs pause
-browser requests; the service keeps collecting. See the [0.4.0 changes](CHANGELOG.md)
-for upgrade details, including possible steps in the history chart.
+1. **On your computer.** ComputeDeck reaches every cluster, cloud account and machine
+   directly, with your SSH configuration and keys. It collects while it runs.
+2. **On your computer, with routes.** A source your computer cannot reach goes through
+   another machine. A **jump host** forwards your SSH connection and needs nothing
+   installed. A **collection machine** has ComputeDeck installed and collects the source
+   with its own keys, credentials and network.
+3. **On an always-on server.** The service collects around the clock;
+   `computedeck connect my-server` opens it from your laptop through an SSH tunnel.
 
-**0.5.0 — Understand and resolve problems** adds progressive connection checks, job explanations and timestamps, narrow-screen tables, and shareable view state. See the [changelog](CHANGELOG.md).
+Start with 1 and add a route per source when needed: a jump host when your own keys work on
+the target, a collection machine when only that machine has the keys, VPN or software.
+Choose 3 when collection must continue while your laptop sleeps. Moving from a server to
+your laptop? `computedeck import --from my-server` adopts the server's sources and keeps
+collecting them there, or reaches them through it as a jump host or directly
+(`--route collect|jump|direct`). See [Running ComputeDeck](docs/deployment.md).
 
-**0.6.0 — Know what changed** adds searchable activity, recorded job outcomes and array summaries, notification digests and delivery status, visible observation gaps, and attention acknowledgement and snoozing. See the [changelog](CHANGELOG.md).
+![The Routes panel on the Sources page, drawing each route as a path such as This computer → Lab gateway → Cluster B, with its kind and status](docs/assets/screens/routes.png)
 
-**0.7.0 — Choose resources with confidence** explains resource estimates and their evidence, finds free SSH GPUs, and copies Slurm flags from collected facts. Usage & cost adds observed daily usage and cost estimates; low-use hints, Slurm queue positions and history-backed waits help you decide where to run. See the [changelog](CHANGELOG.md).
+## Quick start
 
-## Version preview
+You need macOS or Linux, Python 3.12 or 3.13 and the OpenSSH client.
 
-Completed milestones and planned work; future scope and priorities may change.
+**From a release.** Each release on the [Releases
+page](https://github.com/JiahaoZhang-Public/computedeck/releases) has a wheel with the web
+app built in. Install it with `uv tool install` or `pipx` and run `computedeck serve
+--open`; [Install](docs/install.md#install-a-release) has the exact commands, upgrades and
+where your data lives. ComputeDeck is not on PyPI.
 
-- [x] **v0.5 — Understand and resolve problems:** step-by-step connection diagnostics and credential updates, clearer job reasons and timestamps, responsive tables, and URL-preserved filters and planner inputs.
-- [x] **v0.6 — Know what changed:** a searchable activity page, one recorded outcome per job with failure explanations, grouped job and array notifications with delivery status, attention acknowledgement and snoozing, and visible observation gaps.
-- [x] **v0.7 — Choose resources with confidence:** explained resource comparisons, free SSH GPUs and copy-only Slurm flags, observed usage and cost estimates, sustained low-use hints, Slurm queue positions, history-backed waits, and shared-host GPU counting.
-- [ ] **v1.0 — A redesigned interface:** a rebuilt visual system, navigation organised around your questions, a command palette, a phone layout with bottom tabs, and one place to add and repair connections.
+**From source.** If the Releases page lists no release yet, or you want the latest code,
+build it with [uv](https://docs.astral.sh/uv/) and Node.js 22.18+ or 24:
 
-## Terms in the interface
-
-| Term | Meaning |
-|---|---|
-| Source | One connection used to collect data: a cluster login, cloud API account or SSH host. Several sources can describe the same cluster or platform. |
-| Cluster or platform | A group of resources shown under **Clusters & clouds** and in the group filter. |
-| Instance / machine | One rented or owned machine. **Cloud and machines** includes cloud instances, SSH sources and hand-added machines. |
-| Collection machine | Another computer that collects sources for this service, shown as **via {name}**. It is not a compute node. |
-| Node | A compute node reported by a cluster scheduler. Usable capacity excludes unavailable nodes. |
-| GPUs in use | GPUs allocated to your running jobs and held cloud instances, or GPUs with visible compute processes or significant GPU memory use on SSH machines. Unreadable processes, or missing memory without visible processes, leave use unknown. This is not GPU utilization. |
-| “usable GPUs” in the capacity reading | Capacity on usable nodes across all users, not a promise that your login can allocate it. |
-| Needs attention | The single list of current faults and warnings; its badge, tile and panel count only items that are not acknowledged or snoozed. |
-
-Job details use the scheduler's terms: Account / Partition / QoS for Slurm,
-Account / Queue for PBS, Project / Queue for LSF, and Namespace / Node pool /
-Priority class for Kubernetes. Other drivers use neutral Account / Partition / QoS labels.
-
-## Examples
-
-<details>
-<summary><strong>Read why a job is queued</strong></summary>
-
-This job requests four A100 GPUs. Its details show the account, QoS and Slurm's `QOSMaxGRESPerUser` pending reason, so you can see which limit the scheduler is reporting.
-
-[![Example queued job requesting four A100 GPUs, with its account, QoS and pending reason](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/job-detail.jpg)
-
-</details>
-
-<details>
-<summary><strong>Find resources for a 4 × H100, 24-hour run</strong></summary>
-
-Enter the model, count and run time. The planner flags the two-hour debug QoS and Cluster A's lack of H100 GPUs. The remaining options are still estimates from the latest collection.
-
-[![Example comparison for four H100 GPUs over 24 hours, showing time limits and GPU model mismatches](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)](https://jiahaozhang-public.github.io/computedeck/assets/planner.jpg)
-
-</details>
-
-## Supported sources
-
-| Clusters | Cloud GPUs | Other machines |
-|---|---|---|
-| Slurm, Kubernetes, PBS, LSF | RunPod, Lambda, AWS EC2, Vast.ai, GPUhub | NVIDIA and AMD GPU hosts over SSH; manual entries |
-
-Kubernetes, PBS, LSF, Vast.ai and GPUhub are beta integrations. The interface supports English and Chinese.
-
-## Run from source
-
-ComputeDeck is available as a source preview. No PyPI package has been released yet.
-
-You need macOS or Linux, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Node.js 22 and OpenSSH. Node is needed to build the web interface.
-
-```sh
+```bash
 git clone https://github.com/JiahaoZhang-Public/computedeck.git
 cd computedeck
 uv sync --frozen
@@ -110,52 +86,114 @@ npm --prefix web run build
 uv run computedeck serve --open
 ```
 
-Turn on **Example data** to try the interface without connecting a resource. It includes
-failed and stale collections, a rate-limited cloud account and a timed-out job. The
-mode survives reloads and blocks changes through the web app, including Notify, Chat
-and plugin requests; signing in remains possible. Tool and settings pages still show
-your own data, and existing background collection continues. Use **Turn off example
-data** in the banner to resume changes. The service listens on `http://127.0.0.1:8710`.
+The app opens at `http://127.0.0.1:8710`. Then:
 
-To connect a cluster, choose **Sources → Add source** and enter the SSH alias and username you already use. SSH must work without prompts. For cloud providers, enter a credential reference such as `env:RUNPOD_API_KEY`, not the key itself. See [configuration](docs/configuration.md) and the [Slurm setup guide](docs/drivers/slurm.md).
+- Turn on **Example data** to look around without connecting anything. Example mode
+  blocks changes until you turn it off.
+- Add a cluster under **Sources → Add source** with the SSH alias and username you
+  already use; SSH must log in without prompts. For a cloud account, enter a credential
+  reference such as `env:RUNPOD_API_KEY`, not the key. See
+  [configuration](docs/configuration.md) and the [Slurm guide](docs/drivers/slurm.md).
+- A source this computer cannot reach directly gets a **Route** in its form; add jump
+  hosts and collection machines with **Add route** on the Sources page.
+- Use **Test connection**, or `uv run computedeck doctor`, when a source fails. The
+  [diagnostics guide](docs/doctor.md) explains each result. `computedeck --version` shows
+  what is installed.
 
-Use **Test connection** or `uv run computedeck doctor` to check a source. The [diagnostics guide](docs/doctor.md) explains the results.
+## Supported sources
 
-## Run on a server
+| Clusters | Cloud GPUs | Other machines |
+|---|---|---|
+| Slurm, Kubernetes (beta), PBS (beta), LSF (beta) | RunPod, Lambda, AWS EC2, Vast.ai (beta), GPUhub (beta) | NVIDIA and AMD GPU machines over SSH; machines you add by hand |
 
-```sh
-# On the server, from its ComputeDeck checkout:
-uv run computedeck service install
+Beta integrations have had limited testing on live systems; each [driver
+guide](docs/drivers/) says what is known. Plugins can add more drivers.
 
-# On your laptop, from its ComputeDeck checkout:
-uv run computedeck connect my-server
-```
+## Numbers you can trust
 
-The server keeps collecting while your laptop is closed; the client connects through SSH. Use `COMPUTEDECK_AUTH=token` on a shared host. See [deployment, authentication and backups](docs/deployment.md).
+- **Unknown stays unknown.** Missing or unreadable data is shown as unknown, never as
+  zero or as free.
+- **Partial totals say so.** They show `≥` and name the machines or logins that could
+  not be measured.
+- **One set of figures.** Overview, Usage & cost and history count the same way.
+- **GPUs in use** are GPUs allocated to your jobs and held cloud instances, or GPUs with
+  compute processes or significant memory use on SSH machines. This is not utilization.
+- **Estimates are labelled.** Where to run, typical waits and costs are estimates, not
+  scheduler promises or bills, and stale data shows its age.
 
-Data is stored on the service machine in `~/Library/Application Support/ComputeDeck` on macOS or `~/.local/share/ComputeDeck` on Linux. Set `COMPUTEDECK_DATA_DIR` to use another directory.
+[How the numbers are calculated](docs/metrics.md).
 
-## Plugins and contributions
+## Security and privacy
 
-Plugins add tools, source drivers, notification channels and pages. They run inside the service with its user's permissions. Install them on the service machine and enable tools in **Toolbox**.
+- **Read-only.** The core reads; it never submits jobs, stops instances or changes a cluster.
+- **Local only.** The service listens on `127.0.0.1` and accepts changes only from its own page.
+- **Optional access token.** Set `COMPUTEDECK_AUTH=token` on a machine other people use.
+- **Credentials by reference.** Sources store `env:`, `keychain:` or `file:` references, never keys.
+- **No telemetry.** Nothing is sent anywhere except the sources you configure, and the
+  marketplaces and notification channels you choose to use.
 
-- [Official plugins](https://github.com/JiahaoZhang-Public/computedeck-plugins): network diagnostics and Shell credential references. Their first release is in preparation.
+Plugins run with your permissions. See [SECURITY.md](SECURITY.md) and [Running
+ComputeDeck](docs/deployment.md#access-token).
+
+## Plugins
+
+Plugins add tools, source drivers, notification channels and pages. Install them on the
+machine that runs the service and turn tools on in **Toolbox**; the built-in Notifications
+and Team messages tools start switched off.
+
+- [Official plugins](https://github.com/JiahaoZhang-Public/computedeck-plugins): network
+  diagnostics and Shell credential references. Their first release is in preparation.
 - [Write a plugin](docs/plugins.md): scaffold, Python API and web API.
-- [Contribute a plugin or submit a PR](https://github.com/JiahaoZhang-Public/computedeck-plugins/blob/main/CONTRIBUTING.md): local setup, tests and review requirements.
 
-For core changes, open a focused PR with the behavior changed and the checks you ran. Use fictional data in tests and screenshots.
+## Roadmap
 
-```sh
-bash scripts/check.sh    # lint, formatting, types, tests and web build
-bash scripts/build.sh    # local wheel and sdist, including the web interface
+- **1.0:** the first stable release: one table of sources, a shorter path from a
+  request to a place to run it, and an interface with fewer words on every page.
+- **0.8:** routes through a jump host or collection machine so ComputeDeck
+  runs on your laptop, connection checks that name the failing hop, a redesigned and
+  quieter interface with detail on demand, a phone layout, and release packages built and
+  checked in CI.
+- **Next:** the first tagged release with a wheel on the Releases page, then PyPI once
+  Trusted Publishing is set up; the first release of the official plugins.
+- **Later:** a command palette and one place to add and repair connections; beta
+  integrations graduate after testing on live systems.
+
+Plans may change. Past releases are in the [changelog](CHANGELOG.md).
+
+## Terms
+
+| Term | Meaning |
+|---|---|
+| Source | One connection that is collected: a cluster login, a cloud API account or an SSH machine. |
+| Cluster or platform | A group of resources under **Clusters & clouds** and in the group filter. |
+| Route | How ComputeDeck reaches a source: directly from this computer, through a jump host, or collected by a collection machine. A routed login names its route in the **Route** column. |
+| Jump host | A machine your SSH connections pass through, as with `ssh -J`. Nothing is installed on it; your keys and SSH configuration are used. |
+| Collection machine | A machine with ComputeDeck installed that collects sources for you with its own keys, credentials and network. |
+| Node | A compute node reported by a scheduler; not a route. |
+| GPUs in use | Allocated or visibly busy GPUs, as defined above; not utilization. |
+| Needs attention | The one list of current faults and warnings you have not dismissed or snoozed. A dismissed item returns when it changes. |
+
+Job details use each scheduler's own terms, such as Partition and QoS for Slurm or Queue
+for PBS and LSF.
+
+## Contributing
+
+Open a focused pull request that says what behaviour changed and which checks you ran. Use
+fictional data in tests, docs and screenshots; see [AGENTS.md](AGENTS.md). Security
+problems go to [SECURITY.md](SECURITY.md), not to issues.
+
+```bash
+bash scripts/check.sh        # lint, formatting, types, tests and web build
+bash scripts/check-ui.sh     # browser UI gate: screenshots, axe, DOM checks
+bash scripts/build.sh        # wheel and sdist with the web app, in dist/
+bash scripts/smoke-wheel.sh dist/computedeck-*.whl   # install and use the built wheel
 ```
 
-For demo layout checks with an external Playwright installation, run `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node web/check-plan-layout.mjs` (optionally set `PLAYWRIGHT_EXECUTABLE_PATH` to the browser executable).
-
-The Python service is in `src/computedeck`, the React interface in `web`, and Python tests in `tests`.
-
-Web type checks use TypeScript 7. ESLint uses the official TypeScript 6 API package alongside it. Run `npm --prefix web run typecheck` to select the TypeScript 7 compiler explicitly.
+The Python service is in `src/computedeck`, the React app in `web`, and Python tests in
+`tests`. [Local UI checks](docs/ui-testing.md) covers browsers, baselines and page
+filters; [publishing](docs/publishing.md) covers releases.
 
 ## License
 
-[Apache-2.0](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for bundled dependencies.
+[Apache-2.0](LICENSE). See [NOTICE](NOTICE), and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)
+for the browser libraries bundled in the package.

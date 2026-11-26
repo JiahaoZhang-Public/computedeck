@@ -6,10 +6,10 @@ import { expect, it } from 'vitest';
 const neutral = new Set(['GPU', 'CPU', 'SSH', 'AI', '⌘K', 'v', '/h']);
 // Exact, file-scoped exceptions: brand text and executable/example input values only.
 const examples: Record<string, string[]> = {
-  'App.tsx': ['Compute', 'Deck'],
+  'app/Frame.tsx': ['Compute', 'Deck'],
   'TokenGate.tsx': ['computedeck token'],
   'forms.tsx': ['gpu-box-01', 'gpu-box', '~/.ssh/id_ed25519', 'RTX 4090'],
-  'pages/Nodes.tsx': ['lab-gateway', '~/.local/bin/computedeck'],
+  'pages/RoutesPanel.tsx': ['lab-gateway', '~/.local/bin/computedeck'],
   'pages/Notify.tsx': ['alice, bob', 'llm-*'],
   'pages/Marketplace.tsx': ['· ComputeDeck'],
 };
@@ -89,7 +89,7 @@ it('finds visible text and attribute literals without treating translation keys 
 });
 
 it('keeps visible JSX text and title/placeholder/aria-label literals translated', () => {
-  const files = ['', 'pages/'].flatMap((directory) =>
+  const files = ['', 'pages/', 'app/', 'ui/', 'layers/', 'chart/'].flatMap((directory) =>
     readdirSync(new URL(`./${directory}`, import.meta.url))
       .filter((name) => name.endsWith('.tsx') && !name.endsWith('.test.tsx'))
       .map((name) => directory + name),

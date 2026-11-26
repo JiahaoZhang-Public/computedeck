@@ -1,29 +1,36 @@
 import type { ReactNode } from 'react';
-import type { HistoryPoint } from '../types';
-import { historyPartial } from '../domain';
+import type { ChartData } from '../chart/types';
+import { Chart } from '../chart/Chart';
 import { t } from '../i18n';
-import TrendChart from '../TrendChart';
-import { ChartLegend } from './shared';
 
-/** Chart presentation; Usage owns the range and its observations. */
+/** Presentation only; Usage owns the request and URL range. */
 export function HistoryPanel({
-  points,
-  hours,
+  data,
   note,
   empty,
+  onRange,
+  onPage,
+  controls,
+  busy = false,
 }: {
-  points: HistoryPoint[];
-  hours: number;
+  data?: ChartData;
+  busy?: boolean;
   note?: ReactNode;
+  controls?: ReactNode;
   empty?: string;
+  onRange?: (range: string) => void;
+  onPage?: (direction: -1 | 1) => void;
 }) {
   return (
-    <section className="usage-trend">
+    <section className="usage-trend" aria-busy={busy}>
       <header className="panel-header">
         <h3>{t('chart.heading')}</h3>
-        <ChartLegend partial={points.some(historyPartial)} />
       </header>
-      <TrendChart history={points} hours={hours} empty={empty} />
+      {data ? (
+        <Chart data={data} onRange={onRange} onPage={onPage} controls={controls} />
+      ) : (
+        <p className="chart-empty">{empty ?? t('chart.unavailable')}</p>
+      )}
       {note && <p className="panel-note">{note}</p>}
     </section>
   );

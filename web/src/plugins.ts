@@ -1,3 +1,4 @@
+import { corePages, routeAliases } from './routes';
 import { useSyncExternalStore } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -82,8 +83,24 @@ export function activePlugins(plugins: WebPlugin[], tools: Tool[]): WebPlugin[] 
   );
 }
 
+const warnedPages = new Set<string>();
 export function pagesOf(plugins: WebPlugin[]): PluginPage[] {
-  return plugins.flatMap((plugin) => plugin.pages ?? []);
+  return plugins.flatMap((plugin) =>
+    (plugin.pages ?? []).filter((page) => {
+      if (
+        !(corePages as readonly string[]).includes(page.id) &&
+        !Object.hasOwn(routeAliases, page.id) &&
+        page.id !== '__gallery'
+      )
+        return true;
+      const key = `${plugin.id}:${page.id}`;
+      if (!warnedPages.has(key)) {
+        console.warn(`Plugin ${plugin.id}: reserved page id ${page.id} was ignored`);
+        warnedPages.add(key);
+      }
+      return false;
+    }),
+  );
 }
 
 const loaded = new Set<string>();

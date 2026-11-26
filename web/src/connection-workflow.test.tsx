@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.mocked(api).mockReset().mockResolvedValue([]);
   setLocale('en');
+  history.replaceState(null, '', '#/sources');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -76,6 +77,13 @@ it('keeps an edited credential reference pending until a new collection finishes
     source.id,
   );
   expect(close).not.toHaveBeenCalled();
+  expect(api).toHaveBeenCalledWith(
+    `/sources/${encodeURIComponent(source.id)}/check`,
+    {},
+    'POST',
+    expect.any(Object),
+  );
+  expect(container.textContent).toContain(t('source.check.savedPending'));
   expect(container.textContent).toContain(t('source.check.running'));
   expect(container.textContent).not.toContain(t('source.check.done'));
   await act(async () =>
@@ -106,3 +114,44 @@ it('does not label normal queued and starting jobs as warnings', () => {
   expect(statusTone('stale')).toBe('amber');
   expect(statusTone('FAILED')).toBe('red');
 });
+
+it.each(['en', 'zh-CN'] as const)(
+  'a cold saved-source step 3 in %s checks only after Run check',
+  async (locale) => {
+    setLocale(locale);
+    const data = serverDemo();
+    const source = data.sources[0];
+    history.replaceState(null, '', `#/sources?edit=${encodeURIComponent(source.id)}&step=3`);
+    await act(async () =>
+      root.render(
+        <SourceForm
+          source={source}
+          sources={data.sources}
+          groups={groupsOf(data)}
+          drivers={[]}
+          where="this service"
+          busy={false}
+          onSubmit={vi.fn()}
+          onDelete={vi.fn()}
+          onCancel={vi.fn()}
+          onManual={vi.fn()}
+        />,
+      ),
+    );
+    expect(api).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain(t('source.check.savedPending'));
+    expect(container.textContent).not.toContain(t('source.check.running'));
+    const run = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === t('source.check.run'),
+    )!;
+    expect(run).toBeDefined();
+    await act(async () => run.click());
+    expect(api).toHaveBeenCalledExactlyOnceWith(
+      `/sources/${encodeURIComponent(source.id)}/check`,
+      {},
+      'POST',
+      expect.any(Object),
+    );
+    expect(container.textContent).not.toContain(t('source.check.savedPending'));
+  },
+);

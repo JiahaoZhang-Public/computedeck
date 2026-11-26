@@ -10,3 +10,11 @@ dist/
 *.egg-info/
 *.tsbuildinfo
 .DS_Store
+# Local editor and agent settings, such as preview launch configurations.
+.claude/
+
+# Only CI-generated Linux UI baselines are committed.
+web/e2e/snapshots/*
+!web/e2e/snapshots/linux/
+web/test-results/
+web/playwright-report/

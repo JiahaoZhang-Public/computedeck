@@ -1,0 +1,30 @@
+/* WEB_API 1: these names remain supported for plugins. */
+:root {
+  --text: var(--fg-default);
+  --text-2: var(--fg-muted);
+  --text-3: var(--fg-subtle);
+  --text-4: var(--fg-subtle);
+  --surface: var(--bg-surface);
+  --surface-2: var(--bg-sunken);
+  --border: var(--border-muted);
+  --accent: var(--accent-fill);
+  --accent-soft: var(--accent-bg);
+  --accent-text: var(--accent-fg);
+  --gray-soft: var(--status-unknown-bg);
+  --green: var(--status-ok-fg);
+  --green-soft: var(--status-ok-bg);
+  --amber: var(--status-warn-fg);
+  --amber-soft: var(--status-warn-bg);
+  --red: var(--status-error-fg);
+  --radius: var(--r-block);
+  --radius-sm: var(--r-control);
+  --mono: var(--font-mono);
+  --accent-hover: var(--accent-fill);
+  --text-muted: var(--fg-muted);
+}
+
+@supports (color: color-mix(in oklch, red, red)) {
+  :root {
+    --accent-hover: color-mix(in oklch, var(--accent-fill) 88%, black);
+  }
+}
