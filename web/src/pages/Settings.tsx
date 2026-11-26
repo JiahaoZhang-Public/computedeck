@@ -1,11 +1,11 @@
 import { ClockText } from '../data/ClockText';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, isLocale, locales, t } from '../i18n';
 import { relativeTime } from '../domain';
 import { readClock, saveClock, type Clock } from '../format';
 import { Panel, Status } from '../ui';
-import { readTheme, readDensity, saveTheme, saveDensity } from '../theme/preferences';
+import { readTheme, readDensity, saveTheme, saveDensity, THEME_EVENT } from '../theme/preferences';
 import type { Theme, Density } from '../theme/preferences';
 import type { Ctx } from './shared';
 
@@ -185,6 +185,12 @@ function LowUseSettings({ ctx }: { ctx: Ctx }) {
 
 function AppearanceSettings({ ctx }: { ctx: Ctx }) {
   const [theme, setTheme] = useState(readTheme);
+  // The sidebar's switch changes the same preference.
+  useEffect(() => {
+    const sync = () => setTheme(readTheme());
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
   const [density, setDensity] = useState(readDensity);
   const [clock, setClock] = useState(readClock);
   return (

@@ -147,6 +147,11 @@ const ORDER: Verdict[] = [
   'denied',
 ];
 
+/** Where a verdict sorts: lower starts sooner. */
+export function verdictRank(verdict: Verdict) {
+  return ORDER.indexOf(verdict);
+}
+
 /** Slurm walltime: minutes ("2880"), or [D-]HH:MM:SS ("1-00:00:00"). */
 export function wallHours(value: string | null | undefined): number | null {
   if (!value) return null;

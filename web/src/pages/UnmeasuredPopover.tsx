@@ -14,7 +14,10 @@ export default function UnmeasuredPopover({
   items,
   ctx,
   note,
+  title,
 }: {
+  /** What the list is, in words: "3 not counted". */
+  title?: string;
   anchor: HTMLElement;
   labelledBy: string;
   close: () => void;
@@ -41,6 +44,7 @@ export default function UnmeasuredPopover({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={keepActivation}
       >
+        {title && <div className="unmeasured-title">{title}</div>}
         {!!items.length && (
           <ul>
             {items.map((item) => (

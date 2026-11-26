@@ -145,3 +145,12 @@
     white-space: nowrap;
   }
 }
+.chart-about {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.chart-about summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-2);
+}

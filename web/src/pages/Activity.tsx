@@ -21,7 +21,7 @@ import { setRouteParams, useRouteParam } from '../useRouteParam';
 import type { Ctx } from './shared';
 import { SearchBox } from './shared';
 import { statusLabel } from '../labels';
-import { jobTime } from '../jobFacts';
+import { jobElapsed, jobTime } from '../jobFacts';
 import type { MessageKey } from '../i18n';
 
 /** What changed between collections: jobs that started, ended or failed, sources that broke. */
@@ -32,6 +32,9 @@ export function ActivityPanel({
   onOpen,
   sources = [],
   tools = [],
+  category,
+  cluster = 'all',
+  query = '',
 }: {
   sources?: Source[];
   tools?: Tool[];
@@ -39,7 +42,26 @@ export function ActivityPanel({
   limit?: number;
   token?: string;
   onOpen?: (event: DeckEvent) => void;
+  /** Limits the list, and the link to the full one, to one kind of event. */
+  category?: 'jobs';
+  /** The page's own cluster filter and search: the list follows the table above it. */
+  cluster?: string;
+  query?: string;
 }) {
+  const [search, setSearch] = useState(query);
+  useEffect(() => {
+    // Nothing to follow until the search changes: an idle page schedules no update.
+    if (query === search) return;
+    const timer = window.setTimeout(() => setSearch(query), 250);
+    return () => window.clearTimeout(timer);
+  }, [query, search]);
+  const filters = [
+    category && `&category=${category}`,
+    cluster !== 'all' && `&cluster_id=${encodeURIComponent(cluster)}`,
+    search && `&q=${encodeURIComponent(search.slice(0, 64))}`,
+  ]
+    .filter(Boolean)
+    .join('');
   const [events, setEvents] = useState<DeckEvent[] | null>(null);
   const currentEvents = useRef<DeckEvent[] | null>(null);
   const [error, setError] = useState(false);
@@ -49,7 +71,7 @@ export function ActivityPanel({
     const id = ++loadId.current;
     try {
       const rows = await api<DeckEvent[]>(
-        `/events?limit=${limit}&demo=${demo}&group=1&include=changes&delivery=true`,
+        `/events?limit=${limit}&demo=${demo}&group=1&include=changes&delivery=true${filters}`,
       );
       if (id === loadId.current) {
         const next = share(currentEvents.current, activityEvents(rows));
@@ -68,7 +90,7 @@ export function ActivityPanel({
         setError(true);
       }
     }
-  }, [demo, limit]);
+  }, [demo, limit, filters]);
   useEffect(
     () => () => {
       loadId.current += 1;
@@ -80,7 +102,7 @@ export function ActivityPanel({
     <Panel
       title={t('activity.title')}
       actions={
-        <a className="link" href={routeHash('activity')}>
+        <a className="link" href={`${routeHash('activity')}${category ? `?type=${category}` : ''}`}>
           {t('activity.all')}
         </a>
       }
@@ -126,23 +148,21 @@ function ActivityRow({
     event.type === 'change.source' && event.data.action !== 'removed'
       ? sources.find((source) => source.id === event.data.subject_id)
       : undefined;
-  const sourceLine = [event.data.source_name, event.data.username].filter(Boolean).join(' · ');
+  const text = eventText(
+    tool ? { ...event, data: { ...event.data, name: localized(tool.name) } } : event,
+  );
+  // A known end reads like every other row ("2 h ago"), with the clock time as its tooltip.
+  // Only a time that was not observed exactly keeps its words ("between 12:09 and 13:08").
+  const ended = !event.group && event.type === 'job.finished' ? event.data.ended_at : null;
   const content = (
     <>
       <span className={`dot ${eventTone(event)}`} />
-      <span className="grow">
-        {eventText(
-          tool ? { ...event, data: { ...event.data, name: localized(tool.name) } } : event,
-        )}
-      </span>
-      {/* One line: what happened, where, when. Outcomes and changed fields are in the details. */}
-      {sourceLine && (
-        <span className="activity-source" title={sourceLine}>
-          {sourceLine}
-        </span>
-      )}
+      <span className="grow">{text}</span>
+      {/* One line: what happened and when. Where, outcomes and changed fields are in the details. */}
       <time dateTime={event.at} title={eventTimeTitle(event)}>
-        <ClockText>{() => eventTimeText(event) ?? relativeTime(event.at)}</ClockText>
+        <ClockText>
+          {() => (ended ? relativeTime(ended) : (eventTimeText(event) ?? relativeTime(event.at)))}
+        </ClockText>
       </time>
     </>
   );
@@ -228,10 +248,12 @@ function EventDetails({ event, ctx }: { event: DeckEvent; ctx: Ctx }) {
     ctx.data.instances.find((item) => item.id === data.subject_id);
   const ended = data.ended_at ?? data.job?.end;
   const facts: [MessageKey, string | number | null | undefined][] = [
+    ['event.source', data.source_name],
+    ['sources.col.login', data.username],
     ['jobs.col.state', job?.state ? statusLabel(job.state) : null],
     ['jobs.col.exitCode', job?.exit_code],
     ['job.node', job?.node],
-    ['jobs.col.elapsed', job?.elapsed],
+    ['jobs.col.elapsed', job?.elapsed ? jobElapsed(job.elapsed) : null],
     ['jobs.col.ended', ended ? jobTime(ended) : null],
     ['event.observedAt', dateTime(data.observed_at ?? event.at)],
     ['activity.errorDetail', data.error ? formatMessage(data.error) : null],

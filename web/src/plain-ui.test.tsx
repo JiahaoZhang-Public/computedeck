@@ -7,6 +7,9 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { groupsOf } from './groups';
+import { computeHealth } from './health';
+import { HealthPanel } from './HealthPanel';
+import { sourceState } from './labels';
 import { setLocale } from './i18n';
 import { CloudPage } from './pages/Cloud';
 import { ClustersPage } from './pages/Clusters';
@@ -114,5 +117,50 @@ describe.each(['en', 'zh-CN'] as const)('plain interface in %s', (locale) => {
       for (const tag of host.querySelectorAll('.panel-header .tag'))
         expect(['Estimate', '估算']).not.toContain(tag.textContent);
     }
+  });
+});
+
+describe('what needs a look comes first', () => {
+  it('lists Where to run options by the verdict each row shows', async () => {
+    await show(<PlanPage ctx={context(serverDemo())} />);
+    const tones = ['green', 'amber', 'wait', 'red', 'gray'];
+    const rows = [...host.querySelector('.plan-table')!.querySelectorAll('.plan-verdict .status')];
+    const ranks = rows.map((status) => tones.findIndex((tone) => status.classList.contains(tone)));
+    expect(ranks.length).toBeGreaterThan(3);
+    expect(ranks).not.toContain(-1);
+    // An option whose access was not checked reads "Unknown" and never sits above an estimate.
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(ranks.at(-1)).toBe(tones.indexOf('gray'));
+  });
+
+  it('opens the health panel on sources in trouble and folds the rest', async () => {
+    const data = serverDemo();
+    await show(
+      <HealthPanel
+        state={computeHealth(data, null, null, false, true)}
+        data={data}
+        busy={false}
+        refresh={vi.fn()}
+        close={vi.fn()}
+      />,
+    );
+    const panel = document.querySelector('.health-panel')!;
+    const fine = data.sources.filter((source) =>
+      ['ready', 'syncing'].includes(sourceState(source)),
+    );
+    expect(fine.length).toBeGreaterThan(0);
+    expect(fine.length).toBeLessThan(data.sources.length);
+    // Rows outside the fold are the ones in trouble, a failure first.
+    const open = [...panel.querySelectorAll(':scope > .health-row')];
+    expect(open).toHaveLength(data.sources.length - fine.length);
+    expect(open[0].querySelector('.status.red')).not.toBeNull();
+    const folded = panel.querySelector('.health-fine')!;
+    expect(folded.querySelector('summary')!.textContent).toContain(String(fine.length));
+    expect(folded.querySelectorAll('.health-row')).toHaveLength(fine.length);
+    // A source that is being collected right now is not offered another collection.
+    const collecting = data.sources.filter((source) => source.status === 'syncing').length;
+    expect(panel.querySelectorAll('.health-row button.link')).toHaveLength(
+      data.sources.filter((source) => source.enabled).length - collecting,
+    );
   });
 });

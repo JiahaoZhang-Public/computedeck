@@ -516,9 +516,11 @@ export function SourceForm({
           (checkStarted ? (
             <ConnectionChecks key={savedId} sourceId={savedId} />
           ) : (
-            <button className="button" onClick={() => setCheckStarted(true)}>
-              {t('source.check.run')}
-            </button>
+            <p>
+              <button className="button" onClick={() => setCheckStarted(true)}>
+                {t('source.check.run')}
+              </button>
+            </p>
           ))}
         {justSaved && (
           <ul className="checklist">

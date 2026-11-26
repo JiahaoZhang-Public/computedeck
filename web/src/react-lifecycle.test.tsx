@@ -22,7 +22,7 @@ import { ChatPage } from './pages/Chat';
 import { JobsPage } from './pages/Jobs';
 import { dateTime, relativeTime } from './domain';
 import { driverInfo } from './drivers';
-import { groupsOf } from './groups';
+import { groupsOf, sourceLabel } from './groups';
 import { sourceState, statusLabel } from './labels';
 import { routeParams } from './useRouteParam';
 import { HistoryPanel } from './pages/HistoryPanel';
@@ -39,12 +39,13 @@ vi.mock('./api', () => ({ api: vi.fn(), upload: vi.fn(), download: vi.fn() }));
 const request = vi.mocked(api);
 const now = new Date('2026-10-13T12:00:00Z');
 
-/** The shared attention count as the Overview tile shows it; the list heading carries none. */
+/**
+ * The shared attention count as the top bar shows it; the list heading carries none, and the
+ * Overview has no tile that repeats it. A calm top bar shows no number.
+ */
 function attentionCount() {
   expect(container.querySelector('#attention .count')).toBeNull();
-  return [...container.querySelectorAll('.stat')]
-    .find((element) => element.querySelector('.stat-label')?.textContent === t('overview.issues'))
-    ?.querySelector('.stat-value')?.textContent;
+  return container.querySelector('.health-pill .health-count')?.textContent ?? '0';
 }
 
 let container: HTMLDivElement;
@@ -108,16 +109,16 @@ function activeRowTitle(item: NonNullable<Dashboard['attention']>[number]) {
 const activeRows = () => [...container.querySelectorAll('#attention > ul > li')];
 const mutedSummary = () => container.querySelector('.attention-muted > summary')?.textContent;
 
-/** One active count everywhere: Overview tile, nav badge, top-bar pill and the list itself. */
+/** One active count everywhere: nav badge, top-bar pill and the list itself. */
 function assertCounts(count: number) {
   expect(container.querySelector('a[href="#/overview"] .badge')?.textContent).toBe(
     count ? String(count) : undefined,
   );
   expect(attentionCount()).toBe(String(count));
-  const tile = [...container.querySelectorAll('.stat')].find(
-    (element) => element.querySelector('.stat-label')?.textContent === t('overview.attention'),
-  );
-  expect(tile?.querySelector('.stat-value')?.textContent).toBe(String(count));
+  // No tile repeats the list that sits directly under the totals.
+  expect(
+    [...container.querySelectorAll('.stat-label')].map((label) => label.textContent),
+  ).not.toContain(t('overview.attention'));
   // The pill follows the same count; with none left it is only the freshness.
   const pill = container.querySelector('.health-pill')!;
   expect(pill.querySelector('.health-count')?.textContent).toBe(count ? String(count) : undefined);
@@ -992,8 +993,9 @@ it.each(['en', 'zh-CN'] as const)(
     expect(panel.textContent).toContain(t('health.unreadable', { count: 2 }));
     expect(panel.textContent).toContain('schedule failed');
     expect(panel.textContent).toContain(t('health.backoff', { count: 2 }));
-    const retry = [...panel.querySelectorAll('button')].find(
-      (button) => button.textContent === t('common.retry'),
+    // Sources that need a look are listed first, so the row is found by its own name.
+    const retry = panel.querySelector<HTMLButtonElement>(
+      `button[aria-label="${t('health.retrySource', { name: sourceLabel(groupsOf(data), data.sources[0]) })}"]`,
     )!;
     await act(async () => retry.click());
     expect(request).toHaveBeenCalledWith('/refresh', { source_id: data.sources[0].id });
@@ -1196,12 +1198,6 @@ it.each(['en', 'zh-CN'] as const)(
     await render(<App />);
     expect(container.querySelector('a[href="#/overview"] .badge')?.textContent).toBe('1');
     expect(attentionCount()).toBe('1');
-    const tile = [...container.querySelectorAll('.stat')].find(
-      (element) => element.querySelector('.stat-label')?.textContent === t('overview.attention'),
-    );
-    expect(tile?.querySelector('.stat-value')?.textContent).toBe('1');
-    // A complete count needs no caption; the list sits right below it.
-    expect(tile?.querySelector('.stat-hint')).toBeNull();
     expect(container.querySelectorAll('#attention li')).toHaveLength(1);
     // One line: what, then a relative age; the cause and times are in the detail it opens.
     const row = container.querySelector('#attention li .attention-open')!;
@@ -1304,11 +1300,12 @@ it.each(['en', 'zh-CN'] as const)('keeps example diagnosis read-only in %s', asy
   source.error = { code: 'ssh_timeout' };
   await render(<SourceDiagnosis source={source} demo drivers={[]} />);
   const button = container.querySelector('button')!;
-  expect(button.disabled).toBe(true);
   expect(button.textContent).toBe(t('sources.testConnection'));
-  // The banner explains read-only example data; every action here stays disabled.
-  for (const action of container.querySelectorAll('button')) expect(action.disabled).toBe(true);
+  // No dead control: the button answers with why nothing runs, and nothing is sent.
+  expect(button.disabled).toBe(false);
+  expect(container.textContent).not.toContain(t('toast.demoReadOnly'));
   await act(async () => button.click());
+  expect(container.querySelector('[role="status"]')?.textContent).toBe(t('toast.demoReadOnly'));
   expect(request).not.toHaveBeenCalled();
 });
 
@@ -1530,7 +1527,7 @@ describe('visible dashboard polling', () => {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
     expect(request).toHaveBeenCalledWith('/dashboard?demo=false&since=live-token');
     expect(request).toHaveBeenCalledWith(
-      '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+      '/events?limit=12&demo=false&group=1&include=changes&delivery=true&category=jobs',
     );
     request.mockClear();
     await act(async () => window.dispatchEvent(new Event('focus')));
@@ -1691,7 +1688,7 @@ describe('visible dashboard polling', () => {
     data = { ...data, token: 'next-token' };
     await act(async () => vi.advanceTimersByTimeAsync(10000));
     expect(request).toHaveBeenCalledWith(
-      '/events?limit=12&demo=false&group=1&include=changes&delivery=true',
+      '/events?limit=12&demo=false&group=1&include=changes&delivery=true&category=jobs',
     );
     request.mockClear();
     await click('[role="switch"]');
@@ -1749,7 +1746,8 @@ it('announces health without clock chatter and gives retry buttons source-specif
   expect(live.textContent).toBe(before);
   await click('.health-pill');
   const retries = [...container.querySelectorAll<HTMLButtonElement>('.health-row .link')];
-  expect(retries.length).toBe(data.sources.length);
+  // One per source, except a source that is being collected right now.
+  expect(retries.length).toBe(data.sources.filter((source) => source.status !== 'syncing').length);
   expect(new Set(retries.map((button) => button.getAttribute('aria-label'))).size).toBe(
     retries.length,
   );
@@ -2185,7 +2183,8 @@ it('scrolls only the selected Sources group without hiding other groups', async 
   const second = ctx.groups.find((group) => group.key === 'example:cluster-d')!;
   await render(<SourcesPage ctx={{ ...ctx, group: first.key }} />);
   const panel = document.getElementById(`source-group:${first.key}`);
-  expect(panel?.tagName).toBe('SECTION');
+  // One table for every source: a group is a body of rows in it.
+  expect(panel?.tagName).toBe('TBODY');
   expect(scroll).toHaveBeenCalledWith({ block: 'start' });
   expect(scroll.mock.contexts.every((element) => element === panel)).toBe(true);
   expect(container.querySelectorAll('.source-group')).toHaveLength(
@@ -2384,7 +2383,7 @@ it.each(['en', 'zh-CN'] as const)(
     );
     expect(activeRows()[0].querySelector('strong')?.textContent).toBe(firstTitle);
     // Snoozing lives in the detail each row opens: the source pane for a source, the drawer for
-    // a machine. Their "⋯" menu ends with both durations.
+    // a machine. Their "⋯" menu offers both durations.
     const lowUse = data.attention!.find((item) => item.action === 'instance' && !item.muted)!;
     const snoozeLabels = [t('attention.oneHour'), t('attention.tomorrow')];
     for (const [until, item, pane, heading] of [
@@ -2408,9 +2407,11 @@ it.each(['en', 'zh-CN'] as const)(
       expect(writes()).toHaveLength(before);
       assertCounts(until === '1h' ? 5 : 4);
       const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-      expect(items.slice(-2).map((entry) => entry.textContent)).toEqual(snoozeLabels);
+      // Both durations are offered, in order, wherever the pane's other actions sit.
+      const snoozes = items.filter((entry) => snoozeLabels.includes(entry.textContent ?? ''));
+      expect(snoozes.map((entry) => entry.textContent)).toEqual(snoozeLabels);
       expect(document.activeElement).toBe(items[0]);
-      await act(async () => items.at(until === '1h' ? -2 : -1)!.click());
+      await act(async () => snoozes[until === '1h' ? 0 : 1].click());
       await act(async () => {
         await vi.dynamicImportSettled();
       });
@@ -2844,7 +2845,9 @@ it.each([false, true])('stops following the completed collection (scoped: %s)', 
   await render(<App />);
   if (scoped) {
     await click('.health-pill');
-    const retry = container.querySelector('.health-row button.link')!;
+    const retry = container.querySelector(
+      `.health-row button[aria-label="${t('health.retrySource', { name: sourceLabel(groupsOf(data), data.sources[0]) })}"]`,
+    )!;
     await act(async () => (retry as HTMLButtonElement).click());
     expect(request).toHaveBeenCalledWith('/refresh', { source_id: target });
   } else {

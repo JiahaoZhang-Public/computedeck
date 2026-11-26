@@ -79,8 +79,11 @@ it.each(['en', 'zh-CN'] as const)(
       message: t('plan.submit.copied'),
     });
     expect(vi.mocked(ctx.copy).mock.calls[0][0]).not.toContain('#');
-    // Unconfirmed flags are listed in the estimate's details, next to the copy button.
-    expect(host.querySelector('.plan-best .plan-details')!.textContent).toContain(
+    // Unconfirmed flags are named with the flags themselves, never behind the details.
+    expect(host.querySelector('.plan-best')!.textContent).toContain(
+      t('plan.submit.unknown', { flags: '-p, -A' }),
+    );
+    expect(host.querySelector('.plan-best .plan-details')!.textContent).not.toContain(
       t('plan.submit.unknown', { flags: '-p, -A' }),
     );
     expect(host.querySelector('.plan-best .plan-submit')!.textContent).not.toContain(
@@ -237,7 +240,7 @@ it('uses the newest node observation for submit flags on the best card and optio
   }
 });
 
-it('preset chips fill only the request and job context, clearing run time', async () => {
+it('preset chips fill only the request and job context, leaving a typed run time', async () => {
   ctx.data.jobs[0].submitted_at = '2099-01-01T00:00:00Z';
   await act(async () => setRouteParams({ hours: '24' }));
   await render();
@@ -245,7 +248,7 @@ it('preset chips fill only the request and job context, clearing run time', asyn
   expect(presets.length).toBe(4);
   await act(async () => presets[0].click());
   expect(routeParams().get('gpus')).toBe('4');
-  expect(routeParams().get('hours')).toBeNull();
+  expect(routeParams().get('hours')).toBe('24');
   expect(routeParams().get('from')).toBe(ctx.data.jobs[0].id);
   expect(ctx.copy).not.toHaveBeenCalled();
 });

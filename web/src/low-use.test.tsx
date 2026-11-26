@@ -104,8 +104,8 @@ describe.each(['en', 'zh-CN'] as const)('sustained low use in %s', (language) =>
   });
   it.each([
     [60, '1 h', '1 小时'],
-    [45, '45 m', '45 分钟'],
-    [150, '2 h 30 m', '2 小时 30 分钟'],
+    [45, '45 min', '45 分钟'],
+    [150, '2 h 30 min', '2 小时 30 分钟'],
   ] as const)(
     'formats %i minutes consistently across all low-use displays',
     async (minutes, en, zh) => {

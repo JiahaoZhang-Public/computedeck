@@ -5,6 +5,7 @@ import type { DeckEvent, Instance, Job, Source, SSHConfig } from '../types';
 import type { SourcePreset } from '../forms';
 import type { Ctx } from '../pages/shared';
 import { snoozeItems } from '../pages/snooze';
+import { groupLabel } from '../groups';
 import type { computeHealth } from '../health';
 import { HealthPanel } from '../HealthPanel';
 import { SourceDiagnosis } from '../SourceDiagnosis';
@@ -235,6 +236,28 @@ export function Layers({
                 key={diagnosisSource.id}
                 source={diagnosisSource}
                 configure={() => configure(diagnosisSource)}
+                addLogin={
+                  diagnosisSource.kind === 'cluster'
+                    ? () =>
+                        configure(undefined, {
+                          driver: diagnosisSource.driver,
+                          clusterName: groupLabel(ctx.groups, diagnosisSource.cluster_id),
+                        })
+                    : undefined
+                }
+                remove={async () => {
+                  try {
+                    await mutate(
+                      `/sources/${encodeURIComponent(diagnosisSource.id)}`,
+                      {},
+                      'DELETE',
+                    );
+                    setModal(null);
+                    notify(t('toast.sourceRemoved', { name: diagnosisSource.name }));
+                  } catch (reason) {
+                    notify(errorText(reason, 'error.save'), 'error');
+                  }
+                }}
                 collect={() => collect(diagnosisSource)}
                 pause={() => ctx.pauseSource(diagnosisSource)}
                 snooze={snoozeItems(ctx, diagnosisSource.id)}

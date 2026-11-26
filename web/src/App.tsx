@@ -623,7 +623,9 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
     return saved;
   }
   const blockedInDemo = () => {
-    if (demo) notify(t('toast.demoReadOnly'));
+    // The refusal carries its own way out.
+    if (demo)
+      notify(t('toast.demoReadOnly'), 'ok', { label: t('banner.demoOff'), run: toggleDemo });
     return demo;
   };
   async function showSSH() {

@@ -148,7 +148,12 @@ export function CloudPage({ ctx }: { ctx: Ctx }) {
                               })}
                             />
                           )}
-                          <Meter value={item.gpu_utilization} />
+                          {/* No reading is a dash, not an empty bar. */}
+                          {item.gpu_utilization == null ? (
+                            <span className="muted">—</span>
+                          ) : (
+                            <Meter value={item.gpu_utilization} />
+                          )}
                         </span>
                       </td>
                       <td

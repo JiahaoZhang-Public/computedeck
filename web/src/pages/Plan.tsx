@@ -5,19 +5,27 @@ import type { ReactNode } from 'react';
 import { setRouteParams, useRouteParam } from '../useRouteParam';
 import { jobPlanRequest, jobWaitsHere, planPresets, submitFlags } from '../submit';
 import type { SubmitFormat } from '../submit';
-import { ChevronDown, Clock3, X } from 'lucide-react';
+import { ChevronDown, Clock3, Copy, X } from 'lucide-react';
 import { locale, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { dateTime, relativeTime, sourceHasData, uniqueNodes } from '../domain';
 import { jobReason } from '../jobFacts';
 import { duration, planComparison, planFactors, RULES, type PlanFactor } from '../planExplanation';
-import { gpuModels, lowUseInstances, machineOptions, machineSamples, planOptions } from '../plan';
+import {
+  gpuModels,
+  lowUseInstances,
+  machineOptions,
+  machineSamples,
+  planOptions,
+  verdictRank,
+} from '../plan';
 import type { PlanOption, PlanRequest, Verdict } from '../plan';
 import { Empty, Panel } from '../ui';
 import { LazyMenuButton } from './LazyMenu';
 import type { Ctx } from './shared';
 import type { Job, NodeSummary } from '../types';
 import { WaitHistory, WaitHistoryNote } from '../WaitHistory';
+import { waitRange } from '../waitRange';
 
 const TONES: Record<Verdict, string> = {
   likely: 'green',
@@ -193,7 +201,11 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
     ]),
   );
   const copyFormat = { value: format, change: changeFormat };
-  const visible = options.filter((option) => option.access !== 'not_associated');
+  // Listed by the verdict the row shows: an option whose access was not checked reads
+  // "Unknown" and sorts as that, below the ones with an estimate. The sort is stable.
+  const visible = options
+    .filter((option) => option.access !== 'not_associated')
+    .sort((a, b) => verdictRank(shownVerdict(a)) - verdictRank(shownVerdict(b)));
   const denied = options.filter((option) => option.access === 'not_associated');
   // Options that cannot run as asked stay listed, with reasons, behind one disclosure.
   const unfitVerdicts: Verdict[] = ['none', 'unavailable', 'wall', 'limit'];
@@ -201,6 +213,9 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   const unfit = visible.filter((option) => unfitVerdicts.includes(option.verdict));
   const first = visible[0];
   const best = first && ['likely', 'possible'].includes(shownVerdict(first)) ? first : null;
+  // Your own finished jobs on that login and QoS, when there are enough of them to say.
+  const bestWait =
+    best && waitRange(data.wait_history?.[best.source.id], best.qos ?? null, null, request.gpus);
   const machines = machineOptions(data, request, undefined, ctx.nodes);
   const { staleCount } = machineSamples(data);
   const visibleMachines = machines.filter(
@@ -217,54 +232,6 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <Panel>
-        {from && (
-          <div className="plan-from">
-            <span>
-              {fromJob
-                ? fromJob.gpu_count != null && fromJob.gpu_count > 0
-                  ? t('plan.forJob', { name: fromJob.name, count: fromJob.gpu_count })
-                  : t('plan.forJob.nameOnly', { name: fromJob.name })
-                : t('plan.fromMissing', { id: from })}
-              {fromJob && (fromJob.gpu_count == null || fromJob.gpu_count < 1) && (
-                <span className="sub">{t('plan.fromUnknown')}</span>
-              )}
-            </span>
-            <button
-              className="icon-button"
-              aria-label={t('plan.clearFrom')}
-              onClick={() => setFrom('')}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-        {presets.length > 0 && (
-          <div className="plan-presets" role="group" aria-label={t('plan.presets')}>
-            {presets.map((job) => {
-              const next = jobPlanRequest(job, data.nodes);
-              return (
-                <button
-                  key={`${job.source_id}:${job.id}`}
-                  className="button small"
-                  onClick={() => {
-                    changeRequest({
-                      gpus: String(next.gpus),
-                      model: next.gpuType,
-                      hours: null,
-                      from: job.id,
-                    });
-                  }}
-                >
-                  {t(next.gpuType ? 'plan.preset' : 'plan.preset.noModel', {
-                    count: next.gpus,
-                    model: next.gpuType,
-                    name: job.name,
-                  })}
-                </button>
-              );
-            })}
-          </div>
-        )}
         <form className="plan-form" onSubmit={(event) => event.preventDefault()}>
           <label>
             {t('plan.gpus')}
@@ -293,23 +260,72 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
             </select>
           </label>
           <label>
-            <span>
-              {t('plan.runtime')} <small>{t('common.optional')}</small>
-            </span>
+            {t('plan.runtime')}
             <input
               type="number"
               min="0"
               step="0.5"
               value={hours}
-              placeholder="24"
+              placeholder={t('plan.anyRuntime')}
               onChange={(event) => changeRequest({ hours: event.target.value })}
             />
           </label>
         </form>
+        {presets.length > 0 && (
+          <div className="plan-presets" role="group" aria-label={t('plan.presets')}>
+            {presets.map((job) => {
+              const next = jobPlanRequest(job, data.nodes);
+              return (
+                <button
+                  key={`${job.source_id}:${job.id}`}
+                  className="button small"
+                  aria-pressed={from === job.id}
+                  onClick={() => {
+                    // A preset sets what a job asked for; a run time already typed stays.
+                    if (from === job.id) setFrom('');
+                    else
+                      changeRequest({
+                        gpus: String(next.gpus),
+                        model: next.gpuType,
+                        from: job.id,
+                      });
+                  }}
+                >
+                  {t(next.gpuType ? 'plan.preset' : 'plan.preset.noModel', {
+                    count: next.gpus,
+                    model: next.gpuType,
+                    name: job.name,
+                  })}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {from && (
+          <div className="plan-from">
+            <span>
+              {fromJob
+                ? fromJob.gpu_count != null && fromJob.gpu_count > 0
+                  ? t('plan.forJob', { name: fromJob.name, count: fromJob.gpu_count })
+                  : t('plan.forJob.nameOnly', { name: fromJob.name })
+                : t('plan.fromMissing', { id: from })}
+              {fromJob && (fromJob.gpu_count == null || fromJob.gpu_count < 1) && (
+                <span className="sub">{t('plan.fromUnknown')}</span>
+              )}
+            </span>
+            <button
+              className="icon-button"
+              aria-label={t('plan.clearFrom')}
+              onClick={() => setFrom('')}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </Panel>
       {best && (
         <Panel title={t('plan.best')}>
-          <div className="plan-best">
+          <div className="plan-best hero">
             <strong>
               {best.source.name} · {best.source.username}
               {best.qos && ` · ${best.qos}`}
@@ -337,6 +353,12 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
                 <dt>{t('plan.tile.node')}</dt>
                 <dd>{best.largestNodeFree ?? '—'}</dd>
               </div>
+              {bestWait && (
+                <div>
+                  <dt>{t('wait.label')}</dt>
+                  <dd>{bestWait}</dd>
+                </div>
+              )}
             </dl>
             <SubmitCopy
               result={submissions.get(best.key)!}
@@ -344,18 +366,22 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
               option={best}
               format={copyFormat}
             />
+            {/* Schedulers without copyable flags show the estimate alone. */}
+            {submissions.get(best.key) && (
+              <pre
+                className="plan-flags"
+                tabIndex={0}
+                aria-label={t('plan.submit.flagsFor', { name: optionName(best) })}
+              >
+                {submissions.get(best.key)!.text}
+              </pre>
+            )}
+            {/* Read before pasting: never behind a disclosure. */}
+            <SubmitNotes result={submissions.get(best.key)} />
             <details className="plan-details">
               <summary>{t('plan.details')}</summary>
-              <SubmitNotes result={submissions.get(best.key)} />
               {visible[1] && (
                 <p className="plan-comparison">{planComparison(best, visible[1], request)}</p>
-              )}
-              {best.nodesObservedAt && (
-                <p className="sub">
-                  <ClockText>
-                    {() => t('plan.nodesAt', { time: relativeTime(best.nodesObservedAt) })}
-                  </ClockText>
-                </p>
               )}
               <WaitHistory
                 compact
@@ -504,9 +530,11 @@ export function PlanPage({ ctx }: { ctx: Ctx }) {
         </Panel>
       )}
       {lowUse.length > 0 && (
-        <a className="link" href="#/cloud?use=low">
-          {t('lowUse.pointer', { count: lowUse.length })}
-        </a>
+        <p className="plan-pointer">
+          <a className="link" href="#/cloud?use=low">
+            {t('lowUse.pointer', { count: lowUse.length })}
+          </a>
+        </p>
       )}
     </>
   );
@@ -565,15 +593,21 @@ function OptionsTable({
                   <td>
                     <span className="with-mark">
                       <strong>{option.source.name}</strong>
+                      {/* A narrow card names login and QoS here instead of in labelled cells. */}
+                      <span className="plan-option-sub" aria-hidden="true">
+                        {[option.source.username, option.qos].filter(Boolean).join(' · ')}
+                      </span>
                       {jobWaitsHere(fromJob, option) && (
                         <span className="tag plan-qos">{t('plan.waitsHere')}</span>
                       )}
                     </span>
                   </td>
-                  <td className="mono col-high" data-label={t('sources.col.login')}>
+                  <td className="mono col-high plan-identity" data-label={t('sources.col.login')}>
                     {option.source.username || '—'}
                   </td>
-                  <td data-label={t('job.qos')}>{option.qos || '—'}</td>
+                  <td className="plan-identity" data-label={t('job.qos')}>
+                    {option.qos || '—'}
+                  </td>
                   <td className="num key" data-label={t('plan.col.free')}>
                     {freeGpuCount(option)}
                   </td>
@@ -597,25 +631,28 @@ function OptionsTable({
                       {verdict === 'behind' ? <Clock3 size={13} /> : <i />}
                       {verdictLabel(option, request)}
                     </span>
-                    <SubmitCopy
-                      result={submissions.get(option.key)!}
-                      ctx={ctx}
-                      option={option}
-                      format={format}
-                    />
-                    <button
-                      type="button"
-                      className="icon-button plan-expand"
-                      aria-expanded={expanded.includes(option.key)}
-                      aria-controls={`${tableId}-${option.key}`}
-                      aria-label={t('plan.explanationFor', { name: optionName(option) })}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggle(option.key);
-                      }}
-                    >
-                      <ChevronDown size={16} />
-                    </button>
+                    <span className="plan-row-actions">
+                      <SubmitCopy
+                        result={submissions.get(option.key)!}
+                        ctx={ctx}
+                        option={option}
+                        format={format}
+                        compact
+                      />
+                      <button
+                        type="button"
+                        className="icon-button plan-expand"
+                        aria-expanded={expanded.includes(option.key)}
+                        aria-controls={`${tableId}-${option.key}`}
+                        aria-label={t('plan.explanationFor', { name: optionName(option) })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggle(option.key);
+                        }}
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </span>
                   </td>
                 </tr>
                 <tr
@@ -624,8 +661,26 @@ function OptionsTable({
                   hidden={!expanded.includes(option.key)}
                 >
                   <td colSpan={10}>
-                    <PlanExplanation option={option} request={request}>
-                      {why && <p>{why}</p>}
+                    <PlanExplanation
+                      option={option}
+                      request={request}
+                      lead={
+                        <>
+                          {/* What the copy icon copies, readable and selectable. */}
+                          {submissions.get(option.key) && (
+                            <pre
+                              className="plan-flags"
+                              tabIndex={0}
+                              aria-label={t('plan.submit.flagsFor', { name: optionName(option) })}
+                            >
+                              {submissions.get(option.key)!.text}
+                            </pre>
+                          )}
+                          <SubmitNotes result={submissions.get(option.key)} />
+                          {why && <p>{why}</p>}
+                        </>
+                      }
+                    >
                       {option.access === 'unknown' && (
                         <p>
                           {t('plan.accessNote', {
@@ -645,22 +700,12 @@ function OptionsTable({
                       ) : (
                         <p>{t('plan.queueRoomUnknown')}</p>
                       )}
-                      <SubmitNotes result={submissions.get(option.key)} />
                       <WaitHistory
                         compact
                         history={ctx.data.wait_history?.[option.source.id]}
                         qos={option.qos}
                         gpus={request.gpus}
                       />
-                      <ClockText>
-                        {() =>
-                          option.nodesObservedAt && (
-                            <p className="sub">
-                              {t('plan.nodesAt', { time: relativeTime(option.nodesObservedAt) })}
-                            </p>
-                          )
-                        }
-                      </ClockText>
                     </PlanExplanation>
                   </td>
                 </tr>
@@ -673,31 +718,49 @@ function OptionsTable({
   );
 }
 
+/**
+ * An opened option: what would be submitted and the one line of why come first. The queue
+ * detail, typical waits and the seven factors with their sources are one click further.
+ */
 function PlanExplanation({
   option,
   request,
+  lead,
   children,
 }: {
   option: PlanOption;
   request: PlanRequest;
+  lead?: ReactNode;
   children?: ReactNode;
 }) {
+  const [more, setMore] = useState(false);
   return (
     <div className="plan-explanation">
-      {children}
-      <p className="sub">{t('plan.factor.note')}</p>
-      <dl className="plan-factors">
-        {planFactors(option, request).map((factor) => (
-          <div key={factor.key}>
-            <dt>{t(`plan.factor.${factor.key}`)}</dt>
-            <dd>
-              <span>{factor.value}</span>
-              <span className="sub">{t(`plan.effect.${factor.effect}`)}</span>
-              <FactorSources factor={factor} />
-            </dd>
-          </div>
-        ))}
-      </dl>
+      {lead}
+      <button
+        type="button"
+        className="link plan-evidence"
+        aria-expanded={more}
+        onClick={() => setMore(!more)}
+      >
+        {t('plan.factor.evidence')}
+      </button>
+      <div className="plan-more" hidden={!more}>
+        {children}
+        <dl className="plan-factors">
+          {planFactors(option, request).map((factor) => (
+            <div key={factor.key}>
+              <dt>{t(`plan.factor.${factor.key}`)}</dt>
+              <dd>
+                <span>{factor.value}</span>
+                <span className="sub">{t(`plan.effect.${factor.effect}`)}</span>
+                <FactorSources factor={factor} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="sub">{t('plan.factor.note')}</p>
+      </div>
     </div>
   );
 }
@@ -750,19 +813,40 @@ function FactorSources({ factor }: { factor: PlanFactor }) {
 
 type CopyFormat = { value: SubmitFormat; change: (value: SubmitFormat) => void };
 
-/** Copy, with the flag format one menu away on the same control. */
+/**
+ * Copy, with the flag format one menu away on the same control. A table row carries only the
+ * copy icon: the words and the format menu are said once, on the best estimate.
+ */
 function SubmitCopy({
   result,
   ctx,
   option,
   format,
+  compact,
 }: {
   result: ReturnType<typeof submitFlags>;
   ctx: Ctx;
   option: PlanOption;
   format: CopyFormat;
+  compact?: boolean;
 }) {
   if (!result) return null;
+  if (compact)
+    return (
+      <span className="plan-submit">
+        <button
+          className="icon-button"
+          aria-label={t('plan.submit.copyFor', { name: optionName(option) })}
+          title={t('plan.submit.copy')}
+          onClick={(event) => {
+            event.stopPropagation();
+            void ctx.copy(result.text, { kind: 'command', message: t('plan.submit.copied') });
+          }}
+        >
+          <Copy size={15} />
+        </button>
+      </span>
+    );
   return (
     <div className="plan-submit split-button">
       <button

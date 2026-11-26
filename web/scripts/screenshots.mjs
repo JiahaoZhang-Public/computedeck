@@ -23,9 +23,21 @@ async function openQueuedJob(page) {
   await page.locator('[role="dialog"], .drawer').first().waitFor();
 }
 
+/** Routes follow the sources table: bring the panel to the top of the view. */
+async function showRoutes(page) {
+  await page
+    .locator('.routes-panel')
+    .evaluate((panel) => panel.scrollIntoView({ block: 'center' }));
+}
+
 const readme = [
   { name: 'overview', hash: '#/overview', viewport: desktop },
-  { name: 'routes', hash: '#/sources', viewport: { width: 1440, height: 620 } },
+  {
+    name: 'routes',
+    hash: '#/sources',
+    viewport: { width: 1440, height: 620 },
+    prepare: showRoutes,
+  },
   { name: 'where-to-run', hash: plan, viewport: desktop },
   { name: 'job-detail', hash: '#/jobs', viewport: desktop, prepare: openQueuedJob },
   { name: 'phone-overview', hash: '#/overview', viewport: phone, scale: 3 },

@@ -77,7 +77,7 @@ test('Plan wait pills keep one clock and uncoloured plugin pills have no invente
 
 const typographyKinds = new Set(['small-text', 'unsupported-font-weight']);
 for (const route of ['plan', 'activity', 'usage']) {
-  test(`${route} visible text uses at least 12px and weights 400/600`, async ({ page }) => {
+  test(`${route} visible text uses at least 12px and weights 400/500/600`, async ({ page }) => {
     await page.goto(`/?demo=true#/${route}`);
     await ready(page);
     expect((await checkLayout(page)).filter(({ kind }) => typographyKinds.has(kind))).toEqual([]);
@@ -327,7 +327,9 @@ test('forced colours override explicit themes in both builds', async ({ page, fr
   }
 });
 
-test('table numbers and metrics stay tabular and job timings stay monospace', async ({ page }) => {
+test('table numbers and metrics stay tabular and mono cells share the table text size', async ({
+  page,
+}) => {
   await page.goto('/?demo=true#/__gallery?compat');
   await ready(page);
   const number = page.locator('.gallery .table td.num').first();
@@ -335,16 +337,17 @@ test('table numbers and metrics stay tabular and job timings stay monospace', as
   // Exercise both frozen classes together on the same plugin-style table cell.
   await number.evaluate((cell) => cell.classList.add('mono'));
   await expect(number).toHaveCSS('font-family', /ui-monospace/);
-  await expect(number).toHaveCSS('font-size', '12px');
+  await expect(number).toHaveCSS('font-size', '13px');
   await expect(number).toHaveCSS('font-variant-numeric', 'tabular-nums');
   for (const route of ['jobs', 'resources', 'sources']) {
     await page.goto(`/?demo=true#/${route}`);
     await ready(page);
     const cells = page.locator('.table td.mono');
-    if (route === 'jobs') expect(await cells.count()).toBeGreaterThan(0);
+    // Logins and connections are mono; a job's time is now a worded duration.
+    if (route === 'sources') expect(await cells.count()).toBeGreaterThan(0);
     for (const cell of await cells.all()) {
       await expect(cell).toHaveCSS('font-family', /ui-monospace/);
-      await expect(cell).toHaveCSS('font-size', '12px');
+      await expect(cell).toHaveCSS('font-size', '13px');
     }
     for (const cell of await page.locator('.table td.num').all())
       await expect(cell).toHaveCSS('font-variant-numeric', 'tabular-nums');

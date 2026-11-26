@@ -72,9 +72,13 @@ export function ClustersPage({ ctx }: { ctx: Ctx }) {
                 <strong>{item.label}</strong>
                 <ClockText>{() => <Status state={groupSummary(data, item).state} />}</ClockText>
               </header>
-              <strong className={`cluster-hero ${tone}`}>
-                {row.nodes.nodes ? allocationText(row.nodes) : '—'}
-              </strong>
+              {/* The figure says what it counts: "12 / 32 GPUs allocated". */}
+              <div className="cluster-figure">
+                <strong className={`cluster-hero ${tone}`}>
+                  {row.nodes.nodes ? allocationText(row.nodes) : '—'}
+                </strong>
+                {row.nodes.nodes > 0 && <span>{t('clusters.heroUnit')}</span>}
+              </div>
               <CapacityBar nodes={row.nodes} />
               <dl className="kv">
                 <div>

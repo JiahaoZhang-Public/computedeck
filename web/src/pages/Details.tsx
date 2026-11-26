@@ -8,7 +8,7 @@ import { Copy, Ellipsis, Loader2 } from 'lucide-react';
 import { MenuButton } from '../layers/Popover';
 import type { DeckEvent, GpuRow, Instance, Job, SSHConfig } from '../types';
 import { failureEnd, failureExplanation, inspectionCommand } from '../failures';
-import { jobReason, jobTime, jobWaiting } from '../jobFacts';
+import { jobElapsed, jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { groupLabel } from '../groups';
 import { errorText, formatMessage, t } from '../i18n';
 import {
@@ -427,8 +427,11 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                     ),
                     value:
                       job.elapsed && job.time_limit
-                        ? t('failure.ranLimit', { elapsed: job.elapsed, limit: job.time_limit })
-                        : job.elapsed || '—',
+                        ? t('failure.ranLimit', {
+                            elapsed: jobElapsed(job.elapsed),
+                            limit: jobElapsed(job.time_limit),
+                          })
+                        : jobElapsed(job.elapsed),
                   },
                   ...(job.exit_code != null
                     ? [{ label: t('jobs.col.exitCode'), value: job.exit_code }]
@@ -444,7 +447,7 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
                 ]
               : [
                   { label: t('job.allocatedGpus'), value: gpus },
-                  { label: t('jobs.col.elapsed'), value: job.elapsed || '—' },
+                  { label: t('jobs.col.elapsed'), value: jobElapsed(job.elapsed) },
                   { label: t('job.node'), value: job.node || '—' },
                 ]
         }
@@ -553,12 +556,15 @@ export function JobDetail({ job, ctx, event }: { job: Job; ctx: Ctx; event?: Dec
         {!historical && (
           <div>
             <dt>{t('jobs.col.elapsed')}</dt>
-            <dd className="mono">
+            <dd>
               {pending
                 ? '—'
                 : job.elapsed && job.time_limit
-                  ? t('failure.ranLimit', { elapsed: job.elapsed, limit: job.time_limit })
-                  : job.elapsed || '—'}
+                  ? t('failure.ranLimit', {
+                      elapsed: jobElapsed(job.elapsed),
+                      limit: jobElapsed(job.time_limit),
+                    })
+                  : jobElapsed(job.elapsed)}
             </dd>
           </div>
         )}

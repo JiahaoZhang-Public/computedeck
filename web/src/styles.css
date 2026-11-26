@@ -7,7 +7,7 @@
   --red-soft: var(--status-error-bg);
   --chart-hatch: var(--hatch);
   --brand-word: var(--ink);
-  --sidebar-width: 260px;
+  --sidebar-width: 244px;
   --font: var(--font-sans);
 }
 
@@ -96,6 +96,9 @@ kbd,
 .mono {
   font-family: var(--mono);
   font-size: 12px;
+}
+.table .mono {
+  font-size: 13px;
 }
 
 .amber-text {
@@ -260,12 +263,37 @@ kbd,
 .service-state {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 8px 0;
-  margin-top: 6px;
-  border-top: 1px solid var(--border);
-  color: var(--text-3);
-  font-size: 12px;
+  gap: 8px;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+/* A small segmented control: a sunken track with the chosen theme raised. */
+.theme-switch {
+  display: inline-flex;
+  gap: 2px;
+  width: fit-content;
+  margin: 4px 8px;
+  padding: 2px;
+  border-radius: var(--r-pill);
+  background: var(--bg-canvas);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.theme-switch button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 26px;
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+}
+.theme-switch button:hover {
+  color: var(--text);
+}
+.theme-switch button[aria-pressed='true'] {
+  background: var(--bg-selected);
+  color: var(--text);
 }
 .main {
   margin-left: var(--sidebar-width);
@@ -279,7 +307,8 @@ kbd,
   align-items: center;
   gap: 12px;
   height: var(--topbar-h);
-  padding: 0 40px;
+  padding: 0 max(32px, calc(50% - 608px));
+  border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
@@ -300,7 +329,7 @@ kbd,
   min-height: var(--control-h);
   max-width: 360px;
   padding: 0 10px;
-  border-radius: var(--r-block);
+  border-radius: var(--r-control);
   color: var(--text-2);
   font-size: 13px;
 }
@@ -346,6 +375,11 @@ kbd,
   padding-right: 28px;
   font-size: 16px;
 }
+.health-panel h3 {
+  padding-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
 .health-panel p {
   color: var(--text-2);
   font-size: 12px;
@@ -359,6 +393,11 @@ kbd,
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+.health-fine > summary {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
 }
 .health-row details {
   font-size: 12px;
@@ -424,20 +463,51 @@ kbd,
   }
 }
 
-.demo-banner {
-  background: var(--surface);
-  color: var(--text-3);
-}
-.demo-banner span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Example mode: one bordered label beside the page title, with the cross that leaves it. */
+.example-mode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 28px;
+  padding: 0 2px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  font-size: 13px;
   white-space: nowrap;
+}
+.example-mode .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.example-mode-line {
+  display: none;
+}
+@media (max-width: 560px) {
+  .topbar .example-mode {
+    display: none;
+  }
+  .example-mode-line {
+    display: flex;
+    justify-content: space-between;
+    height: auto;
+    min-height: 44px;
+    padding: 0 6px 0 16px;
+    border-width: 0 0 1px;
+    border-color: var(--border);
+    border-radius: 0;
+  }
+  .example-mode-line .icon-button {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .content {
-  padding: 16px 24px 64px;
-  max-width: 1480px;
+  padding: 24px 32px 64px;
+  max-width: 1280px;
+  margin-inline: auto;
   display: grid;
   gap: 32px;
   align-content: start;
@@ -460,22 +530,40 @@ kbd,
   padding: 0 10px;
   font-size: 13px;
 }
-/* Page tabs sit under the title, with one hairline across the main area. */
-.page-tabs {
-  margin: -8px -24px -16px;
-  padding: 0 40px;
-  border-bottom: 1px solid var(--border);
-}
+/* Views of a list are a row of pills under the title, each with its count. */
 .page-tabs {
   min-width: 0;
+  margin-bottom: -16px;
 }
-.page-tabs .chips {
+:is(.page-tabs, .toolbar) .chips {
   max-width: 100%;
   overflow-x: auto;
+  gap: 8px;
+  padding: 1px;
   border-bottom: 0;
 }
-.page-tabs .chips button {
-  min-height: 40px;
+:is(.page-tabs, .toolbar) .chips button {
+  min-height: var(--control-h);
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+:is(.page-tabs, .toolbar) .chips button:hover {
+  background: var(--bg-hover);
+}
+:is(.page-tabs, .toolbar) .chips button.active {
+  border-color: var(--text);
+  background: var(--bg-hover);
+}
+/* A phone shows every filter: the row wraps instead of scrolling out of sight. */
+@media (max-width: 560px) {
+  :is(.page-tabs, .toolbar) .chips {
+    flex-wrap: wrap;
+  }
 }
 /* A time range is a segmented control: a neutral track with the chosen segment raised. */
 .segmented .chips {
@@ -500,7 +588,7 @@ kbd,
 /* Small filter chips and compact calls to action are the only full pills. */
 .chip,
 .plan-presets .button {
-  height: 28px;
+  height: var(--control-h);
   padding: 0 12px;
   border-radius: var(--r-pill);
   font-size: 13px;
@@ -515,7 +603,7 @@ select.chip {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: var(--r-block);
+  border-radius: var(--r-control);
   color: var(--text-3);
 }
 .icon-button:hover:not(:disabled) {
@@ -532,10 +620,11 @@ textarea,
   height: var(--control-h);
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--r-block);
+  border-radius: var(--r-control);
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
+  font-weight: 400;
 }
 textarea {
   height: auto;
@@ -547,7 +636,9 @@ select:focus,
 textarea:focus {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-color: var(--text);
+}
+input[type='radio'] {
+  accent-color: var(--accent);
 }
 input[type='checkbox'] {
   accent-color: var(--accent);
@@ -555,9 +646,11 @@ input[type='checkbox'] {
   height: 14px;
   margin: 0;
 }
+/* A placeholder is an example, plainly lighter than something typed. */
 input::placeholder,
 textarea::placeholder {
-  color: var(--text-4);
+  color: var(--text-3);
+  opacity: 0.72;
 }
 .search {
   display: flex;
@@ -567,12 +660,17 @@ textarea::placeholder {
   width: 260px;
   padding: 0 6px 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--r-block);
+  border-radius: var(--r-control);
   background: var(--surface);
   color: var(--text-3);
 }
 .search:focus-within {
   border-color: var(--text);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.search input:focus-visible {
+  outline: none;
 }
 .search input {
   flex: 1;
@@ -679,7 +777,7 @@ form > .form-error {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 0 16px 12px;
+  padding: 0 0 12px;
 }
 .toolbar.bare {
   padding: 0;
@@ -741,6 +839,13 @@ form > .form-error {
   line-height: 32px;
   font-variant-numeric: tabular-nums;
 }
+.cluster-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
 /* Allocated, free, on demand and unavailable GPUs in one bar. */
 .capacity-bar {
   display: flex;
@@ -783,31 +888,28 @@ form > .form-error {
 
 /* ---------- Stats ---------- */
 
-/* The stat grid: one hairline card divided into cells, each a label over a number.
-   Cells draw their own left and top rule, clipped at the card's edge as they wrap. */
+/* Stat cards: each figure in its own hairline card, a dark label over the number. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 12px;
 }
 .stat {
   display: grid;
   align-content: start;
-  gap: 4px;
-  padding: 14px 16px;
+  gap: 2px;
+  padding: 16px 20px;
   min-width: 0;
-  box-shadow:
-    -1px 0 var(--border),
-    0 -1px var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-block);
 }
 .stat-label {
-  color: var(--text-3);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
 }
 .stat-value {
-  font-size: 28px;
+  font-size: clamp(20px, 6vw, 28px);
+  white-space: nowrap;
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -849,10 +951,17 @@ form > .form-error {
 .unmeasured-list ul {
   list-style: none;
 }
+.unmeasured-title {
+  padding: 4px 8px 0;
+  font-weight: 600;
+}
 .unmeasured-list .link {
   display: grid;
   justify-items: start;
   width: 100%;
+  min-height: 0;
+  line-height: 20px;
+  text-align: left;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   color: var(--text-3);
@@ -912,7 +1021,7 @@ form > .form-error {
   gap: 4px;
 }
 .copyable code {
-  max-width: 160px;
+  max-width: clamp(160px, 24vw, 360px);
   overflow: hidden;
   color: var(--text-2);
   text-overflow: ellipsis;
@@ -1085,13 +1194,20 @@ form > .form-error {
   border-top: 1px solid var(--border);
 }
 .setup {
-  padding: 16px 18px;
+  padding: 24px;
   display: grid;
-  gap: 10px;
+  gap: 16px;
   justify-items: start;
 }
 .setup h2 {
-  font-size: 14px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.setup-lead {
+  margin-top: -8px;
+  color: var(--text-2);
 }
 /* ---------- Clusters ---------- */
 
@@ -1131,6 +1247,14 @@ form > .form-error {
   text-align: right;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+/* An opened activity row reads as a short list: labels in one column, values beside them. */
+.activity-details .kv > div {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+}
+.activity-details .kv dd {
+  text-align: left;
 }
 
 /* ---------- Settings ---------- */
@@ -1317,6 +1441,7 @@ form > .form-error {
 }
 .drawer-chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   max-width: 100%;
   min-width: 0;
@@ -1337,9 +1462,7 @@ form > .form-error {
 .drawer-id,
 .drawer-code {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   padding: 0 5px;
   border-radius: 4px;
   background: var(--gray-soft);
@@ -1425,7 +1548,8 @@ form > .form-error {
 }
 .drawer-metrics > div {
   display: grid;
-  grid-template-columns: 48px 1fr;
+  grid-template-columns: max-content 1fr;
+  gap: 12px;
   align-items: center;
   color: var(--text-3);
   font-size: 13px;
@@ -1448,6 +1572,10 @@ form > .form-error {
 }
 .callout.red > :first-child {
   color: var(--red);
+}
+/* Only the lead carries the status colour; what to do next reads as ordinary text. */
+.callout > :not(:first-child) {
+  color: var(--text);
 }
 
 /* ---------- Add-source wizard ---------- */
@@ -1484,8 +1612,8 @@ form > .form-error {
 }
 .type-card .tag.beta {
   margin-left: 6px;
-  background: var(--amber-soft);
-  color: var(--amber);
+  background: var(--gray-soft);
+  color: var(--text-2);
   font-size: 12px;
   line-height: 17px;
   vertical-align: 1px;
@@ -1571,7 +1699,7 @@ form > .form-error {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
-  padding: 14px 18px;
+  padding: 20px 24px;
   overflow-wrap: anywhere;
 }
 .plan-explanation {
@@ -1599,17 +1727,24 @@ form > .form-error {
 .plan-table td.plan-verdict {
   position: relative;
   min-height: calc(var(--control-h) + 6px);
-  padding-right: 52px;
+  padding-right: 80px;
 }
-.plan-expand {
+/* Copy and the explanation chevron: two quiet icons at the row's end. */
+.plan-row-actions {
   position: absolute;
   top: 6px;
   right: 8px;
+  display: flex;
+  gap: 2px;
+}
+.plan-option-sub {
+  display: none;
 }
 .plan-expand[aria-expanded='true'] svg {
   transform: rotate(180deg);
 }
-.plan-best .figures {
+.plan-best .figures,
+.plan-best .plan-flags {
   flex-basis: 100%;
 }
 .plan-factors {
@@ -1646,7 +1781,7 @@ form > .form-error {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 220px));
   gap: 12px 16px;
-  padding: 14px 18px;
+  padding: 0 0 14px;
 }
 .plan-form label {
   display: grid;
@@ -1679,7 +1814,7 @@ form > .form-error {
   padding-top: 0;
 }
 .plan-table td.plan-verdict {
-  min-width: 232px;
+  min-width: 200px;
 }
 
 /* Keep the estimate visible when the main column cannot fit the full table. */
@@ -1696,14 +1831,34 @@ form > .form-error {
   }
   .plan-table tr {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 16px;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
   }
+  .table.plan-table tr.clickable:hover td {
+    background: none;
+  }
+  .table.plan-table tr.clickable:hover {
+    background: var(--bg-hover);
+  }
+  /* Three lines a card: where, the estimate, the numbers. */
+  .plan-option-sub {
+    display: inline;
+    margin-left: 6px;
+    color: var(--text-2);
+  }
+  .table.plan-table td.plan-identity {
+    display: none;
+  }
   .plan-table .plan-option-row {
     border-bottom: 0;
     padding-bottom: 0;
+  }
+  /* A closed explanation takes no room, so the card closes itself. */
+  .plan-table .plan-option-row:has(+ .plan-explanation-row[hidden]) {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
   }
   .plan-table .plan-explanation-row {
     padding-top: 0;
@@ -1722,11 +1877,25 @@ form > .form-error {
   .table.plan-table td.plan-verdict {
     order: 1;
     grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     min-width: 0;
+    min-height: 0;
   }
-  .plan-table td[data-label]::before {
+  .plan-row-actions {
+    position: static;
+    flex: none;
+  }
+  /* The number, then what it counts, on one line. */
+  .table.plan-table td[data-label]:not(.plan-identity, .col-low, .col-mid) {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .plan-table td[data-label]::after {
     content: attr(data-label);
-    display: block;
     color: var(--text-3);
     font-size: 12px;
   }
@@ -1736,6 +1905,10 @@ form > .form-error {
 
 .source-group {
   scroll-margin-top: 64px;
+}
+/* Groups are bodies of one table: the hairline between rows continues across them. */
+.table tbody.source-group:not(:last-child) tr:last-child td {
+  border-bottom: 1px solid var(--border);
 }
 @media (max-width: 560px) {
   .source-group {
@@ -1845,18 +2018,10 @@ form > .form-error {
   flex: none;
   transform: translateY(-1px);
 }
-.activity-source,
 .activity time {
   color: var(--text-3);
   font-size: 12px;
   text-align: right;
-}
-.activity-source {
-  flex: 0 1 auto;
-  max-width: 30%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .activity time {
   flex: none;
@@ -1868,9 +2033,35 @@ form > .form-error {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* The chevron leads an expandable row; its dot, words and time follow as on any other row. */
+.activity-group summary::before {
+  align-self: center;
+}
 .activity .activity-group {
   display: block;
   padding: 0;
+}
+/* A phone gives the sentence its own line; where and when sit under it. */
+@media (max-width: 560px) {
+  .activity li,
+  .activity-job,
+  .activity-group summary {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .activity .grow {
+    flex: 1 1 calc(100% - 18px);
+  }
+  .activity-group summary .grow {
+    flex-basis: calc(100% - 48px);
+  }
+  .activity .grow + time {
+    margin-left: 18px;
+  }
+  .activity time {
+    max-width: none;
+    text-align: left;
+  }
 }
 .activity-group details {
   width: 100%;
@@ -1887,18 +2078,6 @@ form > .form-error {
   gap: 10px;
   padding: 7px 16px;
   cursor: pointer;
-}
-.activity-group summary::-webkit-details-marker {
-  display: none;
-}
-.activity-group summary::before {
-  content: '▸';
-  position: absolute;
-  left: 2px;
-  width: 10px;
-}
-.activity-group details[open] > summary::before {
-  content: '▾';
 }
 
 /* ---------- Toolbox ---------- */
@@ -2439,10 +2618,6 @@ td.wrap {
   .content {
     padding: 16px 16px 40px;
   }
-  .page-tabs {
-    margin-inline: -16px;
-    padding-inline: 32px;
-  }
   .locale-gate {
     padding-inline: 16px;
   }
@@ -2570,29 +2745,25 @@ td.wrap {
   .table.stack-on-phone tr.clickable:hover td {
     background: none;
   }
-  /* Jobs and machines read as one unlabelled, dot-separated line of facts. */
+  /* The selected card is one block too. */
+  .table.stack-on-phone tr.selected {
+    background: var(--accent-soft);
+  }
+  .table.stack-on-phone tr.selected td {
+    background: none;
+  }
+  /* Jobs and machines read as one unlabelled line of facts, spaced apart. A fact is never
+     cut short: one that does not fit moves to the next line whole. */
   .table.meta-on-phone tr {
-    gap: 4px 6px;
+    gap: 2px 14px;
   }
   .table.meta-on-phone td[data-label]:not(:has(> .status, > .display-status))::before {
-    content: '·';
-    margin-right: 6px;
-    display: inline;
-    font-size: inherit;
-  }
-  .table.meta-on-phone td[data-label]:nth-child(2)::before,
-  .table.meta-on-phone td[data-label].col-high::before {
     content: none;
   }
-  /* The meta items share one line and shrink rather than wrap, so a separator never starts
-     a line; a reason is a short label and joins the line. */
   .table.meta-on-phone td[data-label]:not(:has(> .status, > .display-status)) {
-    flex: 1 1 0;
-    max-width: max-content;
+    flex: 0 1 auto;
+    max-width: 100%;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .table.meta-on-phone td:not(:first-child) :is(.sub, .clamp, .tags) {
     display: inline;
@@ -2600,6 +2771,14 @@ td.wrap {
   }
   .table.meta-on-phone td.key {
     font-size: inherit;
+  }
+  /* A fact that does not apply to this row is left out of its line, not shown as a dash. */
+  .table.meta-on-phone td.no-value {
+    display: none;
+  }
+  /* A card carries its own rule; the row line between source groups is the table's. */
+  .table.stack-on-phone tbody.source-group:not(:last-child) tr:last-child td {
+    border-bottom: 0;
   }
 }
 
@@ -2724,11 +2903,12 @@ td.wrap {
   max-width: 100%;
 }
 .activity-day {
-  margin: 16px 16px 4px;
+  margin: 8px 16px 4px;
   font-size: 13px;
   color: var(--text-3);
 }
 .activity-details {
+  max-width: 560px;
   padding: 12px 16px 12px 20px;
   overflow-wrap: anywhere;
 }
@@ -2781,7 +2961,36 @@ td.wrap {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 14px 18px 0;
+  padding: 0 0 14px;
+}
+/* The preset the form came from. */
+.plan-presets .button[aria-pressed='true'] {
+  border-color: var(--text);
+  font-weight: 600;
+}
+.plan-flags {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-block);
+  background: var(--gray-soft);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+.plan-evidence {
+  width: fit-content;
+}
+.plan-more {
+  display: grid;
+  gap: 6px;
+}
+/* An author's display must not show what the hidden attribute hides. */
+.plan-more[hidden] {
+  display: none;
+}
+.plan-pointer {
+  padding: 0 16px;
 }
 .plan-from > span {
   flex: 1 1 12rem;
@@ -2789,6 +2998,7 @@ td.wrap {
 }
 .plan-presets .button {
   height: auto;
+  font-weight: 400;
   min-height: 28px;
   padding: 4px 12px;
   white-space: normal;
@@ -2801,6 +3011,9 @@ td.wrap {
   display: inline-flex;
   margin-left: 8px;
   vertical-align: middle;
+}
+.plan-row-actions .plan-submit {
+  margin-left: 0;
 }
 .plan-best .plan-submit {
   margin-left: 0;
@@ -2819,15 +3032,27 @@ td.wrap {
 /* Usage comparisons keep the value readable even on a narrow phone. */
 .usage-heading {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 .usage-history {
-  padding: 16px;
+  padding: 0;
   min-width: 0;
 }
 .usage-history h3 {
   margin: 20px 0 8px;
   font-size: 13px;
+}
+/* The range control sits with the tables it governs, under the fixed-period totals. */
+.usage-range {
+  display: flex;
+  justify-content: flex-end;
+  margin: 16px 0 -12px;
+}
+.usage-range-alone {
+  margin: 0;
 }
 .usage-table tfoot :is(th, td) {
   padding-block: 10px;
@@ -2835,12 +3060,6 @@ td.wrap {
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
-}
-.coverage-mark {
-  display: inline-flex;
-  margin-left: 6px;
-  color: var(--text-3);
-  vertical-align: 2px;
 }
 .ranked-bars {
   list-style: none;
@@ -2939,17 +3158,13 @@ td.wrap {
   line-height: 20px;
 }
 .panel-header h2 {
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 600;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 .topbar h1 {
   font-size: 20px;
-  line-height: 32px;
-  font-weight: 600;
-}
-.stat-value {
-  font-size: 24px;
   line-height: 32px;
   font-weight: 600;
 }
@@ -2960,4 +3175,56 @@ td.wrap {
 .panel-note:lang(zh),
 .page-note:lang(zh) {
   line-height: 1.7;
+}
+
+/* ---------- Disclosures ---------- */
+
+/* Every disclosure opens with the same chevron, set inside the content edge. */
+details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 3px 0 2px;
+  border-right: 1.5px solid var(--text-2);
+  border-bottom: 1.5px solid var(--text-2);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast);
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+/* ---------- Answer cards ---------- */
+
+/* The one card a page leads with: a hairline card under a soft wash of the identity hues. */
+.hero {
+  border: 1px solid var(--border);
+  border-radius: var(--r-pop);
+  /* Each hue is first lightened towards the canvas, so the wash stays clear in both themes. */
+  background-image:
+    radial-gradient(
+      60% 90% at 100% 0%,
+      color-mix(in oklab, var(--status-warn-shape) 32%, var(--bg-canvas)) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      70% 110% at 78% 0%,
+      color-mix(in oklab, var(--id-2) 26%, var(--bg-canvas)) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      80% 120% at 52% 0%,
+      color-mix(in oklab, var(--id-1) 26%, var(--bg-canvas)) 0%,
+      transparent 60%
+    );
 }

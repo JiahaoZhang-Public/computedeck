@@ -157,7 +157,8 @@ export function Chart({
   const page = Math.min(tablePage, Math.max(0, pageCount - 1));
   return (
     <section className="chart-kit" aria-label={title}>
-      <p>
+      {/* The axis shows the range; the sentence stays for readers who cannot see the axis. */}
+      <p className="sr-only">
         {title}
         {scope && <> · {scope}</>} · {compactRange(data.start, data.end)}
       </p>
@@ -534,11 +535,15 @@ export function Chart({
           </p>
         </>
       )}
-      <p className="sub">{t('chart.legend')}</p>
-      <p className="sub">
-        {t('chart.lastSample')} ·{' '}
-        {data.last_sample ? <Time value={data.last_sample} /> : t('chart.noLastSample')}
-      </p>
+      {/* How the marks read is one disclosure away, not a caption under every chart. */}
+      <details className="chart-about">
+        <summary>{t('chart.about')}</summary>
+        <p className="sub">{t('chart.legend')}</p>
+        <p className="sub">
+          {t('chart.lastSample')} ·{' '}
+          {data.last_sample ? <Time value={data.last_sample} /> : t('chart.noLastSample')}
+        </p>
+      </details>
     </section>
   );
 }

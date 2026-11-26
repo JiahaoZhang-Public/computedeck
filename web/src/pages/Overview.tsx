@@ -97,7 +97,6 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
             />
           }
         />
-        <Stat label={t('overview.issues')} value={issues} />
       </div>
       <AttentionSection ctx={ctx} issues={issues} />
       <Panel
@@ -159,11 +158,6 @@ export function OverviewPage({ ctx }: { ctx: Ctx }) {
       >
         <GroupsTable ctx={ctx} />
       </Panel>
-      <p className="panel-note">
-        <a className="link" href={routeHash('usage')}>
-          {t('usage.view')}
-        </a>
-      </p>
       {asides.map((plugin) => {
         const Aside = plugin.overview!;
         return (
@@ -315,8 +309,9 @@ function SetupGuide({ ctx }: { ctx: Ctx }) {
     },
   ];
   return (
-    <section className="panel setup">
+    <section className="panel setup hero">
       <h2>{t('setup.title')}</h2>
+      <p className="setup-lead">{t('setup.lead')}</p>
       <div className="type-cards setup-cards">
         {choices.map((choice) => (
           <button key={choice.key} className="type-card" onClick={choice.open}>
@@ -325,7 +320,7 @@ function SetupGuide({ ctx }: { ctx: Ctx }) {
           </button>
         ))}
       </div>
-      <button className="link" onClick={ctx.toggleDemo}>
+      <button className="button" onClick={ctx.toggleDemo}>
         {t('setup.demo')}
       </button>
     </section>
@@ -386,7 +381,10 @@ function GroupsTable({ ctx }: { ctx: Ctx }) {
                     ctx={ctx}
                   />
                 </td>
-                <td data-label={t('overview.col.capacity')}>
+                <td
+                  data-label={t('overview.col.capacity')}
+                  className={cluster && nodes.nodes > 0 ? undefined : 'no-value'}
+                >
                   {cluster && nodes.nodes > 0 ? (
                     <Meter value={nodes.ratio} text={allocationText(nodes)} />
                   ) : (

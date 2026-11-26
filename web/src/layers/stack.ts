@@ -46,6 +46,10 @@ function syncModalInert() {
 export function useModalHost() {
   return useSyncExternalStore(subscribe, modalHost, () => null);
 }
+/** A pane, dialog, menu or popover is open: Escape belongs to it before anything else. */
+export function hasLayer() {
+  return stack.length > 0;
+}
 export function hasModalLayer() {
   return modalHost() !== null;
 }
@@ -69,6 +73,15 @@ function controls(node: HTMLElement) {
       element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length,
   );
 }
+/**
+ * A field with suggestions (an input with a datalist). Typing or clicking in it may open the
+ * browser's suggestion list, and the next Escape belongs to that list: it must not also close
+ * the dialog around the field and discard what was typed.
+ */
+let suggesting: HTMLInputElement | null = null;
+function suggestionField(target: EventTarget | null) {
+  return target instanceof HTMLInputElement && target.list ? target : null;
+}
 function keydown(event: KeyboardEvent) {
   pointerOpener = null;
   if (event.defaultPrevented || event.isComposing) return;
@@ -79,6 +92,16 @@ function keydown(event: KeyboardEvent) {
   }
   const top = stack.at(-1);
   if (!top) return;
+  const field = suggestionField(event.target);
+  if (field && event.key !== 'Escape' && event.key !== 'Tab') suggesting = field;
+  if (event.key === 'Escape' && field && suggesting === field) {
+    // The browser closes its list. A native dialog's own cancel for this key press follows
+    // in the same task, so the mark is cleared only after it.
+    window.setTimeout(() => {
+      if (suggesting === field) suggesting = null;
+    });
+    return;
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -110,6 +133,7 @@ function outsideControl(target: EventTarget | null) {
     : null;
 }
 function outside(event: PointerEvent) {
+  suggesting = suggestionField(event.target) ?? suggesting;
   if (event.target instanceof Element)
     pointerOpener = event.target.closest<HTMLElement>(
       'button, a[href], input, select, textarea, [tabindex], .clickable',
@@ -207,6 +231,8 @@ export function useLayer({
     } else if (!node.contains(document.activeElement)) (controls(node)[0] ?? node).focus();
     const cancel = (event: Event) => {
       event.preventDefault();
+      // The Escape that dismisses a field's suggestions keeps the dialog and its form.
+      if (suggesting && node.contains(suggesting)) return;
       if (stack.at(-1) === entry)
         keydown(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
     };

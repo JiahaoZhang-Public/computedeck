@@ -147,7 +147,6 @@
     align-items: center;
   }
   .how-worked-out > summary {
-    display: list-item;
     min-height: 44px;
     min-width: 44px;
     padding-block: 12px;

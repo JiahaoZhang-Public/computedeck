@@ -9,6 +9,7 @@ import {
   readDensity,
   saveTheme,
   saveDensity,
+  THEME_EVENT,
 } from './preferences';
 
 // Execute the actual head bootstrap, independently of the application module.
@@ -77,6 +78,21 @@ it.each(['light', 'dark'] as const)('persists %s and restores it before renderin
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   expect(localStorage.getItem('computedeck.theme')).toBe('system');
 });
+it('tells every control that shows the theme when it changes', () => {
+  const changed = vi.fn();
+  window.addEventListener(THEME_EVENT, changed);
+  try {
+    saveTheme('dark');
+    expect(changed).toHaveBeenCalledOnce();
+    expect(readTheme()).toBe('dark');
+    saveTheme('system');
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+  } finally {
+    window.removeEventListener(THEME_EVENT, changed);
+  }
+});
+
 it('still applies choices when device storage is blocked', () => {
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
     throw new Error('blocked');

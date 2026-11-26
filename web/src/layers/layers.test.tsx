@@ -266,6 +266,39 @@ it('expires transition announcements without removing the live region or persist
   expect(dismiss).not.toHaveBeenCalled();
 });
 
+it("keeps a form open when Escape only dismisses a field's suggestions", async () => {
+  const close = vi.fn();
+  await render(
+    <FocusView labelledBy="title" close={close}>
+      <h2 id="title">Form</h2>
+      <input aria-label="Host" list="hosts" />
+      <datalist id="hosts">
+        <option value="cluster-a" />
+      </datalist>
+      <input aria-label="Name" />
+    </FocusView>,
+  );
+  const press = (target: HTMLElement, key: string) =>
+    act(async () => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    });
+  const host = container.querySelector<HTMLInputElement>('input[list]')!;
+  const name = container.querySelector<HTMLInputElement>('input:not([list])')!;
+  // Typing opens the browser's list; the next Escape belongs to that list.
+  await press(host, 'c');
+  await press(host, 'Escape');
+  expect(close).not.toHaveBeenCalled();
+  // With the list dismissed, Escape closes the dialog as usual.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  await press(host, 'Escape');
+  expect(close).toHaveBeenCalledOnce();
+  // A field without suggestions never holds Escape back.
+  close.mockClear();
+  await press(name, 'x');
+  await press(name, 'Escape');
+  expect(close).toHaveBeenCalledOnce();
+});
+
 it('Undo pauses on hover and focus, errors persist, Escape dismisses toasts before the layer', async () => {
   vi.useFakeTimers();
   const undo = vi.fn();

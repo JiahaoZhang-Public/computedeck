@@ -135,6 +135,11 @@ function button(text: string) {
   );
 }
 
+/** Example mode's own cross, beside the page title. */
+function leaveExample() {
+  return container.querySelector(`.demo-banner button[aria-label="${t('banner.demoOff')}"]`);
+}
+
 function expectOnlyReads() {
   expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
   expect(
@@ -164,7 +169,7 @@ it.each(['en', 'zh-CN'] as const)(
   'refuses Notify test, delete and editor saves in %s',
   async (locale) => {
     await open('notify', locale);
-    expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demoTool'));
+    expect(container.querySelector('.demo-banner')?.textContent).toContain(t('banner.demo'));
     await click(button(t('notify.test')));
     expect(container.textContent).toContain(t('toast.demoReadOnly'));
     for (const remove of container.querySelectorAll(`button[aria-label="${t('common.remove')}"]`)) {
@@ -221,7 +226,7 @@ it.each(['en', 'zh-CN'] as const)(
 
 it('preserves other query parameters and the route when toggling and reloading', async () => {
   await open('jobs');
-  await click(button(t('banner.demoOff')));
+  await click(leaveExample());
   expect(window.location.search).toBe('?remote=1');
   expect(window.location.hash).toBe('#/jobs');
   expect(container.querySelector('.demo-banner')).toBeNull();
@@ -259,7 +264,7 @@ it.each(['en', 'zh-CN'] as const)(
     expect(sources()).toBe(String(configured));
     expect(container.textContent).not.toContain('Managed on the Sources page');
     expect(container.textContent).not.toContain(`${data.sources.length} configured`);
-    await click(button(t('banner.demoOff')));
+    await click(leaveExample());
     expect(sources()).toBe(String(configured));
   },
 );
@@ -272,7 +277,7 @@ it.each([
   await open(kind === 'drawer' ? 'jobs' : 'overview');
   await click(container.querySelector(selector));
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  await click(button(t('banner.demoOff')));
+  await click(leaveExample());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.querySelector('.demo-banner')).toBeNull();
   expectOnlyReads();

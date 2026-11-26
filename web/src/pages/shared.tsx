@@ -23,6 +23,7 @@ import { groupLabel, sourceList } from '../groups';
 import type { Filter, Page } from '../routes';
 import { routeHash } from '../routes';
 import type { Locale } from '../i18n';
+import { hasLayer } from '../layers/stack';
 import { t } from '../i18n';
 import type { PluginProps, WebPlugin } from '../plugins';
 import {
@@ -39,7 +40,7 @@ import {
 } from '../domain';
 import type { JobArray } from '../domain';
 import { failureEnd } from '../failures';
-import { jobReason, jobTime, jobWaiting } from '../jobFacts';
+import { jobElapsed, jobReason, jobTime, jobWaiting } from '../jobFacts';
 import { Empty, Status } from '../ui';
 import { UnmeasuredLinks } from './UnmeasuredLinks';
 
@@ -152,8 +153,18 @@ export function SearchBox({
         maxLength={maxLength}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder={placeholder}
+        onKeyDown={(event) => {
+          // Escape empties the field, unless a pane or dialog is open: that closes first and
+          // the search stays as it is.
+          if (event.key === 'Escape' && query && !hasLayer()) {
+            event.stopPropagation();
+            setQuery('');
+          }
+        }}
+        // One word in the field; what it searches is its name and tooltip.
+        placeholder={t('search.placeholder')}
         aria-label={placeholder}
+        title={placeholder}
       />
       {query ? (
         <button className="icon-button" aria-label={t('search.clear')} onClick={() => setQuery('')}>
@@ -414,8 +425,8 @@ export function JobsTable({
                     {pending ? (explanation?.label ?? t('job.short.waiting')) : job.node || '—'}
                   </span>
                 </td>
-                <td className="num mono panel-hide" data-label={t('jobs.col.timing')}>
-                  {pending ? jobWaiting(job) : job.elapsed || '—'}
+                <td className="num panel-hide" data-label={t('jobs.col.timing')}>
+                  {pending ? jobWaiting(job) : jobElapsed(job.elapsed)}
                 </td>
               </tr>
             );

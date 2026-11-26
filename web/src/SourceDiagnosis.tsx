@@ -4,6 +4,7 @@ import { collectionOverdue } from './health';
 import { useState } from 'react';
 import { Ellipsis, X } from 'lucide-react';
 import { ConnectionChecks } from './ConnectionChecks';
+import { useConfirm } from './layers/useConfirm';
 import { dateTime, money } from './domain';
 import { driverInfo, fieldValue, primaryField } from './drivers';
 import { formatMessage, localized, t } from './i18n';
@@ -24,6 +25,8 @@ export function SourceDiagnosis({
   nodes = [],
   collecting = false,
   configure,
+  addLogin,
+  remove,
   collect,
   pause,
   snooze = [],
@@ -35,6 +38,10 @@ export function SourceDiagnosis({
   nodes?: CollectionNode[];
   collecting?: boolean;
   configure?: () => void;
+  /** A cluster takes further logins; the form opens with this cluster filled in. */
+  addLogin?: () => void;
+  /** Removes the source from ComputeDeck; asked for confirmation here first. */
+  remove?: () => Promise<void>;
   collect?: () => Promise<void>;
   pause?: () => Promise<void>;
   /** Snooze entries for the source's attention item, when it has one. */
@@ -43,6 +50,9 @@ export function SourceDiagnosis({
 }) {
   const inFlight = useSourceInFlight();
   const [check, setCheck] = useState(0);
+  // Example data runs no check; the button says so when it is used.
+  const [readOnly, setReadOnly] = useState(false);
+  const [confirm, confirmation] = useConfirm();
   const active = collecting || source.status === 'syncing';
   const info = driverInfo(drivers, source.driver);
   const primary = primaryField(info);
@@ -55,25 +65,43 @@ export function SourceDiagnosis({
           {
             id: 'collect',
             label: t('sources.collectNow'),
-            disabled: demo || busy || !source.enabled,
+            // Example mode answers a click with why nothing changes, not with a dead control.
+            disabled: busy || !source.enabled,
             action: () => void collect(),
           },
         ]
       : []),
-    ...(configure
-      ? [{ id: 'configure', label: t('common.configure'), disabled: demo, action: configure }]
-      : []),
+    ...(configure ? [{ id: 'configure', label: t('common.configure'), action: configure }] : []),
+    ...(addLogin ? [{ id: 'add-login', label: t('sources.addLogin'), action: addLogin }] : []),
     ...(pause
       ? [
           {
             id: 'pause',
             label: t(source.enabled ? 'sources.pause' : 'sources.resume'),
-            disabled: demo || !!inFlight[source.id],
+            disabled: !!inFlight[source.id],
             action: () => void pause(),
           },
         ]
       : []),
     ...snooze,
+    ...(remove
+      ? [
+          {
+            id: 'remove',
+            label: t('common.remove'),
+            action: () => {
+              if (demo) setReadOnly(true);
+              else
+                void confirm(
+                  t('source.deleteConfirm', { name: source.name }),
+                  t('layer.removeSource'),
+                ).then((confirmed) => {
+                  if (confirmed) void remove();
+                });
+            },
+          },
+        ]
+      : []),
   ];
   return (
     <div className="source-diagnosis">
@@ -104,8 +132,8 @@ export function SourceDiagnosis({
         <div className="drawer-actions">
           <button
             className="button primary"
-            disabled={demo || busy}
-            onClick={() => setCheck(check + 1)}
+            disabled={busy}
+            onClick={() => (demo ? setReadOnly(true) : setCheck(check + 1))}
           >
             {t('sources.testConnection')}
           </button>
@@ -115,6 +143,12 @@ export function SourceDiagnosis({
             </LazyMenuButton>
           )}
         </div>
+        {confirmation}
+        {readOnly && (
+          <p className="panel-note" role="status">
+            {t('toast.demoReadOnly')}
+          </p>
+        )}
         <ClockText>
           {() => {
             const why =
@@ -124,6 +158,8 @@ export function SourceDiagnosis({
               why && (
                 <div className="callout red">
                   <p className="lead">{why}</p>
+                  {/* The error is the scheduler's or SSH's own words; this is what to do with it. */}
+                  <p>{t('sources.errorNext')}</p>
                 </div>
               )
             );
@@ -182,7 +218,8 @@ export function SourceDiagnosis({
                   <li key={item.capability} className={`capability ${state}`}>
                     <code>{item.command}</code>
                     <span>{localized(item.label)}</span>
-                    <span>{t(`sources.capability.${state}`)}</span>
+                    {/* The list is what it reads; only a read that is missing says so. */}
+                    {state !== 'ok' && <span>{t(`sources.capability.${state}`)}</span>}
                     {notice && <span className="muted">{formatMessage(notice)}</span>}
                   </li>
                 );

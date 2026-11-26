@@ -25,10 +25,13 @@ for (const forcedColors of ['none', 'active'] as const) {
     if (hasTouch) {
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
       const summary = page.locator('.how-worked-out > summary');
-      await expect(summary).toHaveCSS('display', 'list-item');
-      expect(await summary.evaluate((node) => getComputedStyle(node).listStyleType)).not.toBe(
-        'none',
-      );
+      // Disclosures draw their own chevron from borders, which forced colours keep.
+      await expect(summary).toHaveCSS('display', 'flex');
+      expect(
+        await summary.evaluate((node) =>
+          parseFloat(getComputedStyle(node, '::before').borderRightWidth),
+        ),
+      ).toBeGreaterThan(0);
       const target = await summary.boundingBox();
       expect(target!.width).toBeGreaterThanOrEqual(44);
       expect(target!.height).toBeGreaterThanOrEqual(44);

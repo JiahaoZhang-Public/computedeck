@@ -31,6 +31,8 @@ export function applyTheme(theme: Theme) {
           : 'not all';
   }
 }
+/** Fired on the window after the theme changes, so every control that shows it agrees. */
+export const THEME_EVENT = 'computedeck:theme';
 export function saveTheme(theme: Theme) {
   applyTheme(theme);
   try {
@@ -38,6 +40,7 @@ export function saveTheme(theme: Theme) {
   } catch {
     /* Keep the choice for this page even without storage. */
   }
+  window.dispatchEvent(new Event(THEME_EVENT));
 }
 export function saveDensity(density: Density) {
   document.documentElement.dataset.density = density;

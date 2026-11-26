@@ -401,7 +401,7 @@ hello 和兼容渲染版。按三种宽度、六组语言/主题组合检查有�
 
 `theme.spec.ts` checks that Plan's waiting verdict retains exactly one clock, uncoloured
 and `.wait` pills gain no shape, and coloured pills never add a mask beside an existing
-icon. `checkLayout` reports visible text below 12 px or outside weights 400/600; Plan,
+icon. `checkLayout` reports visible text below 12 px or outside weights 400/500/600; Plan,
 Activity and Usage must have zero such findings. A probe verifies the guard detects both
 violations and ignores hidden text. The base styles set heading weights to 600 and give
 `small` a 12 px floor. The current navigation item uses a straight 2 px pseudo-element bar.
@@ -419,7 +419,7 @@ including their effect on inline `.link` controls and compact toolbars.
 
 中文：主题测试检查 Plan 等待标签恰有一个时钟，无颜色及 `.wait` 标签不添加形状，
 带图标的彩色标签不重复添加掩码。`checkLayout` 报告可见文字小于 12 像素或字重不属于
-400/600；Plan、Activity、Usage 必须零违规，并有探针验证检测与隐藏文字排除。
+400/500/600；Plan、Activity、Usage 必须零违规，并有探针验证检测与隐藏文字排除。
 基础样式将标题字重设为 600、`small` 下限设为 12 像素；当前导航使用笔直的 2 像素指示条。
 外观控件使用带命名空间的 ID，测试按角色和名称定位。head 内联脚本在应用脚本加载前
 设置主题、密度及浏览器栏主题色；单元测试覆盖两种主题、无效值与存储受限，浏览器测试

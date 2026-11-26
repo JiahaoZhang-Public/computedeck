@@ -8,7 +8,7 @@ import { Puzzle } from 'lucide-react';
 import { registerWebPlugin } from './plugins';
 import { api } from './api';
 import { setLocale, t } from './i18n';
-import { jobReason, jobWaiting } from './jobFacts';
+import { jobElapsed, jobReason, jobWaiting } from './jobFacts';
 import { failureExplanation } from './failures';
 import { relativeTime } from './domain';
 import { serverDashboard, serverDemo } from './test-server';
@@ -397,7 +397,7 @@ it('keeps compact element resources, waiting reasons and stale tags', async () =
   expect(rows[0].cells[1].textContent).toBe(String(example.gpu_count));
   expect(rows[0].cells[3].textContent).toBe(example.node);
   const stale = t('cloud.staleSince', { time: relativeTime(example.observed_at) });
-  expect(rows[0].cells[4].textContent).toBe(example.elapsed);
+  expect(rows[0].cells[4].textContent).toBe(jobElapsed(example.elapsed));
   // A queued element's request is muted, without a "requests" word; unknown stays a dash.
   expect(rows[1].cells[1].querySelector('.requested')?.textContent).toBe('—');
   expect(rows[1].cells[1].textContent).not.toContain('requests');

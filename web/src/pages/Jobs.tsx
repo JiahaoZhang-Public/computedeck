@@ -3,7 +3,6 @@ import { useRouteParam } from '../useRouteParam';
 import { groupLabel } from '../groups';
 import { t } from '../i18n';
 import { groupArrays, jobCount, jobsMissing, listedJobs } from '../domain';
-import { routeHash } from '../routes';
 import { Chips, Empty, Panel } from '../ui';
 import type { Ctx } from './shared';
 import { ActivityPanel } from './Activity';
@@ -190,9 +189,12 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
                     }
                     action={
                       !hasClusters && !ctx.demo ? (
-                        <a className="button" href={routeHash('settings')}>
-                          {t('common.toSettings')}
-                        </a>
+                        <button
+                          className="button primary"
+                          onClick={() => ctx.configure(undefined, { kind: 'cluster' })}
+                        >
+                          {t('clusters.add')}
+                        </button>
                       ) : undefined
                     }
                   />
@@ -209,6 +211,9 @@ export function JobsPage({ ctx }: { ctx: Ctx }) {
         demo={ctx.demo}
         token={data.token}
         onOpen={ctx.openEvent}
+        category="jobs"
+        cluster={group}
+        query={query}
       />
     </>
   );

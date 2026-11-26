@@ -464,7 +464,7 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
         <UsageHistory rollups={selected} week={week} hours={24} ctx={context()} />,
       ),
     );
-    // One seven-day tile per currency, each with its coverage gap as a mark on the value.
+    // One seven-day tile per currency; the partial figure itself opens its coverage gap.
     const coverage = t('usage.coverage', { percent: 0 });
     for (const [currency, amount] of [
       ['USD', 1],
@@ -472,9 +472,10 @@ describe.each(['en', 'zh-CN'] as const)('usage and cost in %s', (locale) => {
     ] as const) {
       const value = tile(html, `${t('usage.sevenDays')} · ${currency}`)!;
       expect(value.textContent).toBe(`≥ ${money(amount, currency)}`);
-      const mark = value.querySelector('.coverage-mark')!;
-      expect(mark.getAttribute('title')).toBe(coverage);
-      expect(mark.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(coverage);
+      const trigger = value.querySelector('button.partial')!;
+      expect(trigger.getAttribute('title')).toBe(coverage);
+      expect(trigger.getAttribute('aria-label')).toBe(`≥ ${money(amount, currency)}, ${coverage}`);
+      expect(value.querySelector('[role="img"]')).toBeNull();
     }
   });
 

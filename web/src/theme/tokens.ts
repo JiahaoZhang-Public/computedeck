@@ -2,31 +2,31 @@
 export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   'bg-canvas': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.17, 0.003, 260.0],
+    dark: [0.245, 0.0, 0.0],
   },
   'bg-surface': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.17, 0.003, 260.0],
+    dark: [0.245, 0.0, 0.0],
   },
   'bg-sunken': {
     light: [0.965, 0.0, 0.0],
-    dark: [0.2, 0.003, 260.0],
+    dark: [0.2, 0.0, 0.0],
   },
   'bg-raised': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.205, 0.004, 260.0],
+    dark: [0.275, 0.0, 0.0],
   },
   'bg-overlay': {
     light: [1.0, 0.0, 0.0],
-    dark: [0.215, 0.004, 260.0],
+    dark: [0.285, 0.0, 0.0],
   },
   'bg-hover': {
     light: [0.97, 0.001, 260.0],
-    dark: [0.215, 0.004, 260.0],
+    dark: [0.285, 0.0, 0.0],
   },
   'bg-selected': {
     light: [0.94, 0.002, 260.0],
-    dark: [0.255, 0.004, 260.0],
+    dark: [0.32, 0.0, 0.0],
   },
   'fg-default': {
     light: [0.2, 0.004, 260.0],
@@ -50,15 +50,15 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'border-muted': {
     light: [0.93, 0.002, 260.0],
-    dark: [0.255, 0.004, 260.0],
+    dark: [0.3, 0.0, 0.0],
   },
   'border-default': {
     light: [0.9, 0.003, 260.0],
-    dark: [0.3, 0.004, 260.0],
+    dark: [0.34, 0.0, 0.0],
   },
   'border-strong': {
     light: [0.62, 0.008, 260.0],
-    dark: [0.56, 0.008, 260.0],
+    dark: [0.62, 0.0, 0.0],
   },
   'status-ok-fg': {
     light: [0.5, 0.13, 150.0],
@@ -66,7 +66,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'status-ok-bg': {
     light: [0.965, 0.025, 150.0],
-    dark: [0.26, 0.04, 150.0],
+    dark: [0.315, 0.04, 150.0],
   },
   'status-wait-fg': {
     light: [0.5, 0.15, 255.0],
@@ -74,7 +74,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'status-wait-bg': {
     light: [0.965, 0.014, 255.0],
-    dark: [0.26, 0.045, 255.0],
+    dark: [0.315, 0.045, 255.0],
   },
   'status-warn-fg': {
     light: [0.52, 0.115, 65.0],
@@ -82,7 +82,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'status-warn-bg': {
     light: [0.97, 0.028, 85.0],
-    dark: [0.27, 0.04, 75.0],
+    dark: [0.325, 0.04, 75.0],
   },
   // Chroma .13 clips blue by -0.00002774 in linear sRGB; .1299 stays in gamut.
   'status-warn-shape': {
@@ -95,7 +95,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'status-error-bg': {
     light: [0.965, 0.016, 25.0],
-    dark: [0.27, 0.055, 25.0],
+    dark: [0.325, 0.055, 25.0],
   },
   'status-unknown-fg': {
     light: [0.5, 0.01, 260.0],
@@ -103,7 +103,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'status-unknown-bg': {
     light: [0.955, 0.003, 260.0],
-    dark: [0.24, 0.005, 260.0],
+    dark: [0.295, 0.005, 260.0],
   },
   'id-1': {
     light: [0.56, 0.09, 195.0],
@@ -131,27 +131,27 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'id-tint-1': {
     light: [0.955, 0.02, 195.0],
-    dark: [0.26, 0.032, 195.0],
+    dark: [0.315, 0.032, 195.0],
   },
   'id-tint-2': {
     light: [0.955, 0.02, 288.0],
-    dark: [0.26, 0.032, 288.0],
+    dark: [0.315, 0.032, 288.0],
   },
   'id-tint-3': {
     light: [0.955, 0.02, 350.0],
-    dark: [0.26, 0.032, 350.0],
+    dark: [0.315, 0.032, 350.0],
   },
   'id-tint-4': {
     light: [0.955, 0.02, 112.0],
-    dark: [0.26, 0.032, 112.0],
+    dark: [0.315, 0.032, 112.0],
   },
   'id-tint-5': {
     light: [0.955, 0.02, 42.0],
-    dark: [0.26, 0.032, 42.0],
+    dark: [0.315, 0.032, 42.0],
   },
   'id-tint-6': {
     light: [0.955, 0.02, 330.0],
-    dark: [0.26, 0.032, 330.0],
+    dark: [0.315, 0.032, 330.0],
   },
   hatch: {
     light: [0.51, 0.01, 260.0, 0.55],
@@ -159,7 +159,7 @@ export const tokens: Record<string, { light: number[]; dark: number[] }> = {
   },
   'hatch-strong': {
     light: [0.32, 0.01, 260.0, 0.72],
-    dark: [0.88, 0.005, 260.0, 0.6],
+    dark: [0.84, 0.005, 260.0, 0.52],
   },
   'grid-others': {
     light: [0.66, 0.006, 260.0],

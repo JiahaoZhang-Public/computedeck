@@ -66,7 +66,8 @@ export async function checkLayout(page: Page): Promise<DomFinding[]> {
       const fontSize = parseFloat(style.fontSize);
       const fontWeight = style.fontWeight;
       if (fontSize < 12) issues.push({ kind: 'small-text', identity: identity(parent), fontSize });
-      if (!['400', '600'].includes(fontWeight))
+      // Regular, medium (headings, buttons, filters) and semibold.
+      if (!['400', '500', '600'].includes(fontWeight))
         issues.push({ kind: 'unsupported-font-weight', identity: identity(parent), fontWeight });
     }
     for (const cell of document.querySelectorAll('td,th')) {

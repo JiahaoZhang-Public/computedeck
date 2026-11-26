@@ -367,6 +367,32 @@ it('shares link/text semantics and announces clipboard failures once', async () 
   expect(notify).toHaveBeenCalledExactlyOnceWith(t('toast.clipboard'), 'error');
 });
 
+it('copies through a selection where the page has no Clipboard API', async () => {
+  // Plain http from another machine: navigator.clipboard does not exist.
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  const exec = vi.fn(() => true);
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  opener.focus();
+  const notify = vi.fn();
+  try {
+    await createCopy(false, notify)('sbatch -q long');
+    expect(exec).toHaveBeenCalledExactlyOnceWith('copy');
+    // The helper field is gone and focus is back where it was.
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(notify).toHaveBeenCalledExactlyOnceWith(t('display.copied'));
+    notify.mockClear();
+    exec.mockReturnValue(false);
+    await createCopy(false, notify)('sbatch');
+    expect(notify).toHaveBeenCalledExactlyOnceWith(t('toast.clipboard'), 'error');
+  } finally {
+    Reflect.deleteProperty(document, 'execCommand');
+    opener.remove();
+  }
+});
+
 it('keeps fractional bounds below the actual value and names non-numeric unknowns', async () => {
   await act(async () =>
     root.render(

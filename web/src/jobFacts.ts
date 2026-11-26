@@ -1,4 +1,5 @@
-import { dateTime, PENDING_STATES } from './domain';
+import { dateTime, elapsedSeconds, PENDING_STATES } from './domain';
+import { duration } from './format';
 import { t } from './i18n';
 import type { MessageKey } from './i18n';
 import type { Job } from './types';
@@ -82,6 +83,11 @@ export function jobWaiting(job: Job) {
     PENDING_STATES.includes(job.state.toUpperCase()) ? job.observed_at : job.started_at,
   );
   if (start == null || end == null || end < start) return '—';
-  const minutes = Math.floor((end - start) / 60000);
-  return t('job.waitDuration', { hours: Math.floor(minutes / 60), minutes: minutes % 60 });
+  return duration(Math.floor((end - start) / 60000) * 60);
+}
+
+/** A scheduler's "1-06:12:04" as "1 d 6 h": every duration on a page reads the same way. */
+export function jobElapsed(value: string | null | undefined) {
+  if (!value) return '—';
+  return /^(?:\d+-)?(?:\d+:)?\d+:\d+$/.test(value.trim()) ? duration(elapsedSeconds(value)) : value;
 }

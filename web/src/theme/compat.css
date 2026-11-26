@@ -44,13 +44,13 @@
   gap: 6px;
   height: var(--control-h);
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-block);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
   background: var(--surface);
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 20px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   transition:
     background var(--dur-fast),
@@ -63,6 +63,8 @@
 .primary-button,
 .button.primary,
 .button.primary-button {
+  padding-inline: 16px;
+  border-radius: var(--r-pill);
   background: var(--accent-fill);
   border-color: var(--accent-fill);
   color: var(--fg-on-accent);
@@ -102,7 +104,7 @@
   justify-content: space-between;
   gap: 12px;
   min-height: var(--control-h);
-  padding: 0 16px 8px;
+  padding: 0 0 8px;
 }
 .panel-header h2,
 .usage-trend h3 {
@@ -140,13 +142,15 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-/* Header: small muted words, no fill; rows apart by one hairline. */
+/* Header: a tinted band with small dark labels; rows apart by one hairline. */
 .table th {
   text-align: left;
-  font-weight: 400;
+  font-weight: 600;
   font-size: 12px;
-  color: var(--text-3);
-  padding: 8px 12px;
+  line-height: 16px;
+  color: var(--text);
+  padding: 10px 12px;
+  background: var(--bg-sunken);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }

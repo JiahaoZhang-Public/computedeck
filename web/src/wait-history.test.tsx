@@ -56,7 +56,7 @@ describe.each(['en', 'zh-CN'] as const)('wait history in %s', (locale) => {
     const planner = markup(<PlanPage ctx={ctx} />);
     expect(drawer.textContent).toContain(expected);
     expect(drawer.textContent).toContain(
-      locale === 'en' ? '38 m – 1 h 33 m' : '38 分钟 – 1 小时 33 分钟',
+      locale === 'en' ? '38 min – 1 h 33 min' : '38 分钟 – 1 小时 33 分钟',
     );
     expect(planner.textContent).toContain(expected);
     for (const text of [drawer.textContent, planner.textContent]) {

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { groupsOf } from './groups';
 import { CloudPage } from './pages/Cloud';
-import { jobReason } from './jobFacts';
+import { jobElapsed, jobReason } from './jobFacts';
 import { eventJob } from './events';
 import { relativeTime } from './domain';
 import { ArrayDetail, InstanceDetail, JobDetail } from './pages/Details';
@@ -354,15 +354,14 @@ describe.each(['en', 'zh-CN'] as const)('Overview order in %s', (locale) => {
     const groups = overviewGroupsTable(html);
     expect(groups).toContain('<strong>Cluster A</strong>');
     expect(html.indexOf('class="table jobs-table"')).toBeLessThan(html.indexOf(groups));
-    expect(html).toContain(`href="#/usage">${t('usage.view')}`);
+    // Usage is one navigation item away; the page ends with its last table, not a link.
+    expect(html).not.toContain('href="#/usage"');
     expect(html).not.toContain('class="trend-chart"');
     expect(html).toContain(`href="#/jobs">${t('overview.allJobs')}`);
     if (demo) {
       expect(html).not.toContain('data-testid="overview-aside"');
     } else {
-      expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(
-        html.indexOf(t('usage.view')),
-      );
+      expect(html.indexOf('data-testid="overview-aside"')).toBeGreaterThan(html.indexOf(groups));
     }
   });
 });
@@ -528,7 +527,7 @@ describe.each(['en', 'zh-CN'] as const)('server summary rendering in %s', (local
       expect(context.data.summary.nodes.nodes).toBe(0);
       // One dash in each place, not "— / —" and not an empty meter or bar.
       expect(overview).toContain(
-        `<td data-label="${t('overview.col.capacity')}"><span class="muted">—</span></td>`,
+        `<td data-label="${t('overview.col.capacity')}" class="no-value"><span class="muted">—</span></td>`,
       );
       expect(clusters).toMatch(/<strong class="cluster-hero [^"]*">—<\/strong>/);
       for (const html of [overview, clusters]) {
@@ -983,7 +982,10 @@ it.each(['en', 'zh-CN'] as const)(
     const html = renderToStaticMarkup(<JobDetail job={item} ctx={ctx(data)} />);
     expect(html).toContain(t('failure.sigkill'));
     expect(html).toContain(t('failure.signalEvidence', { signal: 9 }));
-    expect(html).toContain(t('failure.ranLimit', { elapsed: '01:00:00', limit: '02:00:00' }));
+    // The scheduler's 01:00:00 reads like every other duration.
+    expect(html).toContain(
+      t('failure.ranLimit', { elapsed: jobElapsed('01:00:00'), limit: jobElapsed('02:00:00') }),
+    );
     expect(html).toContain('/work/train.log');
     expect(html).toContain(t('failure.historyUpdated'));
     expect(html).toContain(t('failure.copyInspection'));

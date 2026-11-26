@@ -12,121 +12,59 @@ import { Empty, Panel, Status } from '../ui';
 import type { Ctx } from './shared';
 import { RoutesPanel } from './RoutesPanel';
 
-function GroupPanel({ group, ctx }: { group: Group; ctx: Ctx }) {
-  const cluster = group.kind === 'cluster';
-  const driver = group.sources[0]?.driver ?? '';
-  const info = driverInfo(ctx.drivers, driver, group.kind);
-  const primary = primaryField(info);
-  // The SSH host gets its own column unless it already identifies the source.
-  const sshColumn =
-    primary?.key !== 'ssh_alias' && info.fields.some((field) => field.key === 'ssh_alias');
-  // An API account's or machine's own name is a column, not a caption.
-  const nameColumn = group.sources.some(
-    (source) => source.kind !== 'cluster' && source.name !== localized(info.label),
-  );
-  const routeColumn = group.sources.some((source) => source.node);
-  const primaryLabel = primary ? localized(primary.label) : t('sources.col.login');
-  return (
-    <Panel
-      id={`source-group:${group.key}`}
-      className="source-group"
-      title={
-        <span className="with-mark">
-          {group.label}
-          <span className="muted group-kind">{localized(info.label)}</span>
-        </span>
-      }
-      actions={
-        cluster && !ctx.demo ? (
-          <button
-            className="button small"
-            onClick={() => ctx.configure(undefined, { driver, clusterName: group.label })}
-          >
-            {t('sources.addLogin')}
-          </button>
-        ) : undefined
-      }
-    >
-      {/* What and its state; what it reads, errors and actions are in the source's pane. */}
-      <div className="table-wrap">
-        <table className="table stack-on-phone meta-on-phone">
-          <thead>
-            <tr>
-              {nameColumn && <th>{t('sources.col.name')}</th>}
-              <th>{primaryLabel}</th>
-              {sshColumn && <th>{t('clusters.col.sshHost')}</th>}
-              {routeColumn && <th>{t('sources.col.route')}</th>}
-              <th className="num">{t('clusters.col.lastSuccess')}</th>
-              <th>{t('clusters.col.state')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {group.sources.map((source) => (
-              <SourceRow
-                key={source.id}
-                source={source}
-                primary={primary?.key}
-                sshColumn={sshColumn}
-                nameColumn={nameColumn}
-                routeColumn={routeColumn}
-                primaryLabel={primaryLabel}
-                ctx={ctx}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
-  );
-}
-
+/**
+ * One row a source: what it is, how it is reached and its state. What it reads, its errors and
+ * its actions are in the pane the row opens.
+ */
 function SourceRow({
   source,
-  primary,
-  sshColumn,
-  nameColumn,
+  group,
   routeColumn,
-  primaryLabel,
   ctx,
 }: {
   source: Source;
-  primary: string | undefined;
-  sshColumn: boolean;
-  nameColumn: boolean;
+  group: Group;
   routeColumn: boolean;
-  primaryLabel: string;
   ctx: Ctx;
 }) {
-  const label = primary ? fieldValue(source, primary) : '';
+  const info = driverInfo(ctx.drivers, source.driver, group.kind);
+  const primary = primaryField(info);
+  const reference = primary ? fieldValue(source, primary.key) : '';
+  // A cluster login is its username at an SSH host; an API account is its key reference.
+  const connection = [
+    reference,
+    primary?.key !== 'ssh_alias' && info.fields.some((field) => field.key === 'ssh_alias')
+      ? source.ssh_alias
+      : '',
+  ]
+    .filter(Boolean)
+    .join('@');
+  const name = group.kind === 'cluster' ? group.label : source.name;
   const route = ctx.nodes.find((item) => item.id === source.node);
   return (
     <tr
       className="clickable"
       tabIndex={0}
-      aria-label={t('attention.diagnosis', { name: label || source.name })}
+      aria-label={t('attention.diagnosis', { name: reference ? `${name} · ${reference}` : name })}
       onClick={() => ctx.diagnose(source)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && event.target === event.currentTarget) ctx.diagnose(source);
       }}
     >
-      {nameColumn && (
-        <td>
-          <strong>{source.name}</strong>
-        </td>
-      )}
-      <td
-        className={primary === 'username' ? '' : 'mono'}
-        data-label={nameColumn ? primaryLabel : undefined}
-      >
-        {nameColumn ? label || source.driver : <strong>{label || source.driver}</strong>}
+      <td>
+        <strong>{name}</strong>
       </td>
-      {sshColumn && (
-        <td className="mono" data-label={t('clusters.col.sshHost')}>
-          {source.ssh_alias || '—'}
-        </td>
-      )}
+      <td className="col-mid panel-hide phone-hide" data-label={t('sources.col.type')}>
+        {localized(info.label)}
+      </td>
+      <td className="mono" data-label={t('sources.col.connection')}>
+        {connection || '—'}
+      </td>
       {routeColumn && (
-        <td data-label={t('sources.col.route')}>
+        <td
+          className={`col-low panel-hide ${source.node ? '' : 'no-value'}`}
+          data-label={t('sources.col.route')}
+        >
           {source.node ? (route?.name ?? source.node) : '—'}
         </td>
       )}
@@ -163,7 +101,7 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
             title={t('settings.noSources')}
             action={
               ctx.demo ? undefined : (
-                <button className="button primary" onClick={() => ctx.configure()}>
+                <button className="button" onClick={() => ctx.configure()}>
                   {t('source.add')}
                 </button>
               )
@@ -173,12 +111,41 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
         <RoutesPanel ctx={ctx} onChange={ctx.reload} />
       </>
     );
+  const routeColumn = collected.some((group) => group.sources.some((source) => source.node));
   return (
     <>
-      <RoutesPanel ctx={ctx} onChange={ctx.reload} />
-      {collected.map((group) => (
-        <GroupPanel key={group.key} group={group} ctx={ctx} />
-      ))}
+      {collected.length > 0 && (
+        <Panel>
+          <div className="table-wrap">
+            <table className="table stack-on-phone meta-on-phone">
+              <thead>
+                <tr>
+                  <th>{t('sources.col.name')}</th>
+                  <th className="col-mid panel-hide phone-hide">{t('sources.col.type')}</th>
+                  <th>{t('sources.col.connection')}</th>
+                  {routeColumn && <th className="col-low panel-hide">{t('sources.col.route')}</th>}
+                  <th className="num">{t('clusters.col.lastSuccess')}</th>
+                  <th>{t('clusters.col.state')}</th>
+                </tr>
+              </thead>
+              {/* A body a group: a link to one cluster or cloud scrolls to its rows. */}
+              {collected.map((group) => (
+                <tbody key={group.key} id={`source-group:${group.key}`} className="source-group">
+                  {group.sources.map((source) => (
+                    <SourceRow
+                      key={source.id}
+                      source={source}
+                      group={group}
+                      routeColumn={routeColumn}
+                      ctx={ctx}
+                    />
+                  ))}
+                </tbody>
+              ))}
+            </table>
+          </div>
+        </Panel>
+      )}
       {manual.length > 0 && (
         <Panel id="source-manual" className="source-group" title={t('sources.manual')}>
           <ul className="rows">
@@ -200,6 +167,7 @@ export function SourcesPage({ ctx }: { ctx: Ctx }) {
           </ul>
         </Panel>
       )}
+      <RoutesPanel ctx={ctx} onChange={ctx.reload} />
     </>
   );
 }

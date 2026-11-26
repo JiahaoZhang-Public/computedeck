@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { dateTime, relativeTime } from './domain';
 import { formatMessage, t } from './i18n';
 import { groupsOf, sourceLabel } from './groups';
-import { computeHealth, nextAttemptText } from './health';
+import { collectionOverdue, computeHealth, nextAttemptText } from './health';
 import { Status } from './ui';
 import { Popover } from './layers/Popover';
 import { captureOpener } from './layers/stack';
@@ -27,6 +27,92 @@ export function HealthPanel({
 }) {
   const [anchor] = useState(() => captureOpener() ?? document.body);
   const groups = groupsOf(data ?? { sources: [], instances: [] });
+  // What needs a look comes first, worst first; sources that are fine fold into one line.
+  const rank = (status: string) =>
+    ['error', 'unavailable', 'degraded', 'stale'].indexOf(status) + 1 || 9;
+  // A source that is being collected right now is doing what it should.
+  const calm = (status: string) => status === 'ready' || status === 'syncing';
+  const troubled = state.rows
+    .filter((row) => !calm(row.state))
+    .sort((a, b) => rank(a.state) - rank(b.state));
+  const fine = state.rows.filter((row) => calm(row.state));
+  const sourceRow = ({ source, state: sourceStatus, collecting }: (typeof state.rows)[number]) => (
+    <div className="health-row" key={source.id}>
+      <div className="health-row-heading">
+        <strong>{sourceLabel(groups, source)}</strong>
+        <Status state={sourceStatus} />
+      </div>
+      <p title={source.last_success ?? ''}>
+        <ClockText>
+          {() =>
+            t('health.lastSuccess', {
+              time: source.last_success
+                ? relativeTime(source.last_success)
+                : t('health.notCollected'),
+            })
+          }
+        </ClockText>
+      </p>
+      {/* The next attempt is worth a line only when it is not the ordinary schedule. */}
+      {source.enabled &&
+        (collecting ||
+          (source.failures ?? 0) > 0 ||
+          collectionOverdue(source.next_due_at, collecting)) && (
+          <p>
+            <ClockText>
+              {() =>
+                source.status === 'syncing'
+                  ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
+                  : collecting
+                    ? t('health.queued')
+                    : nextAttemptText(source.next_due_at, collecting)
+              }
+            </ClockText>
+            {!collecting &&
+              (source.failures ?? 0) > 0 &&
+              ` · ${t('health.backoff', { count: source.failures })}`}
+          </p>
+        )}
+      {source.error && (
+        <details>
+          <summary>{t('health.details')}</summary>
+          <p>{formatMessage(source.error)}</p>
+        </details>
+      )}
+      {(['jobs', 'nodes', 'instances'] as const)
+        .filter((inventory) => !source.capabilities.includes(inventory))
+        .map((inventory) => {
+          const retained = data?.[inventory].filter((row) => row.source_id === source.id) ?? [];
+          if (!retained.length) return null;
+          const times = retained.map((row) => row.observed_at);
+          const oldest = times.every(Boolean)
+            ? (times as string[]).sort((a, b) => Date.parse(a) - Date.parse(b))[0]
+            : null;
+          return (
+            <p key={inventory}>
+              <ClockText>
+                {() =>
+                  t('health.retained', {
+                    inventory: t(`health.inventory.${inventory}`),
+                    time: oldest ? relativeTime(oldest) : t('health.unknown'),
+                  })
+                }
+              </ClockText>
+            </p>
+          );
+        })}
+      {source.enabled && !collecting && (
+        <button
+          className="link"
+          aria-label={t('health.retrySource', { name: sourceLabel(groups, source) })}
+          disabled={busy}
+          onClick={() => void refresh(source.id)}
+        >
+          {t('common.retry')}
+        </button>
+      )}
+    </div>
+  );
   return (
     <Popover anchor={anchor} labelledBy="health-title" close={close}>
       <section className="health-panel">
@@ -35,12 +121,23 @@ export function HealthPanel({
         </button>
         <h2 id="health-title">{t('health.title')}</h2>
         <p>
-          <ClockText>
-            {() => {
-              const age = data?.as_of ? relativeTime(data.as_of) : state.age;
-              return state.label === age ? age : t('health.withAge', { label: state.label, age });
-            }}
-          </ClockText>
+          {/* The count is the Needs attention list; this panel is the sources behind it. */}
+          {state.count > 0 && !state.faults.length ? (
+            <>
+              <a className="link" href="#/overview" onClick={close}>
+                {state.label}
+              </a>
+              {' · '}
+              <ClockText>{() => (data?.as_of ? relativeTime(data.as_of) : state.age)}</ClockText>
+            </>
+          ) : (
+            <ClockText>
+              {() => {
+                const age = data?.as_of ? relativeTime(data.as_of) : state.age;
+                return state.label === age ? age : t('health.withAge', { label: state.label, age });
+              }}
+            </ClockText>
+          )}
         </p>
         {state.faults.map((fault) => (
           <div className="health-row" key={fault.id}>
@@ -57,80 +154,18 @@ export function HealthPanel({
             )}
           </div>
         ))}
-        {state.rows.map(({ source, state: sourceStatus, collecting }) => (
-          <div className="health-row" key={source.id}>
-            <div className="health-row-heading">
-              <strong>{sourceLabel(groups, source)}</strong>
-              <Status state={sourceStatus} />
-            </div>
-            <p title={source.last_success ?? ''}>
-              <ClockText>
-                {() =>
-                  t('health.lastSuccess', {
-                    time: source.last_success
-                      ? relativeTime(source.last_success)
-                      : t('health.notCollected'),
-                  })
-                }
-              </ClockText>
-            </p>
-            {source.enabled && (
-              <p>
-                <ClockText>
-                  {() =>
-                    source.status === 'syncing'
-                      ? t('health.collectingSince', { time: dateTime(source.last_attempt) })
-                      : collecting
-                        ? t('health.queued')
-                        : nextAttemptText(source.next_due_at, collecting)
-                  }
-                </ClockText>
-                {!collecting &&
-                  (source.failures ?? 0) > 0 &&
-                  ` · ${t('health.backoff', { count: source.failures })}`}
-              </p>
-            )}
-            {source.error && (
-              <details>
-                <summary>{t('health.details')}</summary>
-                <p>{formatMessage(source.error)}</p>
-              </details>
-            )}
-            {(['jobs', 'nodes', 'instances'] as const)
-              .filter((inventory) => !source.capabilities.includes(inventory))
-              .map((inventory) => {
-                const retained =
-                  data?.[inventory].filter((row) => row.source_id === source.id) ?? [];
-                if (!retained.length) return null;
-                const times = retained.map((row) => row.observed_at);
-                const oldest = times.every(Boolean)
-                  ? (times as string[]).sort((a, b) => Date.parse(a) - Date.parse(b))[0]
-                  : null;
-                return (
-                  <p key={inventory}>
-                    <ClockText>
-                      {() =>
-                        t('health.retained', {
-                          inventory: t(`health.inventory.${inventory}`),
-                          time: oldest ? relativeTime(oldest) : t('health.unknown'),
-                        })
-                      }
-                    </ClockText>
-                  </p>
-                );
-              })}
-            {source.enabled && (
-              <button
-                className="link"
-                aria-label={t('health.retrySource', { name: sourceLabel(groups, source) })}
-                disabled={busy}
-                onClick={() => void refresh(source.id)}
-              >
-                {t('common.retry')}
-              </button>
-            )}
-          </div>
-        ))}
+        {state.count > 0 && state.rows.length > 0 && <h3>{t('nav.sources')}</h3>}
+        {troubled.map(sourceRow)}
+        {fine.length > 0 && troubled.length > 0 ? (
+          <details className="health-fine">
+            <summary>
+              {t(fine.length === 1 ? 'health.fine.one' : 'health.fine', { count: fine.length })}
+            </summary>
+            {fine.map(sourceRow)}
+          </details>
+        ) : (
+          fine.map(sourceRow)
+        )}
         {data?.sources.length === 0 && <p>{t('health.noSources')}</p>}
         {state.rows.length ? (
           <button className="button" disabled={busy} onClick={() => void refresh()}>

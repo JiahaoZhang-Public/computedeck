@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClock } from '../ui/clock';
 import { ClockText } from '../data/ClockText';
@@ -20,7 +21,6 @@ import { setRouteParams, useRouteParam } from '../useRouteParam';
 import { usageDays, usageTotal, mergeUnrecordedDays } from '../usage';
 import type { UsageTotal } from '../usage';
 import type { Instance, UsageRollups } from '../types';
-import { StatusShape } from '../ui/Status';
 import type { ChartData } from '../chart/types';
 import { absoluteTime } from '../format';
 import { HistoryPanel } from './HistoryPanel';
@@ -126,7 +126,18 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
       )}
       <Panel
         title={t('usage.nowGpus')}
-        actions={<UnmeasuredLinks items={summary.unmeasured} ctx={ctx} />}
+        actions={
+          // Words are the trigger: an icon alone read as a spinner.
+          <UnmeasuredLinks
+            items={summary.unmeasured}
+            ctx={ctx}
+            value={
+              summary.unmeasured.length
+                ? t('unmeasured.count', { count: summary.unmeasured.length })
+                : undefined
+            }
+          />
+        }
       >
         {activeGroups.length ? (
           <RankedBars
@@ -191,35 +202,38 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
           <Empty title={spend?.unpriced.length ? t('status.unknown') : t('cost.none')} />
         )}
       </Panel>
-      <Panel
-        title={t('usage.overRange')}
-        actions={
-          // A time range is a small segmented control, not a set of tabs.
-          <div className="segmented">
-            <Chips
-              label={t('chart.range')}
-              value={String(hours)}
-              onChange={(value) =>
-                setRouteParams({
-                  range: RANGES.find((item) => item.hours === Number(value))!.value,
-                  end: null,
-                })
-              }
-              options={RANGES.map((item) => ({
-                value: String(item.hours),
-                label: t(
-                  item.hours === 24
-                    ? 'chart.range.day'
-                    : item.hours === 168
-                      ? 'chart.range.week'
-                      : 'usage.month',
-                ),
-              }))}
-            />
-          </div>
-        }
-      >
-        <UsageRange key={String(demo)} ctx={ctx} hours={hours} />
+      <Panel title={t('usage.overRange')}>
+        <UsageRange
+          key={String(demo)}
+          ctx={ctx}
+          hours={hours}
+          range={
+            // A time range is a small segmented control, beside the tables it governs: the
+            // today and seven-day totals above it keep their own periods.
+            <div className="segmented">
+              <Chips
+                label={t('chart.range')}
+                value={String(hours)}
+                onChange={(value) =>
+                  setRouteParams({
+                    range: RANGES.find((item) => item.hours === Number(value))!.value,
+                    end: null,
+                  })
+                }
+                options={RANGES.map((item) => ({
+                  value: String(item.hours),
+                  label: t(
+                    item.hours === 24
+                      ? 'chart.range.day'
+                      : item.hours === 168
+                        ? 'chart.range.week'
+                        : 'usage.month',
+                  ),
+                }))}
+              />
+            </div>
+          }
+        />
       </Panel>
     </>
   );
@@ -229,7 +243,8 @@ export function UsagePage({ ctx }: { ctx: Ctx }) {
 function InstanceCosts({ ctx, items }: { ctx: Ctx; items: Instance[] }) {
   return (
     <div className="table-wrap">
-      <table data-detail-list className="table stack-on-phone meta-on-phone">
+      {/* Money and time need their labels: a narrow card keeps them above each value. */}
+      <table data-detail-list className="table stack-on-phone">
         <thead>
           <tr>
             <th>{t('cloud.col.instance')}</th>
@@ -285,17 +300,9 @@ function InstanceCosts({ ctx, items }: { ctx: Ctx; items: Instance[] }) {
 }
 
 /** Part of a period was not observed: a mark on the figure, its share in the name. */
-function CoverageMark({ text }: { text: string }) {
-  return (
-    <span className="coverage-mark" title={text}>
-      <StatusShape kind="unknown" label={text} />
-    </span>
-  );
-}
-
 type HistoryResponse = { chart?: ChartData; rollups: UsageRollups };
 
-function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
+function UsageRange({ ctx, hours, range }: { ctx: Ctx; hours: number; range: ReactNode }) {
   const [result, setResult] = useState<
     (HistoryResponse & { week: UsageRollups; hours: number }) | null
   >(null);
@@ -374,12 +381,16 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
   );
   if (!result)
     return (
-      failure || (
-        <div className="chart-loading">
-          <p>{t('chart.loading')}</p>
-          <DataState state="loading" rows={2} rowHeight={120} />
-        </div>
-      )
+      <>
+        {/* The range can be changed while a slow one is still loading or has failed. */}
+        <div className="usage-range usage-range-alone">{range}</div>
+        {failure || (
+          <div className="chart-loading">
+            <p>{t('chart.loading')}</p>
+            <DataState state="loading" rows={2} rowHeight={120} />
+          </div>
+        )}
+      </>
     );
   return (
     <>
@@ -387,7 +398,13 @@ function UsageRange({ ctx, hours }: { ctx: Ctx; hours: number }) {
         <HistoryClock bucketSeconds={result.chart.bucket_seconds} onBucket={refreshChart} />
       )}
       {failure}
-      <UsageHistory rollups={result.rollups} week={result.week} hours={result.hours} ctx={ctx} />
+      <UsageHistory
+        rollups={result.rollups}
+        week={result.week}
+        hours={result.hours}
+        ctx={ctx}
+        range={range}
+      />
       <HistoryPanel
         busy={settledRange !== chartRequest}
         controls={
@@ -482,11 +499,14 @@ export function UsageHistory({
   week = rollups,
   hours,
   ctx,
+  range,
 }: {
   rollups: UsageRollups;
   week?: UsageRollups;
   hours: number;
   ctx: Ctx;
+  /** The control that picks the period of the tables below it. */
+  range?: ReactNode;
 }) {
   const end = Date.parse(rollups.end),
     start = end - hours * HOUR;
@@ -563,15 +583,20 @@ export function UsageHistory({
               key={`${index}-${currency}`}
               label={currencies.length > 1 ? `${label} · ${currency}` : label}
               value={
-                <>
-                  {currency ? spendText(total, currency) : emptySpend(total)}
-                  {note && total.observed > 0 && <CoverageMark text={note} />}
-                </>
+                // A period that was not observed in full: the figure opens how much was.
+                <UnmeasuredLinks
+                  value={currency ? spendText(total, currency) : emptySpend(total)}
+                  items={[]}
+                  ctx={ctx}
+                  label={note && total.observed > 0 ? note : undefined}
+                  note={note && total.observed > 0 ? note : undefined}
+                />
               }
             />
           ));
         })}
       </div>
+      {range && <div className="usage-range">{range}</div>}
       <h3>{t('usage.gpuHours')}</h3>
       {keys.length ? (
         <div className="table-wrap">

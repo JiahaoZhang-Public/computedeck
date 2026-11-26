@@ -1,4 +1,5 @@
 import { StatusShape } from '../ui/Status';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Activity,
@@ -9,13 +10,17 @@ import {
   History,
   LayoutDashboard,
   Menu,
+  Monitor,
+  Moon,
   Plus,
   Puzzle,
   RefreshCw,
   Server,
   Settings2,
+  Sun,
   Terminal,
   TriangleAlert,
+  X,
 } from 'lucide-react';
 import { useClock } from '../ui/clock';
 import { relativeTime } from '../format';
@@ -26,6 +31,8 @@ import { routeHash } from '../routes';
 import type { CorePage, Page } from '../routes';
 import { labelText, pagesOf } from '../plugins';
 import { BrandMark } from '../ui';
+import { readTheme, saveTheme, THEME_EVENT } from '../theme/preferences';
+import type { Theme } from '../theme/preferences';
 import { enabledToolPages } from '../tools';
 import type { Ctx } from '../pages/shared';
 import type { Dashboard } from '../types';
@@ -131,6 +138,23 @@ export function Frame({
   const problems = data?.attention_count ?? data?.attention?.length ?? 0;
   const isDataPage = dataPages.includes(page);
   const collecting = !!data?.collecting?.length && !needsToken;
+  // Nothing connected yet: the page itself says so, and there is nothing to refresh or check.
+  const unconfigured =
+    !demo && !error && !needsToken && !!data && !data.sources.length && !data.instances.length;
+  // Example mode is named once, beside the title; the control that leaves it is its own cross.
+  const exampleMode = demo && (
+    <>
+      <span>{t('banner.demo')}</span>
+      <button
+        className="icon-button"
+        aria-label={t('banner.demoOff')}
+        title={t('banner.demoOff')}
+        onClick={toggleDemo}
+      >
+        <X size={14} />
+      </button>
+    </>
+  );
   const serviceText = needsToken
     ? t('token.title')
     : error
@@ -178,6 +202,10 @@ export function Frame({
       ? t('gallery.title')
       : t(pageTitles[page as CorePage] ?? 'nav.overview');
 
+  // Each page names itself in the tab and in history.
+  useEffect(() => {
+    document.title = `${title} · ComputeDeck`;
+  }, [title]);
   return (
     <>
       {sidebarOpen && (
@@ -266,15 +294,11 @@ export function Frame({
             <input type="checkbox" role="switch" checked={demo} onChange={toggleDemo} />
             <i aria-hidden="true" />
           </label>
+          <ThemeSwitch />
+          {/* Which service this page shows, and whether it answers. */}
           <div className="service-state">
-            {/* A running service is a dot; words appear only when it needs attention. */}
-            <span
-              className={`dot ${error ? 'red' : data ? 'green' : ''}`}
-              role="img"
-              aria-label={serviceText}
-              title={serviceText}
-            />
-            {(needsToken || error) && serviceText}
+            <span className={`dot ${error ? 'red' : data ? 'green' : ''}`} aria-hidden="true" />
+            {serviceText}
           </div>
         </div>
       </aside>
@@ -288,6 +312,7 @@ export function Frame({
             <Menu size={18} />
           </button>
           <h1>{title}</h1>
+          {demo && <div className="example-mode demo-banner">{exampleMode}</div>}
           <div className="topbar-actions">
             <div className="health-status">
               <HealthPill
@@ -298,8 +323,9 @@ export function Frame({
                 setHealthOpen={setHealthOpen}
               />
             </div>
-            {!demo && pageActions[page]}
-            {isDataPage && (
+            {/* Example mode keeps the one action that says how to connect; it refuses politely. */}
+            {(!demo || page === 'sources') && pageActions[page]}
+            {isDataPage && !unconfigured && (
               <>
                 <button
                   className="button"
@@ -333,14 +359,8 @@ export function Frame({
             </button>
           </div>
         )}
-        {demo && (
-          <div className="banner demo-banner">
-            <span>{t(isDataPage ? 'banner.demo' : 'banner.demoTool')}</span>
-            <button className="link" onClick={toggleDemo}>
-              {t('banner.demoOff')}
-            </button>
-          </div>
-        )}
+        {/* A phone's top bar has no room for it: the same label and cross on their own line. */}
+        {demo && <div className="example-mode example-mode-line">{exampleMode}</div>}
         {error && isDataPage && !needsToken && (
           <div className="banner red" role="alert">
             <TriangleAlert size={15} />
@@ -368,6 +388,37 @@ export function Frame({
         {children}
       </div>
     </>
+  );
+}
+
+const themes: [Theme, typeof Sun][] = [
+  ['system', Monitor],
+  ['light', Sun],
+  ['dark', Moon],
+];
+
+/** Light, dark or the system's choice: three icons, one pressed. */
+function ThemeSwitch() {
+  const [theme, setTheme] = useState(readTheme);
+  useEffect(() => {
+    const sync = () => setTheme(readTheme());
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
+  return (
+    <div className="theme-switch" role="group" aria-label={t('settings.theme')}>
+      {themes.map(([value, Icon]) => (
+        <button
+          key={value}
+          aria-pressed={theme === value}
+          aria-label={t(`settings.theme.${value}`)}
+          title={t(`settings.theme.${value}`)}
+          onClick={() => saveTheme(value)}
+        >
+          <Icon size={15} aria-hidden="true" />
+        </button>
+      ))}
+    </div>
   );
 }
 
