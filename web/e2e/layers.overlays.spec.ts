@@ -383,6 +383,23 @@ for (const address of addresses) {
   });
 }
 
+test('a source pane from a link waits for its source and then takes focus', async ({
+  page,
+  viewport,
+}) => {
+  // Whether the page or its data arrives first depends on the machine; make the data late.
+  await page.route('**/api/dashboard*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.fallback();
+  });
+  await page.goto('/?demo=true#/sources?source=example:cluster-a-alice');
+  // Nothing opens to say the source is missing while it is still loading.
+  await expect(page.locator('.context-panel, dialog[open]')).toHaveCount(0);
+  await ready(page);
+  const layer = page.locator(viewport!.width >= 1200 ? '.context-panel' : 'dialog.drawer');
+  await expect(layer.getByRole('heading', { name: 'Cluster A', exact: true })).toBeFocused();
+});
+
 async function marketplaceFixture(page: Page) {
   await page.route('**/api/marketplace', (route) =>
     route.fulfill({

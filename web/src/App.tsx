@@ -157,8 +157,12 @@ function Application({ initialLocale }: { initialLocale: Locale }) {
   const add = params.get('add');
   const editedSource = data?.sources.find((item) => item.id === editId);
   const editedInstance = data?.instances.find((item) => item.id === editId);
+  // A source's pane opens once sources are known. Opened on a cold link before they load, it
+  // said "not found" and dropped focus when the source's own heading replaced that line.
   const modal: Modal = sourceId
-    ? { kind: 'diagnosis', sourceId, reading: !params.has('repair') }
+    ? data
+      ? { kind: 'diagnosis', sourceId, reading: !params.has('repair') }
+      : null
     : params.get('section') === 'ssh' && sshData
       ? { kind: 'ssh', data: sshData }
       : editId && editedSource
