@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.0 (2026-11-26)
+
+- First stable release. The configuration format, command line, HTTP API, saved data and plugin interfaces (`PLUGIN_API = 1`, `WEB_API = 1`) of 0.8 carry over unchanged. A plugin that declares an upper bound below 1.0, such as `requires=">=0.3,<0.9"`, must widen it (for example to `<2`) before it loads.
+- Give the interface one visual language: a 52-pixel header with the page title, tables with a tinted header band and dark column labels, larger section headings, separate cards for the headline figures, pill filters with their counts under the title, one chevron for every disclosure, 32-pixel controls on one radius and a single highlighted card for the answer a page leads with. Headings, buttons and filters use a medium weight. The dark theme is lighter, with a darker sidebar. Text prefers Inter and IBM Plex Mono when they are installed and otherwise uses the system fonts as before.
+- Switch between light, dark and the system theme from the sidebar; Settings keeps the same choice. The sidebar also names the service the page shows.
+- List every source in one table on Sources: each login, API account and machine is a row with its type, connection, route, last success and state, in place of one table per cluster or cloud. **Add login** and **Remove** are in the menu of a source's details, and a failing source says to use **Test connection** to see which step fails. Routes follow the table, and **Add source** stays visible while example data is on.
+- Ask for the request first on Where to run, with recent jobs as shortcuts under it; a shortcut marks itself as chosen, leaves a run time you typed, and clears when pressed again. Options are listed by the estimate each row shows, so one whose access was not checked no longer sits above options with an estimate.
+- Show the flags with the estimate on Where to run. The best estimate lists the flags it copies, any flag it could not confirm and, when your own finished jobs allow, the typical wait. Each option has one copy icon; opening an option shows its flags and one line of why, with the queue detail and the seven factors under **Why this estimate**. On a narrow screen an option is three lines: where, the estimate and the numbers.
+- Copy over plain HTTP from another computer, where browsers offer pages no clipboard access: copying falls back to a selection.
+- Keep a form open when Escape only dismisses a field's suggestions; the dialog and what was typed stay.
+- Answer instead of greying out in example mode: a change that example data refuses says so and offers to turn example data off, in a source's details as well as in the top bar.
+- List what needs a look first in the health panel, worst first, and fold sources that are fine into one line. Its count links to the Needs attention list, a source being collected counts as fine, and the next attempt is shown only when it is overdue or backing off.
+- Name example data once, in a label beside the page title with a cross that leaves it, instead of a line across every page.
+- Start with **Connect your first source** and one sentence on what ComputeDeck shows, before anything is connected, and offer example data as a button.
+- Write every duration the same way: a job's run time and wait read **1 d 6 h**, **12 h 42 min** or **2 h** in lists, details and Activity, and minutes are **min** everywhere.
+- Make an Activity row one sentence and one time. Where it happened is in the row's details, a known end time reads like any other time, and only a time that was not observed exactly keeps its words. The Jobs page lists job activity only, and that list follows the page's cluster filter and search.
+- Remove the Needs attention figure from the Overview's headline figures; the list sits directly under them and the top bar carries the count.
+- Shorten search fields to **Search**, with what they search as their tooltip. Escape clears a search, or closes an open pane first and leaves the search as it is.
+- Keep facts whole on a phone: a line of facts wraps instead of being cut short, a fact that does not apply to a row is left out rather than shown as a dash, filters wrap onto further lines, and a figure stays on one line.
+- Open every partial figure on Usage: a spend total for a period that was not observed in full opens how much was, and the GPUs that are not counted are named in words.
+- Show a dash on Cloud for a machine without a utilisation reading, and stop cutting SSH aliases short on wide screens. Cluster cards say what their figure counts.
+- Put the Usage range control beside the daily tables it changes, under the today and seven-day totals that keep their own periods, and move the chart's range caption and legend into **How to read this chart**.
+- Name each page in the browser tab.
+
 ## 0.8.0 (2026-11-18)
 
 - Run ComputeDeck on your own laptop even when some sources are only reachable from another machine. Add routes with **Add route** in the Routes panel of the Sources page (or as `[[node]]` in a configuration file) and set each source's **Route**; every other source still connects directly from this computer. The panel draws each route as a path, such as *This computer → Lab gateway → Cluster B*, with its kind and status, and a routed login names its route in the **Route** column.

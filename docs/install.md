@@ -21,7 +21,7 @@ computer (or a server you choose) and listens on `http://127.0.0.1:8710`.
 Each release on the [Releases page](https://github.com/JiahaoZhang-Public/computedeck/releases)
 has a wheel, `computedeck-<version>-py3-none-any.whl`, with the web app already built, and
 the matching sdist. Install the wheel as a tool, with uv or pipx, replacing `<version>`
-(for example `0.8.0`) in both places:
+(for example `1.0.0`) in both places:
 
 ```bash
 uv tool install https://github.com/JiahaoZhang-Public/computedeck/releases/download/v<version>/computedeck-<version>-py3-none-any.whl

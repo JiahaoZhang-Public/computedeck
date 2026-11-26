@@ -147,6 +147,8 @@ and Team messages tools start switched off.
 
 ## Roadmap
 
+- **1.0:** the first stable release: one table of sources, a shorter path from a
+  request to a place to run it, and an interface with fewer words on every page.
 - **0.8:** routes through a jump host or collection machine so ComputeDeck
   runs on your laptop, connection checks that name the failing hop, a redesigned and
   quieter interface with detail on demand, a phone layout, and release packages built and

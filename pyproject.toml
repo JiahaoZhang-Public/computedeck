@@ -1,6 +1,6 @@
 [project]
 name = "computedeck"
-version = "0.8.0"
+version = "1.0.0"
 description = "Read-only dashboard for your GPU work on clusters, cloud GPU accounts and SSH machines"
 # The PyPI description is README.md with absolute links; see fancy-pypi-readme below.
 dynamic = ["readme"]
@@ -12,7 +12,7 @@ keywords = [
     "cloud-gpu", "runpod", "ssh", "monitoring",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Web Environment",
     "Framework :: FastAPI",
     "Intended Audience :: Science/Research",

@@ -31,6 +31,11 @@ require `>=0.7,<0.8` or handle their absence on older cores; the same rule appli
 to 0.6 fields with a minimum of 0.6. An existing `<0.7` bound excludes 0.7 even
 though its API version is unchanged.
 
+ComputeDeck 1.0 keeps `PLUGIN_API = 1` and `WEB_API = 1`. A plugin whose upper bound is
+below 1.0, such as `requires=">=0.3,<0.9"`, does not load on 1.0 until the bound is
+widened (for example `requires=">=0.3,<2"`, with the matching pip dependency and
+marketplace entry), after testing against 1.0.
+
 The 0.7 additions are optional per-GPU readings, run-start and spend fields,
 [usage rollups](#observed-usage-rollups-07),
 [low-use hints and settings](#low-gpu-use-additions-07), Slurm queue estimates,
@@ -1351,6 +1356,24 @@ The legacy host `format.dateTime` now respects the device's 12/24-hour clock cho
 没有移除已有类名或令牌。数据源组（含云平台）使用 `cluster_id`，手动机器使用规范化平台键。
 仪表盘新增 `identity_slots`，色位为 1–6；不要用颜色推断状态，也不要按列表顺序重新分配。
 `format.dateTime` 遵循设备的 12/24 小时设置，`format.relativeTime` 保持原有输出约定。
+
+### The 1.0 look
+
+Plugin pages inherit the 1.0 styling through the same public classes; no class, token or
+component is removed and the exported components' DOM is unchanged. What looks different:
+`.table` headers are a tinted band with bold dark labels; `.button` is 13 px medium on a
+6 px radius and `.button.primary` is a pill; `.chips` inside `.page-tabs` or `.toolbar`
+are pill filters; `.panel-header` headings are 20 px and start at the content edge;
+`.stats` lays its `.stat` cells out as separate cards; every `details > summary` opens
+with the same chevron. The dark palette is lighter (canvas near `#212121`, a darker
+sidebar). The font stack prefers Inter and IBM Plex Mono when installed. The window
+receives a `computedeck:theme` event after the theme changes.
+
+中文：1.0 的样式通过原有公共类名生效，没有移除任何类名、令牌或组件，导出组件的 DOM 不变。
+表头变为带底色的粗体标签，按钮为 13 px、6 px 圆角，主按钮为胶囊形，`.page-tabs` 与
+`.toolbar` 中的 `.chips` 为胶囊筛选项，面板标题为 20 px 并与内容左缘对齐，`.stats`
+中的各项为独立卡片，所有 `details > summary` 使用同一种箭头。深色主题整体更亮。
+主题变化后 `window` 会收到 `computedeck:theme` 事件。
 
 ### Core layers in 0.8
 
