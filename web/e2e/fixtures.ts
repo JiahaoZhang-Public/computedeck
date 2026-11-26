@@ -23,7 +23,13 @@ async function setupPage(page: Page, baseURL: string | undefined, locale: string
       }),
     );
   });
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', (error) => {
+    // WebKit reports a resize notification it put off to the next frame as a page error. The
+    // notification is still delivered and nothing is thrown in the page; seen on the Linux
+    // runner when a sheet's lazy form arrives while its first size is being reported.
+    if (error.message === 'ResizeObserver loop completed with undelivered notifications.') return;
+    errors.push(error.message);
+  });
   await page.route('**/*', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
